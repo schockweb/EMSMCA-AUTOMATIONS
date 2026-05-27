@@ -1,0 +1,119 @@
+# ═══════════════════════════════════════════════════════════
+# EMS Claims Portal — Worker Server Compose
+# ═══════════════════════════════════════════════════════════
+# Deploys to: Hetzner CX42 x1 (Johannesburg)
+# Services:  RabbitMQ, Celery workers, Flower monitoring
+#
+# This runs on a dedicated worker server. The app servers
+# (docker-compose.prod.yml) connect to RabbitMQ here via the
+# CELERY_BROKER_URL in .env.prod.
+#
+# Usage:
+#   docker compose -f docker-compose.worker.yml up -d --build
+#   docker compose -f docker-compose.worker.yml logs -f
+# ═══════════════════════════════════════════════════════════
+
+services:
+  # ── RabbitMQ Message Broker ─────────────────────────────
+  # Handles Celery task queues (OCR, adjudication, email, etc.)
+  # Port 5672: AMQP (internal only — not exposed to host)
+  # Port 15672: Management UI (localhost only, SSH tunnel access)
+  ems_rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: ems_rabbitmq
+    restart: always
+    hostname: ems-rabbitmq             # Fixed hostname for persistent queue data
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS}
+      # Durable queues & dead-letter exchange for failed tasks
+      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: >-
+        -rabbit log [{console,[{level,warning}]}]
+    env_file:
+      - .env.prod
+    ports:
+      - "5672:5672"                    # AMQP — firewalled, only app servers allowed
+      - "127.0.0.1:15672:15672"        # Management UI — localhost only (SSH tunnel)
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_running"]
+      interval: 15s
+      timeout: 10s
+      start_period: 30s
+      retries: 5
+    networks:
+      - ems_worker_net
+
+  # ── Celery Worker ───────────────────────────────────────
+  # Processes async tasks: OCR parsing, claims adjudication,
+  # email notifications, report generation.
+  # - prefork pool for CPU-bound OCR work
+  # - 12 concurrent workers (CX42 has 8 vCPU, allow oversubscription
+  #   since many tasks are I/O-bound API calls)
+  ems_celery_worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    container_name: ems_celery_worker
+    restart: always
+    env_file:
+      - .env.prod
+    volumes:
+      - upload_data:/app/uploads       # Shared upload storage
+      - worker_logs:/app/logs          # Worker-specific logs
+    depends_on:
+      ems_rabbitmq:
+        condition: service_healthy
+    command: >
+      celery -A app.tasks.celery_app worker
+      --loglevel=info
+      --pool=prefork
+      --concurrency=12
+      --max-tasks-per-child=1000
+      --without-heartbeat
+      -Q default,ocr,adjudication,notifications
+    networks:
+      - ems_worker_net
+
+  # ── Flower — Celery Monitoring Dashboard ────────────────
+  # Web UI for monitoring task queues, workers, and task history.
+  # Only bound to localhost:5555 — access via SSH tunnel:
+  #   ssh -L 5555:127.0.0.1:5555 deploy@worker-server
+  ems_flower:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    container_name: ems_flower
+    restart: always
+    env_file:
+      - .env.prod
+    ports:
+      - "127.0.0.1:5555:5555"         # Localhost only — SSH tunnel access
+    depends_on:
+      ems_rabbitmq:
+        condition: service_healthy
+    command: >
+      celery -A app.tasks.celery_app flower
+      --port=5555
+      --broker_api=http://${RABBITMQ_USER}:${RABBITMQ_PASS}@ems_rabbitmq:15672/api/
+      --persistent=True
+      --db=/app/logs/flower.db
+    networks:
+      - ems_worker_net
+
+# ── Volumes ───────────────────────────────────────────────
+volumes:
+  rabbitmq_data:
+    driver: local
+  upload_data:
+    driver: local
+  worker_logs:
+    driver: local
+
+# ── Networks ──────────────────────────────────────────────
+# Internal bridge for worker-server containers.
+# RabbitMQ port 5672 is also exposed to the host for app servers.
+networks:
+  ems_worker_net:
+    driver: bridge

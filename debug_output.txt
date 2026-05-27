@@ -1,0 +1,49 @@
+MATCH on 441:
+439: # Use extracted data from the primary document or first available
+440: primary_doc = next((d for d in docs if d.is_group_primary), docs[0])
+441: extracted = primary_doc.extracted_data or {}
+442: 
+443: procedures = str(extracted.get("procedures_performed", "")).upper()
+---
+MATCH on 589:
+587: 
+588: # ── CHECK 10: Universal PRF Clinical SCRUB Rules ──────────────────────
+589: # These run against the raw extracted_data from the PRF document(s).
+590: # They apply to both scanned-then-extracted PRFs and direct digital submissions.
+591: 
+---
+MATCH on 594:
+592: prf_data: dict = {}
+593: if docs:
+594: # Use the primary (or first completed) document's extracted_data
+595: primary_doc = next(
+596: (d for d in docs if d.is_group_primary and d.extracted_data),
+---
+MATCH on 596:
+594: # Use the primary (or first completed) document's extracted_data
+595: primary_doc = next(
+596: (d for d in docs if d.is_group_primary and d.extracted_data),
+597: next((d for d in docs if d.extracted_data), None),
+598: )
+---
+MATCH on 597:
+595: primary_doc = next(
+596: (d for d in docs if d.is_group_primary and d.extracted_data),
+597: next((d for d in docs if d.extracted_data), None),
+598: )
+599: if primary_doc and primary_doc.extracted_data:
+---
+MATCH on 599:
+597: next((d for d in docs if d.extracted_data), None),
+598: )
+599: if primary_doc and primary_doc.extracted_data:
+600: prf_data = primary_doc.extracted_data
+601: 
+---
+MATCH on 600:
+598: )
+599: if primary_doc and primary_doc.extracted_data:
+600: prf_data = primary_doc.extracted_data
+601: 
+602: if prf_data:
+---

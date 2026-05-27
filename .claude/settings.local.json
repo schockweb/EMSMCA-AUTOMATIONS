@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc *)",
+      "Bash(docker-compose ps *)",
+      "Bash(docker-compose exec *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8000/api/providers/jems/public-vehicles)",
+      "Bash(ls backend/logs)",
+      "Bash(ls backend/*.log)",
+      "Bash(docker ps *)",
+      "Bash(ls \"c:\\\\Users\\\\USER-PC\\\\Desktop\\\\New EMS AUTOMATIONS\\\\\")",
+      "Read(//c/Users/USER-PC/Desktop/**)"
+    ]
+  }
+}

@@ -1,0 +1,2187 @@
+{
+  "version": 1,
+  "generated_from": "frontend/src/data/hpcsaScope.ts",
+  "generated_note": "DO NOT EDIT BY HAND — run `node --experimental-strip-types frontend/scripts/export-hpcsa-scope.mts` to regenerate.",
+  "consultation_required_text": "Mandatory Senior Emergency Care Practitioner and/or Supervising Medical Officer consultation required.",
+  "form_label_to_capability": {
+    "Self-maintained": "airway_basic_manual_manoeuvres",
+    "Intubation": "airway_ett_drug_facilitated",
+    "Supraglottic Airway": "airway_supraglottic_extraglottic_device",
+    "Suction": "airway_suction_upper",
+    "Chest Decompression": "o2_needle_thoracentesis_adult_paed",
+    "Surg. Airway": "airway_surgical_cricothyroidotomy",
+    "Periph. IV Line": "circ_iv_cannulation_limbs_over_1yr",
+    "Cardio Version": "circ_synchronised_cardioversion",
+    "IO Line": "circ_intraosseous_adult",
+    "Pacing": "circ_transcutaneous_cardiac_pacing",
+    "Central Line": "circ_central_line_management",
+    "Defib J/NR": "circ_manual_defibrillation",
+    "CPR": "gen_cardiac_arrest_management"
+  },
+  "capabilities": {
+    "airway_basic_manual_manoeuvres": {
+      "label": "Basic manual airway manoeuvres",
+      "section": "Airway Management",
+      "authorised": [
+        "BAA",
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "airway_suction_upper": {
+      "label": "Suctioning of the airway — upper",
+      "section": "Airway Management",
+      "authorised": [
+        "BAA",
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "airway_suction_endotracheal": {
+      "label": "Suctioning of the airway — endotracheal",
+      "section": "Airway Management",
+      "authorised": [
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "airway_suction_extraglottic": {
+      "label": "Suctioning of the airway — extraglottic",
+      "section": "Airway Management",
+      "authorised": [
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "airway_manual_obstruction_conscious_choking": {
+      "label": "Manual airway obstruction manoeuvres (conscious choking patient)",
+      "section": "Airway Management",
+      "authorised": [
+        "BAA",
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "airway_magills_forceps": {
+      "label": "Use of Magill's forceps / equivalent",
+      "section": "Airway Management",
+      "authorised": [
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "airway_opa_insertion": {
+      "label": "Oropharyngeal airway insertion",
+      "section": "Airway Management",
+      "authorised": [
+        "BAA",
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "airway_npa_insertion": {
+      "label": "Nasopharyngeal tube airway insertion",
+      "section": "Airway Management",
+      "authorised": [
+        "BAA",
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "airway_ett_drug_facilitated": {
+      "label": "Endotracheal intubation — drug-facilitated (induction, neuromuscular blockade, mechanical ventilation, airway adjuncts)",
+      "section": "Airway Management",
+      "authorised": [
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "airway_ett_non_drug_or_deep_sedation": {
+      "label": "Endotracheal intubation — non-drug facilitated or via deep sedation techniques",
+      "section": "Airway Management",
+      "authorised": [],
+      "forbidden": true,
+      "conditions": {},
+      "note": "HPCSA: NOT TO BE PERFORMED by any category."
+    },
+    "airway_video_laryngoscopy": {
+      "label": "Video laryngoscopy",
+      "section": "Airway Management",
+      "authorised": [
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "airway_supraglottic_extraglottic_device": {
+      "label": "Supraglottic / extraglottic airway device insertion",
+      "section": "Airway Management",
+      "authorised": [
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {
+        "ECA": "Cardiac Arrest only"
+      },
+      "note": null
+    },
+    "airway_oro_nasogastric_tube": {
+      "label": "Oro / nasogastric tube insertion",
+      "section": "Airway Management",
+      "authorised": [
+        "ECT",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "airway_needle_cricothyroidotomy": {
+      "label": "Needle cricothyroidotomy",
+      "section": "Airway Management",
+      "authorised": [
+        "AEA",
+        "ECT",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "airway_surgical_cricothyroidotomy": {
+      "label": "Surgical cricothyroidotomy (adolescent / adult)",
+      "section": "Airway Management",
+      "authorised": [
+        "ECT",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": "Commercial device recommended."
+    },
+    "o2_oxygen_administration": {
+      "label": "Oxygen administration",
+      "section": "Oxygenation and Ventilation",
+      "authorised": [
+        "BAA",
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "o2_nebulisation_in_scope": {
+      "label": "Nebulisation of medications on scope of practice",
+      "section": "Oxygenation and Ventilation",
+      "authorised": [
+        "BAA",
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "o2_pulse_oximetry": {
+      "label": "Use of pulse oximetry",
+      "section": "Oxygenation and Ventilation",
+      "authorised": [
+        "BAA",
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "o2_needle_thoracentesis_adult_paed": {
+      "label": "Needle thoracentesis (adult and paediatric)",
+      "section": "Oxygenation and Ventilation",
+      "authorised": [
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "o2_needle_thoracentesis_neonate": {
+      "label": "Needle thoracentesis (neonate)",
+      "section": "Oxygenation and Ventilation",
+      "authorised": [
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "o2_bvm_manual_ventilation": {
+      "label": "Bag-valve mask manual ventilation",
+      "section": "Oxygenation and Ventilation",
+      "authorised": [
+        "BAA",
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "o2_bvt_manual_ventilation": {
+      "label": "Bag-valve tube manual ventilation",
+      "section": "Oxygenation and Ventilation",
+      "authorised": [
+        "BAA",
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "o2_interfacility_mech_vent_paed_adult": {
+      "label": "Interfacility mechanical ventilation (paediatric and adult — without cardiovascular support)",
+      "section": "Oxygenation and Ventilation",
+      "authorised": [
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "o2_mechanical_ventilation_neonate": {
+      "label": "Mechanical ventilation (neonate)",
+      "section": "Oxygenation and Ventilation",
+      "authorised": [
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "o2_niv_with_mechanical_ventilator": {
+      "label": "Non-invasive ventilation with mechanical ventilator",
+      "section": "Oxygenation and Ventilation",
+      "authorised": [
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "o2_niv_oxygen_driven": {
+      "label": "Non-invasive ventilation — oxygen driven (without mechanical ventilator)",
+      "section": "Oxygenation and Ventilation",
+      "authorised": [
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "o2_mechanical_infant_resuscitator": {
+      "label": "Mechanical infant resuscitator",
+      "section": "Oxygenation and Ventilation",
+      "authorised": [
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "o2_capnography_ett_extraglottic": {
+      "label": "Use of capnography / capnometry — via endotracheal tube / extraglottic device",
+      "section": "Oxygenation and Ventilation",
+      "authorised": [
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "o2_capnography_facemask_nasal": {
+      "label": "Use of capnography / capnometry — via facemask / nasal cannula",
+      "section": "Oxygenation and Ventilation",
+      "authorised": [
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "o2_humidification": {
+      "label": "Humidification",
+      "section": "Oxygenation and Ventilation",
+      "authorised": [
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "circ_bp_measurement_nibp": {
+      "label": "Blood pressure measurement including the use of NIBP (automated)",
+      "section": "Circulatory Management",
+      "authorised": [
+        "BAA",
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "circ_iv_cannulation_limbs_over_1yr": {
+      "label": "Peripheral intravenous cannulation as per relevant protocol — limbs and hands (all ages > 1 year old)",
+      "section": "Circulatory Management",
+      "authorised": [
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "circ_iv_cannulation_limbs_under_1yr": {
+      "label": "Peripheral intravenous cannulation as per relevant protocol — limbs and hands (< 1 year old)",
+      "section": "Circulatory Management",
+      "authorised": [
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "circ_iv_cannulation_infant_scalp": {
+      "label": "Peripheral intravenous cannulation as per relevant protocol — infant scalp",
+      "section": "Circulatory Management",
+      "authorised": [
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "circ_external_jugular_cannulation": {
+      "label": "External jugular vein cannulation",
+      "section": "Circulatory Management",
+      "authorised": [
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "circ_intraosseous_all_ages": {
+      "label": "Intra-osseous insertion — all ages",
+      "section": "Circulatory Management",
+      "authorised": [
+        "ECT",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "circ_intraosseous_adult": {
+      "label": "Intra-osseous insertion — adult",
+      "section": "Circulatory Management",
+      "authorised": [
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "circ_umbilical_vein_cannulation": {
+      "label": "Umbilical vein cannulation",
+      "section": "Circulatory Management",
+      "authorised": [
+        "ECT",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "circ_iv_fluid_therapy_adult": {
+      "label": "Intravenous fluid therapy (for purposes other than drug administration) — adult",
+      "section": "Circulatory Management",
+      "authorised": [
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "circ_iv_fluid_therapy_infant_paed": {
+      "label": "Intravenous fluid therapy (for purposes other than drug administration) — infant and paediatric",
+      "section": "Circulatory Management",
+      "authorised": [
+        "ECT",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "circ_oral_rehydration": {
+      "label": "Oral rehydration",
+      "section": "Circulatory Management",
+      "authorised": [
+        "BAA",
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "circ_oral_rehydration_via_ngt": {
+      "label": "Oral rehydration via NGT",
+      "section": "Circulatory Management",
+      "authorised": [
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "circ_drug_admin_iv_io": {
+      "label": "Intravenous / intraosseous drug administration as per scope of practice",
+      "section": "Circulatory Management",
+      "authorised": [
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "circ_drug_admin_subcutaneous": {
+      "label": "Subcutaneous drug administration as per scope of practice",
+      "section": "Circulatory Management",
+      "authorised": [
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "circ_drug_admin_intramuscular": {
+      "label": "Intramuscular drug administration as per scope of practice",
+      "section": "Circulatory Management",
+      "authorised": [
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "circ_drug_admin_endotracheal": {
+      "label": "Endotracheal drug administration",
+      "section": "Circulatory Management",
+      "authorised": [
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "circ_iv_infusion_devices": {
+      "label": "Use of intravenous infusion devices including pressure infuser, volumetric infusion pump and syringe driver",
+      "section": "Circulatory Management",
+      "authorised": [
+        "ECT",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "circ_external_haemorrhage_control": {
+      "label": "External haemorrhage control including use of tourniquet",
+      "section": "Circulatory Management",
+      "authorised": [
+        "BAA",
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "circ_topical_haemostatic_agents": {
+      "label": "Topical haemostatic agents",
+      "section": "Circulatory Management",
+      "authorised": [
+        "BAA",
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "circ_pneumatic_anti_shock_garment": {
+      "label": "Use of pneumatic anti-shock garment",
+      "section": "Circulatory Management",
+      "authorised": [
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "circ_non_pneumatic_anti_shock_garment": {
+      "label": "Use of non-pneumatic anti-shock garment",
+      "section": "Circulatory Management",
+      "authorised": [
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "circ_aed": {
+      "label": "Automated external defibrillation (AED)",
+      "section": "Circulatory Management",
+      "authorised": [
+        "BAA",
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "circ_manual_defibrillation": {
+      "label": "Manual defibrillation (asynchronous)",
+      "section": "Circulatory Management",
+      "authorised": [
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "circ_precordial_thump": {
+      "label": "Precordial thump",
+      "section": "Circulatory Management",
+      "authorised": [
+        "BAA",
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "circ_synchronised_cardioversion": {
+      "label": "Synchronised cardioversion",
+      "section": "Circulatory Management",
+      "authorised": [
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "circ_vagal_manoeuvres": {
+      "label": "Vagal manoeuvres",
+      "section": "Circulatory Management",
+      "authorised": [
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "circ_central_line_management": {
+      "label": "Central line management of lines in-situ",
+      "section": "Circulatory Management",
+      "authorised": [
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "circ_transcutaneous_cardiac_pacing": {
+      "label": "Transcutaneous cardiac pacing",
+      "section": "Circulatory Management",
+      "authorised": [
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "circ_3_lead_ecg": {
+      "label": "3-Lead ECG monitoring and diagnosis as per scope of practice",
+      "section": "Circulatory Management",
+      "authorised": [
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "circ_12_lead_ecg_diagnosis": {
+      "label": "12-Lead ECG diagnosis",
+      "section": "Circulatory Management",
+      "authorised": [
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "circ_fibrinolysis": {
+      "label": "Fibrinolysis (with documented telemetry or equivalent)",
+      "section": "Circulatory Management",
+      "authorised": [
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "circ_targeted_temperature_management": {
+      "label": "Targeted temperature management (inter-facility transfer and where capabilities exist)",
+      "section": "Circulatory Management",
+      "authorised": [
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "ob_normal_vaginal_delivery": {
+      "label": "Normal vaginal delivery as per scope of practice",
+      "section": "Obstetric Management",
+      "authorised": [
+        "BAA",
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "ob_prolapsed_cord_management": {
+      "label": "Prolapsed cord management as per scope of practice",
+      "section": "Obstetric Management",
+      "authorised": [
+        "BAA",
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "ob_breech_delivery_management": {
+      "label": "Breech delivery management as per scope of practice",
+      "section": "Obstetric Management",
+      "authorised": [
+        "BAA",
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "ob_mal_presentations_management": {
+      "label": "Mal-presentations management as per scope of practice",
+      "section": "Obstetric Management",
+      "authorised": [
+        "BAA",
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "ob_preterm_labour_management": {
+      "label": "Preterm labour management as per scope of practice",
+      "section": "Obstetric Management",
+      "authorised": [
+        "BAA",
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "ob_obstructed_labour_management": {
+      "label": "Obstructed labour management as per scope of practice",
+      "section": "Obstetric Management",
+      "authorised": [
+        "BAA",
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "ob_postpartum_haemorrhage_management": {
+      "label": "Post-partum haemorrhage management as per scope of practice",
+      "section": "Obstetric Management",
+      "authorised": [
+        "BAA",
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "diag_ultrasound": {
+      "label": "Use of ultrasound",
+      "section": "Diagnostic and Clinical Aids",
+      "authorised": [
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "diag_fundoscopy": {
+      "label": "Fundoscopy",
+      "section": "Diagnostic and Clinical Aids",
+      "authorised": [
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "diag_otoscope": {
+      "label": "Use of an otoscope",
+      "section": "Diagnostic and Clinical Aids",
+      "authorised": [
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "diag_snellen_chart": {
+      "label": "Use of a Snellen chart",
+      "section": "Diagnostic and Clinical Aids",
+      "authorised": [
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "diag_abg_sampling_and_analysis": {
+      "label": "Arterial blood gas sampling and analysis",
+      "section": "Diagnostic and Clinical Aids",
+      "authorised": [
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "gen_cardiac_arrest_management": {
+      "label": "Cardiac arrest management (adult, child, infant & neonate) as per scope of practice",
+      "section": "General",
+      "authorised": [
+        "BAA",
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "gen_clinical_assessment": {
+      "label": "Clinical assessment (as per level of care)",
+      "section": "General",
+      "authorised": [
+        "BAA",
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "gen_vital_sign_assessment": {
+      "label": "Vital sign assessment",
+      "section": "General",
+      "authorised": [
+        "BAA",
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "gen_finger_prick_glucose": {
+      "label": "Finger prick and blood glucose measurement (manual and electronic)",
+      "section": "General",
+      "authorised": [
+        "BAA",
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "gen_peak_flow": {
+      "label": "Peak flow measurement and interpretation",
+      "section": "General",
+      "authorised": [
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "gen_poc_blood_sampling_capillary": {
+      "label": "Point of care blood sampling (capillary)",
+      "section": "General",
+      "authorised": [
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "gen_cervical_spinal_clearance": {
+      "label": "Cervical spinal clearance",
+      "section": "General",
+      "authorised": [
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "gen_spinal_movement_restriction": {
+      "label": "Spinal movement restriction",
+      "section": "General",
+      "authorised": [
+        "BAA",
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": "HPCSA footnote ¹ applies — definition pending from source table."
+    },
+    "gen_limb_splints": {
+      "label": "Application of limb splints",
+      "section": "General",
+      "authorised": [
+        "BAA",
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "gen_pelvic_binding": {
+      "label": "Application of pelvic binding devices",
+      "section": "General",
+      "authorised": [
+        "BAA",
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "gen_vacuum_mattress": {
+      "label": "Application of vacuum mattress",
+      "section": "General",
+      "authorised": [
+        "BAA",
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "gen_urinary_catheterization": {
+      "label": "Urinary catheterisation",
+      "section": "General",
+      "authorised": [
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "gen_emergency_wound_care": {
+      "label": "Emergency wound care as per scope of practice",
+      "section": "General",
+      "authorised": [
+        "BAA",
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "gen_suturing": {
+      "label": "Suturing",
+      "section": "General",
+      "authorised": [
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "gen_withdrawal_of_resuscitation": {
+      "label": "Withdrawal of resuscitation efforts",
+      "section": "General",
+      "authorised": [
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "gen_withholding_resuscitation": {
+      "label": "Withholding resuscitation",
+      "section": "General",
+      "authorised": [
+        "BAA",
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {
+        "BAA": "Per HPCSA footnote ² — definition pending from source table."
+      },
+      "note": "HPCSA footnote ² applies — definition pending from source table."
+    },
+    "gen_on_scene_discharge": {
+      "label": "On-scene discharge",
+      "section": "General",
+      "authorised": [
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": "HPCSA footnote ³ applies — definition pending from source table."
+    },
+    "gen_interfacility_transfer": {
+      "label": "Inter-facility transfer as per relevant scope of practice",
+      "section": "General",
+      "authorised": [
+        "BAA",
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "gen_incubator": {
+      "label": "Use of an incubator",
+      "section": "General",
+      "authorised": [
+        "BAA",
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_acetyl_salicylic_acid": {
+      "label": "Acetyl Salicylic Acid",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "BAA",
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_activated_charcoal": {
+      "label": "Activated Charcoal",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "BAA",
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_adenosine": {
+      "label": "Adenosine",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_adrenaline_anaphylaxis_arrest": {
+      "label": "Adrenaline — use in anaphylaxis and cardiac arrest",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_adrenaline_general": {
+      "label": "Adrenaline",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECT",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {
+        "ECT": "Mandatory Senior Emergency Care Practitioner and/or Supervising Medical Officer consultation required."
+      },
+      "note": null
+    },
+    "med_amiodarone": {
+      "label": "Amiodarone Hydrochloride",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECT",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_atropine_toxidrome": {
+      "label": "Atropine Sulphate — use in toxidrome",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_atropine": {
+      "label": "Atropine Sulphate",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECT",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_betamethasone": {
+      "label": "Betamethasone",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {
+        "ECP": "Mandatory Senior Emergency Care Practitioner and/or Supervising Medical Officer consultation required."
+      },
+      "note": null
+    },
+    "med_calcium_chloride_gluconate": {
+      "label": "Calcium Chloride / Calcium Gluconate",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_clopidogrel": {
+      "label": "Clopidogrel",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_hydrocortisone_iv": {
+      "label": "Hydrocortisone (IV)",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_methylprednisolone_iv": {
+      "label": "Methylprednisolone (IV)",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_dexamethasone": {
+      "label": "Dexamethasone",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {
+        "ECP": "Mandatory Senior Emergency Care Practitioner and/or Supervising Medical Officer consultation required."
+      },
+      "note": null
+    },
+    "med_dextrose_iv_adult": {
+      "label": "Dextrose Intravenous (adult)",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_dextrose_iv_paed_neonate": {
+      "label": "Dextrose Intravenous (paediatric and neonate)",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "AEA",
+        "ECT",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_dopamine": {
+      "label": "Dopamine",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {
+        "ECP": "Mandatory Senior Emergency Care Practitioner and/or Supervising Medical Officer consultation required."
+      },
+      "note": null
+    },
+    "med_diazepam": {
+      "label": "Diazepam",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_dobutamine": {
+      "label": "Dobutamine",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {
+        "ECP": "Mandatory Senior Emergency Care Practitioner and/or Supervising Medical Officer consultation required."
+      },
+      "note": null
+    },
+    "med_enoxaparin": {
+      "label": "Enoxaparin",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_etomidate": {
+      "label": "Etomidate",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_fentanyl_iv": {
+      "label": "Fentanyl (intravenous)",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {
+        "ANT": "Mandatory Senior Emergency Care Practitioner and/or Supervising Medical Officer consultation required."
+      },
+      "note": null
+    },
+    "med_fentanyl_intranasal": {
+      "label": "Fentanyl (intranasal)",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {
+        "ANT": "Mandatory Senior Emergency Care Practitioner and/or Supervising Medical Officer consultation required."
+      },
+      "note": null
+    },
+    "med_flumazenil_iatrogenic": {
+      "label": "Flumazenil (only in cases of iatrogenic benzodiazepine overdose)",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_flumazenil_general": {
+      "label": "Flumazenil",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_furosemide": {
+      "label": "Furosemide",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_glucagon": {
+      "label": "Glucagon",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {
+        "AEA": "Mandatory Senior Emergency Care Practitioner and/or Supervising Medical Officer consultation required."
+      },
+      "note": null
+    },
+    "med_glyceryl_trinitrate": {
+      "label": "Glyceryl Trinitrate",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECT",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_heparin_sodium": {
+      "label": "Heparin Sodium",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_hydralazine": {
+      "label": "Hydralazine",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {
+        "ECP": "Mandatory Senior Emergency Care Practitioner and/or Supervising Medical Officer consultation required."
+      },
+      "note": null
+    },
+    "med_ipratropium_bromide": {
+      "label": "Ipratropium Bromide",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "BAA",
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_ketamine_iv": {
+      "label": "Ketamine — intravenous",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_ketamine_im": {
+      "label": "Ketamine — intramuscular",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_ketamine_intranasal": {
+      "label": "Ketamine — intranasal",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_labetalol": {
+      "label": "Labetalol",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_lignocaine_io_flush": {
+      "label": "Lignocaine hydrochloride (IO flush — local anaesthetic)",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_lignocaine_systemic_arrhythmia": {
+      "label": "Lignocaine hydrochloride (systemic — arrhythmia management)",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": "Source-image cell values were not perfectly legible — please verify authorised categories."
+    },
+    "med_lorazepam": {
+      "label": "Lorazepam",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_magnesium_sulphate_im": {
+      "label": "Magnesium Sulphate (intramuscular)",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {
+        "AEA": "Mandatory Senior Emergency Care Practitioner and/or Supervising Medical Officer consultation required."
+      },
+      "note": null
+    },
+    "med_magnesium_sulphate_iv": {
+      "label": "Magnesium Sulphate (intravenous)",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECT",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_medical_oxygen": {
+      "label": "Medical oxygen",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "BAA",
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_metoclopramide": {
+      "label": "Metoclopramide monohydrochloride",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECT",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_midazolam": {
+      "label": "Midazolam",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_morphine_sulphate": {
+      "label": "Morphine Sulphate",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECT",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {
+        "ECT": "Mandatory Senior Emergency Care Practitioner and/or Supervising Medical Officer consultation required."
+      },
+      "note": null
+    },
+    "med_naloxone_hydrochloride": {
+      "label": "Naloxone hydrochloride",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {
+        "AEA": "Mandatory Senior Emergency Care Practitioner and/or Supervising Medical Officer consultation required."
+      },
+      "note": null
+    },
+    "med_neostigmine": {
+      "label": "Neostigmine",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_nifedipine": {
+      "label": "Nifedipine (oral / IV)",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {
+        "ECP": "Mandatory Senior Emergency Care Practitioner and/or Supervising Medical Officer consultation required."
+      },
+      "note": null
+    },
+    "med_nitrates_iv": {
+      "label": "Nitrates (intravenous)",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {
+        "ECP": "Mandatory Senior Emergency Care Practitioner and/or Supervising Medical Officer consultation required."
+      },
+      "note": null
+    },
+    "med_nitrous_oxide": {
+      "label": "Nitrous oxide",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "BAA",
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_ondansetron": {
+      "label": "Ondansetron",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_oral_glucose": {
+      "label": "Oral glucose powder / gel",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "BAA",
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_oxytocin": {
+      "label": "Oxytocin",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECT",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {
+        "ECT": "Mandatory Senior Emergency Care Practitioner and/or Supervising Medical Officer consultation required.",
+        "ANT": "Mandatory Senior Emergency Care Practitioner and/or Supervising Medical Officer consultation required."
+      },
+      "note": null
+    },
+    "med_paracetamol_oral": {
+      "label": "Paracetamol (oral)",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_paracetamol_iv": {
+      "label": "Paracetamol (intravenous)",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {
+        "ANT": "Mandatory Senior Emergency Care Practitioner and/or Supervising Medical Officer consultation required."
+      },
+      "note": null
+    },
+    "med_p2y12_inhibitors": {
+      "label": "P2Y12 Inhibitors",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {
+        "ECP": "Mandatory Senior Emergency Care Practitioner and/or Supervising Medical Officer consultation required."
+      },
+      "note": null
+    },
+    "med_prednisolone_oral": {
+      "label": "Prednisolone (oral)",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECT",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_promethazine": {
+      "label": "Promethazine",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECT",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_procainamide": {
+      "label": "Procainamide",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_rocuronium": {
+      "label": "Rocuronium",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_sodium_bicarbonate": {
+      "label": "Sodium Bicarbonate 8.5%",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_sotalol": {
+      "label": "Sotalol",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {
+        "ECP": "Mandatory Senior Emergency Care Practitioner and/or Supervising Medical Officer consultation required."
+      },
+      "note": null
+    },
+    "med_sugammadex": {
+      "label": "Sugammadex",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_streptokinase": {
+      "label": "Streptokinase",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_suxamethonium_chloride": {
+      "label": "Suxamethonium Chloride",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_tenecteplase": {
+      "label": "Tenecteplase",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_thiamine": {
+      "label": "Thiamine",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_tranexamic_acid": {
+      "label": "Tranexamic Acid",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_vecuronium": {
+      "label": "Vecuronium",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_beta2_stimulants_inhaled": {
+      "label": "β2 Stimulants (inhaled)",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "BAA",
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_beta2_stimulants_systemic": {
+      "label": "β2 Stimulants (systemic)",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECT",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_nsaid_non_iv": {
+      "label": "Non-Steroidal Anti-Inflammatories (non-IV)",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_gp_iib_iiia_inhibitors": {
+      "label": "GPIIb/IIIa Inhibitors",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {
+        "ECP": "Mandatory Senior Emergency Care Practitioner and/or Supervising Medical Officer consultation required."
+      },
+      "note": null
+    },
+    "med_direct_thrombin_inhibitors": {
+      "label": "Direct Thrombin Inhibitors",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {
+        "ECP": "Mandatory Senior Emergency Care Practitioner and/or Supervising Medical Officer consultation required."
+      },
+      "note": null
+    },
+    "med_penthroxyflurane": {
+      "label": "Penthroxyflurane",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "BAA",
+        "AEA",
+        "ECT",
+        "ECA",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_cyanide_antidotes_ohs": {
+      "label": "Cyanide antidotes (within occupational health and safety system)",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_anti_emetic_remote_oral": {
+      "label": "Anti-emetic (oral only — within remote site medicine scenario)",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_anti_spasmodics_remote_oral": {
+      "label": "Anti-spasmodics (oral only — within remote site medicine scenario)",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "med_anti_diarrhoeals_remote_oral": {
+      "label": "Anti-diarrhoeals (oral only — within remote site medicine scenario)",
+      "section": "List of Medications (Route of Administration)",
+      "authorised": [
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    }
+  }
+}

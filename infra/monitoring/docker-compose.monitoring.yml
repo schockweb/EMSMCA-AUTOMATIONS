@@ -1,0 +1,130 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# EMS Claims Portal — Monitoring Stack
+# Runs alongside the main application on one of the CX32 app servers
+# or on a dedicated monitoring node.
+#
+# Usage:
+#   docker compose -f docker-compose.monitoring.yml up -d
+#
+# All ports are bound to 127.0.0.1 — access via SSH tunnel or reverse proxy.
+# ═══════════════════════════════════════════════════════════════════════════
+
+services:
+  # ─────────────────────────────────────────────────────────────────────
+  # Prometheus — Metrics collection & alerting
+  # ─────────────────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: ems_prometheus
+    restart: always
+    ports:
+      - "127.0.0.1:9090:9090"          # localhost only — not publicly exposed
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=30d"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+      - "--web.enable-lifecycle"         # allows config reload via /-/reload
+    networks:
+      - monitoring
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Grafana — Dashboards & visualization
+  # ─────────────────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: ems_grafana
+    restart: always
+    ports:
+      - "127.0.0.1:3000:3000"          # localhost only
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    environment:
+      # Admin password — set via env var, change immediately after first login
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_SECURITY_ADMIN_USER: admin
+
+      # Server settings
+      GF_SERVER_ROOT_URL: "https://app.example.co.za/grafana/"
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+
+      # Auth — disable public signup
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+
+      # Logging
+      GF_LOG_LEVEL: warn
+    depends_on:
+      - prometheus
+      - loki
+    networks:
+      - monitoring
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Alertmanager — Alert routing & notification
+  # ─────────────────────────────────────────────────────────────────────
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: ems_alertmanager
+    restart: always
+    ports:
+      - "127.0.0.1:9093:9093"          # localhost only
+    volumes:
+      - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+    networks:
+      - monitoring
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Loki — Log aggregation (receives logs from Promtail/Docker)
+  # ─────────────────────────────────────────────────────────────────────
+  loki:
+    image: grafana/loki:3.1.0
+    container_name: ems_loki
+    restart: always
+    ports:
+      - "127.0.0.1:3100:3100"          # localhost only
+    volumes:
+      - loki_data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - monitoring
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Uptime Kuma — Uptime monitoring & status page
+  # ─────────────────────────────────────────────────────────────────────
+  uptime-kuma:
+    image: louislam/uptime-kuma:1
+    container_name: ems_uptime_kuma
+    restart: always
+    ports:
+      - "127.0.0.1:3001:3001"          # localhost only
+    volumes:
+      - uptime_kuma_data:/app/data
+    networks:
+      - monitoring
+
+volumes:
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+  alertmanager_data:
+    driver: local
+  loki_data:
+    driver: local
+  uptime_kuma_data:
+    driver: local
+
+networks:
+  monitoring:
+    driver: bridge

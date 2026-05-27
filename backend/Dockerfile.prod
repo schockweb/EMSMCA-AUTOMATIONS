@@ -1,0 +1,84 @@
+# ═══════════════════════════════════════════════════════════
+# EMS Claims Portal — Backend Production Dockerfile
+# Multi-stage build: builder (venv + deps) → runtime (slim)
+# Target: Hetzner CX32 / CX42, Ubuntu 22.04, amd64
+# ═══════════════════════════════════════════════════════════
+
+# ── Stage 1: Builder ────────────────────────────────────────
+# Install all build-time dependencies into a virtualenv so we
+# can copy just the venv to the runtime stage (no gcc/headers).
+FROM python:3.12-slim AS builder
+
+WORKDIR /build
+
+# Build-time system deps (gcc for C extensions, libpq-dev for psycopg/asyncpg)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc libpq-dev libjpeg-dev zlib1g-dev libffi-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create virtualenv
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Install Python deps into the venv
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -r requirements.txt \
+    && pip install --no-cache-dir gunicorn
+
+
+# ── Stage 2: Runtime ───────────────────────────────────────
+# Minimal image: only runtime libs, the venv, and app code.
+FROM python:3.12-slim AS runtime
+
+LABEL maintainer="EMS Claims Portal <admin@emsclaims.co.za>"
+LABEL description="EMS Claims Portal — FastAPI backend (production)"
+
+# Runtime-only system deps (no compiler toolchain)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 libjpeg62-turbo zlib1g curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Non-root user for security
+RUN groupadd -r ems && useradd -r -g ems -d /app -s /bin/false ems
+
+WORKDIR /app
+
+# Copy the pre-built virtualenv from the builder stage
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Copy application source
+COPY . .
+
+# Create required runtime directories
+RUN mkdir -p /app/uploads /app/logs \
+    && chown -R ems:ems /app
+
+# Switch to non-root user
+USER ems
+
+EXPOSE 8000
+
+# Health check — backend exposes /health endpoint
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Production entrypoint: Gunicorn with Uvicorn workers
+# - 4 workers (suitable for CX32 4-vCPU instances)
+# - Access log to stdout for Docker log collection
+# - Proxy headers trusted (behind Nginx)
+# - NO --reload, NO dev tools
+CMD ["gunicorn", "app.main:app", \
+     "--worker-class", "uvicorn.workers.UvicornWorker", \
+     "--workers", "4", \
+     "--bind", "0.0.0.0:8000", \
+     "--access-logfile", "-", \
+     "--error-logfile", "-", \
+     "--proxy-protocol", \
+     "--forwarded-allow-ips", "*", \
+     "--timeout", "120", \
+     "--graceful-timeout", "30", \
+     "--keep-alive", "5"]

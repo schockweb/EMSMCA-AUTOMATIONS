@@ -1,0 +1,122 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# EMS Claims Portal — Alertmanager Configuration
+# Routes alerts by severity to appropriate receivers
+#
+# Placeholder SMTP settings — update before deployment.
+# ═══════════════════════════════════════════════════════════════════════════
+
+global:
+  # ── SMTP configuration (placeholder — update with real relay) ──────────
+  smtp_smarthost: "smtp.example.co.za:587"
+  smtp_from: "alerts@app.example.co.za"
+  smtp_auth_username: "alerts@app.example.co.za"
+  smtp_auth_password: "CHANGE_ME_SMTP_PASSWORD"
+  smtp_require_tls: true
+
+  # How long to wait before sending a notification for a new group of alerts
+  resolve_timeout: 5m
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Templates (optional — customize notification format)
+# ─────────────────────────────────────────────────────────────────────────
+# templates:
+#   - "/etc/alertmanager/templates/*.tmpl"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Routing Tree
+# ═══════════════════════════════════════════════════════════════════════════
+route:
+  # Default receiver for anything that doesn't match a sub-route
+  receiver: "email-warnings"
+
+  # Group alerts by these labels — reduces notification noise
+  group_by: ["alertname", "service", "severity"]
+
+  # Wait before sending the first notification (allow group to fill)
+  group_wait: 30s
+
+  # Wait before sending updates to an existing group
+  group_interval: 5m
+
+  # Wait before resending a notification for an unchanged group
+  repeat_interval: 4h
+
+  # ── Sub-routes ─────────────────────────────────────────────────────────
+  routes:
+    # CRITICAL alerts → page the on-call team immediately
+    - match:
+        severity: critical
+      receiver: "email-critical"
+      group_wait: 10s
+      repeat_interval: 1h
+      continue: false                    # stop matching after this route
+
+    # WARNING alerts → standard email (batched, less urgent)
+    - match:
+        severity: warning
+      receiver: "email-warnings"
+      group_wait: 1m
+      repeat_interval: 4h
+      continue: false
+
+    # Infrastructure alerts → dedicated channel
+    - match:
+        service: infrastructure
+      receiver: "email-infra"
+      continue: false
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Receivers
+# ═══════════════════════════════════════════════════════════════════════════
+receivers:
+  # ── Critical → Immediate page ──────────────────────────────────────────
+  - name: "email-critical"
+    email_configs:
+      - to: "oncall@example.co.za"
+        send_resolved: true
+        headers:
+          Subject: "🚨 EMS CRITICAL: {{ .GroupLabels.alertname }} ({{ .GroupLabels.service }})"
+        html: |
+          <h2>🚨 Critical Alert</h2>
+          <p><strong>Alert:</strong> {{ .GroupLabels.alertname }}</p>
+          <p><strong>Service:</strong> {{ .GroupLabels.service }}</p>
+          <p><strong>Status:</strong> {{ .Status }}</p>
+          <hr>
+          {{ range .Alerts }}
+          <p><strong>Instance:</strong> {{ .Labels.instance }}</p>
+          <p>{{ .Annotations.description }}</p>
+          <p><small>Started: {{ .StartsAt }}</small></p>
+          <hr>
+          {{ end }}
+
+  # ── Warnings → Standard email ──────────────────────────────────────────
+  - name: "email-warnings"
+    email_configs:
+      - to: "devops@example.co.za"
+        send_resolved: true
+        headers:
+          Subject: "⚠️ EMS WARNING: {{ .GroupLabels.alertname }} ({{ .GroupLabels.service }})"
+
+  # ── Infrastructure → Separate channel ──────────────────────────────────
+  - name: "email-infra"
+    email_configs:
+      - to: "infra@example.co.za"
+        send_resolved: true
+        headers:
+          Subject: "🖥️ EMS INFRA: {{ .GroupLabels.alertname }}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Inhibition Rules
+# ═══════════════════════════════════════════════════════════════════════════
+# If a critical alert fires, suppress the corresponding warning alert
+# (for the same alertname + service) to reduce noise.
+inhibit_rules:
+  - source_match:
+      severity: "critical"
+    target_match:
+      severity: "warning"
+    equal: ["alertname", "service"]

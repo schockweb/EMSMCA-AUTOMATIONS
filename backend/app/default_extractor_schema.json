@@ -1,0 +1,400 @@
+{
+  "fields": [
+    {
+      "category": "Patient Information",
+      "key": "patient_name",
+      "description": "Full patient name",
+      "rules": ""
+    },
+    {
+      "category": "Patient Information",
+      "key": "patient_id_number",
+      "description": "SA ID number (13 digits)",
+      "rules": ""
+    },
+    {
+      "category": "Patient Information",
+      "key": "patient_dob",
+      "description": "Date of birth (YYYY-MM-DD)",
+      "rules": ""
+    },
+    {
+      "category": "Patient Information",
+      "key": "gender",
+      "description": "Male/Female",
+      "rules": ""
+    },
+    {
+      "category": "Patient Information",
+      "key": "patient_address",
+      "description": "Patient residential address",
+      "rules": ""
+    },
+    {
+      "category": "Patient Information",
+      "key": "patient_phone",
+      "description": "Contact number",
+      "rules": ""
+    },
+    {
+      "category": "Patient Information",
+      "key": "patient_relationship",
+      "description": "Relationship to main member (e.g. Self, Child, Spouse)",
+      "rules": ""
+    },
+    {
+      "category": "Medical Scheme",
+      "key": "medical_scheme",
+      "description": "Medical aid/scheme name (e.g. GEMS, Discovery, Bonitas, Medshield)",
+      "rules": ""
+    },
+    {
+      "category": "Medical Scheme",
+      "key": "scheme_option",
+      "description": "Specific plan/option name (e.g. Classic Saver, Emerald Value)",
+      "rules": ""
+    },
+    {
+      "category": "Medical Scheme",
+      "key": "main_member_name",
+      "description": "Full name and surname of the principal/main member",
+      "rules": ""
+    },
+    {
+      "category": "Medical Scheme",
+      "key": "main_member_id",
+      "description": "SA ID number or date of birth of the principal member",
+      "rules": ""
+    },
+    {
+      "category": "Medical Scheme",
+      "key": "member_number",
+      "description": "Scheme membership number (full number)",
+      "rules": ""
+    },
+    {
+      "category": "Medical Scheme",
+      "key": "dependent_code",
+      "description": "Dependent code if the patient is not the main member (e.g. 01, 02)",
+      "rules": ""
+    },
+    {
+      "category": "Medical Scheme",
+      "key": "preauth_number",
+      "description": "Pre-authorization or reference number. If not applicable, write N/A.",
+      "rules": "Mandatory for IFT incidents and GEMS scheme primary calls. If patient paid cash or no auth was issued, value should be N/A."
+    },
+    {
+      "category": "Provider & Transport",
+      "key": "service_provider_name",
+      "description": "Name of EMS service provider company and contact details",
+      "rules": ""
+    },
+    {
+      "category": "Provider & Transport",
+      "key": "bhf_practice_number",
+      "description": "BHF (Board of Healthcare Funders) practice/PCNS number — must be active",
+      "rules": "Must be present for scheme billing. Critical field."
+    },
+    {
+      "category": "Provider & Transport",
+      "key": "treating_provider",
+      "description": "Primary treating paramedic/crew member 1 full name",
+      "rules": ""
+    },
+    {
+      "category": "Provider & Transport",
+      "key": "provider_practice_number",
+      "description": "HPCSA registration number of crew member 1",
+      "rules": ""
+    },
+    {
+      "category": "Provider & Transport",
+      "key": "crew_member_1_name",
+      "description": "Full name and initials of crew member 1",
+      "rules": ""
+    },
+    {
+      "category": "Provider & Transport",
+      "key": "crew_member_1_qualification",
+      "description": "Qualification of crew member 1 (e.g. AEA, CCA, Paramedic, ECP)",
+      "rules": "Must be one of: AEA, CCA, Paramedic, ECP, EMT-B. South African EMS qualifications only."
+    },
+    {
+      "category": "Provider & Transport",
+      "key": "crew_member_1_hpcsa",
+      "description": "HPCSA registration number of crew member 1",
+      "rules": "Critical for scheme reimbursement."
+    },
+    {
+      "category": "Provider & Transport",
+      "key": "crew_member_2_name",
+      "description": "Full name and initials of crew member 2 if present",
+      "rules": ""
+    },
+    {
+      "category": "Provider & Transport",
+      "key": "crew_member_2_qualification",
+      "description": "Qualification of crew member 2 (e.g. AEA, CCA, Paramedic, ECP)",
+      "rules": ""
+    },
+    {
+      "category": "Provider & Transport",
+      "key": "crew_member_2_hpcsa",
+      "description": "HPCSA registration number of crew member 2",
+      "rules": ""
+    },
+    {
+      "category": "Provider & Transport",
+      "key": "vehicle_registration",
+      "description": "Ambulance vehicle registration number",
+      "rules": ""
+    },
+    {
+      "category": "Provider & Transport",
+      "key": "vehicle_callsign",
+      "description": "Vehicle/unit callsign",
+      "rules": ""
+    },
+    {
+      "category": "Incident Details",
+      "key": "incident_date",
+      "description": "Date of service/incident (YYYY-MM-DD)",
+      "rules": ""
+    },
+    {
+      "category": "Incident Details",
+      "key": "incident_type",
+      "description": "Type of incident: Primary (scene response) or IFT (Inter-Facility Transfer)",
+      "rules": "Must be one of: Primary, IFT"
+    },
+    {
+      "category": "Incident Details",
+      "key": "multiple_patient_indicator",
+      "description": "Indicates if multiple patients were treated in this incident (e.g. Solo, Patient 1 of 2, Patient 2 of 2)",
+      "rules": "If multiple patients, triggers 150% billing rule review."
+    },
+    {
+      "category": "Incident Details",
+      "key": "level_of_care",
+      "description": "Level of care rendered: ILS (Intermediate Life Support) or ALS (Advanced Life Support)",
+      "rules": "Must be one of: ILS, ALS. South African EMS does NOT use BLS. If the document says Basic or BLS, map to ILS."
+    },
+    {
+      "category": "Incident Details",
+      "key": "level_of_care_dispatched",
+      "description": "Level of care the crew was dispatched as (may differ from level rendered)",
+      "rules": "Must be one of: ILS, ALS."
+    },
+    {
+      "category": "Incident Details",
+      "key": "incident_location",
+      "description": "Physical scene address or GPS coordinates",
+      "rules": ""
+    },
+    {
+      "category": "Incident Details",
+      "key": "receiving_facility",
+      "description": "Name of receiving hospital or facility (full name, no abbreviations)",
+      "rules": ""
+    },
+    {
+      "category": "Incident Details",
+      "key": "chief_complaint",
+      "description": "Primary chief complaint or reason for the call",
+      "rules": ""
+    },
+    {
+      "category": "Incident Details",
+      "key": "mechanism_of_injury",
+      "description": "Mechanism of injury if trauma incident",
+      "rules": ""
+    },
+    {
+      "category": "Provider & Transport",
+      "key": "call_received_time",
+      "description": "Time call was received by dispatch (HH:MM 24-hour format)",
+      "rules": ""
+    },
+    {
+      "category": "Provider & Transport",
+      "key": "dispatch_time",
+      "description": "Time crew was dispatched (HH:MM 24-hour format)",
+      "rules": ""
+    },
+    {
+      "category": "Provider & Transport",
+      "key": "on_scene_time",
+      "description": "Time crew arrived on scene (HH:MM 24-hour format)",
+      "rules": ""
+    },
+    {
+      "category": "Provider & Transport",
+      "key": "departure_from_scene_time",
+      "description": "Time crew departed scene with patient (HH:MM 24-hour format)",
+      "rules": ""
+    },
+    {
+      "category": "Provider & Transport",
+      "key": "transport_time",
+      "description": "Time transport to hospital started — same as departure from scene (HH:MM)",
+      "rules": ""
+    },
+    {
+      "category": "Provider & Transport",
+      "key": "hospital_arrival_time",
+      "description": "Time crew arrived at receiving hospital (HH:MM 24-hour format)",
+      "rules": ""
+    },
+    {
+      "category": "Provider & Transport",
+      "key": "handover_complete_time",
+      "description": "Time patient was handed over to receiving facility (HH:MM 24-hour format)",
+      "rules": ""
+    },
+    {
+      "category": "Provider & Transport",
+      "key": "odometer_dispatch",
+      "description": "Vehicle odometer reading at time of dispatch (km)",
+      "rules": "Numeric value in kilometres."
+    },
+    {
+      "category": "Provider & Transport",
+      "key": "odometer_at_scene",
+      "description": "Vehicle odometer reading on arrival at scene (km)",
+      "rules": "Numeric value in kilometres. Must be >= odometer_dispatch."
+    },
+    {
+      "category": "Provider & Transport",
+      "key": "odometer_departure",
+      "description": "Vehicle odometer reading on departure from scene (km)",
+      "rules": "Numeric value in kilometres."
+    },
+    {
+      "category": "Provider & Transport",
+      "key": "odometer_destination",
+      "description": "Vehicle odometer reading on arrival at destination/hospital (km)",
+      "rules": "Numeric value in kilometres."
+    },
+    {
+      "category": "Provider & Transport",
+      "key": "odometer_rtb",
+      "description": "Vehicle odometer reading on return to base (km). Required for long-distance or non-patient-carrying billing.",
+      "rules": "Numeric value in kilometres."
+    },
+    {
+      "category": "Clinical Notes",
+      "key": "ample_history",
+      "description": "AMPLE history: Allergies, Medications, Past medical history, Last meal, Events prior to incident",
+      "rules": "Structured narrative covering all 5 AMPLE components."
+    },
+    {
+      "category": "Clinical Notes",
+      "key": "clinical_notes",
+      "description": "Primary and secondary survey clinical findings and full narrative",
+      "rules": ""
+    },
+    {
+      "category": "Clinical Notes",
+      "key": "vital_signs",
+      "description": "JSON array of vital sign sets including time, BP, HR, RR, SpO2, GCS, Temperature",
+      "rules": "Must be a JSON array. Minimum 2 sets for primary calls, minimum 3 sets for IFT. Each object: {time, bp, hr, rr, spo2, gcs, temp, equipment}."
+    },
+    {
+      "category": "Clinical Notes",
+      "key": "procedures",
+      "description": "JSON array of procedures and equipment used during the call",
+      "rules": "Must be a JSON array of strings or objects with {procedure, time, practitioner}."
+    },
+    {
+      "category": "Clinical Notes",
+      "key": "medications_given",
+      "description": "JSON array of medications and IV fluids administered",
+      "rules": "Must be a JSON array. Each object must have: {name, dose, route, time, practitioner}."
+    },
+    {
+      "category": "Clinical Notes",
+      "key": "primary_diagnosis",
+      "description": "Primary clinical diagnosis in plain language",
+      "rules": ""
+    },
+    {
+      "category": "Clinical Notes",
+      "key": "icd10_codes",
+      "description": "ICD-10 diagnosis codes as a JSON array (e.g. [\"I21.0\", \"S06\"]). Extract from the billing/diagnosis section.",
+      "rules": "Must be a JSON array of strings. If no codes are found in the document, return []."
+    },
+    {
+      "category": "Clinical Notes",
+      "key": "primary_icd10",
+      "description": "Primary ICD-10 diagnosis code (single code, e.g. S72.0, I21.1)",
+      "rules": "Single ICD-10 string. If the diagnosis is injury/trauma (codes starting with S or T), an external cause code is also required."
+    },
+    {
+      "category": "Clinical Notes",
+      "key": "external_cause_code",
+      "description": "External cause ICD-10 code — mandatory when primary diagnosis is an injury or trauma",
+      "rules": "Must start with V, W, X, or Y and be exactly 5 characters (e.g. V892.0 style or W19.0). Only required when primary_icd10 starts with S or T."
+    },
+    {
+      "category": "Other",
+      "key": "treating_practitioner_signature_present",
+      "description": "true/false — treating practitioner signature present on the physical PRF",
+      "rules": ""
+    },
+    {
+      "category": "Other",
+      "key": "patient_signature_present",
+      "description": "true/false — patient or guardian signature present on the physical PRF",
+      "rules": ""
+    },
+    {
+      "category": "Other",
+      "key": "provider_signature_present",
+      "description": "true/false — provider signature present",
+      "rules": ""
+    },
+    {
+      "category": "Other",
+      "key": "receiving_facility_signature_present",
+      "description": "true/false — receiving facility clinician signature and qualification present",
+      "rules": ""
+    },
+    {
+      "category": "Other",
+      "key": "receiving_clinician_qualification",
+      "description": "Qualification of the clinician who accepted handover at the receiving facility",
+      "rules": ""
+    },
+    {
+      "category": "Other",
+      "key": "signature_unobtainable_reason",
+      "description": "Reason if any signature could not be obtained (e.g. patient unconscious, facility refused)",
+      "rules": ""
+    },
+    {
+      "category": "Billing",
+      "key": "invoice_number",
+      "description": "Invoice or claim number for this PRF",
+      "rules": ""
+    },
+    {
+      "category": "Billing",
+      "key": "tariff_codes",
+      "description": "JSON array of tariff/CPT billing codes claimed (e.g. [\"17600\", \"17601\"])",
+      "rules": "Must be a JSON array of strings."
+    },
+    {
+      "category": "Billing",
+      "key": "units_claimed",
+      "description": "Number of units claimed per tariff code",
+      "rules": ""
+    },
+    {
+      "category": "Billing",
+      "key": "total_claimed_amount",
+      "description": "Total amount claimed in Rands (numeric, e.g. 4250.00)",
+      "rules": "Numeric value. Must match sum of all tariff line items."
+    }
+  ]
+}

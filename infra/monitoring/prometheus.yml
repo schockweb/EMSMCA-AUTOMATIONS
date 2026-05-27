@@ -1,0 +1,131 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# EMS Claims Portal — Prometheus Configuration
+# Scrape targets + alert rules for the entire platform
+# ═══════════════════════════════════════════════════════════════════════════
+
+global:
+  scrape_interval: 15s                  # How often to scrape targets
+  evaluation_interval: 15s              # How often to evaluate alert rules
+  scrape_timeout: 10s
+
+  # External labels — attached to all alerts & remote-write samples
+  external_labels:
+    cluster: "ems-production"
+    region: "af-south-1"                # Hetzner Johannesburg
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Alertmanager — Where to send fired alerts
+# ─────────────────────────────────────────────────────────────────────────
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - "alertmanager:9093"
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Alert Rules — External file
+# ─────────────────────────────────────────────────────────────────────────
+rule_files:
+  - "/etc/prometheus/alert_rules.yml"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Scrape Configurations
+# ═══════════════════════════════════════════════════════════════════════════
+scrape_configs:
+
+  # ── Prometheus self-monitoring ──────────────────────────────────────────
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+        labels:
+          service: "prometheus"
+
+  # ── FastAPI Backend (app servers) ───────────────────────────────────────
+  # Requires prometheus-fastapi-instrumentator or starlette_exporter
+  # in the backend app.  Exposes /metrics endpoint.
+  - job_name: "fastapi"
+    metrics_path: /api/metrics
+    scrape_interval: 10s
+    static_configs:
+      - targets:
+          - "ems_backend:8000"
+          # Add app-2 backend when multi-server:
+          # - "<APP2_PRIVATE_IP>:8000"
+        labels:
+          service: "ems-api"
+
+  # ── Node Exporter (host-level metrics) ──────────────────────────────────
+  # Install on each server: apt install prometheus-node-exporter
+  # Or run via Docker: prom/node-exporter
+  - job_name: "node_exporter"
+    scrape_interval: 30s
+    static_configs:
+      - targets:
+          - "host.docker.internal:9100"   # same host
+          # Multi-server setup — add all server IPs:
+          # - "<APP1_PRIVATE_IP>:9100"
+          # - "<APP2_PRIVATE_IP>:9100"
+          # - "<WORKER_PRIVATE_IP>:9100"
+          # - "<DB_PRIMARY_PRIVATE_IP>:9100"
+          # - "<DB_STANDBY_PRIVATE_IP>:9100"
+        labels:
+          service: "node"
+
+  # ── PostgreSQL Exporter ─────────────────────────────────────────────────
+  # Run postgres_exporter on the DB server(s)
+  # Docker: prometheuscommunity/postgres-exporter
+  - job_name: "postgresql"
+    scrape_interval: 30s
+    static_configs:
+      - targets:
+          - "host.docker.internal:9187"   # postgres_exporter default port
+          # - "<DB_PRIMARY_PRIVATE_IP>:9187"
+          # - "<DB_STANDBY_PRIVATE_IP>:9187"
+        labels:
+          service: "postgresql"
+
+  # ── RabbitMQ (built-in Prometheus plugin) ───────────────────────────────
+  # Enable plugin: rabbitmq-plugins enable rabbitmq_prometheus
+  # Exposes /metrics on port 15692
+  - job_name: "rabbitmq"
+    scrape_interval: 30s
+    static_configs:
+      - targets:
+          - "ems_rabbitmq:15692"
+        labels:
+          service: "rabbitmq"
+
+  # ── Celery / Flower ─────────────────────────────────────────────────────
+  # Flower exposes /metrics with Celery worker/task stats
+  # Run: celery -A app.tasks.celery_app flower --port=5555
+  - job_name: "celery_flower"
+    scrape_interval: 15s
+    static_configs:
+      - targets:
+          - "host.docker.internal:5555"
+          # - "<WORKER_PRIVATE_IP>:5555"
+        labels:
+          service: "celery"
+
+  # ── Nginx (stub_status module) ──────────────────────────────────────────
+  # Requires nginx-prometheus-exporter sidecar
+  # Or enable stub_status in Nginx config and scrape with nginx-exporter
+  - job_name: "nginx"
+    scrape_interval: 30s
+    static_configs:
+      - targets:
+          - "host.docker.internal:9113"   # nginx-prometheus-exporter
+        labels:
+          service: "nginx"
+
+  # ── PgBouncer Exporter ──────────────────────────────────────────────────
+  - job_name: "pgbouncer"
+    scrape_interval: 30s
+    static_configs:
+      - targets:
+          - "host.docker.internal:9127"   # pgbouncer_exporter
+        labels:
+          service: "pgbouncer"

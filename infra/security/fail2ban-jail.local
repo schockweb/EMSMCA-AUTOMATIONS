@@ -1,0 +1,98 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# EMS Claims Portal — Fail2ban Jail Configuration
+# Place at: /etc/fail2ban/jail.local  (overrides jail.conf)
+#
+# Install:  apt install fail2ban
+# Restart:  systemctl restart fail2ban
+# Status:   fail2ban-client status
+# ═══════════════════════════════════════════════════════════════════════════
+
+[DEFAULT]
+# ── Global defaults ──────────────────────────────────────────────────────
+# Ban duration: 1 hour (3600 seconds)
+bantime  = 3600
+
+# Window to count failures: 10 minutes
+findtime = 600
+
+# Max failures before ban
+maxretry = 5
+
+# Ban action — use UFW since we set up UFW as the firewall
+banaction = ufw
+
+# Email notifications (optional — configure sendmail/msmtp first)
+# destemail = alerts@example.co.za
+# sender    = fail2ban@app.example.co.za
+# action    = %(action_mwl)s
+
+# Ignore localhost and Docker bridge
+ignoreip = 127.0.0.1/8 ::1 172.16.0.0/12
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SSH Jail — Brute-force login protection
+# ═══════════════════════════════════════════════════════════════════════════
+[sshd]
+enabled  = true
+port     = ssh
+filter   = sshd
+logpath  = /var/log/auth.log
+maxretry = 5
+bantime  = 3600
+findtime = 600
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Nginx HTTP Auth — Failed Basic/Digest auth attempts
+# ═══════════════════════════════════════════════════════════════════════════
+[nginx-http-auth]
+enabled  = true
+port     = http,https
+filter   = nginx-http-auth
+logpath  = /var/log/nginx/error.log
+maxretry = 5
+bantime  = 3600
+findtime = 600
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Nginx Rate Limit — IPs hitting rate limits (429s)
+# ═══════════════════════════════════════════════════════════════════════════
+# Catches IPs that repeatedly trigger Nginx's limit_req (our API rate
+# limiter).  If they keep hammering after getting 429s, ban them at the
+# firewall level.
+[nginx-limit-req]
+enabled  = true
+port     = http,https
+filter   = nginx-limit-req
+logpath  = /var/log/nginx/error.log
+maxretry = 10
+bantime  = 3600
+findtime = 300
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Nginx Bad Bots — Scanners probing for common exploits
+# ═══════════════════════════════════════════════════════════════════════════
+[nginx-botsearch]
+enabled  = true
+port     = http,https
+filter   = nginx-botsearch
+logpath  = /var/log/nginx/access.log
+maxretry = 3
+bantime  = 86400
+findtime = 600
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Recidive — Repeat offenders get longer bans
+# ═══════════════════════════════════════════════════════════════════════════
+# If an IP gets banned 3 times in 24 hours by any jail, ban them for 1 week.
+[recidive]
+enabled  = true
+filter   = recidive
+logpath  = /var/log/fail2ban.log
+maxretry = 3
+bantime  = 604800
+findtime = 86400

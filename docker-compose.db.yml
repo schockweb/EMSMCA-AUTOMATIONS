@@ -1,0 +1,113 @@
+# ═══════════════════════════════════════════════════════════
+# EMS Claims Portal — Database Server Compose (Primary)
+# ═══════════════════════════════════════════════════════════
+# Deploys to: Hetzner CX42 x1 (Johannesburg) — DB Primary
+# Services:  PostgreSQL 16, PgBouncer connection pooler
+#
+# App servers and workers connect to PgBouncer on port 6432.
+# A separate CX32 standby server runs streaming replication
+# (not managed by this compose — configured via pg_basebackup).
+#
+# Usage:
+#   docker compose -f docker-compose.db.yml up -d
+#   docker compose -f docker-compose.db.yml logs -f ems_postgres
+#
+# Backup:
+#   docker exec ems_postgres pg_dump -U $POSTGRES_USER $POSTGRES_DB > backup.sql
+# ═══════════════════════════════════════════════════════════
+
+services:
+  # ── PostgreSQL 16 Primary ───────────────────────────────
+  # Production-tuned for CX42 (8 vCPU, 16 GB RAM).
+  # Custom postgresql.conf is mounted for performance tuning.
+  # WAL files on a separate volume for I/O isolation.
+  ems_postgres:
+    image: postgres:16-alpine
+    container_name: ems_postgres
+    restart: always
+    hostname: ems-pg-primary
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      # Ensure UTF-8 encoding for South African locale data
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.UTF-8"
+      PGDATA: /var/lib/postgresql/data/pgdata
+    env_file:
+      - .env.prod
+    ports:
+      - "5432:5432"                    # Firewalled — only PgBouncer & standby allowed
+    volumes:
+      - ems_pg_data:/var/lib/postgresql/data
+      - ems_pg_wal:/var/lib/postgresql/wal
+      # Custom postgresql.conf — tuned for CX42 (16 GB RAM)
+      # Create this file before first deploy (see docs/postgresql.conf.example)
+      - ./config/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+    command: >
+      postgres
+      -c config_file=/etc/postgresql/postgresql.conf
+      -c wal_directory=/var/lib/postgresql/wal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+    shm_size: '256mb'                  # Shared memory for parallel queries
+    networks:
+      - ems_db_net
+
+  # ── PgBouncer Connection Pooler ─────────────────────────
+  # Sits in front of PostgreSQL — app servers connect here.
+  # Prevents connection exhaustion from multiple app/worker instances.
+  # Mode: transaction (best for FastAPI async — releases conn after each tx)
+  ems_pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: ems_pgbouncer
+    restart: always
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@ems_postgres:5432/${POSTGRES_DB}
+      # Pool sizing for CX42 (max_connections=200 on PG side)
+      DEFAULT_POOL_SIZE: "40"
+      MIN_POOL_SIZE: "10"
+      MAX_CLIENT_CONN: "200"
+      POOL_MODE: "transaction"
+      # Auth
+      AUTH_TYPE: "scram-sha-256"
+      # Logging
+      LOG_CONNECTIONS: "0"
+      LOG_DISCONNECTIONS: "0"
+      # Timeouts
+      SERVER_IDLE_TIMEOUT: "600"
+      CLIENT_IDLE_TIMEOUT: "0"
+      QUERY_TIMEOUT: "120"
+    env_file:
+      - .env.prod
+    ports:
+      - "6432:6432"                    # App servers connect here (firewalled)
+    depends_on:
+      ems_postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 6432"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - ems_db_net
+
+# ── Volumes ───────────────────────────────────────────────
+# Separate data and WAL volumes for I/O performance.
+# In production, consider mounting these on dedicated block storage.
+volumes:
+  ems_pg_data:
+    driver: local
+  ems_pg_wal:
+    driver: local
+
+# ── Networks ──────────────────────────────────────────────
+# Internal bridge — PgBouncer port 6432 is also exposed to
+# the host for app/worker server connections.
+networks:
+  ems_db_net:
+    driver: bridge

@@ -1,0 +1,712 @@
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+  
+2023  
+GEMS EMS  
+CLAIMS  
+MANUAL 2023 GEMS EMS Claims Manual  Page 2 
+  
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+Contents 
+ 
+ 
+1. Purpose ..................................................................................................................................................... 3 
+2. Introduction ............................................................................................................................................... 3 
+3. Pre-Authorisation Referencing Number .................................................................................................... 4 
+4. Post-Authorisation Referencing Number .................................................................................................. 4 
+5. Claims Submission Process ..................................................................................................................... 5 
+6. Claims Resubmission Process ................................................................................................................. 6 
+7. Claims Queries Process ........................................................................................................................... 6 
+8. Invoicing .................................................................................................................................................... 7 
+9. Call Out Fee Process ................................................................................................................................ 8 
+10. Claims Adjudication Guidelines ............................................................................................................. 9 
+11. Administrative Rejections .................................................................................................................... 15 
+ANNEXURE A ................................................................................................................................................. 17 
+ 
+  
+ 
+ 2023 GEMS EMS Claims Manual  Page 3 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+1. Purpose  
+ 
+The purpose of the GEMS Emergency Medical Services (EMS) Claims Manual is to facilitate the processes which 
+accredited EMS Service Providers are required to follow to ensure prompt and accurate submission of claims and the 
+subsequent processing thereof. This process ensures that GEMS expectations are met through submission of good quality 
+documentation. 
+ 
+2. Introduction 
+ 
+GEMS is fully committed to delivering excellent, accessible, affordable and comprehensive emergency medical services to 
+our beneficiaries. The Designated Service Provider (DSP) responsible for the EMED Centre is Europ Assistance.  
+ 
+The EMED  services include: 
+ 
+• Emergency telephonic assistance  
+• Emergency medical response by road or air to the scene of a medical emergency  
+• Transfer by road or air to the closest, most appropriate medical facility  
+• Inter-hospital transfers (IHTs). 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 2023 GEMS EMS Claims Manual  Page 4 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+3. Pre-Authorisation 
+Referencing Number 
+ 
+The EMED Centre will immediately provide a pre-authorisation reference number to be used when claiming for all self-
+sourced primary cases upon request, within the 3 hours’ time frame.  
+ 
+3.1. Pre-authorisation reference numbers are not a guarantee of payment.  
+3.2. All claims will undergo the process of adjudication.  
+3.3. The pre-authorisation reference number will be in Alpha-Numerical format, which has specific reference to the case 
+logged. 
+3.4. Pre-authorisation reference numbers are case- and patient- specific and cannot be utilised for another patient. 
+ 
+ 
+ 
+4. Post-Authorisation 
+Referencing Number 
+ 
+Once an EMS provider has responded to an emergency, the service provider must obtain a Post-Authorisation reference 
+number from the EMED Centre. There are three (3) methods to complete the transaction: 
+ 
+4.1. EMS service providers must email a completed spread sheet (Annexure A) to emsprimary@gems.gov.za. This 
+submission must be made within 2 business days of the service date.  
+4.1.1. In the email’s subject line, please include the name of the provider, the patient’s name and Patient Report Form (PRF) 
+number.  
+ 
+4.2. Post event request can also be submitted via the online Claims portal under the “Claims Home” screen via the “New 
+Postal Invoice” button https://dispatch.europassistance.co.za/.  
+4.2.1. The detailed process can be provided upon request  to SP Management division of EASA after onboarding. 
+ 
+4.3. Thereafter, the provider will receive a reference number via email, as described above, to be used when claiming. 
+4.4. It may take up to 2 business days for the EMED Centre to provide this reference number. 
+4.5. No post-authorisation references will be dealt with telephonically, after 3 hours of incident, this must be submitted via the 
+2 business day post-authorisation process. 
+ 
+ 2023 GEMS EMS Claims Manual  Page 5 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+5. Claims                           
+Submission Process  
+ 
+Once an EMS provider has received the reference number from the EMED Centre, the claim can be submitted, there are 
+two (2) methods to complete this transaction, the claim must be submitted within 120 days of service date to be considered 
+for payment. Claims that exceed 120 days from the date of service will be deemed stale and rejected as such.  
+ 
+5.1. The Service Provider must submit the claim for EMS services rendered, the submission must contain your invoice 
+number and the reference number in the subject line of your email and only one claim, consisting of an invoice, its 
+corresponding PRF and other relevant supporting documents, must be submitted per the email. 
+5.2. The below information is required on the claim: 
+ 
+• Patient’s full membership number 
+• The Scheme’s name (i.e., GEMS) 
+• Patient’s benefit option (e.g., Tanzanite One, Beryl, Ruby, Emerald Value, Emerald or Onyx) 
+• Patient’s surname and initials 
+• The patient’s date of birth and dependent code as it appears on their membership card 
+• The name of the healthcare provider 
+• The valid practice code of the healthcare provider 
+• The date of service 
+• The type and cost of treatment 
+• The pre-authorization number, if applicable 
+• The Tariff code (treatment) 
+• The relevant ICD10 code (condition) 
+• Claims will not be adjudicated in the absence of the reference numbers 
+• Claims may be submitted by email to emsclaims@gems.gov.za  
+ 
+5.3. The Service Provider may also use the online Claims Portal to submit the claim for EMS services rendered under the 
+“Claims Home” screen under “New Invoice”  https://dispatch.europassistance.co.za/  
+5.3.1. The detailed process can be found on the EMS Web Billing Manual. 2023 GEMS EMS Claims Manual  Page 6 
+6. Claims Resubmission 
+Process 
+ 
+This process is to be followed when a claim has been returned pending motivation, documentation or correction to be 
+submitted to support the claim within 60 days of the first submission.  
+ 
+Where motivation or additional documentation is required, the service provider will be advised of such and has 60 days with 
+the balance of the 120 days to resubmit with amendment. Failure to comply will result in claim being deemed as stale and 
+rejected as such. 
+ 
+For all resubmissions, the motivation must be detailed according to the rejection or return for correction reasons and must 
+be documented on a company letterhead when submitting. 
+ 
+6.1. The Service Provider may submit the resubmission, there are two (2) methods to complete this instruction: 
+6.1.1. Resubmissions may be submitted by email to emsclaims@gems.gov.za  
+• Resubmissions must contain your invoice number and reference number followed by “RESUBMISSION: the 
+amendment/s that were made” refer below for example. 
+ABC123/2013 - RESUBMISSION: ICD 10 code corrected 
+XYZ789/2018 – RESUBMISSION: Hospital Sticker Attached 
+6.1.2. The Service Provider may also use the online Claims Portal to submit the claim for EMS services rendered under the 
+“Claims Home” screen under “Home/Resubmission” https://dispatch.europassistance.co.za/. 
+• The detailed process can be found on the EMS Web Billing Manual. 
+ 
+ 
+7. Claims Queries Process 
+ 
+Claims may only be queried at 14 days or more after the date of submission. It is the service provider’s responsibility to 
+ensure that a remittance advice is obtained for each payment received from the GEMS Administrator viz. Metropolitan 
+Health in order for you to perform a thorough reconciliation of your paid and outstanding claims.  
+ 
+Kindly follow the steps below when querying your claims: 
+https://provider.mhg.co.za/  
+ 
+Step 1:  Ensure that you are registered on the GEMS website as a service 
+provider. This functionality is designed to allow you access to view the 
+status of your claims apart from all the other benefits. 14 days from the 
+date of submission of your claim, you should be able to view the outcome 
+of your claim and address accordingly. 
+ 
+Step 2:  If the need to conduct further queries exists, the service provider will need 
+to call the claims queries Call Center on 086 000 4367 and follow the 
+prompts. 
+ 
+Step 3:  Bulk queries may be submitted by email to enquiries@gems.gov.za and 
+your subject line should state “EMS CLAIMS QUERIES” followed by your 
+practice number. Please ensure that your contact details and all important 
+details relating to the claims are contained in your email. 
+2023 GEMS EMS Claims Manual  Page 7 
+8. Invoicing 
+ 
+8.1 Requirements on the Invoice  
+1. Name of service provider with relevant contact details 
+2. Practice number of service provider 
+3. Date of Invoice 
+4. Invoice number (must be a number unique to this invoice only) 
+5. Date of service (must correspond with the DOS on the PRF) 
+6. Patient’s name and surname, date of birth or ID number 
+7. Membership number in full (9 digits) 
+8. Dependent Code of Patient 
+9. Reference number from Europ Assistance  
+10. Diagnosis with a matching ICD10 code (External cause codes where applicable) 
+11. Tariff codes, number of units, claimed amount (must be on the same claim line) 
+12. The sum total of the claim. 
+ 
+ 
+8.2 Transportation of Multiple Patients 
+A service provider can transport more than one (1) priority 2 or priority 3 patient in a single ambulance, a total maximum 
+equivalent of 150% of the approved tariffs is payable with the exception of a P1, where only 1 P1 in an ambulance will be 
+accepted and paid. 
+ 
+8.2.1. Where two patients are transported in one ambulance (composing of 1 driver & 1 treating practitioner): 150%/2=75% 
+of level of care rendered. 
+8.2.2. Where three patients are transported in one ambulance (composing of 1 driver & 1 treating practitioner): 150%/3=50% 
+of level of care rendered. 
+ 
+In the event of three crew members on the ambulance (namely two treating practitioners and a crew member driving), the 
+claim for two patients only transported, may be paid at 100% scheme approved tariff rates. 
+ 
+When invoicing claims for multiple patients, both invoice and patient report form must indicate multiple patient transportati on 
+and the number transported, such as patient one of two.  
+ 
+Where a number of patients and crew i n totality exceeds stipulated carrying capacity of ambulance as per licence disk, all 
+claims will be rejected due to disregard for safety and compliance. 
+ 
+8.3 Allocated Time Guidelines 
+• Response time to incident: 1min/km. Where there is a variation on this, ade quate and appropriate motivation must 
+accompany initial submission 
+• On Scene Time: 15minutes for BLS,20 minutes for ILS and 30 minutes for ALS . ICU Transfers will be granted 30 minutes, 
+motivation for prolonged bed side time will be acknowledged dependent on complexity of incident, and where motivation 
+accompanies initial submission 
+• Scene to Hand Over Destination: 1.5min/km 
+• Hospital Hand over Time: BLS and ILS cases are allocated 15 minutes. ALS and ICU cases are allocated 20 minutes.  
+Motivation for prolonged extended treatment time will be acknowledged dependent on complexity of incident, and where 
+motivation accompanies initial submission 
+• Long distance calls where patient carrying kilometres exceed 100 km’s is not adjudicated on time  but distance as set out 
+on the tariff rates. 
+ 2023 GEMS EMS Claims Manual  Page 8 
+9. Call Out Fee Process 
+ 
+Below is a list of GEMS criteria to assess the eligibility of a call out fee. To be considered, service providers must ensure the 
+following: 
+ 
+1. Only Contracted Network Providers are eligible to claim call out fees 
+2. Only calls that are dispatched by EMED will receive consideration for call out fees. 
+ No call out fees will be paid for self-sourced calls 
+3. Obtain a GEMS reference number from the dispatcher at the point of dispatch. 
+ No retrospective reference number requests will be accepted 
+4. Notify EMED immediately upon establishing that the patient is not being removed from the hospital to ensure that the 
+authorisation request is converted to a call out fee request and appropriate notes are captured 
+5. Complete a PRF and obtain signatures from the patient. Where the patient cannot sign for whatever reason, the 
+service provider must ensure that a next of kin or witness signature is obtained with contact details of the signatory 
+clearly reflected on the PRF 
+6. Ensure that all claims relating to a call out fee are accompanied by a PRF and a tracking report upon submission. If 
+you are unable to provide a report due a tracking error, a letter (on an official letterhead) from the tracking company 
+must be submitted to confirm reason for error and the date and time of error must be included 
+7. Use the tariff codes specified, refer to ANNEXURE A, with the appropriate rates as call out fees will not be paid against 
+any other tariff codes 
+8. Any delayed response by the service providers to a dispatched emergency incident, will automatically disqualify the 
+service provider’s claim for a call out fee. Response times will be assessed using the current industry guidelines that 
+are in place 
+9. The maximum amount per call out has been capped at R1800 and applies to all levels of care when billed per 
+kilometre of travel. 
+ 
+9.1 Covered Cases - Call Out Fee 
+ 
+1. Diabetic cases, where clinical intervention results in an improvement in the level of consciousness of the patient’s  and 
+the patient refuses transportation to hospital. 
+2. In the event of an unsuccessful resuscitation, where clinical intervention using equipment and/or drugs was rendered 
+to resuscitate the patient, or where the patient is deceased, and a declaration of death is completed by appropriately 
+qualified crew member 
+3. Inter-hospital transfers (IHT) dispatched by EMED, where a level of care was specified at the point of dispatch but not 
+required upon arrival on scene 
+4. Cases dispatched by EMED and upon examination of the patient, transportation of that member is deemed not 
+medically justifiable. EMED must immediately be notified, and a tracking report and signed Patient Report Form must 
+be submitted. 
+ 
+9.2 Limitations – Call Out Fee 
+The following limitations have been applied to regulate the new benefit: 
+ 
+• Only one call out fee per event, irrespective of the number of GEMS member/s or dependent/s involved 
+• The service provider must have reached the scene in a local call and rendered some form of clinical intervention in line 
+with the categories of cases covered or be stood down by EMED whilst on route. 
+ 
+ 
+ 
+ 2023 GEMS EMS Claims Manual  Page 9 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+10. Claims Adjudication 
+Guidelines 
+ 
+To ensure that your claim is processed and accepted on the first submission, GEMS has listed the important focus areas of 
+your claim and Patient Report Form below. We recommend that you conduct a thorough Quality Assurance of the Invoice 
+and, more importantly, the Patient Report Form prior to submitting the claim for no delays in the claims processing steps. 
+ 
+GEMS is proud to offer our members unlimited access to ambulance services. Service providers are advised that this only 
+applies to “Life Threatening” emergencies that are part of an approved hospital event. The Medical Schemes Act 131 of 
+1998 defines an “emergency medical condition” as “the sudden and, at the time, unexpected onset of a health condition that 
+requires immediate medical or surgical treatment, where failure to provide medical or surgical treatment would result in 
+serious impairment to bodily functions or serious dysfunction of a body organ or part or would place the person’s life in 
+serious jeopardy”.  
+  
+Claims adjudication follows the Clinical Practice Guidelines (CPG) protocol.  
+ 
+To this end, GEMS can confirm that the following scenarios, to name a few but not limited to, will not be covered by GEMS: 
+ 
+• Transportation to doctor’s rooms, clinics etc. (any place not registered as a hospital wi th 24-hour trauma facilities and 
+overnight accommodation)  
+• Transportation home or a non-clinical place of residence, without authorization from EMED 
+• Transportation for pre-planned events (including Renal dialysis and Oncology Transfers)  
+• Direct admission (into any unit within a facility, where casualty is bypassed and where EMED is not notified). The exception 
+to this is where lifesaving interventions occur, such as direct Cath Lab delivery 
+• Transportation to a doctors’ rooms, within a hospital or transportation to a specialized facility/ specialist, without pre-
+authorisation 
+• Inter facility transfers without pre-authorisation 
+• Bypassing of the closest appropriate facility. 
+ 
+ 2023 GEMS EMS Claims Manual  Page 10 
+10.1 Focus areas of PRF for claims adjudication process 
+10.1.1 General Notes 
+• Name, BHF practice number, address and contact details of Service Provider must reflect on Patient Report Form 
+• Corrections to documentation will only be accepted where a single line is drawn through the incorrect section, and clearly 
+initialled by crew member. Alterations made to treatment sheets must be signed by crew member. Any variation of this 
+will be rejected. In addition, the use of Tippex, or the similar, will result in rejection of claim 
+• Only Patient Report Forms scribed in English and completed in black ink will be accepted. Patient report forms must be 
+legible and written neatly. Illegible Documents will be rejected 
+• Claims that are completed with two BLS crew only, will be rejected 
+• All vehicles are to be crewed to a minimum of Intermediate Life Support, or an independent practitioner. Where only 
+‘supervised practice’ staff crew an ambulance, these claims will be rejected due to lack of supervision. 
+ 
+The PRF must be completed and signed by the treating crew member only. Variance in script will be accepted for the 
+following: 
+ 
+• Authorisation/ Reference Number 
+• ICD10 Codes (Can be found on the GEMS website https://www.gems.gov.za/Healthcare-Providers/ICD10-Code) 
+• In the event that a higher level of care takes over management of the patient, and this is clearly documented in the 
+Patient Report Form. 
+ 
+A refusal to accept any kind of treatment by the patient should be accompanied by the signature of the patient/ legal 
+guardian. Where patient or next of kin refuse to sign, the ambulance crew member must put a note on the Patient report 
+form and the second crew member to counter sign as witness. 
+ 
+All interventions/treatment will be assessed according to HPCSA protocols and Clinical Practice Guidelines (CPG). 
+Inappropriate treatment/intervention will be downgraded to an appropriate level of care as guided by the HPCSA protocols 
+and clinical practice guidelines. 
+ 
+Omissions in treatment or intervention which would result in the patient’s condition being compromised will result in rejection 
+of the claim. 
+ 
+ILS level of care will only be considered where an IV line is inserted due to the following: 
+ 
+• Replacement of fluids in a significantly fluid depleted or hemodynamically compromised patient 
+• Medication administration in line with ILS Scope of Practice, as per HPCSA 
+• A compromised patient whose vital signs are abnormal and/ or co-morbidities that place the patient at a significant risk of 
+acute rapid deterioration 
+• Where IV is sited by a practitioner prior to arrival of the service provider at the incident, the initial treating practitioner 
+details to be documented on the patient report form 
+• Where there is a significant delay on scene to establish IV Access, this claim will be repriced as when definitive care is 
+within an appropriate distance from scene. 
+ 
+A patient is to be transported to the closest and most appropriate facility as aligned to scheme rules per option. Where a 
+provider is non-compliant to this, the claim will be repriced to the nearest facility capable of rendering required care and the 
+balance forfeited. Should a medically justifiable, or valid reason be documented at time of initial submission, this will be 
+considered for total payment of claim. 
+ 
+ 2023 GEMS EMS Claims Manual  Page 11 
+10.1.2 Authorisation/ Reference numbers 
+• GEMS processes require that service providers obtain reference numbers from GEMS EMED for all calls prior to 
+submitting claims 
+• These reference numbers must be recorded on the PRF or claim prior to submitting the claim 
+• Reference numbers are not a guarantee of payment as all claims will still need to undergo the process of adjudication  
+• Reference numbers are allocated per case/trip and cannot be re-used for another case/trip. If a service provider is given 
+one set of reference numbers for a forward and a return trip, then GEMS EMED will record notes accordingly in the 
+authorisation request 
+• The service provider must then bill for both trips on one invoice, clearly breaking down the tariff codes, units and 
+amounts per trip with a sum total of both trips. 
+ 
+10.1.3 Date of service  
+• Please ensure that the date of service is correct and in line with the invoice and the reference numbers supplied to you 
+by Europ Assistance 
+ 
+10.1.4 Registration number and Call Sign of vehicle 
+• Each vehicle used whilst on the incident to include Registration Number and Call Sign. 
+ 
+10.1.5 Primary or IHT 
+• Clear indication on the case notes as to type of incident. 
+ 
+10.1.6 Level of care 
+• Clear indication on the case notes as to level of care rendered to the patient. 
+ 
+10.1.7 Crew details 
+• Initials and surname of each attending practitioner, alongside their qualification and HPCSA number. 
+ 
+10.1.8 Patient details  
+• All patient and member specific details, this is inclusive of GEMS Membership particulars 
+• The patient report form should accompany a hospital sticker or hospital admission document. The particulars there of 
+must correspond to particulars of service. 
+ 
+10.1.9 Scene address 
+GEMS will accept either of the following forms of pick-up points 
+ 
+• Option 1 - House number and street name, or two street names, with the suburb and city 
+• Option 2 – GPS co-ordinates of the pick-up point. 
+ 
+10.1.10 Delivery address 
+• Full name of receiving facility, or physical address where delivered- if not a facility 
+• No abbreviations of hospital names or locations will be accepted. 
+ 2023 GEMS EMS Claims Manual  Page 12 
+10.1.11 Chief Complaint 
+• This is the complaint of the patient. This may be scribed in layman’s terms, as described by the individual themselves 
+ 
+10.1.12 Primary and secondary survey 
+• Thorough and accurate documentation of findings must be detailed. Poor note taking may result in delay in processing, 
+due to request for additional information. 
+10.1.13 Past Medical history 
+• Minimum AMPLE history.  
+• All medications should be clearly and thoroughly documented. The use of the terms “POLYPHARM” or “MULTIMEDS” 
+are not acceptable. 
+• Present history: Chief complaint, accompanied by all signs, symptoms and clinical notes. 
+ 
+10.1.14 Events prior 
+• This needs to be a comprehensive version of events or events leading up to request for ambulance. Simply stating 
+“DRIVING”, “FALL”, “IHT” is insufficient information and will result in delay in processing, due to request for additional 
+information. Details such as where impact occurred, height of fall, date of admission etc. need to be well documented. 
+ 
+10.1.15 Diagnosis 
+• An accurate diagnosis (or as accurate as possible) and patient priority along w ith mechanism of injury (based on specific 
+ICD10 codes) must be reflected. 
+ 
+10.1.16 External Cause codes 
+• These codes refer to injuries and must always accompany any injury ICD 10 code (usually, but not limited to, ICD 10 codes 
+starting with an “S” or “T”)  
+• External cause codes must always contain 5 digits excluding the dot (e.g., W01.01). Any claim containing an 
+external cause code with less than 5 digits will be rejected 
+• External cause codes will start with the alphabets V, W, X or Y. Any code starting with the alphabet “Z” cannot be 
+used as a diagnosis code and these claims will be rejected. 
+ 
+10.1.17 Treatment and Clinical Notes 
+• An accurate account of care rendered to the patient must be noted. Where multiple interventions occurred, this should 
+be noted in as much detail as deemed appropriate. Where no treatment is documented, it will be acknowledged as not 
+done and adjudicated accordingly. 
+ 
+10.1.18 Vital Signs  
+• At intervals determined by patient priority (minimum 2 sets vitals).  Clearly indicate equipment used 
+• Vitals signs must be documented regularly depending on the patient treatment and distance of transportation. 
+ 
+10.1.19 Times  
+• All times must be clearly documented in 24-hour time units 
+• Time call received by EMS service, dispatch, at scene, left scene, at destination, handover and available. 
+ 
+ 
+ 
+ 2023 GEMS EMS Claims Manual  Page 13 
+10.1.20 Kilometres 
+• Odometer reading at time of dispatch, at scene, left scene and at destination. 
+10.1.21 Fluid Administration 
+• Name of fluid 
+• Rate of infusion 
+• Total fluid volume infused 
+• Time Sited 
+• Site used  
+• Number of attempts 
+• Signature of practitioner that sited the IV. 
+ 
+10.1.22 Medication Administration 
+• Name of Medication- no abbreviation of name will be accepted 
+• Dose- appropriately noted. (mg, mg/ml, mcg/kg/hr.) 
+• Route administered 
+• Time of administration 
+• Signature, in accordance to scope of practice 
+• Any reaction, desired or adverse, must be noted  
+• Where medication is administered prior the arrival of the provider, the medication and details thereof must be documented. 
+ 
+10.1.23 Patient signature 
+• Patient or Guardian’s Signature as proof and acknowledgement of transportation. Where 
+this is unobtainable the reason for such must be documented. Failure to submit signed 
+documentation, without sufficient reasoning, will result in claim rejection. 
+ 
+10.1.24 Handover signature 
+• Signature and qualification of receiving individual as proof and acknowledgement of 
+receipt of patient 
+• Where patient is delivered to a residence, a signat ure from a family member should be 
+obtained and documented. Failure to submit signed documentation will result in claim 
+rejection. 
+ 
+10.1.25 Cardiac related incidence 
+• Where a cardiac related incident is documented or diagnosed, or where cardiac specific 
+ALS medication is administered, a copy of the 12 Lead ECG or rhythm strip must 
+accompany the patient report form submission 
+• Where an unsuccessful resuscitation, or Declaration of Death, is performed, an ECG 
+rhythm strip is required with detailed notes on the Patient Report Form (PRF) regarding 
+the circumstances concerning the death, for the claim to be paid. 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+2023 GEMS EMS Claims Manual  Page 14 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+10.1.26 Resuscitation fee 
+• An ALS or ILS transport fee may be charged in conjunction with a resuscitation fee only when Return of spontaneous 
+circulation (ROSC)  is achieved, post CPR, with or without ALS intervention on scene, and where a patient is handed 
+over to a receiving facility with a perfusing ECG rhythm 
+• The ALS or ILS tariff fee is only applicable for the duration of transportation, whilst tariff fee for resuscitation covers the 
+time spent on scene and the resuscitation on scene 
+• A resuscitation fee may only be billed when a vehicle, staffed with an intermediate/ advanced life support practitioner, 
+attempts to resuscitate a viable patient using ACLS interventions. These interventions must include one or more of the 
+following, in a deliberate attempt at a resuscitation inclusive of CPR and full ILS/ALS resuscitation protocol, in line with 
+international best standards:  
+• Administration of advanced cardiac life support drugs, as listed within the HPCSA clinical practice guidelines  
+• Cardioversion-synchronized or unsynchronized (defibrillation)  
+• External cardiac pacing  
+• Endotracheal intubation (Oral or nasal) with assisted ventilation 
+ 
+ 
+10.2 Inter-Facility Transfers (IFT) 
+• Inter-facility transfers is defined as the movement of a patient from one health care facility to another.  
+• All inter-facility transfers require a reference number obtained from Europ Assistance/EMED and must be clearly noted on 
+the PRF and invoice. 
+ 
+Guidelines for Inter-Facility Transfers: 
+ 
+• The referring facility is one that facilitates admission of patient/s, over-night or long-term stay 
+• The facility must be able to manage the specific case (specialty represented/ doctor on call) 
+• Facility must be able to accommodate patient sleepover (> 6 beds) 
+• Patient is usually transferred from 1 doctor to another, both referring and receiving doctors should be noted 
+• Service providers are required to obtain a reference number prior to removing any patient from a facility. A specific level 
+of care is authorized 
+• Should the approved Service Provider deem the dispatched level of care to be inappropriate based on their actual clinical 
+findings, this should be escalated to GEMS EMED prior to transportation, so upgrade or downgrade in care may be 
+considered. In the event that the Service Provider elects not to advise EMED, claim will be adjudicated via peer assessment 
+and remunerated at the level of care deemed appropriate by assessor, based on level of care serviced and alignment to 
+HPCSA scope of practice 2023 GEMS EMS Claims Manual  Page 15 
+• A minimum of ILS is to monitor and accompany any patients with an ICD, if >24-hours in situ 
+• Where peripheral intravenous access is obtained, and at time of transfer, there is no active fluid administration, these will 
+be adjudicated according to BLS Scope and rates, such is the case for short lines or ‘J -Loop’. Where there is no acti ve 
+fluid administration via a CVP, ILS may monitor. In the event that the CVP is an active infusion site, ALS monitoring is 
+mandatory 
+• In patients where gastric tubes, urinary catheters in situ for >24-hours, BLS monitoring is accepted 
+• Tracheostomy Tubes, i n the chronic environment, where no ventilator or suctioning is required will be dispatched as a 
+BLS, however where frequent suctioning is required, an ILS practitioner is to accompany the patient, and the service 
+provider will be notified by EMED during the dispatch process 
+• Where a ventilator is utilized, all ventilator settings must be detailed on patient report form. A minimum of one Blood Gas 
+Analysis is expected to accompany documentation 
+• Urinary Output in a catheterized patient should be noted 
+• Infusions and medication bolus doses should be detailed as described on page 11, section 19 and 20 
+• Days in situ should be noted for items such as IV, CVP, ICD, urinary catheter. Ventilated days and ICU/ Hospital days 
+should also be noted.  
+ 
+ 
+ 
+11. Administrative 
+Rejections 
+ 
+GEMS pay runs usually occur twice a month. These runs will take place on the mid -month Friday and the Friday closest to 
+the month end. It is the service provider’s responsibility to ensure that a remittance advice is obtained after  each pay run , 
+even if no money was received into your account.  
+ 
+The year on year pay run can be found on the following website: https://www.gems.gov.za/en/Information/Claims-guide 
+under “When are claims paid?” “Click” here to view our claims run dates for” to view the current year’s claims pay run date. 
+ 
+Your remittance advice will provide you with information relating to paid and rejected claims. All rejected claims will be 
+accompanied by a rejection reason and to help you better understand these rejections. (Annexure B) Alternatively, contact 
+MH on (021) 468-1460. 
+ 
+Patient Report Forms will be either rejected or amendment to submission requested, based on and not limited to 
+items listed below: 
+ 
+• Non-active or suspended membership with GEMS at time of service 
+• No reference number detailed on patient report form or Invoice 
+• Active accreditation and registration with HPCSA/ BHF  
+• Inaccurate capturing of patient’s medical aid details 
+• No pre-authorisation for inter-facility transfer 
+• No medical justification for the use of an ambulance, or where the definition of emergency as stipulated by the Council of 
+Medical Scheme is disregarded 
+• Nonregistration with the Health Professions Council 
+• Failing to provide times and or kilometre readings 
+• No signature of the treating and/or senior medic on the clinical notes 
+• Fraudulent alterations to treatment sheets or alterations made to the original treatment sheet and then resubmitted for 
+payment after first submission 2023 GEMS EMS Claims Manual  Page 16 
+• “Stale cases”- Not submitted within the stipulated 120-day period from date of service 
+• A service provider has 60 days, from the date of being notified of a rejection, to amend and resubmit the claim. If the claim 
+is received after this 60-day period, the claim will be rejected as stale 
+• Not transporting to nearest most appropriate facility, as stipulated by the scheme option 
+• Transporting to non -admittance facilities and/or facilities with no registered 24 -hour Trauma Unit (Medicross, Doctors 
+Rooms- regardless of location in hospital, Sub-Acute Facilities) without pre-authorisation. 
+ 
+ 
+ 
+ 
+ 
+2023 GEMS EMS Claims Manual  Page 17 
+ANNEXURE A 
+GEMS POST-AUTHORISATION REQUEST SHEET 
+ 
+ 

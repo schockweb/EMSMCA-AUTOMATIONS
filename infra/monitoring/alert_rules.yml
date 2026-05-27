@@ -1,0 +1,236 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# EMS Claims Portal — Prometheus Alert Rules
+# Thresholds match the operational roadmap targets
+# ═══════════════════════════════════════════════════════════════════════════
+
+groups:
+  # ─────────────────────────────────────────────────────────────────────
+  # RabbitMQ Queue Depth
+  # ─────────────────────────────────────────────────────────────────────
+  - name: rabbitmq_alerts
+    rules:
+      # WARN: queue depth > 100 messages for 5 minutes
+      - alert: RabbitMQQueueDepthWarning
+        expr: rabbitmq_queue_messages > 100
+        for: 5m
+        labels:
+          severity: warning
+          service: rabbitmq
+        annotations:
+          summary: "RabbitMQ queue depth high ({{ $labels.queue }})"
+          description: >
+            Queue {{ $labels.queue }} has {{ $value }} messages
+            (threshold: 100). Workers may be falling behind.
+
+      # PAGE: queue depth > 300 messages for 5 minutes
+      - alert: RabbitMQQueueDepthCritical
+        expr: rabbitmq_queue_messages > 300
+        for: 5m
+        labels:
+          severity: critical
+          service: rabbitmq
+        annotations:
+          summary: "🚨 RabbitMQ queue depth critical ({{ $labels.queue }})"
+          description: >
+            Queue {{ $labels.queue }} has {{ $value }} messages
+            (threshold: 300). Immediate investigation required.
+
+  # ─────────────────────────────────────────────────────────────────────
+  # API Error Rate (5xx)
+  # ─────────────────────────────────────────────────────────────────────
+  - name: api_alerts
+    rules:
+      # WARN: 5xx rate > 1% over 5 minutes
+      - alert: APIErrorRateWarning
+        expr: >
+          (
+            sum(rate(http_requests_total{status=~"5.."}[5m]))
+            /
+            sum(rate(http_requests_total[5m]))
+          ) * 100 > 1
+        for: 5m
+        labels:
+          severity: warning
+          service: api
+        annotations:
+          summary: "API 5xx error rate elevated"
+          description: >
+            5xx error rate is {{ printf "%.2f" $value }}%
+            (threshold: 1%). Check backend logs.
+
+      # PAGE: 5xx rate > 5% over 5 minutes
+      - alert: APIErrorRateCritical
+        expr: >
+          (
+            sum(rate(http_requests_total{status=~"5.."}[5m]))
+            /
+            sum(rate(http_requests_total[5m]))
+          ) * 100 > 5
+        for: 5m
+        labels:
+          severity: critical
+          service: api
+        annotations:
+          summary: "🚨 API 5xx error rate critical"
+          description: >
+            5xx error rate is {{ printf "%.2f" $value }}%
+            (threshold: 5%). Service may be degraded.
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Database Replication Lag
+  # ─────────────────────────────────────────────────────────────────────
+  - name: database_alerts
+    rules:
+      # WARN: replication lag > 30 seconds
+      - alert: DBReplicationLagWarning
+        expr: pg_replication_lag > 30
+        for: 2m
+        labels:
+          severity: warning
+          service: postgresql
+        annotations:
+          summary: "PostgreSQL replication lag elevated"
+          description: >
+            Replication lag is {{ $value }}s (threshold: 30s).
+            Standby may be falling behind.
+
+      # PAGE: replication lag > 2 minutes (120s)
+      - alert: DBReplicationLagCritical
+        expr: pg_replication_lag > 120
+        for: 2m
+        labels:
+          severity: critical
+          service: postgresql
+        annotations:
+          summary: "🚨 PostgreSQL replication lag critical"
+          description: >
+            Replication lag is {{ $value }}s (threshold: 120s).
+            Standby is significantly behind — check WAL shipping.
+
+      # Database connection pool exhaustion
+      - alert: DBConnectionPoolHigh
+        expr: pg_stat_activity_count > 40
+        for: 5m
+        labels:
+          severity: warning
+          service: postgresql
+        annotations:
+          summary: "PostgreSQL connections approaching limit"
+          description: >
+            {{ $value }} active connections (max: 50).
+            PgBouncer may need tuning.
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Celery Workers
+  # ─────────────────────────────────────────────────────────────────────
+  - name: celery_alerts
+    rules:
+      # WARN: fewer than 8 active workers
+      - alert: CeleryWorkersLow
+        expr: flower_worker_online < 8
+        for: 5m
+        labels:
+          severity: warning
+          service: celery
+        annotations:
+          summary: "Celery worker count low"
+          description: >
+            Only {{ $value }} workers online (threshold: 8).
+            Task processing may be slow.
+
+      # PAGE: fewer than 4 active workers
+      - alert: CeleryWorkersCritical
+        expr: flower_worker_online < 4
+        for: 5m
+        labels:
+          severity: critical
+          service: celery
+        annotations:
+          summary: "🚨 Celery worker count critical"
+          description: >
+            Only {{ $value }} workers online (threshold: 4).
+            Task processing is severely impacted.
+
+      # Celery task failure rate
+      - alert: CeleryTaskFailureRate
+        expr: >
+          (
+            sum(rate(flower_tasks_failed_total[10m]))
+            /
+            sum(rate(flower_tasks_total[10m]))
+          ) * 100 > 10
+        for: 10m
+        labels:
+          severity: warning
+          service: celery
+        annotations:
+          summary: "Celery task failure rate high"
+          description: >
+            {{ printf "%.1f" $value }}% of tasks are failing
+            (threshold: 10%). Check worker logs.
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Infrastructure — Host-level alerts
+  # ─────────────────────────────────────────────────────────────────────
+  - name: infrastructure_alerts
+    rules:
+      # Disk space warning (> 80% used)
+      - alert: DiskSpaceWarning
+        expr: >
+          (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 < 20
+        for: 10m
+        labels:
+          severity: warning
+          service: infrastructure
+        annotations:
+          summary: "Disk space low on {{ $labels.instance }}"
+          description: >
+            Only {{ printf "%.1f" $value }}% free on {{ $labels.mountpoint }}.
+
+      # Disk space critical (> 90% used)
+      - alert: DiskSpaceCritical
+        expr: >
+          (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 < 10
+        for: 5m
+        labels:
+          severity: critical
+          service: infrastructure
+        annotations:
+          summary: "🚨 Disk space critical on {{ $labels.instance }}"
+          description: >
+            Only {{ printf "%.1f" $value }}% free. Immediate action required.
+
+      # High CPU usage (> 85% for 10 minutes)
+      - alert: HighCPUUsage
+        expr: >
+          100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 85
+        for: 10m
+        labels:
+          severity: warning
+          service: infrastructure
+        annotations:
+          summary: "High CPU usage on {{ $labels.instance }}"
+          description: "CPU usage is {{ printf \"%.1f\" $value }}%."
+
+      # High memory usage (> 90%)
+      - alert: HighMemoryUsage
+        expr: >
+          (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 90
+        for: 10m
+        labels:
+          severity: warning
+          service: infrastructure
+        annotations:
+          summary: "High memory usage on {{ $labels.instance }}"
+          description: "Memory usage is {{ printf \"%.1f\" $value }}%."
+
+      # Host down (node_exporter unreachable)
+      - alert: HostDown
+        expr: up{job="node_exporter"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: infrastructure
+        annotations:
+          summary: "🚨 Host {{ $labels.instance }} is down"
+          description: "node_exporter on {{ $labels.instance }} has been unreachable for 2 minutes."

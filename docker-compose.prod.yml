@@ -1,0 +1,105 @@
+# ═══════════════════════════════════════════════════════════
+# EMS Claims Portal — App Server Compose (App-1 / App-2)
+# ═══════════════════════════════════════════════════════════
+# Deploys to: Hetzner CX32 x2 (Johannesburg)
+# Services:  FastAPI backend, Nginx reverse proxy, Certbot
+#
+# Database and RabbitMQ are NOT included here — they run on
+# dedicated servers (see docker-compose.db.yml and
+# docker-compose.worker.yml).
+#
+# Usage:
+#   docker compose -f docker-compose.prod.yml up -d --build
+#   docker compose -f docker-compose.prod.yml logs -f
+# ═══════════════════════════════════════════════════════════
+
+services:
+  # ── FastAPI Backend ──────────────────────────────────────
+  # Gunicorn + Uvicorn workers, 4 workers per CX32 (4 vCPU).
+  # No ports exposed — Nginx reverse-proxies to this container.
+  ems_backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    container_name: ems_backend
+    restart: always
+    env_file:
+      - .env.prod
+    volumes:
+      - upload_data:/app/uploads       # Persistent file uploads
+      - backend_logs:/app/logs         # Application logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3
+    networks:
+      - ems_app_net
+
+  # ── Nginx Reverse Proxy + Static Frontend ───────────────
+  # Serves the React SPA (built into the image) and proxies
+  # /api/* requests to the backend container.
+  # Ports 80 and 443 are exposed to the host for HTTP/HTTPS.
+  # SSL certificates are managed by Certbot (see below).
+  ems_nginx:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+      args:
+        VITE_API_URL: /api
+    container_name: ems_nginx
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      # Main Nginx config (reverse proxy + SSL termination)
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/reverse-proxy.conf:ro
+      - ./nginx/security-headers.conf:/etc/nginx/conf.d/security-headers.conf:ro
+      # SSL certificates (managed by Certbot)
+      - certbot_certs:/etc/letsencrypt:ro
+      - certbot_webroot:/var/www/certbot:ro
+    depends_on:
+      ems_backend:
+        condition: service_healthy
+    networks:
+      - ems_app_net
+
+  # ── Certbot — Automated SSL Certificate Management ─────
+  # Obtains and renews Let's Encrypt certificates.
+  # Initial setup:
+  #   docker compose -f docker-compose.prod.yml run --rm ems_certbot \
+  #     certonly --webroot -w /var/www/certbot \
+  #     -d app.example.co.za --agree-tos -m admin@example.co.za
+  #
+  # Auto-renewal: the entrypoint runs 'certbot renew' every 12h.
+  ems_certbot:
+    image: certbot/certbot:latest
+    container_name: ems_certbot
+    restart: always
+    volumes:
+      - certbot_certs:/etc/letsencrypt
+      - certbot_webroot:/var/www/certbot
+    # Check for renewal every 12 hours (standard practice)
+    entrypoint: /bin/sh -c 'trap exit TERM; while :; do certbot renew --quiet; sleep 43200; done'
+    networks:
+      - ems_app_net
+
+# ── Volumes ───────────────────────────────────────────────
+volumes:
+  upload_data:
+    driver: local
+  backend_logs:
+    driver: local
+  certbot_certs:
+    driver: local
+  certbot_webroot:
+    driver: local
+
+# ── Networks ──────────────────────────────────────────────
+# Internal bridge network for app-server containers.
+# Backend is only reachable from Nginx within this network.
+networks:
+  ems_app_net:
+    driver: bridge

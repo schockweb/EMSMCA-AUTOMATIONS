@@ -1,0 +1,21 @@
+610: # ── 10a: External Cause Code (mandatory for S/T ICD-10) ──
+611: if _primary_icd10 and _primary_icd10[0] in ("S", "T"):
+612: import re as _re
+613: ext_cause = (prf_data.get("external_cause_code") or "").strip().upper()
+614: if not ext_cause:
+615: result.checks.append(AdjudicationCheck(
+616: check_name="EXT_CAUSE_REQUIRED",
+617: passed=False, severity="error",
+618: message=(
+619: f"External Cause Code is mandatory for trauma/injury ICD-10 "
+620: f"'{_primary_icd10}' (starts with S/T). "
+621: f"Must start with V, W, X, or Y (e.g. W19.0)."
+622: ),
+623: rfi_reason=RFIReasonCode.INVALID_ICD10,
+624: ))
+625: elif not _re.match(r"^[VWXY][0-9A-Z]{2,}", ext_cause.replace(".", "")):
+626: result.checks.append(AdjudicationCheck(
+627: check_name="EXT_CAUSE_REQUIRED",
+628: passed=False, severity="error",
+629: message=(
+630: f"External Cause Code '{ext_cause}' is invalid. "
