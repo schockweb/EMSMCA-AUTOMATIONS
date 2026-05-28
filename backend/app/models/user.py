@@ -25,6 +25,11 @@ ALL_PERMISSIONS = [
     "employee_management",
     "settings",
     "rule_builder",
+    "providers",
+    "employees",
+    "failed_forms",
+    "system_health",
+    "tariff_billing",
 ]
 
 

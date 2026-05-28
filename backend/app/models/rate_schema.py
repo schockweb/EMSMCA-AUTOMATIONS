@@ -8,7 +8,7 @@ A PRF is linked to a rate schema via `digital_prfs.billing_schema_code`.
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from sqlalchemy import Boolean, Integer, String, Text, Date, DateTime, Numeric
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
 
@@ -88,6 +88,14 @@ class RateSchema(Base):
     )
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True,
+    )
+
+    # Child tariff line items
+    tariff_lines = relationship(
+        "SchemeTariffLine",
+        back_populates="rate_schema",
+        cascade="all, delete-orphan",
+        lazy="selectin",
     )
 
     def __repr__(self):

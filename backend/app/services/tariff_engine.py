@@ -97,8 +97,11 @@ async def generate_tariff_lines(
         )
         return gems_result
 
-    # ── Non-GEMS: attempt time-based billing via rate_schema if db is available ──
-    # Load the rate schema to check for rate_per_minute
+    # ── Non-GEMS/Discovery: DB-driven tariff billing ──────────────────────
+    # 1. Try to load rate_schema + its tariff lines from the DB.
+    # 2. If tariff lines exist, run the full NHRPL billing logic from DB rows.
+    # 3. If no tariff lines but rate_per_minute > 0, fall back to time billing.
+    # 4. Otherwise, return an explicit error.
     rate_schema = None
     if db is not None:
         try:
@@ -113,9 +116,22 @@ async def generate_tariff_lines(
                 )
                 rate_schema = result.scalar_one_or_none()
         except Exception as e:
-            logger.warning("[TariffEngine] Could not load rate schema for time billing: %s", e)
+            logger.warning("[TariffEngine] Could not load rate schema: %s", e)
 
-    # If we have a rate schema with time billing configured, calculate time charge
+    # ── Path A: DB-driven tariff lines (full NHRPL-style billing) ────────
+    if rate_schema is not None:
+        tariff_lines = getattr(rate_schema, "tariff_lines", None) or []
+        active_lines = [ln for ln in tariff_lines if ln.is_active]
+        if active_lines:
+            db_result = await _generate_db_driven_lines(clinical_context, active_lines, rate_schema)
+            db_result["scheme_matched"] = scheme_name
+            logger.info(
+                "[TariffEngine] DB-driven path for '%s': %d lines, total R%.2f",
+                scheme_name, len(db_result["lines"]), db_result["total_amount"],
+            )
+            return db_result
+
+    # ── Path B: rate_per_minute time billing (scalar fallback) ───────────
     if rate_schema and rate_schema.rate_per_minute and rate_schema.rate_per_minute > Decimal("0"):
         icd10 = clinical_context.get("icd10_primary") or None
         time_line = _calculate_time_charge(
@@ -127,7 +143,6 @@ async def generate_tariff_lines(
             icd10=icd10,
         )
         if time_line:
-            # Remove internal metadata keys before returning
             clean_line = {k: v for k, v in time_line.items() if not k.startswith("_")}
             return {
                 "lines": [clean_line],
@@ -142,16 +157,16 @@ async def generate_tariff_lines(
                 },
             }
 
-    # Future: other schemes go here. For now fall through to an explicit error.
+    # ── No pricing path available ───────────────────────────────────────
     error_msg = (
-        f"Scheme '{scheme_name}' has a rule module but no pricing dispatcher. "
-        f"Add a branch in tariff_engine.generate_tariff_lines."
+        f"Scheme '{scheme_name}' has no tariff lines and no rate_per_minute configured. "
+        f"Add tariff lines via the Tariff Billing dashboard or set rate_per_minute > 0."
     )
     logger.error(error_msg)
     return {
         "lines": [],
         "total_amount": 0.0,
-        "scheme_matched": getattr(rules_module, "SCHEME_ID", None),
+        "scheme_matched": getattr(rules_module, "SCHEME_ID", None) if rules_module else None,
         "rules_used": 0,
         "ai_powered": False,
         "error": error_msg,
@@ -944,6 +959,88 @@ def _find_mileage_row(rules_module, level: str, loaded: bool, pick_rate_fn=None)
             return row
 
     return search_pool[0] if search_pool else None
+
+
+# ===============================================================================
+# DB-DRIVEN BILLING — converts SchemeTariffLine rows into the same billing path
+# ===============================================================================
+
+class _DbTariffRow:
+    """Lightweight adapter that gives SchemeTariffLine DB rows the same
+    attribute interface as the hardcoded TariffEntry dataclass, so
+    _generate_gems_lines can consume them identically."""
+    __slots__ = (
+        "tariff_code", "description", "primary_rate", "iht_rate",
+        "category", "notes", "unit", "is_active", "level", "loaded", "keywords",
+    )
+
+    def __init__(self, db_line):
+        self.tariff_code = db_line.tariff_code
+        self.description = db_line.description
+        self.primary_rate = float(db_line.primary_rate) if db_line.primary_rate is not None else 0.0
+        self.iht_rate = float(db_line.iht_rate) if db_line.iht_rate is not None else 0.0
+        self.category = db_line.category
+        self.notes = db_line.notes
+        self.unit = db_line.unit or "per call"
+        self.is_active = db_line.is_active
+        self.level = db_line.level_of_care
+        self.loaded = db_line.loaded
+        # Parse comma-separated keywords into a tuple
+        kw_str = db_line.keywords or ""
+        self.keywords = tuple(k.strip() for k in kw_str.split(",") if k.strip())
+
+
+class _DbRulesModule:
+    """Fake rules-module that satisfies the interface _generate_gems_lines
+    expects: all_base_rates(), all_mileage(), mileage_row(), base_rates_for_level()."""
+
+    def __init__(self, rows: list[_DbTariffRow]):
+        self._rows = rows
+        self.SCHEME_ID = "db_driven"
+
+    def all_tariffs(self):
+        return [r for r in self._rows if r.is_active]
+
+    def all_base_rates(self):
+        return [r for r in self._rows if r.is_active and r.category == "base_rate"]
+
+    def all_mileage(self):
+        return [r for r in self._rows if r.is_active and r.category == "mileage"]
+
+    def base_rates_for_level(self, level: str):
+        tag = f"[{level.upper()}]"
+        return [r for r in self.all_base_rates() if tag in (r.description or "").upper()]
+
+    def mileage_row(self, level: str, loaded: bool):
+        lvl = level.upper()
+        for r in self.all_mileage():
+            if r.level == lvl and r.loaded == loaded:
+                return r
+        return None
+
+
+async def _generate_db_driven_lines(
+    clinical_context: dict,
+    db_tariff_lines: list,
+    rate_schema,
+) -> dict:
+    """Generate billing lines from DB-stored tariff lines.
+
+    Wraps the DB rows into _DbTariffRow adapters, builds a fake rules
+    module, and delegates to _generate_gems_lines which implements the
+    full NHRPL billing logic (100km rule, time extensions, mileage,
+    crew-qualification cap, multi-patient multipliers).
+    """
+    adapted_rows = [_DbTariffRow(ln) for ln in db_tariff_lines]
+    fake_module = _DbRulesModule(adapted_rows)
+
+    result = await _generate_gems_lines(clinical_context, fake_module)
+
+    # Override the source label
+    result["source"] = "db_driven"
+    result["billing_schema_code"] = rate_schema.schema_code if rate_schema else None
+
+    return result
 
 
 async def _generate_gems_lines(clinical_context: dict, rules_module) -> dict:
