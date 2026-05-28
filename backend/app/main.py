@@ -37,6 +37,7 @@ from app.api.digital_prf import router as digital_prf_router
 from app.api.rate_schemas import router as rate_schemas_router
 from app.api.failed_prfs import router as failed_prfs_router
 from app.api.metrics import router as metrics_router
+from app.api.tariff_lines import router as tariff_lines_router
 
 settings = get_settings()
 logger = get_logger("main")
@@ -267,6 +268,7 @@ app.include_router(digital_prf_router)
 app.include_router(rate_schemas_router)
 app.include_router(failed_prfs_router)
 app.include_router(metrics_router)
+app.include_router(tariff_lines_router)
 
 
 # ═══════════════════════════════════════════════════════════

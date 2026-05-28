@@ -65,7 +65,7 @@ export default function ProviderLogin() {
   const field: React.CSSProperties = {
     width: '100%', padding: '13px 16px', fontSize: '0.94rem',
     borderRadius: 10, border: `1px solid ${B}`,
-    background: '#f8fafc', color: T, fontWeight: 500,
+    background: '#ffffff', color: T, fontWeight: 500,
     marginBottom: 18, outline: 'none', boxSizing: 'border-box', transition: 'all 0.2s',
     fontFamily: 'inherit',
   };
@@ -74,13 +74,13 @@ export default function ProviderLogin() {
     <div style={{
       minHeight: '100vh', display: 'flex', flexDirection: 'column',
       alignItems: 'center', justifyContent: 'center',
-      background: '#f8fafc', padding: '24px 20px', position: 'relative',
+      background: '#ffffff', padding: '24px 20px', position: 'relative',
       fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
     }}>
       {/* Back */}
       <button onClick={() => navigate('/login')} style={{
         position: 'absolute', top: 20, left: 20,
-        background: '#ffffff', border: `1px solid ${B}`,
+        background: '#f1f5f9', border: `1px solid ${B}`,
         borderRadius: 8, padding: '7px 14px', color: M,
         fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer',
       }}>
@@ -114,7 +114,7 @@ export default function ProviderLogin() {
       {/* Admin Login Card */}
       <div style={{
         width: '100%', maxWidth: 360,
-        background: '#ffffff', border: `1px solid ${B}`,
+        background: '#f8fafc', border: `1px solid ${B}`,
         borderRadius: 18, padding: '32px 28px',
         boxShadow: '0 4px 24px rgba(0,0,0,0.04)',
       }}>
@@ -145,8 +145,8 @@ export default function ProviderLogin() {
             autoFocus
             spellCheck={false}
             style={field}
-            onFocus={e => { e.currentTarget.style.borderColor = G; e.currentTarget.style.background = '#fff'; e.currentTarget.style.boxShadow = `0 0 0 3px rgba(16,185,129,0.12)`; }}
-            onBlur={e => { e.currentTarget.style.borderColor = B; e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.boxShadow = 'none'; }}
+            onFocus={e => { e.currentTarget.style.borderColor = G; e.currentTarget.style.background = '#ffffff'; e.currentTarget.style.boxShadow = `0 0 0 3px rgba(16,185,129,0.12)`; }}
+            onBlur={e => { e.currentTarget.style.borderColor = B; e.currentTarget.style.background = '#ffffff'; e.currentTarget.style.boxShadow = 'none'; }}
           />
 
           <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: 700, color: M, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 7 }}>
@@ -158,8 +158,8 @@ export default function ProviderLogin() {
             data-lpignore="true"
             data-form-type="other"
             style={{ ...field, marginBottom: 24 }}
-            onFocus={e => { e.currentTarget.style.borderColor = G; e.currentTarget.style.background = '#fff'; e.currentTarget.style.boxShadow = `0 0 0 3px rgba(16,185,129,0.12)`; }}
-            onBlur={e => { e.currentTarget.style.borderColor = B; e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.boxShadow = 'none'; }}
+            onFocus={e => { e.currentTarget.style.borderColor = G; e.currentTarget.style.background = '#ffffff'; e.currentTarget.style.boxShadow = `0 0 0 3px rgba(16,185,129,0.12)`; }}
+            onBlur={e => { e.currentTarget.style.borderColor = B; e.currentTarget.style.background = '#ffffff'; e.currentTarget.style.boxShadow = 'none'; }}
           />
 
           <button type="submit" disabled={loading} style={{
@@ -185,13 +185,13 @@ export default function ProviderLogin() {
           onClick={() => navigate(`/${providerSlug}/crew/dashboard`)}
           style={{
             width: '100%', padding: '13px',
-            background: '#ffffff', border: `1px solid ${B}`,
+            background: '#f8fafc', border: `1px solid ${B}`,
             borderRadius: 10, color: GD, fontSize: '0.92rem',
             fontWeight: 700, cursor: 'pointer', letterSpacing: '0.02em',
             boxShadow: '0 2px 8px rgba(0,0,0,0.02)', transition: 'all 0.2s',
           }}
           onMouseEnter={e => { e.currentTarget.style.borderColor = G; e.currentTarget.style.background = '#f0fdf4'; }}
-          onMouseLeave={e => { e.currentTarget.style.borderColor = B; e.currentTarget.style.background = '#ffffff'; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = B; e.currentTarget.style.background = '#f8fafc'; }}
         >
           Start Shift
         </button>

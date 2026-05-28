@@ -21,6 +21,7 @@ from app.models.vehicle import Vehicle
 from app.models.crew_member import CrewMember
 from app.models.digital_prf import DigitalPRF, PRFStatus
 from app.models.rate_schema import RateSchema
+from app.models.scheme_tariff_line import SchemeTariffLine
 
 __all__ = [
     "User", "UserRole",
@@ -43,4 +44,5 @@ __all__ = [
     "CrewMember",
     "DigitalPRF", "PRFStatus",
     "RateSchema",
+    "SchemeTariffLine",
 ]

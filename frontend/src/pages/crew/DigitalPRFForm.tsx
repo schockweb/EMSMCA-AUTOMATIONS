@@ -511,6 +511,18 @@ const POSTAUTH_REQUIRED_SCHEMES = new Set<string>([
   'Regular Force Medical Continuation Fund',
 ]);
 
+const TRANSFER_SUBTYPES = [
+  'Return Trip',
+  'Social Transfer',
+  'Upgrade Transfer',
+  'Downgrade Transfer',
+  'Hospital to Hospital',
+  'Hospital to Residence',
+  'Hospital to Stepdown',
+  'Residence to Hospital',
+  'Psychiatric',
+];
+
 // ── Trip phases ────────────────────────────────────────────────────────────────
 const PHASES = [
   { id: 'dispatch', label: 'Dispatch', short: 'DISP' },
@@ -724,7 +736,7 @@ function KmInput({ kmKey, value, onChange, onCommit }: {
       type="text"
       inputMode="decimal"
       pattern="[0-9. ]*"
-      value={focused ? value : fmt(value)}
+      value={fmt(value)}
       placeholder=""
       autoComplete="off"
       onChange={e => {
@@ -862,7 +874,7 @@ const formatNominatimSuggestion = (item: any): AddrSuggestion => {
   };
 };
 
-const AddrInp = ({ fk, suburbKey }: { fk: string; ph?: string; req?: boolean; suburbKey?: string }) => {
+const AddrInp = ({ fk, suburbKey, ph, containerStyle, inputStyle }: { fk: string; ph?: string; req?: boolean; suburbKey?: string; containerStyle?: React.CSSProperties; inputStyle?: React.CSSProperties }) => {
   const { fd, sf } = useContext(FormContext);
   const val: string = fd[fk] ?? '';
   const [suggestions, setSuggestions] = useState<AddrSuggestion[]>([]);
@@ -920,7 +932,7 @@ const AddrInp = ({ fk, suburbKey }: { fk: string; ph?: string; req?: boolean; su
   };
 
   return (
-    <div style={{ position: 'relative', marginBottom: 14 }}>
+    <div style={{ position: 'relative', marginBottom: 14, ...containerStyle }}>
       <input
         type="text"
         value={val}
@@ -933,10 +945,10 @@ const AddrInp = ({ fk, suburbKey }: { fk: string; ph?: string; req?: boolean; su
         }}
         onKeyDown={(e) => { if (e.key === 'Escape') { setOpen(false); (e.currentTarget as HTMLInputElement).blur(); } }}
         autoComplete="off"
-        placeholder=""
+        placeholder={ph || ""}
         aria-label="Street address with autocomplete"
         aria-autocomplete="list"
-        style={{ ...base, borderColor: '#e2e8f0' }}
+        style={{ ...base, borderColor: '#e2e8f0', ...inputStyle }}
       />
       {open && (loading || suggestions.length > 0) && (
         <div
@@ -2460,7 +2472,12 @@ function GeoConfirmOverlay({
         <div style={{ marginBottom: 10 }}>
           <button
             type="button"
-            onClick={onRecapture}
+            onClick={() => {
+              if (error === 'Location permission denied') {
+                alert('Location access is blocked by your browser. Please tap the lock icon (🔒) or "aA" in your address bar, go to Site Settings, and allow Location access. Then press OK to try again.');
+              }
+              onRecapture();
+            }}
             disabled={capturing}
             style={{ width: '100%', padding: '12px 0', borderRadius: 10, fontWeight: 800, fontSize: '0.85rem', border: `2px solid ${S200}`, background: W, color: S700, cursor: capturing ? 'not-allowed' : 'pointer', opacity: capturing ? 0.5 : 1 }}
           >
@@ -2557,6 +2574,11 @@ export default function DigitalPRFForm() {
     | { phase: 'signing'; kind: 'iv' | 'med'; crew: CrewPickedIdentity }
     | { phase: 'select'; kind: 'treating' };
   const [crewPicker, setCrewPicker] = useState<CrewPickerState | null>(null);
+  const [dismissedTreating, setDismissedTreating] = useState(false);
+  const [startedExam, setStartedExam] = useState(false);
+  const [transferSubtypeOpen, setTransferSubtypeOpen] = useState(false);
+  const [rhtCallOutFeeOpen, setRhtCallOutFeeOpen] = useState(false);
+  const [enRouteOverlay, setEnRouteOverlay] = useState(false);
 
   const profile = JSON.parse(localStorage.getItem('crew_profile') || '{}');
   const dirtyRef = useRef(false);
@@ -2688,10 +2710,11 @@ export default function DigitalPRFForm() {
   useEffect(() => {
     if (phase !== 3) return;
     if (fd.treating_practitioner_category) return;
+    if (dismissedTreating) return;
     if (crewPicker) return;
     setCrewPicker({ phase: 'select', kind: 'treating' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, fd.treating_practitioner_category]);
+  }, [phase, fd.treating_practitioner_category, dismissedTreating]);
 
   // ── Auto-save on change (debounced) ─────────────────────────────────────
   // The form saves automatically as the crew types — every keystroke
@@ -3149,6 +3172,15 @@ export default function DigitalPRFForm() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kms, fd.preauth_number, fd.call_type, phase, vitals.length]);
 
+  // Show en-route overlay when dispatch time is first marked
+  useEffect(() => {
+    if (timestamps.time_dispatched && !timestamps.time_on_scene) {
+      setEnRouteOverlay(true);
+    } else {
+      setEnRouteOverlay(false);
+    }
+  }, [timestamps.time_dispatched, timestamps.time_on_scene]);
+
   const advancePhase = async (nextPhase: number, autoTimeKey?: string, autoKmKey?: string) => {
     const inlineBlockers = collectLeavePhaseBlockers(phase);
     if (inlineBlockers.length > 0) {
@@ -3510,16 +3542,11 @@ export default function DigitalPRFForm() {
     const addressKey = `address_${row.timeKey}`;
     const addressVal: string = fd[addressKey] || '';
     const addressInput = (
-      <input
-        type="text"
-        value={addressVal}
-        onChange={e => sf(addressKey, e.target.value)}
-        onFocus={onF}
-        onBlur={onB}
-        autoComplete="off"
-        aria-label={`${row.label} address`}
-        placeholder={timeRowsNarrow ? 'Address' : ''}
-        style={{
+      <AddrInp
+        fk={addressKey}
+        ph={timeRowsNarrow ? 'Address' : ''}
+        containerStyle={{ marginBottom: 0 }}
+        inputStyle={{
           width: '100%', padding: '8px 10px', fontSize: '0.78rem',
           borderRadius: 7, border: `1px solid ${S200}`, background: W,
           color: S900, outline: 'none', boxSizing: 'border-box',
@@ -3751,112 +3778,256 @@ export default function DigitalPRFForm() {
   // PHASE RENDERERS
   // ═══════════════════════════════════════════════════════════════════════════
 
+  // ── FadeIn wrapper ────────────────────────────────────────────────────────
+  const FadeIn = ({ children, show, delay = 0 }: { children: React.ReactNode; show: boolean; delay?: number }) => {
+    const [visible, setVisible] = useState(false);
+    useEffect(() => {
+      if (show) {
+        const t = setTimeout(() => setVisible(true), delay);
+        return () => clearTimeout(t);
+      }
+      setVisible(false);
+    }, [show, delay]);
+    if (!show && !visible) return null;
+    return (
+      <div style={{
+        opacity: visible ? 1 : 0,
+        transform: visible ? 'translateY(0)' : 'translateY(12px)',
+        transition: 'opacity 0.35s ease, transform 0.35s ease',
+      }}>
+        {children}
+      </div>
+    );
+  };
+
+  // ── En Route Overlay ──────────────────────────────────────────────────────
+  const EnRouteOverlay = ({ dispatchedAt, onDoubleTap }: { dispatchedAt: string; onDoubleTap: () => void }) => {
+    const [, tick] = useState(0);
+    const lastTapRef = useRef<number>(0);
+
+    useEffect(() => {
+      const id = setInterval(() => tick(t => t + 1), 1000);
+      return () => clearInterval(id);
+    }, []);
+
+    const elapsed = Math.floor((Date.now() - new Date(dispatchedAt).getTime()) / 1000);
+    const mins = Math.floor(elapsed / 60);
+    const secs = elapsed % 60;
+
+    const handleTap = () => {
+      const now = Date.now();
+      if (now - lastTapRef.current < 400) {
+        onDoubleTap();
+      }
+      lastTapRef.current = now;
+    };
+
+    return (
+      <div
+        onClick={handleTap}
+        style={{
+          position: 'fixed', inset: 0, zIndex: 9998,
+          background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
+          display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center',
+          padding: 32, userSelect: 'none',
+          WebkitTapHighlightColor: 'transparent',
+          touchAction: 'manipulation',
+        }}
+      >
+        {/* Pulsing ring animation */}
+        <div style={{
+          width: 120, height: 120, borderRadius: '50%',
+          border: `3px solid ${G}`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          marginBottom: 32, position: 'relative',
+          animation: 'enRoutePulse 2s ease-in-out infinite',
+        }}>
+          <div style={{
+            fontSize: '2.4rem', fontWeight: 900, color: W,
+            fontFamily: 'monospace', letterSpacing: '-0.02em',
+          }}>
+            {String(mins).padStart(2, '0')}:{String(secs).padStart(2, '0')}
+          </div>
+        </div>
+
+        {/* Status bar */}
+        <div style={{
+          background: 'rgba(91,141,239,0.15)', border: `1.5px solid ${G}40`,
+          borderRadius: 16, padding: '14px 24px', marginBottom: 24,
+        }}>
+          <div style={{
+            fontSize: '0.72rem', fontWeight: 800, color: G,
+            textTransform: 'uppercase', letterSpacing: '0.12em',
+            textAlign: 'center',
+          }}>EN ROUTE</div>
+        </div>
+
+        {/* Instruction */}
+        <div style={{
+          fontSize: '1.3rem', fontWeight: 800, color: W,
+          textAlign: 'center', lineHeight: 1.4,
+          maxWidth: 280,
+        }}>
+          Double tap when arrived on scene
+        </div>
+
+        <div style={{
+          fontSize: '0.75rem', color: S400, marginTop: 16,
+          textAlign: 'center',
+        }}>
+          Tap twice quickly to mark arrival
+        </div>
+
+        <style>{`
+          @keyframes enRoutePulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(91,141,239,0.4); }
+            50% { box-shadow: 0 0 0 20px rgba(91,141,239,0); }
+          }
+        `}</style>
+      </div>
+    );
+  };
+
   // ── Phase 0: DISPATCH ─────────────────────────────────────────────────────
-  const P0 = () => (
+  const P0 = () => {
+    const startExamBtn = (
+      <button
+        type="button"
+        onClick={() => {
+          setStartedExam(true);
+          if (!fd.treating_practitioner_category) {
+            setCrewPicker({ phase: 'select', kind: 'treating' });
+          }
+        }}
+        style={{
+          width: '100%', padding: '14px 16px', borderRadius: 12,
+          background: '#eff6ff', color: '#1d4ed8', border: '1.5px dashed #93c5fd',
+          fontWeight: 800, fontSize: '0.9rem', cursor: 'pointer', marginTop: 16,
+        }}
+      >
+        Start Examination ↓
+      </button>
+    );
+
+    return (
     <>
       <SHdr t="Call Type" />
       <CallTypePicker />
 
-      {/* Resus Level — surfaces immediately when RESUS is selected, before
-          billing type. Crew picks ILS or BLS to declare the resuscitation
-          level of care. This is independent of billing type. */}
-      {fd.call_type === 'RESUS' && (
+      {/* ── IFT/IHT flow ── */}
+      <FadeIn show={fd.call_type === 'IHT'} delay={150}>
         <div style={{ marginBottom: 14 }}>
-          <Lbl t="Resus Level" req />
-          <Toggle fk="med_aid_resus_level" opts={['ILS', 'BLS']} size="sm" />
+          <Lbl t="Why is this an IFT/IHT call?" req />
+          <div
+            onClick={() => setTransferSubtypeOpen(true)}
+            style={{
+              width: '100%', padding: '12px 14px', fontSize: '0.88rem',
+              borderRadius: 10, border: `1.5px solid ${S200}`, background: W,
+              color: fd.transfer_subtype ? S900 : S400, cursor: 'pointer',
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.03)'
+            }}
+          >
+            <span style={{ fontWeight: fd.transfer_subtype ? 700 : 400 }}>{fd.transfer_subtype || 'Tap to select…'}</span>
+            <span style={{ fontSize: '0.7rem' }}>▼</span>
+          </div>
         </div>
-      )}
+      </FadeIn>
 
-      {fd.call_type === 'RHT' && (
+      <FadeIn show={fd.call_type === 'IHT' && !!fd.transfer_subtype} delay={150}>
         <div style={{ marginBottom: 14 }}>
-          <Lbl t="Call Out Fee" />
-          <Sel
-            fk="rht_call_out_fee"
-            opts={['Standard', 'After Hours', 'Public Holiday', 'Standby Cancellation', 'No Patient Loaded', 'None']}
-          />
+          <Lbl t="Quoted Payout Amount (R)" />
+          <Inp fk="med_aid_quoted_amount" ph="0.00 — leave blank if not quoted" />
         </div>
-      )}
+      </FadeIn>
 
-      {fd.call_type === 'IHT' && (
-        <>
-          <div style={{ marginBottom: 14 }}>
-            <Lbl t="Why is this an IFT/IHT call?" req />
-            <ComboInp
-              fk="transfer_subtype"
-              opts={[
-                'Return Trip',
-                'Social Transfer',
-                'Upgrade Transfer',
-                'Downgrade Transfer',
-                'Hospital to Hospital',
-                'Hospital to Residence',
-                'Hospital to Stepdown',
-                'Residence to Hospital',
-                'Psychiatric',
-              ]}
-              listId="transfer-subtype-list"
-              ph="Type or pick a reason…"
-            />
-          </div>
-
-          <div style={{ marginBottom: 14 }}>
-            <Lbl t="Quoted Payout Amount (R)" />
-            <Inp fk="med_aid_quoted_amount" ph="0.00 — leave blank if not quoted" />
-          </div>
-        </>
-      )}
-
-      {['IHT', 'IFT'].includes(fd.call_type) && (
+      <FadeIn show={['IHT', 'IFT'].includes(fd.call_type) && (fd.call_type !== 'IHT' || !!fd.transfer_subtype)} delay={150}>
         <div style={{ marginBottom: 14 }}>
           <Lbl t="Pre-Auth No." req />
           <Inp fk="preauth_number" ph="Pre-authorisation reference" />
         </div>
+      </FadeIn>
+
+      {/* ── RHT flow ── */}
+      <FadeIn show={fd.call_type === 'RHT'} delay={150}>
+        <div style={{ marginBottom: 14 }}>
+          <Lbl t="Call Out Fee" />
+          <div
+            onClick={() => setRhtCallOutFeeOpen(true)}
+            style={{
+              width: '100%', padding: '12px 14px', fontSize: '0.88rem',
+              borderRadius: 10, border: `1.5px solid ${S200}`, background: W,
+              color: fd.rht_call_out_fee ? S900 : S400, cursor: 'pointer',
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.03)'
+            }}
+          >
+            <span style={{ fontWeight: fd.rht_call_out_fee ? 700 : 400 }}>{fd.rht_call_out_fee || 'Tap to select…'}</span>
+            <span style={{ fontSize: '0.7rem' }}>▼</span>
+          </div>
+        </div>
+      </FadeIn>
+
+      {/* ── Dispatch Time — all call types except IFT/IHT (which waits for preauth) ── */}
+      <FadeIn show={
+        (fd.call_type === 'PRIMARY' || fd.call_type === 'COURTESY' || fd.call_type === 'RESUS') ||
+        (fd.call_type === 'RHT') ||
+        (fd.call_type === 'DOD') ||
+        (['IHT', 'IFT'].includes(fd.call_type) && !!(fd.preauth_number || '').trim())
+      } delay={200}>
+        <SHdr t="Dispatch Times" />
+        <div style={{ borderRadius: 14, overflow: 'hidden', border: `1.5px solid ${S200}`, marginBottom: 20 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: TIME_ROW_COLS, background: G }}>
+            {TIME_HEADERS.map((h, i, a) => (
+              <div key={h} style={{ padding: '10px 14px', fontSize: '0.65rem', fontWeight: 800, color: W, letterSpacing: '0.1em', borderRight: i < a.length - 1 ? '1px solid rgba(255,255,255,0.15)' : 'none' }}>{h}</div>
+            ))}
+          </div>
+          {TimeRow({ row: ALL_TIME_ROWS.find(r => r.timeKey === 'time_dispatched')! })}
+        </div>
+      </FadeIn>
+
+      {/* ── On Scene Time — shows after dispatch time is marked ── */}
+      <FadeIn show={!!timestamps.time_dispatched && !!kms.km_dispatched} delay={200}>
+        <div style={{ borderRadius: 14, overflow: 'hidden', border: `1.5px solid ${S200}`, marginBottom: 20 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: TIME_ROW_COLS, background: G }}>
+            {TIME_HEADERS.map((h, i, a) => (
+              <div key={h} style={{ padding: '10px 14px', fontSize: '0.65rem', fontWeight: 800, color: W, letterSpacing: '0.1em', borderRight: i < a.length - 1 ? '1px solid rgba(255,255,255,0.15)' : 'none' }}>{h}</div>
+            ))}
+          </div>
+          {TimeRow({ row: ALL_TIME_ROWS.find(r => r.timeKey === 'time_on_scene')! })}
+        </div>
+      </FadeIn>
+
+      {/* ── En Route Overlay — shows after dispatch time is marked but before on scene ── */}
+      {enRouteOverlay && timestamps.time_dispatched && !timestamps.time_on_scene && (
+        <EnRouteOverlay
+          dispatchedAt={timestamps.time_dispatched}
+          onDoubleTap={() => {
+            setEnRouteOverlay(false);
+            markTime('time_on_scene', 'km_on_scene');
+          }}
+        />
       )}
 
-      {/* Dispatch Times: DoD / RESUS calls embed the same rows inside their
-          dedicated panel, so they're skipped here to avoid a duplicate widget
-          on the same shared state. Billing Type has moved to Phase 2. */}
-      {!fd.med_aid_dec_death && fd.call_type !== 'RESUS' && (
-        <>
-          <SHdr t="Dispatch Times" />
-          {TimeTable({ rows: ALL_TIME_ROWS.filter(r => r.phase === 0 || r.phase === 2) })}
-        </>
-      )}
-
-      {/* PRIMARY and COURTESY calls surface the clinical section inline so
-          the crew can run the patient assessment without leaving Dispatch
-          — same pattern as RESUS. Only shows after Dispatch and On Scene times & KMs are filled. */}
-      {(fd.call_type === 'PRIMARY' || fd.call_type === 'COURTESY') && timestamps.time_dispatched && fd.km_dispatched && timestamps.time_on_scene && fd.km_on_scene && P3(true)}
-
-      {/* Standalone slot for the DoD / Resus billing subsections. Fires
-          for any billing channel once a Declaration of Death is flagged
-          or the call type is RESUS — the Resus Level and embedded
-          dispatch times surface through MedAidMore. */}
-      {/* MedAidMore: shows for DoD (any billing type) and for RESUS (immediately
-          — no billing_type gate, since Resus Level is needed before billing). */}
-      {(fd.med_aid_dec_death || fd.call_type === 'RESUS') && (
+      {/* ── DOD: keep existing layout ── */}
+      {fd.call_type === 'DOD' && (
         <Card>
           <MedAidMore />
         </Card>
       )}
 
-      {/* Resus: surface the full clinical section only once On Scene is marked
-          so the section doesn't pop in immediately on call-type selection. */}
-      {fd.call_type === 'RESUS' && timestamps.time_dispatched && fd.km_dispatched && timestamps.time_on_scene && fd.km_on_scene && P3(true)}
+      {/* ── Clinical section gates (unchanged logic) ── */}
+      {(fd.call_type === 'PRIMARY' || fd.call_type === 'COURTESY') && timestamps.time_dispatched && kms.km_dispatched && timestamps.time_on_scene && kms.km_on_scene && (startedExam ? P3(true) : startExamBtn)}
 
-      {/* IFT/IHT: inter-facility transfers — clinical section appears
-          once On Scene time is marked. */}
-      {['IHT', 'IFT'].includes(fd.call_type) && timestamps.time_dispatched && fd.km_dispatched && timestamps.time_on_scene && fd.km_on_scene && P3(true)}
+      {fd.call_type === 'RESUS' && timestamps.time_dispatched && kms.km_dispatched && timestamps.time_on_scene && kms.km_on_scene && (startedExam ? P3(true) : startExamBtn)}
 
-      {/* RHT: clinical section appears once On Scene time is marked. */}
-      {fd.call_type === 'RHT' && timestamps.time_dispatched && fd.km_dispatched && timestamps.time_on_scene && fd.km_on_scene && P3(true)}
+      {['IHT', 'IFT'].includes(fd.call_type) && timestamps.time_dispatched && kms.km_dispatched && timestamps.time_on_scene && kms.km_on_scene && (startedExam ? P3(true) : startExamBtn)}
 
-      {/* Resus that fails — collapsible Declaration of Death tag at the
-          bottom of the clinical section. Click toggles the DoD form open
-          inline so the crew can fill it without leaving the dispatch
-          screen. State lives in `fd.med_aid_dec_death` and is shared with
-          the MedAidMore mount, so toggling here also reflects elsewhere. */}
-      {fd.call_type === 'RESUS' && (
+      {fd.call_type === 'RHT' && timestamps.time_dispatched && kms.km_dispatched && timestamps.time_on_scene && kms.km_on_scene && (startedExam ? P3(true) : startExamBtn)}
+
+      {/* Resus: Declaration of Death at bottom of clinical section */}
+      {fd.call_type === 'RESUS' && startedExam && (
         <>
           <button
             type="button"
@@ -3891,13 +4062,13 @@ export default function DigitalPRFForm() {
         </>
       )}
 
-      {/* Hide Patient Information CTA until clinical data is inserted, 
-          unless the patient was declared deceased on scene (where clinical is skipped). */}
+      {/* Patient Information CTA */}
       {(fd.med_aid_dec_death || !!fd.chief_complaint) && (
         CTA({ label: "Patient Information  →", onClick: () => advancePhase(2) })
       )}
     </>
-  );
+    );
+  };
 
   // ── Phase 1: EN ROUTE ─────────────────────────────────────────────────────
   const P1 = () => (
@@ -3990,8 +4161,10 @@ export default function DigitalPRFForm() {
           The Billing Type selector and all channel-specific detail cards
           live here on Phase 2 so the crew completes triage and patient
           info before being asked to fill billing details. */}
-      <SHdr t="Billing Type" />
-      <BillingTypePicker />
+      {fd.call_type !== 'COURTESY' && (
+        <>
+          <SHdr t="Billing Type" />
+          <BillingTypePicker />
 
       {fd.billing_type === 'PVT' && (
         <>
@@ -4105,6 +4278,7 @@ export default function DigitalPRFForm() {
           </Card>
         )}
 
+      </>)}
       </>)}
 
       <Lbl t="Persons Accompanying Patient in Ambulance" />
@@ -5705,10 +5879,8 @@ export default function DigitalPRFForm() {
                 <button
                   type="button"
                   onClick={() => {
-                    // For the treating-practitioner gate the only way out without
-                    // picking is to step back to the previous phase — closing the
-                    // modal in-place would just trigger the auto-reopen useEffect.
-                    if (isTreating) setPhase(2);
+                    // Just close the picker overlay.
+                    if (isTreating) setDismissedTreating(true);
                     setCrewPicker(null);
                   }}
                   style={{
@@ -5717,7 +5889,7 @@ export default function DigitalPRFForm() {
                     fontWeight: 800, fontSize: '0.88rem', cursor: 'pointer',
                   }}
                 >
-                  {isTreating ? '← Back to previous step' : 'Cancel'}
+                  Cancel
                 </button>
               </div>
             </div>
@@ -5827,6 +5999,69 @@ export default function DigitalPRFForm() {
                   Fix the items above, then tap <strong>Save & Continue</strong> again.
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* ── IFT/IHT Transfer Subtype Overlay ── */}
+        {transferSubtypeOpen && (
+          <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(15,23,42,0.6)', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', padding: 20, backdropFilter: 'blur(4px)' }} onClick={() => setTransferSubtypeOpen(false)}>
+            <div style={{ background: S50, borderRadius: 24, padding: '24px 16px', width: '100%', maxWidth: 500, maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 40px rgba(0,0,0,0.2)' }} onClick={e => e.stopPropagation()}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                <div style={{ fontSize: '1.2rem', fontWeight: 900, color: S900, letterSpacing: '-0.02em' }}>Transfer Reason</div>
+                <button type="button" onClick={() => setTransferSubtypeOpen(false)} style={{ width: 32, height: 32, borderRadius: 16, border: 'none', background: S200, color: S600, fontSize: '1.2rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>×</button>
+              </div>
+              <div style={{ overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 10 }}>
+                {TRANSFER_SUBTYPES.map(reason => {
+                  const on = fd.transfer_subtype === reason;
+                  return (
+                    <button
+                      key={reason}
+                      type="button"
+                      onClick={() => { sf('transfer_subtype', reason); setTransferSubtypeOpen(false); }}
+                      style={{
+                        padding: '16px 12px', borderRadius: 12, fontSize: '0.88rem', fontWeight: 800,
+                        border: `2px solid ${on ? G : S200}`, background: on ? G : W, color: on ? W : S700,
+                        cursor: 'pointer', textAlign: 'center', transition: 'all 0.15s',
+                        boxShadow: on ? `0 4px 12px ${G}40` : '0 2px 4px rgba(0,0,0,0.02)'
+                      }}
+                    >
+                      {reason}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {rhtCallOutFeeOpen && (
+          <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(15,23,42,0.6)', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', padding: 20, backdropFilter: 'blur(4px)' }} onClick={() => setRhtCallOutFeeOpen(false)}>
+            <div style={{ background: S50, borderRadius: 24, padding: '24px 16px', width: '100%', maxWidth: 500, maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 40px rgba(0,0,0,0.2)' }} onClick={e => e.stopPropagation()}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                <div style={{ fontSize: '1.2rem', fontWeight: 900, color: S900, letterSpacing: '-0.02em' }}>Call Out Fee</div>
+                <button type="button" onClick={() => setRhtCallOutFeeOpen(false)} style={{ width: 32, height: 32, borderRadius: 16, border: 'none', background: S200, color: S600, fontSize: '1.2rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>×</button>
+              </div>
+              <div style={{ overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 10 }}>
+                {['Standard', 'After Hours', 'Public Holiday', 'Standby Cancellation', 'No Patient Loaded', 'None'].map(reason => {
+                  const on = fd.rht_call_out_fee === reason;
+                  return (
+                    <button
+                      key={reason}
+                      type="button"
+                      onClick={() => { sf('rht_call_out_fee', reason); setRhtCallOutFeeOpen(false); }}
+                      style={{
+                        padding: '16px 12px', borderRadius: 12, fontSize: '0.88rem', fontWeight: 800,
+                        border: `2px solid ${on ? G : S200}`, background: on ? G : W, color: on ? W : S700,
+                        cursor: 'pointer', textAlign: 'center', transition: 'all 0.15s',
+                        boxShadow: on ? `0 4px 12px ${G}40` : '0 2px 4px rgba(0,0,0,0.02)'
+                      }}
+                    >
+                      {reason}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
         )}
