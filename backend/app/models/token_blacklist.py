@@ -3,6 +3,7 @@ TokenBlacklist model — Revoked JWT tokens.
 When a user logs out or a refresh token is rotated, the old token's
 JTI (JWT ID) is stored here so it cannot be reused.
 """
+from typing import Union
 import uuid
 from datetime import datetime, timezone
 from sqlalchemy import String, DateTime
@@ -21,7 +22,7 @@ class TokenBlacklist(Base):
         String(64), unique=True, nullable=False, index=True,
         comment="JWT ID claim — unique per token"
     )
-    user_id: Mapped[uuid.UUID | None] = mapped_column(
+    user_id: Mapped[Union[uuid.UUID, None]] = mapped_column(
         UUID(as_uuid=True), nullable=True, index=True,
         comment="User who owned the revoked token"
     )

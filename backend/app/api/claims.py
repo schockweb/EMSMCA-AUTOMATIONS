@@ -1,6 +1,7 @@
 """
 Claims API — Claim creation, listing, and status management.
 """
+from __future__ import annotations
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select

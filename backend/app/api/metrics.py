@@ -3,6 +3,7 @@ Prometheus Metrics Endpoint — lightweight, no external dependencies.
 Exposes PRF status counts, failed PRF gauge, and database pool statistics
 in Prometheus exposition format.
 """
+from __future__ import annotations
 from fastapi import APIRouter, Depends
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession

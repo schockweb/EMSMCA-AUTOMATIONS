@@ -2,6 +2,7 @@
 Global Crash Handler — catches unhandled exceptions across all FastAPI routes,
 persists them to the crash_events table, and returns a clean 500 with reference ID.
 """
+from __future__ import annotations
 import traceback
 import uuid
 from datetime import datetime, timezone

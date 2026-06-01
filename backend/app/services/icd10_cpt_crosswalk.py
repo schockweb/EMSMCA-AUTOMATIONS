@@ -4,6 +4,7 @@ Validates that diagnosis codes match procedure codes and detects clinical mismat
 
 Uses SA-specific EMS tariff codes alongside standard CPT codes.
 """
+from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 

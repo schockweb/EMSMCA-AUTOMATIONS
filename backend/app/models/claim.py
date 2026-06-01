@@ -1,6 +1,7 @@
 """
 Claim model — Financial representation of a Case.
 """
+from typing import Union
 import uuid
 from datetime import datetime, timezone
 from sqlalchemy import Boolean, String, Text, ForeignKey, DateTime, Enum as SAEnum, Numeric
@@ -31,13 +32,13 @@ class Claim(Base):
     total_amount: Mapped[float] = mapped_column(
         Numeric(12, 2), nullable=True, default=0
     )
-    target_scheme: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    target_scheme: Mapped[Union[str, None]] = mapped_column(String(255), nullable=True)
     adjudication_status: Mapped[AdjudicationStatus] = mapped_column(
         SAEnum(AdjudicationStatus, name="adjudication_status"),
         nullable=False,
         default=AdjudicationStatus.PENDING,
     )
-    dispatch_reference_number: Mapped[str | None] = mapped_column(
+    dispatch_reference_number: Mapped[Union[str, None]] = mapped_column(
         String(100), nullable=True,
         comment="CAD/Dispatch reference — used when billing an AGGREGATOR payer (e.g. ER24, Netcare 911)"
     )
@@ -47,24 +48,24 @@ class Claim(Base):
         Boolean, nullable=False, default=False,
         comment="True if this claim has been voided"
     )
-    voided_at: Mapped[datetime | None] = mapped_column(
+    voided_at: Mapped[Union[datetime, None]] = mapped_column(
         DateTime(timezone=True), nullable=True,
         comment="Timestamp when claim was voided"
     )
-    voided_by: Mapped[uuid.UUID | None] = mapped_column(
+    voided_by: Mapped[Union[uuid.UUID, None]] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=True,
         comment="User who voided this claim"
     )
-    voided_reason: Mapped[str | None] = mapped_column(
+    voided_reason: Mapped[Union[str, None]] = mapped_column(
         Text, nullable=True,
         comment="Mandatory reason for voiding — audit trail"
     )
-    amended_by_id: Mapped[uuid.UUID | None] = mapped_column(
+    amended_by_id: Mapped[Union[uuid.UUID, None]] = mapped_column(
         UUID(as_uuid=True), ForeignKey("claims.id"), nullable=True,
         comment="If voided, the replacement claim's ID"
     )
 
-    submitted_at: Mapped[datetime | None] = mapped_column(
+    submitted_at: Mapped[Union[datetime, None]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(

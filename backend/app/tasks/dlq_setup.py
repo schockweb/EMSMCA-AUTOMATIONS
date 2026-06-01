@@ -5,6 +5,7 @@ in RabbitMQ when the Celery worker starts.
 Messages that fail permanently (rejected, timed out, or nacked without requeue)
 are routed here for admin review via the dashboard.
 """
+from __future__ import annotations
 import logging
 from celery.signals import worker_ready
 

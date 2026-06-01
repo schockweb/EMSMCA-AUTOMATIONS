@@ -2,6 +2,7 @@
 Structured Logging — JSON-formatted logs for production (ELK / CloudWatch).
 Falls back to readable text format in development.
 """
+from __future__ import annotations
 import logging
 import sys
 import json

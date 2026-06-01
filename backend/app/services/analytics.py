@@ -2,6 +2,7 @@
 Analytics Service — Real-time metrics for the claims lifecycle.
 Computes DSO, rejection rates, AI confidence, revenue, and pipeline health.
 """
+from __future__ import annotations
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from sqlalchemy import select, func, case as sql_case, extract

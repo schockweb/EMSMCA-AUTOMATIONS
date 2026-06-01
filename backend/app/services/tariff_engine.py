@@ -13,6 +13,7 @@ This guarantees:
   √ AI can never hallucinate a Rand amount
   √ Every price on the invoice traces back to an uploaded Billing Guideline
 """
+from __future__ import annotations
 import json
 import math
 import re

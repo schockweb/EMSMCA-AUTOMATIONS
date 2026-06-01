@@ -1633,6 +1633,261 @@ label:has(+ .pulsate-red),
   font-weight: 600;
 }
 
+/* ─── Tab Bar — Centered navigation with animated icons ─────────────────── */
+.tab-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.tab-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 18px 10px;
+  border-radius: var(--radius-md);
+  border: none;
+  background: none;
+  cursor: pointer;
+  position: relative;
+  transition: all var(--transition-fast);
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.tab-item:hover {
+  background: rgba(8, 131, 149, 0.05);
+  color: var(--text-secondary);
+}
+
+.tab-item.active {
+  color: var(--brand-teal);
+}
+
+.tab-item.active::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 24px;
+  height: 3px;
+  background: var(--brand-teal);
+  border-radius: var(--radius-full);
+}
+
+.tab-item:hover .tab-icon-wrap {
+  transform: scale(1.08);
+}
+
+.tab-item.active .tab-icon-wrap {
+  transform: scale(1.05);
+}
+
+/* Tab icon wrapper */
+.tab-icon-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform var(--transition-fast);
+}
+
+/* ─── Animated Icon Keyframes ───────────────────────────────────────────── */
+
+/* Home heartbeat trace — dash draw */
+@keyframes heartbeat-draw {
+  0%   { stroke-dashoffset: 60; opacity: 0.3; }
+  40%  { stroke-dashoffset: 0;  opacity: 1; }
+  70%  { stroke-dashoffset: 0;  opacity: 1; }
+  100% { stroke-dashoffset: -60; opacity: 0.3; }
+}
+
+.home-heartbeat {
+  animation: heartbeat-draw 3s ease-in-out infinite;
+}
+
+/* Chimney smoke — float up and fade */
+@keyframes smoke-float {
+  0%   { opacity: 0.12; transform: translateY(0) scale(1); }
+  50%  { opacity: 0.06; transform: translateY(-4px) scale(1.3); }
+  100% { opacity: 0;    transform: translateY(-8px) scale(0.6); }
+}
+
+.chimney-smoke-1 {
+  animation: smoke-float 3s ease-out infinite;
+}
+
+.chimney-smoke-2 {
+  animation: smoke-float 3s ease-out infinite;
+  animation-delay: 1.5s;
+}
+
+/* Ambulance siren blink */
+@keyframes siren-blink {
+  0%, 100% { opacity: 0.6; }
+  50%      { opacity: 1; filter: brightness(1.3); }
+}
+
+.siren-light {
+  animation: siren-blink 1.2s ease-in-out infinite;
+}
+
+.siren-glow {
+  animation: siren-blink 1.2s ease-in-out infinite;
+  animation-delay: 0.3s;
+}
+
+/* Ambulance wheel rotation */
+@keyframes wheel-rotate {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.ambulance-wheel {
+  transform-origin: center;
+  animation: wheel-rotate 3s linear infinite;
+}
+
+/* Pause wheel animation by default, play on hover */
+.tab-item:not(:hover) .ambulance-wheel {
+  animation-play-state: paused;
+}
+
+.tab-item:hover .ambulance-wheel {
+  animation-play-state: running;
+  animation-duration: 1s;
+}
+
+.tab-item.active .ambulance-wheel {
+  animation-play-state: running;
+  animation-duration: 4s;
+}
+
+/* Employee breathing animation */
+@keyframes breathe {
+  0%, 100% { transform: scaleY(1); }
+  50%      { transform: scaleY(1.015); }
+}
+
+.employee-body {
+  transform-origin: center bottom;
+  animation: breathe 4s ease-in-out infinite;
+}
+
+/* Stethoscope sway */
+@keyframes steth-sway {
+  0%, 100% { transform: rotate(0deg); }
+  50%      { transform: rotate(2deg); }
+}
+
+.stethoscope {
+  transform-origin: top center;
+  animation: steth-sway 3s ease-in-out infinite;
+}
+
+/* ─── Large Icon Animations (for cards) ─────────────────────────────────── */
+
+/* Siren active alternating */
+@keyframes siren-active-left {
+  0%, 49%  { opacity: 0.8; }
+  50%, 100% { opacity: 0.2; }
+}
+
+@keyframes siren-active-right {
+  0%, 49%  { opacity: 0.2; }
+  50%, 100% { opacity: 0.8; }
+}
+
+.siren-active-left {
+  animation: siren-active-left 0.8s step-end infinite;
+}
+
+.siren-active-right {
+  animation: siren-active-right 0.8s step-end infinite;
+}
+
+/* Headlight glow pulse */
+@keyframes headlight-pulse {
+  0%, 100% { opacity: 0.1; }
+  50%      { opacity: 0.25; }
+}
+
+.headlight-glow {
+  animation: headlight-pulse 2s ease-in-out infinite;
+}
+
+/* Employee ring pulse (on shift) */
+@keyframes ring-pulse {
+  0%   { transform: scale(1); opacity: 0.3; }
+  50%  { transform: scale(1.04); opacity: 0.15; }
+  100% { transform: scale(1); opacity: 0.3; }
+}
+
+.employee-ring-pulse {
+  animation: ring-pulse 3s ease-in-out infinite;
+}
+
+/* Status dot pulse */
+@keyframes status-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(56, 142, 60, 0.5); }
+  50%      { box-shadow: 0 0 0 4px rgba(56, 142, 60, 0); }
+}
+
+/* ─── Shift Status Dot (employee cards) ─────────────────────────────────── */
+.shift-status-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2.5px solid white;
+}
+
+.shift-status-online {
+  background: #388E3C;
+  box-shadow: 0 0 8px rgba(56, 142, 60, 0.5);
+  animation: status-pulse 2s ease-in-out infinite;
+}
+
+.shift-status-offline {
+  background: #a8afc2;
+}
+
+/* ─── Responsive Tab Bar ────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .tab-bar {
+    gap: 2px;
+  }
+
+  .tab-item {
+    padding: 6px 10px 8px;
+    font-size: 0.6rem;
+  }
+
+  .tab-item .tab-icon-wrap svg {
+    width: 28px;
+    height: 28px;
+  }
+
+  .navbar-inner {
+    padding: 0 16px;
+    height: 68px;
+  }
+}
+
+@media (max-width: 480px) {
+  .tab-item span:last-child {
+    display: none;
+  }
+}
+
 /* ── Print: strip the app chrome so PRF prints cleanly ─────────────────────
    The PRF viewer is the only page that prints meaningful content. Hide the
    top navbar globally so it never bleeds into print output. Page-specific

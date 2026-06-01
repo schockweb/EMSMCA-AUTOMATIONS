@@ -1,3 +1,4 @@
+from __future__ import annotations
 from .base import BaseSchemeAdapter
 from .generic import OAuth2SchemeAdapter
 from .medscheme import APIKeySchemeAdapter

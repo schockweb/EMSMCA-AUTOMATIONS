@@ -1,3 +1,4 @@
+from __future__ import annotations
 import httpx
 import logging
 from sqlalchemy.ext.asyncio import AsyncSession

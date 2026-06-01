@@ -11,6 +11,7 @@ Orchestrates:
 5. Completeness checks (pre-auth, signatures, etc.)
 6. Automated RFI generation for failures
 """
+from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from typing import Optional

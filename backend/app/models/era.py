@@ -1,6 +1,7 @@
 """
 ERA (Electronic Remittance Advice) model — tracks scheme payments and reconciliation.
 """
+from typing import Union
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -39,7 +40,7 @@ class ERA(Base):
     claim_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("claims.id"), nullable=False, index=True
     )
-    edi_submission_id: Mapped[uuid.UUID | None] = mapped_column(
+    edi_submission_id: Mapped[Union[uuid.UUID, None]] = mapped_column(
         UUID(as_uuid=True), ForeignKey("edi_submissions.id"), nullable=True
     )
     era_status: Mapped[ERAStatus] = mapped_column(
@@ -57,33 +58,33 @@ class ERA(Base):
     discount_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
 
     # Scheme details
-    scheme_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    scheme_reference: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    payment_reference: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    payment_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    scheme_name: Mapped[Union[str, None]] = mapped_column(String(100), nullable=True)
+    scheme_reference: Mapped[Union[str, None]] = mapped_column(String(100), nullable=True)
+    payment_reference: Mapped[Union[str, None]] = mapped_column(String(100), nullable=True)
+    payment_date: Mapped[Union[datetime, None]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Line-level breakdown
-    line_details: Mapped[dict | None] = mapped_column(
+    line_details: Mapped[Union[dict, None]] = mapped_column(
         JSONB, nullable=True,
         comment="Per-line approved/paid amounts and rejection reasons"
     )
 
     # Rejection / adjustment
-    rejection_codes: Mapped[dict | None] = mapped_column(
+    rejection_codes: Mapped[Union[dict, None]] = mapped_column(
         JSONB, nullable=True,
         comment="List of HPCSA rejection reason codes"
     )
-    adjustment_reasons: Mapped[dict | None] = mapped_column(
+    adjustment_reasons: Mapped[Union[dict, None]] = mapped_column(
         JSONB, nullable=True,
         comment="Adjustment reason codes and descriptions"
     )
 
     # Reconciliation
-    reconciliation_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reconciliation_notes: Mapped[Union[str, None]] = mapped_column(Text, nullable=True)
     auto_reconciled: Mapped[bool] = mapped_column(default=False)
 
     # Raw ERA data
-    raw_era_data: Mapped[dict | None] = mapped_column(
+    raw_era_data: Mapped[Union[dict, None]] = mapped_column(
         JSONB, nullable=True, comment="Original ERA payload from clearinghouse"
     )
 

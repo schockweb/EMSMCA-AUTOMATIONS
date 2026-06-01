@@ -3,6 +3,7 @@ Input Sanitization & XSS Protection Middleware.
 Strips dangerous HTML/JS from query parameters AND request bodies.
 Adds security response headers to all responses.
 """
+from __future__ import annotations
 import re
 import html
 import json

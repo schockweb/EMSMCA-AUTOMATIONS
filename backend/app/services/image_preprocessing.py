@@ -2,6 +2,7 @@
 Image Preprocessing Service — Claid.ai (primary), Cloudinary (backup), local OpenCV (fallback).
 Enhances low-quality mobile PRF uploads: deskew, shadow removal, contrast, upscaling.
 """
+from __future__ import annotations
 import io
 import httpx
 from dataclasses import dataclass

@@ -2,6 +2,7 @@
 EMS Medical Claims Ingestion Portal — FastAPI Application Entry Point
 Production-hardened with rate limiting, XSS protection, structured logging.
 """
+from __future__ import annotations
 import os
 import time
 from contextlib import asynccontextmanager
@@ -78,11 +79,14 @@ async def _init_prf_sequence():
     On first run, creates the sequence. On subsequent runs, ensures it starts
     from MAX(prf_number)+1 so there are no collisions with existing PRFs.
     """
+    if settings.DATABASE_URL.startswith("sqlite"):
+        logger.info("Using SQLite — skipping PRF sequence initialization (SQLite max logic will be used).")
+        return
+
     from app.models.digital_prf import DigitalPRF
     from sqlalchemy import func
 
     async with AsyncSessionLocal() as db:
-        # Create the sequence if it doesn't exist
         await db.execute(text(
             "CREATE SEQUENCE IF NOT EXISTS prf_number_seq "
             "START WITH 1 INCREMENT BY 1 NO CYCLE"

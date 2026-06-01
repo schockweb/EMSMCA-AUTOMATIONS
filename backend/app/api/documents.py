@@ -2,6 +2,7 @@
 Documents API — Upload, list, and download PRF documents.
 Triggers async preprocessing and OCR extraction pipelines.
 """
+from __future__ import annotations
 import uuid
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status, BackgroundTasks

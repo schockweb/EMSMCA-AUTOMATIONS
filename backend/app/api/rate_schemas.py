@@ -2,6 +2,7 @@
 Rate Schema API — CRUD for billing rate schemas.
 Manages per-scheme tariff configuration (rate per km, base fees, multipliers).
 """
+from __future__ import annotations
 import logging
 from datetime import date, datetime, timezone
 from decimal import Decimal

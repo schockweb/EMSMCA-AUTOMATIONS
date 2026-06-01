@@ -9,6 +9,7 @@ Currently supports:
 
 When GEMS provides API credentials, fill in GemsMemberAdapter.lookup() below.
 """
+from __future__ import annotations
 import logging
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException

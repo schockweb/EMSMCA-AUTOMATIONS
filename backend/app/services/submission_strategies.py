@@ -7,6 +7,7 @@ Routes approved invoices to the correct billing pathway:
 
 Uses the Strategy pattern for clean extensibility.
 """
+from __future__ import annotations
 import uuid
 import logging
 from abc import ABC, abstractmethod

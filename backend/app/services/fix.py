@@ -1,3 +1,4 @@
+from __future__ import annotations
 import sys
 
 correct_block = """        # ── Load & inject learned corrections (few-shot examples from human reviewers) ──

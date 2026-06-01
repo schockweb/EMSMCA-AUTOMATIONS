@@ -5,6 +5,7 @@ Real-time validation of provider credentials against the Board of Healthcare Fun
 In production, this would integrate with the live BHF API. For now we implement a deterministic
 validation engine with local PCNS format rules and a stubbed API call for future integration.
 """
+from __future__ import annotations
 import re
 import httpx
 from dataclasses import dataclass

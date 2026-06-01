@@ -6,6 +6,7 @@ Phase 2: Strict Pydantic Structured Outputs via Azure OpenAI GPT-4o (beta.parse)
          constrained to populate the correct key, in the correct format, every time.
 Phase 4: ICD-10 auto-suggest if codes are still missing after extraction.
 """
+from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from typing import Dict, Any, Optional, List

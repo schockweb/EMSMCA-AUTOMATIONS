@@ -2,6 +2,7 @@
 CrashEvent model — Platform-wide crash/error monitoring ledger.
 Captures unhandled exceptions from Backend, Celery workers, and Frontend.
 """
+from typing import Union
 import uuid
 from datetime import datetime, timezone, timedelta
 from enum import Enum as PyEnum
@@ -47,18 +48,18 @@ class CrashEvent(Base):
         String(2000), nullable=False,
         comment="Error message (truncated to 2000 chars)"
     )
-    stacktrace: Mapped[str | None] = mapped_column(
+    stacktrace: Mapped[Union[str, None]] = mapped_column(
         Text, nullable=True,
         comment="Full traceback / component stack"
     )
-    endpoint: Mapped[str | None] = mapped_column(
+    endpoint: Mapped[Union[str, None]] = mapped_column(
         String(500), nullable=True,
         comment="API route, Celery task name, or frontend URL"
     )
-    user_id: Mapped[uuid.UUID | None] = mapped_column(
+    user_id: Mapped[Union[uuid.UUID, None]] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=True, index=True
     )
-    metadata_blob: Mapped[dict | None] = mapped_column(
+    metadata_blob: Mapped[Union[dict, None]] = mapped_column(
         JSONB, nullable=True,
         comment="Extra context: request body, task args, browser info"
     )
@@ -66,10 +67,10 @@ class CrashEvent(Base):
         Boolean, default=False, nullable=False,
         comment="Manually marked as resolved by admin"
     )
-    resolved_at: Mapped[datetime | None] = mapped_column(
+    resolved_at: Mapped[Union[datetime, None]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    resolved_by: Mapped[uuid.UUID | None] = mapped_column(
+    resolved_by: Mapped[Union[uuid.UUID, None]] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(

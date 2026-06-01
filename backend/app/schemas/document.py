@@ -1,6 +1,7 @@
 """
 Pydantic schemas for Documents.
 """
+from __future__ import annotations
 from datetime import datetime
 from pydantic import BaseModel
 from typing import Optional, Dict, Any

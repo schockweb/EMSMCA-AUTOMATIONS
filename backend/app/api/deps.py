@@ -1,6 +1,7 @@
 """
 API Dependencies — shared across all route modules.
 """
+from __future__ import annotations
 from app.database import get_db
 from app.utils.security import get_current_user, require_role
 

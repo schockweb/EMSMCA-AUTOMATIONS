@@ -1,6 +1,7 @@
 """
 SchemeAuthRequest model — audit trail of every authorization request to medical schemes.
 """
+from typing import Union
 import uuid
 import enum
 from datetime import datetime, timezone
@@ -27,18 +28,18 @@ class SchemeAuthRequest(Base):
     case_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("cases.id"), nullable=False, index=True
     )
-    claim_id: Mapped[uuid.UUID | None] = mapped_column(
+    claim_id: Mapped[Union[uuid.UUID, None]] = mapped_column(
         UUID(as_uuid=True), ForeignKey("claims.id"), nullable=True
     )
-    scheme_name: Mapped[str | None] = mapped_column(
+    scheme_name: Mapped[Union[str, None]] = mapped_column(
         String(255), nullable=True,
         comment="Name of the medical scheme contacted"
     )
-    request_payload: Mapped[dict | None] = mapped_column(
+    request_payload: Mapped[Union[dict, None]] = mapped_column(
         JSONB, nullable=True,
         comment="Exact JSON payload sent to the scheme API"
     )
-    response_payload: Mapped[dict | None] = mapped_column(
+    response_payload: Mapped[Union[dict, None]] = mapped_column(
         JSONB, nullable=True,
         comment="Raw response from the scheme API"
     )
@@ -47,26 +48,26 @@ class SchemeAuthRequest(Base):
         nullable=False,
         default=AuthRequestStatus.PENDING,
     )
-    auth_number: Mapped[str | None] = mapped_column(
+    auth_number: Mapped[Union[str, None]] = mapped_column(
         String(100), nullable=True,
         comment="Authorization number returned on approval"
     )
-    approved_amount: Mapped[float | None] = mapped_column(
+    approved_amount: Mapped[Union[float, None]] = mapped_column(
         Numeric(12, 2), nullable=True,
         comment="Scheme-approved financial limit"
     )
-    decline_reason: Mapped[str | None] = mapped_column(
+    decline_reason: Mapped[Union[str, None]] = mapped_column(
         Text, nullable=True,
         comment="Reason if the scheme declined"
     )
-    requested_by: Mapped[uuid.UUID | None] = mapped_column(
+    requested_by: Mapped[Union[uuid.UUID, None]] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
     )
     requested_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
     )
-    responded_at: Mapped[datetime | None] = mapped_column(
+    responded_at: Mapped[Union[datetime, None]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
 

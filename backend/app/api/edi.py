@@ -1,6 +1,7 @@
 """
 EDI API — Electronic Data Interchange endpoints for claim submission.
 """
+from __future__ import annotations
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select

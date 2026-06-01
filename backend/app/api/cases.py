@@ -1,6 +1,7 @@
 """
 Cases API — CRUD operations for EMS cases / pre-authorizations.
 """
+from __future__ import annotations
 import uuid
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status

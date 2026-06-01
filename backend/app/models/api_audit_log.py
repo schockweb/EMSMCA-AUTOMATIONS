@@ -1,3 +1,4 @@
+from typing import Union
 from sqlalchemy import String, Integer, DateTime, JSON
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import UUID, JSONB
@@ -23,19 +24,19 @@ class APIAuditLog(Base):
         String(50), nullable=False,
         comment="e.g. REQUEST_AUTH, SUBMIT_CLAIM"
     )
-    status_code: Mapped[int | None] = mapped_column(
+    status_code: Mapped[Union[int, None]] = mapped_column(
         Integer, nullable=True,
         comment="HTTP status code received from external API"
     )
-    request_payload: Mapped[dict | None] = mapped_column(
+    request_payload: Mapped[Union[dict, None]] = mapped_column(
         JSONB, nullable=True,
         comment="Sanitized outbound payload"
     )
-    response_payload: Mapped[dict | None] = mapped_column(
+    response_payload: Mapped[Union[dict, None]] = mapped_column(
         JSONB, nullable=True,
         comment="Sanitized incoming response body"
     )
-    error_message: Mapped[str | None] = mapped_column(
+    error_message: Mapped[Union[str, None]] = mapped_column(
         String, nullable=True,
         comment="Internal error logs or connection timeouts"
     )

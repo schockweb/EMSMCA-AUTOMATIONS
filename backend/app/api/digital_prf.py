@@ -2,6 +2,7 @@
 Digital PRF API — Create, auto-save (5s), and submit digital Patient Report Forms.
 Crew members use these endpoints from their mobile phones.
 """
+from __future__ import annotations
 import uuid
 import logging
 from datetime import datetime, timezone
@@ -99,6 +100,13 @@ async def _next_prf_number(db: AsyncSession) -> int:
     A SEQUENCE is atomic and lock-free — two concurrent INSERTs will always
     get different numbers, even under heavy load with 500+ ambulances.
     """
+    from app.config import get_settings
+    settings = get_settings()
+    if settings.DATABASE_URL.startswith("sqlite"):
+        result = await db.execute(select(func.max(DigitalPRF.prf_number)))
+        max_val = result.scalar() or 0
+        return max_val + 1
+
     # Ensure the sequence exists (idempotent — CREATE IF NOT EXISTS).
     # This runs once on first call; PostgreSQL caches the definition.
     await db.execute(text(

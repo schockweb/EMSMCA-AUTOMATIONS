@@ -2,6 +2,7 @@
 Claims Pipeline Service — Converts reviewed PRF documents into Case → Claim → ClaimLines.
 This is the bridge between the OCR/HITL review stage and the adjudication engine.
 """
+from __future__ import annotations
 import uuid
 from datetime import date, datetime, timezone
 from typing import Optional

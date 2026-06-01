@@ -1,6 +1,7 @@
 """
 EDI Submission model — tracks claim submissions to clearinghouses.
 """
+from typing import Union
 import uuid
 from datetime import datetime, timezone
 from sqlalchemy import String, Text, ForeignKey, DateTime, Enum as SAEnum, Integer
@@ -47,26 +48,26 @@ class EDISubmission(Base):
         nullable=False,
         default=SubmissionStatus.DRAFT,
     )
-    edi_payload: Mapped[str | None] = mapped_column(
+    edi_payload: Mapped[Union[str, None]] = mapped_column(
         Text, nullable=True, comment="Generated EDI XML/JSON payload"
     )
-    edi_reference: Mapped[str | None] = mapped_column(
+    edi_reference: Mapped[Union[str, None]] = mapped_column(
         String(100), nullable=True, comment="Clearinghouse transaction reference"
     )
-    response_payload: Mapped[dict | None] = mapped_column(
+    response_payload: Mapped[Union[dict, None]] = mapped_column(
         JSONB, nullable=True, comment="Clearinghouse response"
     )
-    response_code: Mapped[str | None] = mapped_column(
+    response_code: Mapped[Union[str, None]] = mapped_column(
         String(20), nullable=True, comment="e.g. 277-A1, 999"
     )
-    rejection_reasons: Mapped[dict | None] = mapped_column(
+    rejection_reasons: Mapped[Union[dict, None]] = mapped_column(
         JSONB, nullable=True, comment="List of rejection codes/reasons"
     )
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
-    submitted_at: Mapped[datetime | None] = mapped_column(
+    submitted_at: Mapped[Union[datetime, None]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    acknowledged_at: Mapped[datetime | None] = mapped_column(
+    acknowledged_at: Mapped[Union[datetime, None]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(

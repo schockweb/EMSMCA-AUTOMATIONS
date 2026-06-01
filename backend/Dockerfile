@@ -4,33 +4,41 @@
 # ═══════════════════════════════════════════════════════════
 
 # ── Stage 1: Dependencies ──
-FROM python:3.12-slim AS deps
+FROM python:3.12-alpine AS deps
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc libpq-dev libjpeg-dev zlib1g-dev libffi-dev curl \
-    && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache \
+    gcc \
+    musl-dev \
+    postgresql-dev \
+    jpeg-dev \
+    zlib-dev \
+    libffi-dev \
+    curl \
+    build-base
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
 
 # ── Stage 2: Production ──
-FROM python:3.12-slim AS production
+FROM python:3.12-alpine AS production
 
 LABEL maintainer="EMS Claims Portal <admin@emsclaims.co.za>"
 LABEL description="EMS Claims Portal — FastAPI Backend"
 
 # Security: run as non-root
-RUN groupadd -r ems && useradd -r -g ems -d /app -s /bin/false ems
+RUN addgroup -S ems && adduser -S -G ems -h /app -s /bin/false ems
 
 WORKDIR /app
 
 # Install runtime deps only (no gcc)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpq5 libjpeg62-turbo zlib1g curl \
-    && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache \
+    libpq \
+    jpeg \
+    zlib \
+    curl
 
 # Copy installed packages from deps stage
 COPY --from=deps /install /usr/local

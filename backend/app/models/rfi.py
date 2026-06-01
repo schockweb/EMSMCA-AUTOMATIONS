@@ -1,6 +1,7 @@
 """
 RFI (Request for Information) model — tracks suspended claims requiring additional data.
 """
+from typing import Union
 import uuid
 from datetime import datetime, timezone
 from sqlalchemy import String, Boolean, Text, ForeignKey, DateTime, Enum as SAEnum
@@ -48,21 +49,21 @@ class RFI(Base):
         comment="MISSING_PREAUTH, INVALID_ICD10, MISSING_SIGNATURE, etc."
     )
     reason_description: Mapped[str] = mapped_column(Text, nullable=False)
-    missing_fields: Mapped[dict | None] = mapped_column(
+    missing_fields: Mapped[Union[dict, None]] = mapped_column(
         JSONB, nullable=True,
         comment="List of specific fields that need correction"
     )
-    response_data: Mapped[dict | None] = mapped_column(
+    response_data: Mapped[Union[dict, None]] = mapped_column(
         JSONB, nullable=True,
         comment="Data submitted in response to the RFI"
     )
-    assigned_to: Mapped[uuid.UUID | None] = mapped_column(
+    assigned_to: Mapped[Union[uuid.UUID, None]] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
     )
-    resolved_by: Mapped[uuid.UUID | None] = mapped_column(
+    resolved_by: Mapped[Union[uuid.UUID, None]] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
     )
-    resolved_at: Mapped[datetime | None] = mapped_column(
+    resolved_at: Mapped[Union[datetime, None]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(

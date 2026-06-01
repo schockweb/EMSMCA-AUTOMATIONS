@@ -2,6 +2,7 @@
 SystemSettings model — database-backed key-value configuration store.
 Replaces hardcoded .env values for admin-configurable settings.
 """
+from typing import Union
 import uuid
 from datetime import datetime, timezone
 from sqlalchemy import String, Text, DateTime, ForeignKey
@@ -20,7 +21,7 @@ class SystemSettings(Base):
         String(100), unique=True, nullable=False, index=True,
         comment="Dotted key e.g. scheme_api.base_url"
     )
-    value: Mapped[str | None] = mapped_column(
+    value: Mapped[Union[str, None]] = mapped_column(
         Text, nullable=True,
         comment="Setting value (encrypted for secrets)"
     )
@@ -32,7 +33,7 @@ class SystemSettings(Base):
         String(255), nullable=False,
         comment="Human-readable display name"
     )
-    description: Mapped[str | None] = mapped_column(
+    description: Mapped[Union[str, None]] = mapped_column(
         Text, nullable=True,
         comment="Help text displayed in the settings UI"
     )
@@ -40,7 +41,7 @@ class SystemSettings(Base):
         String(20), nullable=False, default="string",
         comment="string, secret, boolean, select"
     )
-    options: Mapped[dict | None] = mapped_column(
+    options: Mapped[Union[dict, None]] = mapped_column(
         JSONB, nullable=True,
         comment="Available options for select-type settings"
     )
@@ -49,7 +50,7 @@ class SystemSettings(Base):
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
-    updated_by: Mapped[uuid.UUID | None] = mapped_column(
+    updated_by: Mapped[Union[uuid.UUID, None]] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
     )
 

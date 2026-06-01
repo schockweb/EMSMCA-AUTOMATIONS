@@ -2,6 +2,7 @@
 Service Provider Admin API — CRUD for providers, crew members, and vehicles.
 Admin-only endpoints for onboarding and managing service providers.
 """
+from __future__ import annotations
 import uuid
 import logging
 import re

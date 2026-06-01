@@ -8,6 +8,7 @@ creation) out of the HTTP request handler. The submit endpoint now returns
 This prevents long-running tariff calculations from blocking Uvicorn workers
 (critical when 500+ ambulances may submit PRFs concurrently at shift change).
 """
+from __future__ import annotations
 import uuid
 import logging
 from datetime import datetime, timezone

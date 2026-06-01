@@ -1,6 +1,7 @@
 """
 Middleware package — production hardening layers.
 """
+from __future__ import annotations
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.sanitization import XSSProtectionMiddleware
 from app.middleware.logging_config import setup_logging, get_logger

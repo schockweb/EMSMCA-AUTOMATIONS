@@ -1,6 +1,7 @@
 """
 OCR Extraction Celery Task — runs Vision-Language AI pipeline asynchronously.
 """
+from __future__ import annotations
 import asyncio
 from app.tasks.celery_app import celery_app
 

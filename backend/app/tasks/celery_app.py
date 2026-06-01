@@ -1,6 +1,7 @@
 """
 Celery application configuration.
 """
+from __future__ import annotations
 import traceback
 from celery import Celery
 from celery.signals import task_failure
