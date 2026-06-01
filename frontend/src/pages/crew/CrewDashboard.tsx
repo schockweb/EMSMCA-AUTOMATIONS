@@ -193,8 +193,8 @@ export default function CrewDashboard() {
     }
   };
 
-  const handleAddCrewFromDashboard = async () => {
-    const hpcsa = (addCrewInput || '').trim();
+  const handleAddCrewFromDashboard = async (hpcsaOverride?: string) => {
+    const hpcsa = (typeof hpcsaOverride === 'string' ? hpcsaOverride : addCrewInput || '').trim();
     if (!hpcsa) { setAddCrewError('HPCSA number is required.'); return; }
     setAddCrewBusy(true);
     setAddCrewError('');
@@ -648,51 +648,86 @@ export default function CrewDashboard() {
                 Add crew member
               </button>
             ) : (
-              <div style={{ marginTop: 10, padding: '12px 14px', background: '#f8fafc', border: `1px solid ${B}`, borderLeft: `4px solid ${G}`, borderRadius: 10 }}>
-                <div style={{ fontSize: '0.62rem', fontWeight: 800, color: GD, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8 }}>
-                  Add Crew Member
-                </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <input
-                    value={addCrewInput}
-                    onChange={e => setAddCrewInput(e.target.value.toUpperCase())}
-                    onKeyDown={e => { if (e.key === 'Enter' && !addCrewBusy) handleAddCrewFromDashboard(); }}
-                    placeholder="HPCSA number"
-                    autoComplete="off"
-                    autoFocus
-                    style={{ ...fieldStyle, fontFamily: 'monospace', letterSpacing: '0.06em', marginBottom: 0, flex: 1 }}
-                    onFocus={focusGreen} onBlur={blurReset}
-                  />
-                  <button
-                    type="button"
-                    onClick={handleAddCrewFromDashboard}
-                    disabled={addCrewBusy}
-                    style={{
-                      padding: '0 16px', borderRadius: 8, fontSize: '0.8rem', fontWeight: 700,
-                      background: addCrewBusy ? '#94a3b8' : `linear-gradient(135deg, ${G}, ${GD})`,
-                      color: '#fff', border: 'none',
-                      cursor: addCrewBusy ? 'wait' : 'pointer',
-                    }}
-                  >
-                    {addCrewBusy ? '…' : 'Add'}
-                  </button>
+              <div style={{ marginTop: 10, padding: '12px 14px', background: '#fff', border: `1px solid ${G}`, borderRadius: 14, boxShadow: `0 4px 20px rgba(16,185,129,0.12)` }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 10, borderBottom: `1px solid ${B}`, marginBottom: 10 }}>
+                  <div style={{ fontSize: '0.62rem', fontWeight: 800, color: GD, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                    Add Crew Member
+                  </div>
                   <button
                     type="button"
                     onClick={() => { setAddCrewInput(null); setAddCrewError(''); }}
+                    style={{ background: 'none', border: 'none', color: M, cursor: 'pointer', fontSize: '1.2rem', lineHeight: 1 }}
+                  >×</button>
+                </div>
+                <div style={{ position: 'relative', marginBottom: 10 }}>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={M} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                    style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', opacity: 0.5 }}>
+                    <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+                  </svg>
+                  <input
+                    value={addCrewInput}
+                    onChange={e => setAddCrewInput(e.target.value)}
+                    placeholder="Search by name or qualification…"
+                    autoComplete="off"
+                    autoFocus
                     style={{
-                      padding: '0 12px', borderRadius: 8, fontSize: '0.8rem', fontWeight: 600,
-                      background: '#fff', color: M, border: `1px solid ${B}`,
-                      cursor: 'pointer',
+                      width: '100%', padding: '9px 10px 9px 32px',
+                      fontSize: '0.84rem', borderRadius: 8,
+                      border: `1px solid ${B}`, background: '#f8fafc',
+                      color: T, outline: 'none', boxSizing: 'border-box',
+                      fontFamily: 'inherit',
                     }}
-                  >
-                    Cancel
-                  </button>
+                    onFocus={focusGreen} onBlur={blurReset}
+                  />
                 </div>
                 {addCrewError && (
-                  <div style={{ marginTop: 8, fontSize: '0.78rem', color: '#b91c1c', fontWeight: 600 }}>
+                  <div style={{ marginBottom: 10, fontSize: '0.78rem', color: '#b91c1c', fontWeight: 600 }}>
                     {addCrewError}
                   </div>
                 )}
+                <div style={{ maxHeight: 240, overflowY: 'auto' }}>
+                  {(() => {
+                    const q = addCrewInput.trim().toLowerCase();
+                    const filtered = crewRoster.filter(c => 
+                      (!q || 
+                      c.full_name.toLowerCase().includes(q) || 
+                      c.qualification.toLowerCase().includes(q) || 
+                      c.hpcsa_number.toLowerCase().includes(q)) &&
+                      !(dashboardExtraCrews.some(ext => ext.id === c.id) || profile.id === c.id)
+                    );
+                    if (filtered.length === 0) return (
+                      <div style={{ padding: '24px', textAlign: 'center', color: M, fontSize: '0.84rem' }}>
+                        No available crew members found.
+                      </div>
+                    );
+                    return filtered.map((c, idx) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => handleAddCrewFromDashboard(c.hpcsa_number)}
+                        disabled={addCrewBusy}
+                        style={{
+                          width: '100%', padding: '10px 12px',
+                          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                          background: '#fff', border: 'none',
+                          borderBottom: idx < filtered.length - 1 ? `1px solid ${B}` : 'none',
+                          cursor: addCrewBusy ? 'wait' : 'pointer', textAlign: 'left',
+                          transition: 'background 0.12s',
+                        }}
+                        onMouseOver={e => { e.currentTarget.style.background = '#f8fafc'; }}
+                        onMouseOut={e => { e.currentTarget.style.background = '#fff'; }}
+                      >
+                        <div>
+                          <div style={{ fontWeight: 700, fontSize: '0.88rem', color: T }}>{c.full_name}</div>
+                          <div style={{ fontSize: '0.71rem', color: M, marginTop: 1, fontFamily: 'monospace' }}>
+                            {c.hpcsa_number} · {c.qualification}
+                          </div>
+                        </div>
+                        <div style={{ color: G, fontSize: '1.2rem', fontWeight: 300 }}>+</div>
+                      </button>
+                    ));
+                  })()}
+                </div>
               </div>
             )}
           </div>

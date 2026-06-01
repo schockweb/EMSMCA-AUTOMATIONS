@@ -102,7 +102,21 @@ export default class ErrorBoundary extends Component<Props, State> {
 
   handleRecover = () => {
     this.setState({ hasError: false, crashId: null, errorMessage: '' });
-    window.location.href = '/';
+    
+    // Attempt to return the user to their specific portal if they were in one
+    const pathParts = window.location.pathname.split('/').filter(Boolean);
+    if (pathParts.length >= 2 && (pathParts[1] === 'crew' || pathParts[1] === 'admin' || pathParts[1] === 'login')) {
+      const providerSlug = pathParts[0];
+      if (pathParts[1] === 'crew') {
+        window.location.href = `/${providerSlug}/crew/dashboard`;
+      } else if (pathParts[1] === 'admin') {
+        window.location.href = `/${providerSlug}/admin/dashboard`;
+      } else {
+        window.location.href = `/${providerSlug}/login`;
+      }
+    } else {
+      window.location.href = '/';
+    }
   };
 
   render() {
