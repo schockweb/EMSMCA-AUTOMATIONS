@@ -9,7 +9,8 @@
       "Bash(ls backend/*.log)",
       "Bash(docker ps *)",
       "Bash(ls \"c:\\\\Users\\\\USER-PC\\\\Desktop\\\\New EMS AUTOMATIONS\\\\\")",
-      "Read(//c/Users/USER-PC/Desktop/**)"
+      "Read(//c/Users/USER-PC/Desktop/**)",
+      "Bash(grep -oE '\\\\bS[0-9]{2,3}\\\\b' src/pages/crew/DigitalPRFForm.tsx)"
     ]
   }
 }
