@@ -3,7 +3,7 @@
  * Follows the EMS call from dispatch to completion as a step-by-step journey.
  * Each phase mirrors the real-world call flow so crew always know where they are.
  */
-import { useState, useEffect, useRef, useMemo, useCallback, createContext, useContext } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, createContext, useContext } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import SignaturePad from '../../components/SignaturePad';
@@ -37,8 +37,8 @@ const API = import.meta.env.VITE_API_URL || '';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const G = '#5b8def'; const GDK = '#3b6fde'; const GBG = 'rgba(91,141,239,0.09)';
-const S900 = '#0f172a'; const S700 = '#334155'; const S600 = '#475569';
-const S400 = '#94a3b8'; const S200 = '#e2e8f0'; const S100 = '#f1f5f9';
+const S900 = '#0f172a'; const S800 = '#1e293b'; const S700 = '#334155'; const S600 = '#475569';
+const S400 = '#94a3b8'; const S300 = '#cbd5e1'; const S200 = '#e2e8f0'; const S100 = '#f1f5f9';
 const S50 = '#f8fafc'; const W = '#ffffff';
 const ROSE = '#e11d48'; const AMB = '#f59e0b'; const REDC = '#ef4444';
 
@@ -720,8 +720,10 @@ function KmInput({ kmKey, value, onChange, onCommit }: {
 }) {
   const [focused, setFocused] = useState(false);
   const fmt = (v: string) => {
-    if (!v) return '';
-    const [whole, dec] = v.split('.');
+    // Coerce defensively: loaded data may arrive as a number despite the string type.
+    const str = String(v ?? '');
+    if (!str) return '';
+    const [whole, dec] = str.split('.');
     const formatted = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
     return dec !== undefined ? `${formatted}.${dec}` : formatted;
   };
@@ -874,17 +876,48 @@ const formatNominatimSuggestion = (item: any): AddrSuggestion => {
   };
 };
 
-const AddrInp = ({ fk, suburbKey, ph, containerStyle, inputStyle }: { fk: string; ph?: string; req?: boolean; suburbKey?: string; containerStyle?: React.CSSProperties; inputStyle?: React.CSSProperties }) => {
+export type ResolvedAddress = {
+  street: string;
+  suburb: string | null;
+  raw: any;
+};
+
+export const reverseGeocode = async (
+  lat: number, lng: number, signal: AbortSignal,
+): Promise<ResolvedAddress | null> => {
+  const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&addressdetails=1&lat=${lat}&lon=${lng}&email=system@jemsmedical.co.za`;
+  const res = await fetch(url, { 
+    signal, 
+    headers: { 
+      'Accept': 'application/json',
+      'Accept-Language': 'en-ZA,en-US;q=0.9,en;q=0.8'
+    } 
+  });
+  if (!res.ok) throw new Error(`geocoder ${res.status}`);
+  const data = await res.json();
+  if (!data || !data.address) return null;
+  const a = data.address;
+  const street = buildFullAddress(a, data.display_name);
+  return {
+    street: street || (data.display_name || ''),
+    suburb: a.suburb || a.neighbourhood || a.city_district || null,
+    raw: data,
+  };
+};
+
+const AddrInp = ({ fk, suburbKey, ph, containerStyle, inputStyle, label }: { fk: string; ph?: string; req?: boolean; suburbKey?: string; containerStyle?: React.CSSProperties; inputStyle?: React.CSSProperties; label?: string }) => {
   const { fd, sf } = useContext(FormContext);
   const val: string = fd[fk] ?? '';
+  const [modalOpen, setModalOpen] = useState(false);
   const [suggestions, setSuggestions] = useState<AddrSuggestion[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  
+  const [gpsCapturing, setGpsCapturing] = useState(false);
+  const [gpsError, setGpsError] = useState<string | null>(null);
+
   const abortRef = useRef<AbortController | null>(null);
   const debounceRef = useRef<number | null>(null);
-  // Skips one re-query after the crew picks a suggestion: without this, sf()
-  // re-triggers the input's onChange and re-opens the dropdown with the same
-  // matched result still highlighted.
   const skipNextRef = useRef(false);
   const focusedRef = useRef(false);
 
@@ -931,63 +964,138 @@ const AddrInp = ({ fk, suburbKey, ph, containerStyle, inputStyle }: { fk: string
     setOpen(false);
   };
 
+  const captureGps = () => {
+    if (!('geolocation' in navigator)) {
+      setGpsError('GPS not supported on this device');
+      return;
+    }
+    setGpsCapturing(true);
+    setGpsError(null);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const ac = new AbortController();
+        reverseGeocode(pos.coords.latitude, pos.coords.longitude, ac.signal)
+          .then(addr => {
+            if (addr && addr.street) {
+              skipNextRef.current = true;
+              sf(fk, addr.street);
+              if (suburbKey && addr.suburb && !fd[suburbKey]) sf(suburbKey, addr.suburb);
+            } else {
+              setGpsError('Address not found');
+            }
+            setGpsCapturing(false);
+          })
+          .catch(err => {
+            setGpsError('Could not look up address');
+            setGpsCapturing(false);
+          });
+      },
+      (err) => {
+        const msg = err.code === err.PERMISSION_DENIED
+          ? 'Location permission denied'
+          : err.code === err.POSITION_UNAVAILABLE
+            ? 'GPS signal unavailable'
+            : err.code === err.TIMEOUT
+              ? 'GPS request timed out'
+              : 'Could not capture location';
+        setGpsError(msg);
+        setGpsCapturing(false);
+      },
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
+    );
+  };
+
   return (
-    <div style={{ position: 'relative', marginBottom: 14, ...containerStyle }}>
-      <input
-        type="text"
-        value={val}
-        onChange={e => onTextChange(e.target.value)}
-        onFocus={(e) => { focusedRef.current = true; onF(e); if (val.length >= 3 && suggestions.length > 0) setOpen(true); }}
-        onBlur={(e) => {
-          focusedRef.current = false;
-          onB(e);
-          window.setTimeout(() => { if (!focusedRef.current) setOpen(false); }, 180);
-        }}
-        onKeyDown={(e) => { if (e.key === 'Escape') { setOpen(false); (e.currentTarget as HTMLInputElement).blur(); } }}
-        autoComplete="off"
-        placeholder={ph || ""}
-        aria-label="Street address with autocomplete"
-        aria-autocomplete="list"
-        style={{ ...base, borderColor: '#e2e8f0', ...inputStyle }}
-      />
-      {open && (loading || suggestions.length > 0) && (
-        <div
-          role="listbox"
-          style={{
-            position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 30,
-            marginTop: 4, background: '#fff', border: `1.5px solid #cbd5e1`,
-            borderRadius: 10, boxShadow: '0 8px 24px rgba(15,23,42,0.12)',
-            maxHeight: 280, overflowY: 'auto',
-          }}
-        >
-          {loading && suggestions.length === 0 && (
-            <div style={{ padding: '10px 14px', fontSize: '0.82rem', color: '#475569', fontStyle: 'italic' }}>
-              Searching addresses…
+    <>
+      <div 
+        onClick={() => setModalOpen(true)}
+        style={{ ...base, display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', marginBottom: 14, borderColor: '#e2e8f0', color: val ? S900 : S400, ...containerStyle }}
+      >
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{val || ph || "Tap to set address"}</span>
+        <span style={{ fontSize: '0.7rem', color: S400 }}>▼</span>
+      </div>
+
+      {modalOpen && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 300, background: 'rgba(0,0,0,0.55)', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+          <div style={{ background: W, borderRadius: '20px 20px 0 0', padding: 24, maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+              <div style={{ fontWeight: 900, fontSize: '1.05rem', color: S900 }}>Confirm Location {label ? `· ${label}` : ''}</div>
+              <button type="button" onClick={() => setModalOpen(false)} style={{ background: S100, border: 'none', borderRadius: 8, padding: '6px 12px', fontSize: '0.8rem', fontWeight: 700, color: S600, cursor: 'pointer' }}>Cancel</button>
             </div>
-          )}
-          {suggestions.map((s, i) => (
-            <div
-              key={i}
-              role="option"
-              aria-selected={false}
-              onMouseDown={(e) => { e.preventDefault(); pick(s); }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = '#f8fafc'; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = '#fff'; }}
+
+            <button
+              type="button"
+              onClick={captureGps}
+              disabled={gpsCapturing}
               style={{
-                padding: '10px 14px', cursor: 'pointer',
-                borderBottom: i < suggestions.length - 1 ? '1px solid #f1f5f9' : 'none',
-                fontSize: '0.85rem',
+                width: '100%', padding: 14, borderRadius: 12, fontWeight: 800, fontSize: '0.9rem', marginBottom: 16,
+                border: `2px solid ${S200}`, background: W, color: S700, cursor: gpsCapturing ? 'not-allowed' : 'pointer',
+                display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 8
               }}
             >
-              <div style={{ fontWeight: 700, color: '#0f172a' }}>{s.formatted}</div>
-              {s.display && s.display !== s.formatted && (
-                <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: 2 }}>{s.display}</div>
-              )}
+              {gpsCapturing ? '📍 Capturing GPS…' : '📍 Capture Current GPS Location'}
+            </button>
+            {gpsError && <div style={{ fontSize: '0.8rem', color: REDC, marginBottom: 16, textAlign: 'center' }}>{gpsError}</div>}
+
+            <div style={{ background: '#f8fafc', borderRadius: 16, padding: '16px 14px', border: `1.5px solid ${S200}`, marginBottom: 16 }}>
+              <div style={{ fontSize: '0.75rem', fontWeight: 800, color: S600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10 }}>
+                Manual Entry / Search
+              </div>
+              <div style={{ position: 'relative', flex: 1, minHeight: 0 }}>
+                <input
+                  type="text"
+                  value={val}
+                  onChange={e => onTextChange(e.target.value)}
+                  onFocus={(e) => { focusedRef.current = true; onF(e); if (val.length >= 3 && suggestions.length > 0) setOpen(true); }}
+                  onBlur={(e) => { focusedRef.current = false; onB(e); window.setTimeout(() => { if (!focusedRef.current) setOpen(false); }, 180); }}
+                  onKeyDown={(e) => { if (e.key === 'Escape') { setOpen(false); (e.currentTarget as HTMLInputElement).blur(); } }}
+                  autoComplete="off"
+                  placeholder={ph || "Type street address manually..."}
+                  style={{ ...base, width: '100%', background: W, borderColor: '#cbd5e1', ...inputStyle }}
+                />
+                {open && (loading || suggestions.length > 0) && (
+                  <div
+                    role="listbox"
+                    style={{
+                      position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 30,
+                      marginTop: 4, background: '#fff', border: `1.5px solid #cbd5e1`,
+                      borderRadius: 10, boxShadow: '0 8px 24px rgba(15,23,42,0.12)',
+                      maxHeight: 200, overflowY: 'auto',
+                    }}
+                  >
+                    {loading && suggestions.length === 0 && <div style={{ padding: '10px 14px', fontSize: '0.82rem', color: '#475569', fontStyle: 'italic' }}>Searching addresses…</div>}
+                    {suggestions.map((s, i) => (
+                      <div
+                        key={i} role="option" aria-selected={false}
+                        onMouseDown={(e) => { e.preventDefault(); pick(s); }}
+                        onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = '#f8fafc'; }}
+                        onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = '#fff'; }}
+                        style={{ padding: '10px 14px', cursor: 'pointer', borderBottom: i < suggestions.length - 1 ? '1px solid #f1f5f9' : 'none', fontSize: '0.85rem' }}
+                      >
+                        <div style={{ fontWeight: 700, color: '#0f172a' }}>{s.formatted}</div>
+                        {s.display && s.display !== s.formatted && <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: 2 }}>{s.display}</div>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
-          ))}
+
+            <button
+              type="button"
+              onClick={() => setModalOpen(false)}
+              style={{
+                width: '100%', padding: 16, borderRadius: 12, fontWeight: 800, fontSize: '1rem',
+                border: 'none', background: `linear-gradient(135deg,${G},${GDK})`, color: W,
+                cursor: 'pointer', boxShadow: `0 4px 14px ${G}30`, marginTop: 16
+              }}
+            >
+              ✓ Confirm Address
+            </button>
+          </div>
         </div>
       )}
-    </div>
+    </>
   );
 };
 
@@ -1488,7 +1596,7 @@ const CALL_TYPE_LABELS: Record<string, string> = {
   DOD: 'Declaration of Death',
 };
 
-const CallTypePicker = () => {
+const CallTypePicker = ({ onPick }: { onPick?: (o: string) => void }) => {
   const { fd, sf } = useContext(FormContext);
   const selected: string = fd.call_type || '';
   const [animating, setAnimating] = useState(false);
@@ -1523,25 +1631,36 @@ const CallTypePicker = () => {
     setOpen(false);
     if (firstPick) {
       setAnimating(true);
-      window.setTimeout(() => setAnimating(false), 320);
+      window.setTimeout(() => {
+        setAnimating(false);
+        onPick?.(o);
+      }, 320);
+    } else {
+      onPick?.(o);
     }
   };
 
-  // No selection yet — render the full grid.
+  // No selection yet — render full-screen grid filling the mobile viewport.
   if (!selected) {
     return (
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 8, marginBottom: 14 }}>
+      <div style={{
+        display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)',
+        gridAutoRows: '1fr', gap: 8, marginBottom: 14,
+        minHeight: 'min(340px, calc(100vh - 260px))',
+      }}>
         {CALL_TYPE_OPTS.map(o => (
           <button
             key={o} type="button" onClick={() => pick(o)}
             style={{
-              minHeight: 48, padding: '10px 10px', borderRadius: 10,
-              fontSize: '0.82rem', fontWeight: 700, lineHeight: 1.2,
+              padding: '10px 8px', borderRadius: 10,
+              fontSize: '0.83rem', fontWeight: 800, lineHeight: 1.25,
               textAlign: 'center', whiteSpace: 'normal', wordBreak: 'normal',
               overflowWrap: 'break-word', hyphens: 'auto', cursor: 'pointer',
-              border: `2px solid #e2e8f0`, background: '#ffffff', color: '#475569',
-              transition: 'all 0.15s', boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
+              border: `2px solid #e2e8f0`, background: '#ffffff', color: '#334155',
+              transition: 'all 0.15s',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
               WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}
           >{display(o)}</button>
         ))}
@@ -1856,10 +1975,6 @@ const DodFormBody = () => {
       <Lbl t="Case No." />
       <Inp fk="med_aid_dec_death_case_no" ph="Case number" />
 
-      {/* For Resus calls the dispatch times already render inside
-          the Resus subsection above — skip the duplicate here. */}
-      {fd.call_type !== 'RESUS' && <DodDispatchTimesEmbed />}
-
       <Lbl t="Precise location of body" />
       <AddrInp fk="med_aid_dec_death_location" ph="Where the body is located" />
 
@@ -2083,7 +2198,7 @@ const MedAidMore = () => {
                   {fd.call_type !== 'RESUS' && (
                     <>
                       <Lbl t="Resus Level" />
-                      <Toggle fk="med_aid_resus_level" opts={['ILS', 'BLS']} size="sm" />
+                      <Toggle fk="med_aid_resus_level" opts={['ILS', 'ALS']} size="sm" />
                     </>
                   )}
                   <DodDispatchTimesEmbed />
@@ -2339,7 +2454,7 @@ function QuickVitalsOverlay({ onClose, onSave }: { onClose: () => void; onSave: 
         <Lbl t="Time" />
         <input type="time" value={qv.time ?? ''} onChange={e => setQv((p: any) => ({ ...p, time: e.target.value }))} onFocus={onF} onBlur={onB} style={{ ...base, marginBottom: 14 }} />
         <G2>
-          {[{ l: 'HR', k: 'hr', t: 'number', ph: 'bpm' }, { l: 'BP', k: 'bp', ph: '120/80' }, { l: 'SpO₂%', k: 'spo2', t: 'number', ph: '%' }, { l: 'Resp Rate', k: 'resp_rate', t: 'number', ph: '/min' }].map(f => (
+          {[{ l: 'HR', k: 'hr', t: 'number', ph: 'bpm' }, { l: 'BP', k: 'bp', ph: '120/80' }, { l: 'SpO\u2082%', k: 'spo2', t: 'number', ph: '%' }, { l: 'Resp Rate', k: 'resp_rate', t: 'number', ph: '/min' }].map(f => (
             <div key={f.k}><Lbl t={f.l} /><input type={f.t || 'text'} value={qv[f.k] ?? ''} onChange={e => setQv((p: any) => ({ ...p, [f.k]: e.target.value }))} placeholder="" autoComplete="off" onFocus={onF} onBlur={onB} style={{ ...base, marginBottom: 14 }} /></div>
           ))}
         </G2>
@@ -2347,7 +2462,7 @@ function QuickVitalsOverlay({ onClose, onSave }: { onClose: () => void; onSave: 
         <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: 14 }}>
           {['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10'].map(o => { const on = qv.pain === o; return <button key={o} type="button" onClick={() => setQv((p: any) => ({ ...p, pain: o }))} style={{ padding: '9px 10px', borderRadius: 8, fontSize: '0.8rem', fontWeight: 700, border: `2px solid ${on ? G : S200}`, background: on ? GBG : W, color: on ? GDK : S600, cursor: 'pointer' }}>{o}</button>; })}
         </div>
-        <Lbl t="GCS — Eyes / Voice / Motor" />
+        <Lbl t="GCS \u2014 Eyes / Voice / Motor" />
         {[{ l: 'Eyes (4)', k: 'gcs_e', opts: ['1', '2', '3', '4'] }, { l: 'Voice (5)', k: 'gcs_v', opts: ['1', '2', '3', '4', '5'] }, { l: 'Motor (6)', k: 'gcs_m', opts: ['1', '2', '3', '4', '5', '6'] }].map(f => (
           <div key={f.k} style={{ marginBottom: 10 }}>
             <div style={{ fontSize: '0.65rem', fontWeight: 700, color: S600, marginBottom: 5 }}>{f.l}</div>
@@ -2391,15 +2506,12 @@ function GeoConfirmOverlay({
   // True when that field already has a value the crew typed — we don't
   // overwrite, but we still show the resolved address so they can compare.
   targetFieldOccupied: boolean;
-  onConfirm: () => void;
+  onConfirm: (manualAddress?: string) => void;
   onRecapture: () => void;
   onCancel: () => void;
 }) {
-  const accColor = !coords
-    ? S600
-    : coords.accuracy <= 25 ? GDK
-      : coords.accuracy <= 100 ? '#92400e'
-        : REDC;
+  const [manualAddress, setManualAddress] = useState('');
+  const gpsUnavailable = !capturing && !coords;
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 250, background: 'rgba(0,0,0,0.55)', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
       <div style={{ background: W, borderRadius: '20px 20px 0 0', padding: 24, maxHeight: '85vh', overflowY: 'auto' }}>
@@ -2415,34 +2527,34 @@ function GeoConfirmOverlay({
           </div>
         )}
 
-        {!capturing && coords && (
-          <div style={{ padding: 16, background: GBG, borderRadius: 12, border: `1.5px solid ${G}40`, marginBottom: 16 }}>
-            <div style={{ fontSize: '0.7rem', fontWeight: 800, color: GDK, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>Captured coordinates</div>
-            <div style={{ fontFamily: 'monospace', fontSize: '0.95rem', fontWeight: 800, color: S900, marginBottom: 4 }}>
-              {coords.latitude.toFixed(6)}, {coords.longitude.toFixed(6)}
+        {gpsUnavailable && (
+          <>
+            <div style={{ padding: 16, background: '#fef2f2', borderRadius: 12, border: `1.5px solid ${REDC}40`, marginBottom: 16 }}>
+              <div style={{ fontSize: '0.7rem', fontWeight: 800, color: REDC, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>Location unavailable</div>
+              <div style={{ fontSize: '0.85rem', color: S700, marginBottom: 6 }}>{error || 'No GPS coordinates were captured.'}</div>
+              <div style={{ fontSize: '0.75rem', color: S600 }}>Enter the address manually below, then tap <strong>Confirm &amp; Mark Time</strong> to continue.</div>
             </div>
-            <div style={{ fontSize: '0.78rem', color: accColor, fontWeight: 700, marginBottom: 10 }}>
-              ± {Math.round(coords.accuracy)} m accuracy
+
+            {/* Manual address entry when GPS fails */}
+            <div style={{ background: '#f8fafc', padding: '16px 14px', borderRadius: 16, border: `1.5px solid ${S200}`, marginBottom: 16 }}>
+              <div style={{ fontSize: '0.7rem', fontWeight: 800, color: S600, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
+                {targetFieldLabel || 'Location'} (manual entry)
+              </div>
+              <input
+                type="text"
+                value={manualAddress}
+                onChange={e => setManualAddress(e.target.value)}
+                onFocus={onF}
+                onBlur={onB}
+                placeholder="e.g. 12 Main Street, Sandton"
+                autoComplete="off"
+                style={{ ...base, background: W, borderColor: '#cbd5e1', width: '100%', marginBottom: 0 }}
+              />
             </div>
-            <a
-              href={`https://www.google.com/maps?q=${coords.latitude},${coords.longitude}`}
-              target="_blank" rel="noreferrer"
-              style={{ fontSize: '0.78rem', fontWeight: 700, color: GDK, textDecoration: 'underline' }}
-            >
-              View on map ↗
-            </a>
-          </div>
+          </>
         )}
 
-        {!capturing && !coords && (
-          <div style={{ padding: 16, background: '#fef2f2', borderRadius: 12, border: `1.5px solid ${REDC}40`, marginBottom: 16 }}>
-            <div style={{ fontSize: '0.7rem', fontWeight: 800, color: REDC, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>Location unavailable</div>
-            <div style={{ fontSize: '0.85rem', color: S700, marginBottom: 6 }}>{error || 'No GPS coordinates were captured.'}</div>
-            <div style={{ fontSize: '0.75rem', color: S600 }}>You can still mark the time without GPS, or retry the capture.</div>
-          </div>
-        )}
-
-        {/* ── Resolved street address (shown for every Mark Time when coords resolved) ── */}
+        {/* ── Resolved street address (shown when GPS succeeded) ── */}
         {coords && (
           <div style={{ padding: 16, background: '#eff6ff', borderRadius: 12, border: `1.5px solid #93c5fd`, marginBottom: 16 }}>
             <div style={{ fontSize: '0.7rem', fontWeight: 800, color: '#1d4ed8', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
@@ -2456,7 +2568,7 @@ function GeoConfirmOverlay({
                 <div style={{ fontSize: '0.95rem', fontWeight: 700, color: S900, marginBottom: 6 }}>{address.street}</div>
                 {targetFieldLabel && targetFieldOccupied && (
                   <div style={{ fontSize: '0.72rem', color: '#92400e' }}>
-                    {`“${targetFieldLabel}” already has a value — your existing entry will be kept. Review above and edit the field manually if needed.`}
+                    {`"${targetFieldLabel}" already has a value — your existing entry will be kept. Review above and edit the field manually if needed.`}
                   </div>
                 )}
               </>
@@ -2486,22 +2598,140 @@ function GeoConfirmOverlay({
         </div>
         <button
           type="button"
-          onClick={onConfirm}
-          disabled={capturing || !coords}
+          onClick={() => onConfirm(gpsUnavailable ? (manualAddress.trim() || undefined) : undefined)}
+          disabled={capturing}
           style={{
             width: '100%', padding: 16, borderRadius: 12, fontWeight: 800, fontSize: '1rem',
             border: 'none',
-            background: (capturing || !coords) ? S200 : `linear-gradient(135deg,${G},${GDK})`,
-            color: (capturing || !coords) ? S600 : W,
-            cursor: (capturing || !coords) ? 'not-allowed' : 'pointer',
-            boxShadow: (capturing || !coords) ? 'none' : `0 4px 14px ${G}30`,
+            background: capturing ? S200 : `linear-gradient(135deg,${G},${GDK})`,
+            color: capturing ? S600 : W,
+            cursor: capturing ? 'not-allowed' : 'pointer',
+            boxShadow: capturing ? 'none' : `0 4px 14px ${G}30`,
           }}
         >
-          ✓ Confirm & Mark Time
+          ✓ Confirm &amp; Mark Time
         </button>
       </div>
     </div>
   );
+}
+
+const FadeIn = ({ children, show, delay = 0 }: { children: React.ReactNode; show: boolean; delay?: number }) => {
+  const [visible, setVisible] = useState(false);
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+  
+  // Scale down delay for mobile to make it super snappy (max 50ms)
+  const activeDelay = isMobile ? Math.min(delay, 50) : delay;
+  const duration = isMobile ? '0.18s' : '0.28s';
+  const translateAmt = isMobile ? '6px' : '10px';
+
+  useEffect(() => {
+    if (show) {
+      const t = setTimeout(() => setVisible(true), activeDelay);
+      return () => clearTimeout(t);
+    }
+    setVisible(false);
+  }, [show, activeDelay]);
+
+  if (!show && !visible) return null;
+  return (
+    <div style={{
+      opacity: visible ? 1 : 0,
+      transform: visible ? 'translateY(0)' : `translateY(${translateAmt})`,
+      transition: `opacity ${duration} cubic-bezier(0.25, 1, 0.5, 1), transform ${duration} cubic-bezier(0.25, 1, 0.5, 1)`,
+    }}>
+      {children}
+    </div>
+  );
+};
+
+const CTA = ({ label, color = '#22c55e', onClick }: { label: string; color?: string; onClick: () => void }) => (
+  <button type="button" onClick={onClick} style={{ width: '100%', padding: 18, borderRadius: 14, fontSize: '1rem', fontWeight: 800, border: 'none', background: `linear-gradient(135deg, ${color}, ${color}cc)`, color: '#ffffff', cursor: 'pointer', marginTop: 8, boxShadow: `0 6px 20px ${color}40`, letterSpacing: '0.04em' }}>
+    {label}
+  </button>
+);
+
+const EnRouteOverlay = ({ dispatchedAt, onDoubleTap }: { dispatchedAt: string; onDoubleTap: () => void }) => {
+  const [, tick] = useState(0);
+  const lastTapRef = useRef<number>(0);
+
+  useEffect(() => {
+    const id = setInterval(() => tick(t => t + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const elapsed = Math.floor((Date.now() - new Date(dispatchedAt).getTime()) / 1000);
+  const mins = Math.floor(elapsed / 60);
+  const secs = elapsed % 60;
+
+  const handleTap = () => {
+    const now = Date.now();
+    if (now - lastTapRef.current < 400) {
+      onDoubleTap();
+    }
+    lastTapRef.current = now;
+  };
+
+  return (
+    <div
+      onClick={handleTap}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 9999, background: '#0f172a', display: 'flex',
+        flexDirection: 'column', justifyContent: 'center', alignItems: 'center', color: '#ffffff',
+        userSelect: 'none', WebkitUserSelect: 'none'
+      }}
+    >
+      <div style={{ fontSize: '1rem', fontWeight: 700, color: '#94a3b8', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 20 }}>
+        En Route to Scene
+      </div>
+      <div style={{ fontSize: '5rem', fontWeight: 900, fontVariantNumeric: 'tabular-nums', tracking: '-0.02em', textShadow: '0 0 40px rgba(91,141,239,0.3)', color: '#5b8def' }}>
+        {String(mins).padStart(2, '0')}:{String(secs).padStart(2, '0')}
+      </div>
+      <div style={{ marginTop: 40, padding: '16px 24px', background: 'rgba(255,255,255,0.05)', borderRadius: 100, backdropFilter: 'blur(10px)', color: '#94a3b8', fontSize: '0.9rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 10, animation: 'pulse 2s infinite' }}>
+        <div style={{ width: 10, height: 10, borderRadius: 5, background: '#5b8def' }} />
+        Double tap anywhere when on scene
+      </div>
+    </div>
+  );
+};
+
+
+// ── Loaded-data normalization ────────────────────────────────────────────────
+// The backend can hand back fields whose runtime type differs from what the form
+// assumes: DB columns are numeric, and the OCR/extraction pipeline pre-fills
+// form_data with whatever it parsed. TypeScript can't catch this — the API
+// response is `any` — so a single field arriving as a number where the UI calls
+// `.trim()`/`.split()` used to throw a ReferenceError and the ErrorBoundary took
+// down the whole form (e.g. a numeric `rht_call_out_fee`, or `km_dispatched`).
+//
+// Coerce every field the UI consumes as text/list to the right type here, at the
+// one load boundary, so that entire class of crash can't recur.
+//
+// ⚠️  When you add a field the form treats as text or a list, add its key to the
+//     matching set below. This is the single place that guarantees its type.
+const PRF_TEXT_FIELDS = [
+  'allergies', 'handover_doctor_email', 'medical_scheme',
+  'preauth_number', 'rht_call_out_fee',
+];
+const PRF_ARRAY_FIELDS = [
+  'airway_interventions', 'circulation_interventions',
+  'km_review_flags', 'med_aid_dec_death_documents',
+];
+
+function normalizeFormData(data: Record<string, any>): Record<string, any> {
+  const out = { ...(data || {}) };
+  for (const k of PRF_TEXT_FIELDS) {
+    // Leave null/undefined (callers guard with `|| ''`); stringify anything that
+    // isn't already a string so string methods are always safe. These are all
+    // free-text/identifier fields — none are 0/1 flags, so String() is lossless.
+    if (out[k] != null && typeof out[k] !== 'string') out[k] = String(out[k]);
+  }
+  for (const k of PRF_ARRAY_FIELDS) {
+    // A non-array here means corrupt/legacy data; the UI iterates these, so an
+    // empty array degrades gracefully instead of crashing on `.map`.
+    if (out[k] != null && !Array.isArray(out[k])) out[k] = [];
+  }
+  return out;
 }
 
 export default function DigitalPRFForm() {
@@ -2517,19 +2747,48 @@ export default function DigitalPRFForm() {
     setMaxPhase(prev => (phase > prev ? phase : prev));
   }, [phase]);
 
+  const forceScrollToTop = () => {
+    if (typeof window === 'undefined') return;
+    const docEl = document.documentElement;
+    const originalBehavior = docEl ? docEl.style.scrollBehavior : '';
+    if (docEl) docEl.style.scrollBehavior = 'auto';
+
+    const performScroll = () => {
+      window.scrollTo(0, 0);
+      if (docEl) docEl.scrollTop = 0;
+      if (document.body) document.body.scrollTop = 0;
+    };
+
+    performScroll();
+    requestAnimationFrame(performScroll);
+    setTimeout(performScroll, 50);
+    setTimeout(performScroll, 150);
+    setTimeout(performScroll, 300);
+
+    setTimeout(() => {
+      if (docEl) docEl.style.scrollBehavior = originalBehavior;
+    }, 400);
+  };
+
   // When the crew advances or steps back through the journey, the new phase
   // should always land at the top of the screen — not wherever the previous
   // phase happened to be scrolled to. Without this, navigating from Clinical
   // (a long phase) to Transport drops the user mid-page, looking blank.
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      window.scrollTo({ top: 0, behavior: 'auto' });
-    }
+    forceScrollToTop();
   }, [phase]);
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
+
+  // Ensure that when the PRF successfully loads, the page scrolls to the top
+  // so the Call Type title and choices are fully visible without any scroll drift.
+  useEffect(() => {
+    if (!loading) {
+      forceScrollToTop();
+    }
+  }, [loading]);
   // `saving` was previously surfaced in the sticky-header save icon which
   // has been removed. We keep the setter so doSave() still records the
   // in-flight state for any future indicator, but the value itself is unused.
@@ -2541,6 +2800,25 @@ export default function DigitalPRFForm() {
   const [prfMeta, setPrfMeta] = useState<any>({});
 
   const [fd, setFd] = useState<Record<string, any>>({});
+
+  // Auto-skip hidden phases if the user lands on them (e.g. from an old draft)
+  useEffect(() => {
+    const hidden = fd.med_aid_dec_death
+      ? new Set([1, 3, 4, 5, 6])
+      : fd.call_type === 'RESUS'
+      ? new Set([1, 3, 6])
+      : fd.call_type === 'PRIMARY'
+      ? new Set([1, 3, 6])
+      : fd.call_type === 'RHT'
+      ? new Set([1, 3, 4, 5, 6])
+      : new Set<number>([1, 3, 6]);
+
+    if (hidden.has(phase)) {
+      let next = phase + 1;
+      while (next < PHASES.length && hidden.has(next)) next++;
+      if (next < PHASES.length) setPhase(next);
+    }
+  }, [phase, fd.call_type, fd.med_aid_dec_death]);
   const [timestamps, setTs] = useState<Record<string, string | null>>({});
   const [kms, setKms] = useState<Record<string, string>>({});
   // GPS coordinates the crew has confirmed for each timestamp field.
@@ -2577,8 +2855,62 @@ export default function DigitalPRFForm() {
   const [dismissedTreating, setDismissedTreating] = useState(false);
   const [startedExam, setStartedExam] = useState(false);
   const [transferSubtypeOpen, setTransferSubtypeOpen] = useState(false);
+  const [quotedAmountModalOpen, setQuotedAmountModalOpen] = useState(false);
+  const [preauthModalOpen, setPreauthModalOpen] = useState(false);
   const [rhtCallOutFeeOpen, setRhtCallOutFeeOpen] = useState(false);
   const [enRouteOverlay, setEnRouteOverlay] = useState(false);
+  const [assessmentModalOpen, setAssessmentModalOpen] = useState(false);
+  const [monitoringModalOpen, setMonitoringModalOpen] = useState(false);
+
+  const [preauthVisible, setPreauthVisible] = useState(false);
+  const quotedAmountRef = useRef<HTMLInputElement>(null);
+  const preauthRef = useRef<HTMLInputElement>(null);
+  const [dispatchPromptOpen, setDispatchPromptOpen] = useState(false);
+  const dispatchKmRef = useRef<HTMLInputElement>(null);
+  const [onScenePromptOpen, setOnScenePromptOpen] = useState(false);
+  const onSceneKmRef = useRef<HTMLInputElement>(null);
+  const isMobileView = typeof window !== 'undefined' && window.innerWidth < 768;
+
+  // ── IFT/IHT Automation Flow ──
+  // 1. Automatically open the subtype picker overlay when IFT/IHT is chosen
+  useEffect(() => {
+    if (fd.call_type === 'IHT' && !fd.transfer_subtype && !loading) {
+      setTransferSubtypeOpen(true);
+    }
+  }, [fd.call_type, fd.transfer_subtype, loading]);
+
+  // 2. Automatically open and focus the quoted payout amount modal when subtype is selected
+  useEffect(() => {
+    if (fd.call_type === 'IHT' && !!fd.transfer_subtype && !loading && !preauthVisible && !fd.med_aid_quoted_amount) {
+      setQuotedAmountModalOpen(true);
+    }
+  }, [fd.call_type, fd.transfer_subtype, loading, preauthVisible]);
+
+  useEffect(() => {
+    if (quotedAmountModalOpen) {
+      const t = setTimeout(() => {
+        quotedAmountRef.current?.focus();
+      }, 250);
+      return () => clearTimeout(t);
+    }
+  }, [quotedAmountModalOpen]);
+
+  // 3. Pre-auth card visibility sync with existing data
+  useEffect(() => {
+    if (fd.preauth_number) {
+      setPreauthVisible(true);
+    }
+  }, [fd.preauth_number]);
+
+  // 4. Automatically focus pre-auth field when its modal becomes visible
+  useEffect(() => {
+    if (preauthModalOpen) {
+      const t = setTimeout(() => {
+        preauthRef.current?.focus();
+      }, 250);
+      return () => clearTimeout(t);
+    }
+  }, [preauthModalOpen]);
 
   const profile = JSON.parse(localStorage.getItem('crew_profile') || '{}');
   const dirtyRef = useRef(false);
@@ -2625,7 +2957,7 @@ export default function DigitalPRFForm() {
     if (!data.manager_qualifications && partnerQ) data.manager_qualifications = partnerQ;
 
     setPrfMeta(prf);
-    setFd(data);
+    setFd(normalizeFormData(data));
     setVehicle(prf.vehicle_id || '');
     setCrew2Id(prf.crew_member_2_id || '');
     setVitals(data.vitals_sets || []);
@@ -2633,7 +2965,9 @@ export default function DigitalPRFForm() {
     setMedRows(data.medications || []);
     const ts: Record<string, string | null> = {};
     const km: Record<string, string> = {};
-    ALL_TIME_ROWS.forEach(r => { ts[r.timeKey] = prf[r.timeKey] || null; km[r.kmKey] = prf[r.kmKey] || ''; });
+    // Coerce km to a string — the backend stores odometer values numerically, and
+    // KmInput / fmt() call .split() on them. `?? ''` (not `|| ''`) so a legit 0 is kept.
+    ALL_TIME_ROWS.forEach(r => { ts[r.timeKey] = prf[r.timeKey] || null; km[r.kmKey] = prf[r.kmKey] != null ? String(prf[r.kmKey]) : ''; });
     setTs(ts);
     setKms(km);
     setGeos(prf.geo_locations || {});
@@ -2858,11 +3192,7 @@ export default function DigitalPRFForm() {
   // overlay renders and the crew sees the captured coordinates before they're
   // committed. `coords` is null when the browser denied geolocation or the
   // request timed out — the crew can still mark the time without GPS.
-  type ResolvedAddress = {
-    street: string;          // best human-readable single-line address
-    suburb: string | null;   // suburb / neighbourhood, when available
-    raw: any;                // full Nominatim payload, for debugging
-  };
+
   type PendingMark = {
     timeKey: string;
     kmKey: string;
@@ -2922,27 +3252,7 @@ export default function DigitalPRFForm() {
   // satisfied here (one request per Mark-Time tap). Nominatim ignores the
   // User-Agent header from browsers anyway (the browser overrides it), so the
   // Referer carries identification.
-  const reverseGeocode = useCallback(async (
-    lat: number, lng: number, signal: AbortSignal,
-  ): Promise<ResolvedAddress | null> => {
-    // Zoom 18 is street-level — high enough that we get house numbers and
-    // road names rather than just a suburb pin. addressdetails=1 expands
-    // the response with structured province / postcode / county fields
-    // that `buildFullAddress` uses to assemble the full single-line
-    // address written into the form.
-    const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&addressdetails=1&lat=${lat}&lon=${lng}`;
-    const res = await fetch(url, { signal, headers: { 'Accept': 'application/json' } });
-    if (!res.ok) throw new Error(`geocoder ${res.status}`);
-    const data = await res.json();
-    if (!data || !data.address) return null;
-    const a = data.address;
-    const street = buildFullAddress(a, data.display_name);
-    return {
-      street: street || (data.display_name || ''),
-      suburb: a.suburb || a.neighbourhood || a.city_district || null,
-      raw: data,
-    };
-  }, []);
+
 
   // Public trigger from "Mark Time" / "Edit" buttons and the auto-advance hook.
   // Captures GPS asynchronously, then reverse-geocodes the coords so the crew
@@ -3022,7 +3332,7 @@ export default function DigitalPRFForm() {
       },
       { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 },
     );
-  }, [reverseGeocode]);
+  }, []);
 
   const handleKmChange = (kmKey: string, value: string) => {
     setKms(prev => ({ ...prev, [kmKey]: value }));
@@ -3117,6 +3427,17 @@ export default function DigitalPRFForm() {
 
     const kmRow = ALL_TIME_ROWS.find(r => r.phase === fromPhase);
     if (kmRow) {
+      const hasTime = !!timestamps[kmRow.timeKey];
+      if (!hasTime) {
+        blockers.push({
+          id: `INLINE-TIME-${kmRow.timeKey}`,
+          severity: 'block',
+          field: kmRow.timeKey,
+          message: `Capture the ${kmRow.label} before advancing.`,
+          source: 'Operational — time captures required at every leg.',
+        });
+      }
+
       const v = kms[kmRow.kmKey];
       const blank = v === undefined || v === null || (typeof v === 'string' && v.trim() === '');
       if (blank) {
@@ -3127,6 +3448,41 @@ export default function DigitalPRFForm() {
           message: `Enter the ${kmRow.label} odometer reading (km) before advancing.`,
           source: 'Operational — odometer captures required at every leg.',
         });
+      }
+    }
+
+    if (fromPhase === 1) {
+      if (!timestamps.time_dispatched || !kms.km_dispatched) {
+        blockers.push({
+          id: 'INLINE-MISSING-DISPATCH',
+          severity: 'block',
+          field: 'time_dispatched',
+          message: 'Dispatch Information (Time & KM) is required before advancing. Please return to the Dispatch tab.',
+          source: 'Operational — required sequential flow.',
+        });
+      }
+
+      if (['IFT', 'IHT'].includes(fd.call_type)) {
+        const blankQuoted = !fd.med_aid_quoted_amount || String(fd.med_aid_quoted_amount).trim() === '';
+        if (blankQuoted) {
+          blockers.push({
+            id: 'INLINE-QUOTED-AMOUNT',
+            severity: 'block',
+            field: 'med_aid_quoted_amount',
+            message: 'Quoted Payout Amount (R) is required before advancing.',
+            source: 'Operational — required for IFT/IHT billing.',
+          });
+        }
+        const blankPreauth = !fd.preauth_number || String(fd.preauth_number).trim() === '';
+        if (blankPreauth) {
+          blockers.push({
+            id: 'INLINE-PREAUTH',
+            severity: 'block',
+            field: 'preauth_number',
+            message: 'Pre-Auth No. is required before advancing.',
+            source: 'Operational — required for IFT/IHT billing.',
+          });
+        }
       }
     }
 
@@ -3211,14 +3567,10 @@ export default function DigitalPRFForm() {
         timeKey = undefined;
         kmKey = undefined;
       }
-    } else if (fd.call_type === 'RESUS') {
-      // Resus skips En Route (1) — the dispatch + on-scene times are
-      // already captured inline on the Dispatch screen — Clinical (3)
-      // since the clinical body is rendered inline there too, and
-      // Complete (6) because the Available time + signatures + submit
-      // render inline at the bottom of Handover. Auto-capture is
-      // suppressed so the skip doesn't overwrite times the crew already
-      // marked on a different screen.
+    } else if (['RESUS', 'PRIMARY', 'COURTESY', 'IFT', 'IHT'].includes(fd.call_type)) {
+      // These call types skip En Route (1), Clinical (3), and Complete (6).
+      // The clinical body is rendered inline on Dispatch or skipped, and
+      // submission happens on Handover (or On Scene for some).
       const hidden = new Set([1, 3, 6]);
       if (hidden.has(target)) {
         while (target < PHASES.length && hidden.has(target)) target++;
@@ -3541,7 +3893,7 @@ export default function DigitalPRFForm() {
     const geo = geos[row.timeKey];
     const addressKey = `address_${row.timeKey}`;
     const addressVal: string = fd[addressKey] || '';
-    const addressInput = (
+    const addressInput = has ? (
       <AddrInp
         fk={addressKey}
         ph={timeRowsNarrow ? 'Address' : ''}
@@ -3551,6 +3903,15 @@ export default function DigitalPRFForm() {
           borderRadius: 7, border: `1px solid ${S200}`, background: W,
           color: S900, outline: 'none', boxSizing: 'border-box',
           fontFamily: 'inherit',
+        }}
+      />
+    ) : (
+      <div
+        onClick={() => markTime(row.timeKey, row.kmKey)}
+        style={{
+          width: '100%', padding: '16.5px 10px',
+          borderRadius: 7, border: `1px solid ${S200}`, background: W,
+          cursor: 'pointer', boxSizing: 'border-box'
         }}
       />
     );
@@ -3599,7 +3960,18 @@ export default function DigitalPRFForm() {
             )}
           </div>
           <div style={{ padding: '7px 4px', borderRight: timeRowsNarrow ? 'none' : `1px solid ${S200}`, minWidth: 0 }}>
-            <KmInput kmKey={row.kmKey} value={kms[row.kmKey] ?? ''} onChange={handleKmChange} onCommit={handleKmCommit} />
+            {has ? (
+              <KmInput kmKey={row.kmKey} value={kms[row.kmKey] ?? ''} onChange={handleKmChange} onCommit={handleKmCommit} />
+            ) : (
+              <div
+                onClick={() => markTime(row.timeKey, row.kmKey)}
+                style={{
+                  width: '100%', padding: '17px 6px',
+                  borderRadius: 10, border: `1.5px solid #e2e8f0`, background: '#ffffff',
+                  cursor: 'pointer', boxSizing: 'border-box'
+                }}
+              />
+            )}
           </div>
           {!timeRowsNarrow && (
             <div style={{ padding: '7px 8px', minWidth: 0 }}>{addressInput}</div>
@@ -3767,127 +4139,7 @@ export default function DigitalPRFForm() {
     );
   };
 
-  // ── CTA Button ────────────────────────────────────────────────────────────
-  const CTA = ({ label, color = G, onClick }: { label: string; color?: string; onClick: () => void }) => (
-    <button type="button" onClick={onClick} style={{ width: '100%', padding: 18, borderRadius: 14, fontSize: '1rem', fontWeight: 800, border: 'none', background: `linear-gradient(135deg, ${color}, ${color}cc)`, color: W, cursor: 'pointer', marginTop: 8, boxShadow: `0 6px 20px ${color}40`, letterSpacing: '0.04em' }}>
-      {label}
-    </button>
-  );
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // PHASE RENDERERS
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  // ── FadeIn wrapper ────────────────────────────────────────────────────────
-  const FadeIn = ({ children, show, delay = 0 }: { children: React.ReactNode; show: boolean; delay?: number }) => {
-    const [visible, setVisible] = useState(false);
-    useEffect(() => {
-      if (show) {
-        const t = setTimeout(() => setVisible(true), delay);
-        return () => clearTimeout(t);
-      }
-      setVisible(false);
-    }, [show, delay]);
-    if (!show && !visible) return null;
-    return (
-      <div style={{
-        opacity: visible ? 1 : 0,
-        transform: visible ? 'translateY(0)' : 'translateY(12px)',
-        transition: 'opacity 0.35s ease, transform 0.35s ease',
-      }}>
-        {children}
-      </div>
-    );
-  };
-
-  // ── En Route Overlay ──────────────────────────────────────────────────────
-  const EnRouteOverlay = ({ dispatchedAt, onDoubleTap }: { dispatchedAt: string; onDoubleTap: () => void }) => {
-    const [, tick] = useState(0);
-    const lastTapRef = useRef<number>(0);
-
-    useEffect(() => {
-      const id = setInterval(() => tick(t => t + 1), 1000);
-      return () => clearInterval(id);
-    }, []);
-
-    const elapsed = Math.floor((Date.now() - new Date(dispatchedAt).getTime()) / 1000);
-    const mins = Math.floor(elapsed / 60);
-    const secs = elapsed % 60;
-
-    const handleTap = () => {
-      const now = Date.now();
-      if (now - lastTapRef.current < 400) {
-        onDoubleTap();
-      }
-      lastTapRef.current = now;
-    };
-
-    return (
-      <div
-        onClick={handleTap}
-        style={{
-          position: 'fixed', inset: 0, zIndex: 9998,
-          background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
-          display: 'flex', flexDirection: 'column',
-          alignItems: 'center', justifyContent: 'center',
-          padding: 32, userSelect: 'none',
-          WebkitTapHighlightColor: 'transparent',
-          touchAction: 'manipulation',
-        }}
-      >
-        {/* Pulsing ring animation */}
-        <div style={{
-          width: 120, height: 120, borderRadius: '50%',
-          border: `3px solid ${G}`,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          marginBottom: 32, position: 'relative',
-          animation: 'enRoutePulse 2s ease-in-out infinite',
-        }}>
-          <div style={{
-            fontSize: '2.4rem', fontWeight: 900, color: W,
-            fontFamily: 'monospace', letterSpacing: '-0.02em',
-          }}>
-            {String(mins).padStart(2, '0')}:{String(secs).padStart(2, '0')}
-          </div>
-        </div>
-
-        {/* Status bar */}
-        <div style={{
-          background: 'rgba(91,141,239,0.15)', border: `1.5px solid ${G}40`,
-          borderRadius: 16, padding: '14px 24px', marginBottom: 24,
-        }}>
-          <div style={{
-            fontSize: '0.72rem', fontWeight: 800, color: G,
-            textTransform: 'uppercase', letterSpacing: '0.12em',
-            textAlign: 'center',
-          }}>EN ROUTE</div>
-        </div>
-
-        {/* Instruction */}
-        <div style={{
-          fontSize: '1.3rem', fontWeight: 800, color: W,
-          textAlign: 'center', lineHeight: 1.4,
-          maxWidth: 280,
-        }}>
-          Double tap when arrived on scene
-        </div>
-
-        <div style={{
-          fontSize: '0.75rem', color: S400, marginTop: 16,
-          textAlign: 'center',
-        }}>
-          Tap twice quickly to mark arrival
-        </div>
-
-        <style>{`
-          @keyframes enRoutePulse {
-            0%, 100% { box-shadow: 0 0 0 0 rgba(91,141,239,0.4); }
-            50% { box-shadow: 0 0 0 20px rgba(91,141,239,0); }
-          }
-        `}</style>
-      </div>
-    );
-  };
 
   // ── Phase 0: DISPATCH ─────────────────────────────────────────────────────
   const P0 = () => {
@@ -3910,10 +4162,20 @@ export default function DigitalPRFForm() {
       </button>
     );
 
+    const isMobileView = typeof window !== 'undefined' && window.innerWidth < 768;
+
     return (
-    <>
+    <div>
       <SHdr t="Call Type" />
-      <CallTypePicker />
+      <CallTypePicker onPick={(type) => {
+        if (type === 'PRIMARY' || type === 'RESUS' || type === 'COURTESY' || type === 'DOD') {
+          setDispatchPromptOpen(true);
+          // Wait briefly for the modal to render before focusing the input
+          window.setTimeout(() => dispatchKmRef.current?.focus(), 50);
+        } else if (type === 'RHT') {
+          setRhtCallOutFeeOpen(true);
+        }
+      }} />
 
       {/* ── IFT/IHT flow ── */}
       <FadeIn show={fd.call_type === 'IHT'} delay={150}>
@@ -3938,14 +4200,42 @@ export default function DigitalPRFForm() {
       <FadeIn show={fd.call_type === 'IHT' && !!fd.transfer_subtype} delay={150}>
         <div style={{ marginBottom: 14 }}>
           <Lbl t="Quoted Payout Amount (R)" />
-          <Inp fk="med_aid_quoted_amount" ph="0.00 — leave blank if not quoted" />
+          <div
+            onClick={() => setQuotedAmountModalOpen(true)}
+            style={{
+              width: '100%', padding: '12px 14px', fontSize: '0.88rem',
+              borderRadius: 10, border: `1.5px solid ${S200}`, background: W,
+              color: fd.med_aid_quoted_amount ? S900 : S400, cursor: 'pointer',
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.03)'
+            }}
+          >
+            <span style={{ fontWeight: fd.med_aid_quoted_amount ? 700 : 400 }}>
+              {fd.med_aid_quoted_amount ? `R ${fd.med_aid_quoted_amount}` : 'Tap to enter amount…'}
+            </span>
+            <span style={{ fontSize: '0.7rem' }}>▼</span>
+          </div>
         </div>
       </FadeIn>
 
-      <FadeIn show={['IHT', 'IFT'].includes(fd.call_type) && (fd.call_type !== 'IHT' || !!fd.transfer_subtype)} delay={150}>
+      <FadeIn show={['IHT', 'IFT'].includes(fd.call_type) && (fd.call_type !== 'IHT' || !!fd.transfer_subtype) && preauthVisible} delay={150}>
         <div style={{ marginBottom: 14 }}>
           <Lbl t="Pre-Auth No." req />
-          <Inp fk="preauth_number" ph="Pre-authorisation reference" />
+          <div
+            onClick={() => setPreauthModalOpen(true)}
+            style={{
+              width: '100%', padding: '12px 14px', fontSize: '0.88rem',
+              borderRadius: 10, border: `1.5px solid ${S200}`, background: W,
+              color: fd.preauth_number ? S900 : S400, cursor: 'pointer',
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.03)'
+            }}
+          >
+            <span style={{ fontWeight: fd.preauth_number ? 700 : 400 }}>
+              {fd.preauth_number ? fd.preauth_number : 'Tap to enter Pre-Auth No.…'}
+            </span>
+            <span style={{ fontSize: '0.7rem' }}>▼</span>
+          </div>
         </div>
       </FadeIn>
 
@@ -3972,7 +4262,7 @@ export default function DigitalPRFForm() {
       {/* ── Dispatch Time — all call types except IFT/IHT (which waits for preauth) ── */}
       <FadeIn show={
         (fd.call_type === 'PRIMARY' || fd.call_type === 'COURTESY' || fd.call_type === 'RESUS') ||
-        (fd.call_type === 'RHT') ||
+        (fd.call_type === 'RHT' && !!(fd.rht_call_out_fee || '').trim()) ||
         (fd.call_type === 'DOD') ||
         (['IHT', 'IFT'].includes(fd.call_type) && !!(fd.preauth_number || '').trim())
       } delay={200}>
@@ -4005,16 +4295,65 @@ export default function DigitalPRFForm() {
           dispatchedAt={timestamps.time_dispatched}
           onDoubleTap={() => {
             setEnRouteOverlay(false);
-            markTime('time_on_scene', 'km_on_scene');
+            setOnScenePromptOpen(true);
           }}
         />
       )}
 
-      {/* ── DOD: keep existing layout ── */}
-      {fd.call_type === 'DOD' && (
-        <Card>
-          <MedAidMore />
-        </Card>
+      {/* ── DOD: Declaration of Death form button — visible after on-scene captured ── */}
+      {fd.call_type === 'DOD' && timestamps.time_on_scene && kms.km_on_scene && (
+        <div style={{ marginTop: 8 }}>
+          {/* Toggle button — neutral system style, no red */}
+          <button
+            type="button"
+            onClick={() => sf('med_aid_dec_death', !fd.med_aid_dec_death)}
+            aria-pressed={!!fd.med_aid_dec_death}
+            aria-expanded={!!fd.med_aid_dec_death}
+            style={{
+              width: '100%', padding: '14px 16px',
+              borderRadius: fd.med_aid_dec_death ? '12px 12px 0 0' : 12,
+              fontSize: '0.88rem', fontWeight: 800,
+              cursor: 'pointer', textAlign: 'left',
+              border: `1.5px solid ${fd.med_aid_dec_death ? S300 : S200}`,
+              borderBottom: fd.med_aid_dec_death ? `1.5px solid ${S200}` : `1.5px solid ${S200}`,
+              background: fd.med_aid_dec_death ? S50 : W,
+              color: S800,
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              gap: 12, transition: 'all 0.2s ease',
+              boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
+            }}
+          >
+            <span style={{ fontWeight: 800 }}>Declaration of Death Form</span>
+            <div style={{
+              width: 26, height: 26, borderRadius: 7, flexShrink: 0,
+              background: S100,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: '0.72rem', color: S600,
+              transform: fd.med_aid_dec_death ? 'rotate(180deg)' : 'rotate(0deg)',
+              transition: 'transform 0.25s ease',
+            }}>
+              ▼
+            </div>
+          </button>
+
+          {/* Expanded form body */}
+          {fd.med_aid_dec_death && (
+            <div style={{
+              border: `1.5px solid ${S200}`,
+              borderTop: 'none',
+              borderRadius: '0 0 12px 12px',
+              padding: '20px 16px',
+              background: W,
+              boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+            }}>
+              <DodFormBody />
+              {/* Patient Information CTA sits at the bottom of the DOD form */}
+              <div style={{ marginTop: 20 }}>
+                {CTA({ label: 'Patient Information  →', onClick: () => advancePhase(2) })}
+              </div>
+            </div>
+          )}
+        </div>
       )}
 
       {/* ── Clinical section gates (unchanged logic) ── */}
@@ -4062,11 +4401,20 @@ export default function DigitalPRFForm() {
         </>
       )}
 
-      {/* Patient Information CTA */}
-      {(fd.med_aid_dec_death || !!fd.chief_complaint) && (
-        CTA({ label: "Patient Information  →", onClick: () => advancePhase(2) })
+      {/* Patient Information CTA — DOD shows CTA inside its own form body */}
+      {!!fd.chief_complaint && fd.call_type !== 'DOD' && (
+        CTA({
+          label: "Patient Information  →",
+          onClick: () => {
+            if (!fd.monitoring_level) {
+              setMonitoringModalOpen(true);
+            } else {
+              advancePhase(2);
+            }
+          }
+        })
       )}
-    </>
+    </div>
     );
   };
 
@@ -4101,23 +4449,11 @@ export default function DigitalPRFForm() {
   // ── Phase 2: ON SCENE ─────────────────────────────────────────────────────
   const P2 = () => (
     <>
-      {/* Arrival timetable + Patient Priority are skipped for Declaration
-          of Death — the Dispatch + On Scene timestamps are already captured
-          in the DoD panel, and triage priority doesn't apply once the
+      {/* Patient Priority is skipped for Declaration
+          of Death — triage priority doesn't apply once the
           patient is deceased. */}
       {!fd.med_aid_dec_death && (
         <>
-          {/* On Scene row is captured up-front on the Dispatch screen for
-              PRIMARY calls (see the Dispatch Times block below Billing
-              Type), so re-rendering it here would duplicate the same
-              widget on shared state. */}
-          {fd.call_type !== 'PRIMARY' && (
-            <>
-              <SHdr t="Arrival" />
-              {TimeTable({ rows: ALL_TIME_ROWS.filter(r => r.phase === 2) })}
-            </>
-          )}
-
           {/* Priority — large, colour-coded, dominant.
               Hidden for Resus calls: triage priority doesn't apply when the
               crew is already running a resus. */}
@@ -4532,50 +4868,37 @@ export default function DigitalPRFForm() {
           );
         })()}
 
-        {/* Assessment level — prominent.
-            Hidden for Resus calls: the assessment level is implicit (ILS / ALS
-            picked on the Resus subsection at dispatch). */}
-        {fd.call_type !== 'RESUS' && (
-          <div style={{ background: GBG, border: `1.5px solid ${G}30`, borderRadius: 14, padding: 18, marginBottom: 20 }}>
-            <G2>
-              <div><SHdr t="Assessment" /><Toggle fk="assessment_level" opts={['BLS', 'ILS', 'ALS']} /></div>
-              <div><SHdr t="Monitoring" /><Toggle fk="monitoring_level" opts={['BLS', 'ILS', 'ALS']} /></div>
-            </G2>
-            {(() => {
-              const RANK: Record<string, number> = { BLS: 0, ILS: 1, ALS: 2 };
-              const a = RANK[fd.assessment_level];
-              const m = RANK[fd.monitoring_level];
-              if (a === undefined || m === undefined || a === m) return null;
-              const upgrade = m > a;
-              return (
-                <div role="alert" style={{
-                  marginTop: 14,
-                  padding: '12px 14px',
-                  borderRadius: 10,
-                  border: `1.5px solid ${upgrade ? '#f59e0b' : '#3b82f6'}`,
-                  background: upgrade ? 'rgba(245,158,11,0.10)' : 'rgba(59,130,246,0.08)',
-                  color: upgrade ? '#7c2d12' : '#1e3a8a',
-                  display: 'flex', gap: 10, alignItems: 'flex-start',
-                  fontSize: '0.82rem', lineHeight: 1.5, fontWeight: 600,
-                }}>
-                  <span style={{ fontSize: '1rem', flexShrink: 0 }}>{upgrade ? '↑' : '↓'}</span>
-                  <span>
-                    {upgrade ? (
-                      <>
-                        Monitoring at <b>{fd.monitoring_level}</b> exceeds the assessed level of <b>{fd.assessment_level}</b>.
-                        Call dispatch to <b>upgrade the call</b> to {fd.monitoring_level}.
-                      </>
-                    ) : (
-                      <>
-                        Monitoring at <b>{fd.monitoring_level}</b> is below the assessed level of <b>{fd.assessment_level}</b>.
-                        Call dispatch to <b>downgrade the call</b> to {fd.monitoring_level}.
-                      </>
-                    )}
-                  </span>
-                </div>
-              );
-            })()}
+        {/* Assessment level chip — shown once picked, tap to re-open modal.
+            Never shown for DOD. */}
+        {fd.call_type !== 'DOD' && fd.assessment_level && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            background: GBG, border: `1.5px solid ${G}30`,
+            borderRadius: 12, padding: '10px 14px', marginBottom: 16,
+          }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: '0.62rem', fontWeight: 800, color: GDK, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Assessment Level</div>
+              <div style={{ fontSize: '0.96rem', fontWeight: 900, color: S900, marginTop: 2 }}>{fd.assessment_level}</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setAssessmentModalOpen(true)}
+              style={{ padding: '6px 12px', borderRadius: 8, border: `1.5px solid ${GDK}`, background: '#fff', color: GDK, fontSize: '0.74rem', fontWeight: 800, cursor: 'pointer' }}
+            >Change</button>
           </div>
+        )}
+        {/* Prompt to pick assessment if not yet chosen.
+            Never shown for DOD. */}
+        {fd.call_type !== 'DOD' && !fd.assessment_level && fd.treating_practitioner_name && (
+          <button
+            type="button"
+            onClick={() => setAssessmentModalOpen(true)}
+            style={{
+              width: '100%', padding: '12px 14px', borderRadius: 12, marginBottom: 16,
+              border: '1.5px dashed #93c5fd', background: '#eff6ff', color: '#1d4ed8',
+              fontWeight: 800, fontSize: '0.88rem', cursor: 'pointer',
+            }}
+          >Select Assessment Level ↓</button>
         )}
 
         <SHdr t="Patient History" />
@@ -4657,6 +4980,7 @@ export default function DigitalPRFForm() {
               const hint = verdict.kind === 'authorised' && verdict.condition
                 ? 'Senior ECP / MO consultation required'
                 : undefined;
+              if (disabled) return null;
               return <Chk key={i} fk="airway_interventions" val={i} disabled={disabled} hint={hint} />;
             })}
           </div>
@@ -4696,6 +5020,7 @@ export default function DigitalPRFForm() {
               const hint = verdict.kind === 'authorised' && verdict.condition
                 ? 'Senior ECP / MO consultation required'
                 : undefined;
+              if (disabled) return null;
               return <Chk key={i} fk="circulation_interventions" val={i} disabled={disabled} hint={hint} />;
             })}
             {inArr('circulation_interventions', 'Bleeding') && (
@@ -4773,7 +5098,12 @@ export default function DigitalPRFForm() {
             />
           </Card>
         ))}
-        <button type="button" onClick={() => setCrewPicker({ phase: 'select', kind: 'iv' })} style={{ width: '100%', padding: 12, borderRadius: 10, fontWeight: 800, fontSize: '0.88rem', border: `2px dashed ${G}`, background: GBG, color: GDK, cursor: 'pointer', marginBottom: 20 }}>+ Add IV Line</button>
+        {(() => {
+          const cat = normaliseHpcsaCategory(fd.treating_practitioner_category);
+          const canIv = !cat || isAuthorised(cat, 'circ_iv_cannulation_limbs_over_1yr');
+          if (!canIv) return null;
+          return <button type="button" onClick={() => setCrewPicker({ phase: 'select', kind: 'iv' })} style={{ width: '100%', padding: 12, borderRadius: 10, fontWeight: 800, fontSize: '0.88rem', border: `2px dashed ${G}`, background: GBG, color: GDK, cursor: 'pointer', marginBottom: 20 }}>+ Add IV Line</button>;
+        })()}
 
         <SHdr t="Medication / Infusion" />
         {/* Native typeahead — crew can pick from the HPCSA medication catalogue
@@ -4787,91 +5117,73 @@ export default function DigitalPRFForm() {
           const authorised = medicationNamesForCategory(cat);
           return (
             <>
-              <datalist id="med-drug-options">
-                {authorised.map(n => <option key={n} value={n} />)}
-              </datalist>
-              {cat && (
-                <div style={{ fontSize: '0.7rem', color: S600, marginBottom: 8, fontWeight: 600 }}>
-                  Showing {authorised.length} medications authorised for {cat}.
-                </div>
-              )}
+              {medRows.map((row, i) => {
+                const treatingCat = normaliseHpcsaCategory(fd.treating_practitioner_category);
+                const medCap = findMedicationByName(row.type);
+                const medOutOfScope = !!(treatingCat && medCap && !medCap.authorised.includes(treatingCat));
+                return (
+                  <Card key={i} style={{ marginBottom: 8 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10, gap: 8 }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: '0.82rem', color: S600, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          Medication #{i + 1}
+                          {medOutOfScope && (
+                            <span style={{ fontSize: '0.6rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.07em', color: '#78350f', background: '#fffbeb', border: '1px solid #f59e0b', padding: '2px 6px', borderRadius: 4 }}>
+                              Out of scope for {treatingCat}
+                            </span>
+                          )}
+                        </div>
+                        {row.administered_by && (
+                          <div style={{ fontSize: '0.7rem', color: S700, marginTop: 3, wordBreak: 'break-word' }}>
+                            Administered by <b style={{ color: S900 }}>{row.administered_by}</b>
+                            {row.administered_by_qualification ? ` · ${row.administered_by_qualification}` : ''}
+                          </div>
+                        )}
+                      </div>
+                      <button type="button" onClick={() => { setMedRows(medRows.filter((_, j) => j !== i)); dirtyRef.current = true; }} style={{ padding: '4px 10px', fontSize: '0.72rem', fontWeight: 700, borderRadius: 6, border: `1px solid ${S200}`, background: S50, color: REDC, cursor: 'pointer', flexShrink: 0 }}>Remove</button>
+                    </div>
+                    <G2>
+                      {[{ l: 'Drug / Type', k: 'type' }, { l: 'Route', k: 'route' }, { l: 'Dose', k: 'dose' }, { l: 'Time', k: 'time' }].map(f => (
+                        <div key={f.k}>
+                          <Lbl t={f.l} />
+                          {f.k === 'type' ? (
+                            <select
+                              value={row[f.k] ?? ''}
+                              onChange={e => { const r = [...medRows]; r[i] = { ...r[i], [f.k]: e.target.value }; setMedRows(r); dirtyRef.current = true; }}
+                              onFocus={onF}
+                              onBlur={onB}
+                              style={{ ...base, marginBottom: 8, appearance: 'auto' }}
+                            >
+                              <option value=""></option>
+                              {authorised.map(n => <option key={n} value={n}>{n}</option>)}
+                              {row[f.k] && !authorised.includes(row[f.k] as string) && (
+                                <option value={row[f.k]}>{row[f.k]} (Out of Scope)</option>
+                              )}
+                            </select>
+                          ) : (
+                            <input
+                              autoComplete="off"
+                              value={row[f.k] ?? ''}
+                              onChange={e => { const r = [...medRows]; r[i] = { ...r[i], [f.k]: e.target.value }; setMedRows(r); dirtyRef.current = true; }}
+                              onFocus={onF}
+                              onBlur={onB}
+                              style={{ ...base, marginBottom: 8 }}
+                            />
+                          )}
+                        </div>
+                      ))}
+                    </G2>
+                    <FullscreenSignaturePad
+                      label="Sign"
+                      value={row.sign}
+                      onChange={v => { const r = [...medRows]; r[i] = { ...r[i], sign: v }; setMedRows(r); dirtyRef.current = true; }}
+                    />
+                  </Card>
+                );
+              })}
             </>
           );
         })()}
-        {medRows.map((row, i) => {
-          // Out-of-scope check for the medication's current treating practitioner.
-          // Only flags rows where the typed drug matches a known catalogue entry
-          // — free-text drugs (off-catalogue) are intentionally not checked per
-          // the rollout decision. Triggers when the treating practitioner is
-          // changed mid-call to a category that can't administer this drug.
-          const treatingCat = normaliseHpcsaCategory(fd.treating_practitioner_category);
-          const medCap = findMedicationByName(row.type);
-          const medOutOfScope = !!(treatingCat && medCap && !medCap.authorised.includes(treatingCat));
-          return (
-            <Card key={i} style={{ marginBottom: 8 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10, gap: 8 }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 700, fontSize: '0.82rem', color: S600, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                    Medication #{i + 1}
-                    {medOutOfScope && (
-                      <span style={{ fontSize: '0.6rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.07em', color: '#78350f', background: '#fffbeb', border: '1px solid #f59e0b', padding: '2px 6px', borderRadius: 4 }}>
-                        Out of scope for {treatingCat}
-                      </span>
-                    )}
-                  </div>
-                  {row.administered_by && (
-                    <div style={{ fontSize: '0.7rem', color: S700, marginTop: 3, wordBreak: 'break-word' }}>
-                      Administered by <b style={{ color: S900 }}>{row.administered_by}</b>
-                      {row.administered_by_qualification ? ` · ${row.administered_by_qualification}` : ''}
-                    </div>
-                  )}
-                </div>
-                <button type="button" onClick={() => { setMedRows(medRows.filter((_, j) => j !== i)); dirtyRef.current = true; }} style={{ padding: '4px 10px', fontSize: '0.72rem', fontWeight: 700, borderRadius: 6, border: `1px solid ${S200}`, background: S50, color: REDC, cursor: 'pointer', flexShrink: 0 }}>Remove</button>
-              </div>
-              <G2>
-                {[{ l: 'Drug / Type', k: 'type' }, { l: 'Route', k: 'route' }, { l: 'Dose', k: 'dose' }, { l: 'Time', k: 'time' }].map(f => (
-                  <div key={f.k}><Lbl t={f.l} /><input
-                    list={f.k === 'type' ? 'med-drug-options' : undefined}
-                    autoComplete="off"
-                    value={row[f.k] ?? ''}
-                    onChange={e => { const r = [...medRows]; r[i] = { ...r[i], [f.k]: e.target.value }; setMedRows(r); dirtyRef.current = true; }}
-                    onFocus={onF}
-                    onBlur={e => {
-                      onB(e);
-                      // Free-text scope enforcement for the Drug/Type field.
-                      // The datalist hides unauthorised meds but the input still
-                      // accepts any typed value — so a determined BAA crew could
-                      // type "Adrenaline" by hand. On blur, if the typed value
-                      // matches a known catalogue drug that ISN'T authorised for
-                      // the current treating practitioner, silently clear it. No
-                      // popup (per the no-mid-call-validation rule); the empty
-                      // field is the feedback. Off-catalogue free-text (brand
-                      // names, abbreviations) still passes through since
-                      // findMedicationByName returns undefined for those.
-                      if (f.k !== 'type') return;
-                      const typed = e.target.value.trim();
-                      if (!typed) return;
-                      const med = findMedicationByName(typed);
-                      const tc = normaliseHpcsaCategory(fd.treating_practitioner_category);
-                      if (med && tc && !med.authorised.includes(tc)) {
-                        const r = [...medRows];
-                        r[i] = { ...r[i], type: '' };
-                        setMedRows(r);
-                        dirtyRef.current = true;
-                      }
-                    }}
-                    style={{ ...base, marginBottom: 8 }}
-                  /></div>
-                ))}
-              </G2>
-              <FullscreenSignaturePad
-                label="Sign"
-                value={row.sign}
-                onChange={v => { const r = [...medRows]; r[i] = { ...r[i], sign: v }; setMedRows(r); dirtyRef.current = true; }}
-              />
-            </Card>
-          );
-        })}
         <button type="button" onClick={() => setCrewPicker({ phase: 'select', kind: 'med' })} style={{ width: '100%', padding: 12, borderRadius: 10, fontWeight: 800, fontSize: '0.88rem', border: `2px dashed ${G}`, background: GBG, color: GDK, cursor: 'pointer', marginBottom: 20 }}>+ Add Medication</button>
 
         {!embedded && CTA({ label: "LOAD &amp; GO  →", color: ROSE, onClick: () => advancePhase(4, 'time_depart_scene', 'km_depart_scene') })}
@@ -5403,8 +5715,8 @@ export default function DigitalPRFForm() {
           Now shown on brand-new PRFs (phase 0 / Dispatch) as well. */}
         {phase >= 0 && (
         <div style={{
-          position: 'sticky', top: 0, zIndex: 50,
-          width: 'min(760px, calc(100% - 32px))', margin: '0 auto',
+          position: 'sticky', top: 12, zIndex: 50,
+          width: 'min(760px, calc(100% - 32px))', margin: '12px auto 0',
           background: 'linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(248,250,252,0.96) 100%)',
           backdropFilter: 'blur(14px)',
           WebkitBackdropFilter: 'blur(14px)',
@@ -5553,59 +5865,61 @@ export default function DigitalPRFForm() {
         </div>
         )}
 
-        {/* ── Validation banner (rule findings from prfValidation.ts) ── */}
-        {findings.length > 0 && (
-          <div id="prf-validation-banner" style={{ padding: '16px 18px 0', maxWidth: 640, margin: '0 auto' }}>
-            {validationBlockers(findings).length > 0 && (
-              <div style={{
-                background: '#fef2f2', border: `1px solid #fecaca`, borderRadius: 12,
-                padding: '12px 14px', marginBottom: 8,
-              }}>
-                <div style={{ fontSize: '0.78rem', fontWeight: 800, color: REDC, marginBottom: 6, letterSpacing: '0.02em' }}>
-                  {validationBlockers(findings).length} required item{validationBlockers(findings).length === 1 ? '' : 's'} missing
+        <div style={{ paddingTop: 110 }}>
+          {/* ── Validation banner (rule findings from prfValidation.ts) ── */}
+          {findings.length > 0 && (
+            <div id="prf-validation-banner" style={{ padding: '0 18px 16px', maxWidth: 640, margin: '0 auto' }}>
+              {validationBlockers(findings).length > 0 && (
+                <div style={{
+                  background: '#fef2f2', border: `1px solid #fecaca`, borderRadius: 12,
+                  padding: '12px 14px', marginBottom: 8,
+                }}>
+                  <div style={{ fontSize: '0.78rem', fontWeight: 800, color: REDC, marginBottom: 6, letterSpacing: '0.02em' }}>
+                    {validationBlockers(findings).length} required item{validationBlockers(findings).length === 1 ? '' : 's'} missing
+                  </div>
+                  <ul style={{ margin: 0, paddingLeft: 18, fontSize: '0.78rem', color: '#7f1d1d', lineHeight: 1.5 }}>
+                    {validationBlockers(findings).map(f => (
+                      <li key={f.id} style={{ marginBottom: 4 }}>
+                        {f.message}
+                      </li>
+                    ))}
+                  </ul>
                 </div>
-                <ul style={{ margin: 0, paddingLeft: 18, fontSize: '0.78rem', color: '#7f1d1d', lineHeight: 1.5 }}>
-                  {validationBlockers(findings).map(f => (
-                    <li key={f.id} style={{ marginBottom: 4 }}>
-                      {f.message}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {validationWarnings(findings).length > 0 && (
-              <div style={{
-                background: '#fffbeb', border: `1px solid #fde68a`, borderRadius: 12,
-                padding: '12px 14px', marginBottom: 8,
-              }}>
-                <div style={{ fontSize: '0.78rem', fontWeight: 800, color: '#92400e', marginBottom: 6, letterSpacing: '0.02em' }}>
-                  {validationWarnings(findings).length} warning{validationWarnings(findings).length === 1 ? '' : 's'} — claim may be downgraded if not addressed
+              )}
+              {validationWarnings(findings).length > 0 && (
+                <div style={{
+                  background: '#fffbeb', border: `1px solid #fde68a`, borderRadius: 12,
+                  padding: '12px 14px', marginBottom: 8,
+                }}>
+                  <div style={{ fontSize: '0.78rem', fontWeight: 800, color: '#92400e', marginBottom: 6, letterSpacing: '0.02em' }}>
+                    {validationWarnings(findings).length} warning{validationWarnings(findings).length === 1 ? '' : 's'} — claim may be downgraded if not addressed
+                  </div>
+                  <ul style={{ margin: 0, paddingLeft: 18, fontSize: '0.78rem', color: '#78350f', lineHeight: 1.5 }}>
+                    {validationWarnings(findings).map(f => (
+                      <li key={f.id} style={{ marginBottom: 4 }}>
+                        {f.message}
+                      </li>
+                    ))}
+                  </ul>
                 </div>
-                <ul style={{ margin: 0, paddingLeft: 18, fontSize: '0.78rem', color: '#78350f', lineHeight: 1.5 }}>
-                  {validationWarnings(findings).map(f => (
-                    <li key={f.id} style={{ marginBottom: 4 }}>
-                      {f.message}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            <button
-              type="button"
-              onClick={() => setFindings([])}
-              style={{
-                fontSize: '0.7rem', fontWeight: 600, color: S600, background: 'transparent',
-                border: 'none', cursor: 'pointer', padding: '4px 0', textDecoration: 'underline',
-              }}
-            >
-              Dismiss
-            </button>
-          </div>
-        )}
+              )}
+              <button
+                type="button"
+                onClick={() => setFindings([])}
+                style={{
+                  fontSize: '0.7rem', fontWeight: 600, color: S600, background: 'transparent',
+                  border: 'none', cursor: 'pointer', padding: '4px 0', textDecoration: 'underline',
+                }}
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
 
-        {/* ── Phase content ── */}
-        <div style={{ padding: '20px 18px', maxWidth: 640, margin: '0 auto', overflowAnchor: 'none' }}>
-          {renderPhase()}
+          {/* ── Phase content ── */}
+          <div style={{ padding: '0 18px 20px', maxWidth: 640, margin: '0 auto', overflowAnchor: 'none' }}>
+            {renderPhase()}
+          </div>
         </div>
 
         {/* ── Floating quick-vitals button (clinical & transport phases) ── */}
@@ -5645,17 +5959,20 @@ export default function DigitalPRFForm() {
               targetFieldOccupied={targetOccupied}
               onCancel={() => setPendingMark(null)}
               onRecapture={() => markTime(pendingMark.timeKey, pendingMark.kmKey, pendingMark.onAfterCommit)}
-              onConfirm={async () => {
+              onConfirm={async (manualAddress?: string) => {
                 const { timeKey, kmKey, coords, address, onAfterCommit } = pendingMark;
                 setPendingMark(null);
                 // Auto-fill the resolved address into the target field — but
                 // only if the field is currently empty. The crew already saw
                 // the address in the overlay; this is the "place into field
                 // for review" step.
-                if (target && address && !targetOccupied) {
-                  sf(target.addressKey, address.street);
-                  if (target.suburbKey && address.suburb && !fd[target.suburbKey]) {
-                    sf(target.suburbKey, address.suburb);
+                // When GPS was unavailable, fall back to the manually typed address.
+                const resolvedStreet = address?.street || manualAddress;
+                const resolvedSuburb = address?.suburb || null;
+                if (target && resolvedStreet && !targetOccupied) {
+                  sf(target.addressKey, resolvedStreet);
+                  if (target.suburbKey && resolvedSuburb && !fd[target.suburbKey]) {
+                    sf(target.suburbKey, resolvedSuburb);
                   }
                 }
                 // Also seed the per-row address field shown in the time
@@ -5663,8 +5980,8 @@ export default function DigitalPRFForm() {
                 // a manual address in that row before tapping Mark Time,
                 // don't overwrite it.
                 const rowAddressKey = `address_${timeKey}`;
-                if (address && !fd[rowAddressKey]) {
-                  sf(rowAddressKey, address.street);
+                if (resolvedStreet && !fd[rowAddressKey]) {
+                  sf(rowAddressKey, resolvedStreet);
                 }
                 await commitMarkTime(timeKey, kmKey, coords);
                 if (onAfterCommit) await onAfterCommit();
@@ -5732,14 +6049,17 @@ export default function DigitalPRFForm() {
                     <span style={{ color: S600, fontSize: '0.74rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Difference</span>
                     <span style={{
                       fontFamily: 'monospace', fontWeight: 800,
-                      color: rollback ? REDC : '#92400e',
+                      color: kmConfirm.delta < 0 ? REDC : '#92400e',
                     }}>{kmConfirm.delta > 0 ? '+' : ''}{kmConfirm.delta.toLocaleString()} km</span>
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: 10 }}>
                   <button
                     type="button"
-                    onClick={clearAndReenter}
+                    onClick={() => {
+                      sf(kmConfirm.kmKey, '');
+                      close();
+                    }}
                     style={{
                       flex: 1, padding: 12, borderRadius: 10,
                       border: `1.5px solid ${S200}`, background: '#fff', color: S700,
@@ -5750,7 +6070,7 @@ export default function DigitalPRFForm() {
                     type="button"
                     onClick={() => {
                       // Persist acknowledgement into form_data so it survives save/reload
-                      const existing: any[] = Array.isArray(fd.km_review_flags) ? fd.km_review_flags : [];
+                      const existing = Array.isArray(fd.km_review_flags) ? fd.km_review_flags : [];
                       const newFlag = {
                         field: kmConfirm.kmKey,
                         prev_field: kmConfirm.previousKey,
@@ -5789,14 +6109,13 @@ export default function DigitalPRFForm() {
         {crewPicker && crewPicker.phase === 'select' && (() => {
           const isTreating = crewPicker.kind === 'treating';
           const kindLabel = isTreating ? '' : crewPicker.kind === 'iv' ? 'IV Line' : 'Medication';
-          const opts: Array<{ id: string; tag: string; name: string; qualification: string; hpcsa: string; accent: string; bg: string; border: string }> = [];
+          const opts: Array<{ id: string; tag: string; name: string; qualification: string; hpcsa: string }> = [];
           const c1Name = prfMeta.crew_member_1?.full_name || profile.name || '';
           if (c1Name) opts.push({
             id: 'crew1', tag: 'Crew 1',
             name: c1Name,
             qualification: prfMeta.crew_member_1?.qualification || profile.qualification || '',
             hpcsa: prfMeta.crew_member_1?.hpcsa_number || profile.hpcsa_number || '',
-            accent: GDK, bg: GBG, border: `${G}55`,
           });
           const c2 = prfMeta.crew_member_2;
           if (c2?.full_name) opts.push({
@@ -5804,93 +6123,284 @@ export default function DigitalPRFForm() {
             name: c2.full_name,
             qualification: c2.qualification || '',
             hpcsa: c2.hpcsa_number || '',
-            accent: '#92400e', bg: 'rgba(245,158,11,0.07)', border: 'rgba(245,158,11,0.35)',
           });
+
           const advance = (o: typeof opts[number]) => {
             if (crewPicker.kind === 'treating') {
-              // Treating gate: write the identity straight into form_data —
-              // autosave persists it, scope enforcement reads it. No signature
-              // step; tapping IS the audit trail.
               sf('treating_practitioner_name', o.name);
               sf('treating_practitioner_category', o.qualification);
               sf('treating_practitioner_hpcsa', o.hpcsa);
               setCrewPicker(null);
               return;
             }
-            // IV / Medication flow — proceed to the signature step.
             setCrewPicker({
               phase: 'signing',
               kind: crewPicker.kind,
               crew: { name: o.name, qualification: o.qualification, hpcsa: o.hpcsa },
             });
           };
+
+          // Multi-select overlay for the treating-practitioner gate
+          const TreatingPicker = () => {
+            const getPreSelected = () => {
+              try {
+                const arr: Array<{name: string}> = fd.treating_practitioners_json
+                  ? JSON.parse(fd.treating_practitioners_json as string)
+                  : fd.treating_practitioner_name ? [{ name: fd.treating_practitioner_name }] : [];
+                return new Set(opts.filter(o => arr.some(p => p.name === o.name)).map(o => o.id));
+              } catch { return new Set<string>(); }
+            };
+            const [selected, setSelected] = useState<Set<string>>(getPreSelected);
+            const toggle = (id: string) => setSelected(prev => {
+              const next = new Set(prev);
+              if (next.has(id)) next.delete(id); else next.add(id);
+              return next;
+            });
+            const confirm = () => {
+              const picked = opts.filter(o => selected.has(o.id));
+              if (picked.length === 0) return;
+              sf('treating_practitioner_name', picked[0].name);
+              sf('treating_practitioner_category', picked[0].qualification);
+              sf('treating_practitioner_hpcsa', picked[0].hpcsa);
+              sf('treating_practitioners_json', JSON.stringify(
+                picked.map(p => ({ name: p.name, qualification: p.qualification, hpcsa: p.hpcsa }))
+              ));
+              setCrewPicker(null);
+              // Auto-open assessment modal — skip for DOD (no assessment needed)
+              if (!fd.assessment_level && fd.call_type !== 'DOD') {
+                setAssessmentModalOpen(true);
+              }
+            };
+            return (
+              <div style={{
+                position: 'fixed', inset: 0, zIndex: 200, padding: 20,
+                background: 'rgba(15,23,42,0.6)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                backdropFilter: 'blur(4px)',
+              }}>
+                <div onClick={e => e.stopPropagation()} style={{
+                  maxWidth: 460, width: '100%', background: '#fff',
+                  borderRadius: 20, overflow: 'hidden',
+                  boxShadow: '0 24px 64px rgba(15,23,42,0.3)',
+                }}>
+                  {/* Header */}
+                  <div style={{ padding: '22px 20px 8px' }}>
+                    <div style={{ fontSize: '1.05rem', fontWeight: 900, color: S900, letterSpacing: '-0.01em', marginBottom: 4 }}>
+                      Who is treating this patient?
+                    </div>
+                    {opts.length > 1 && (
+                      <div style={{ fontSize: '0.78rem', color: S400 }}>
+                        Select one or more crew members
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Crew tiles */}
+                  <div style={{ padding: '12px 20px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {opts.length === 0 ? (
+                      <div style={{ padding: '14px 16px', background: '#fef2f2', border: `1.5px solid ${REDC}40`, borderRadius: 12, fontSize: '0.82rem', color: REDC }}>
+                        No crew profile loaded. Open the PRF from your dashboard so Crew 1 / Crew 2 are set.
+                      </div>
+                    ) : opts.map(o => {
+                      const isOn = selected.has(o.id);
+                      const initials = o.name.split(' ').map((w: string) => w[0]).slice(0, 2).join('').toUpperCase();
+                      return (
+                        <button
+                          key={o.id}
+                          type="button"
+                          onClick={() => toggle(o.id)}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: 14,
+                            textAlign: 'left', cursor: 'pointer', width: '100%',
+                            background: isOn ? '#f0fdf4' : '#f8fafc',
+                            border: `1.5px solid ${isOn ? G : S200}`,
+                            borderRadius: 14, padding: '13px 14px',
+                            transition: 'all 0.15s ease',
+                            boxShadow: isOn ? `0 2px 10px ${G}25` : 'none',
+                          }}
+                        >
+                          {/* Avatar circle */}
+                          <div style={{
+                            width: 42, height: 42, borderRadius: 21, flexShrink: 0,
+                            background: isOn ? G : S200,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontSize: '0.88rem', fontWeight: 800, color: isOn ? '#fff' : S600,
+                            transition: 'all 0.15s ease',
+                          }}>
+                            {initials}
+                          </div>
+
+                          {/* Name + badge row */}
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontWeight: 700, fontSize: '0.92rem', color: S900, marginBottom: 3 }}>{o.name}</div>
+                            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                              {o.qualification && (
+                                <span style={{
+                                  fontSize: '0.68rem', fontWeight: 700,
+                                  color: isOn ? GDK : S600,
+                                  background: isOn ? `${G}18` : S100,
+                                  padding: '2px 7px', borderRadius: 5,
+                                  textTransform: 'uppercase', letterSpacing: '0.05em',
+                                }}>
+                                  {o.qualification}
+                                </span>
+                              )}
+                              {o.hpcsa && (
+                                <span style={{ fontSize: '0.68rem', color: S400, fontFamily: 'monospace', alignSelf: 'center' }}>
+                                  {o.hpcsa}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Checkbox */}
+                          <div style={{
+                            width: 22, height: 22, borderRadius: 11, flexShrink: 0,
+                            border: `2px solid ${isOn ? G : S200}`,
+                            background: isOn ? G : 'transparent',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            transition: 'all 0.15s ease',
+                          }}>
+                            {isOn && <span style={{ color: '#fff', fontSize: '0.72rem', fontWeight: 900, lineHeight: 1 }}>✓</span>}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Footer */}
+                  <div style={{ padding: '12px 20px 22px', display: 'flex', gap: 10 }}>
+                    <button
+                      type="button"
+                      onClick={() => { setDismissedTreating(true); setCrewPicker(null); }}
+                      style={{
+                        flex: 1, padding: '12px 0', borderRadius: 12,
+                        border: `1.5px solid ${S200}`, background: '#fff', color: S600,
+                        fontWeight: 700, fontSize: '0.88rem', cursor: 'pointer',
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={confirm}
+                      disabled={selected.size === 0}
+                      style={{
+                        flex: 2, padding: '12px 0', borderRadius: 12,
+                        border: 'none',
+                        background: selected.size > 0 ? `linear-gradient(135deg,${G},${GDK})` : S200,
+                        color: selected.size > 0 ? '#fff' : S400,
+                        fontWeight: 800, fontSize: '0.9rem',
+                        cursor: selected.size > 0 ? 'pointer' : 'not-allowed',
+                        boxShadow: selected.size > 0 ? `0 4px 14px ${G}35` : 'none',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      {selected.size === 0
+                        ? 'Select a crew member'
+                        : selected.size === 1
+                        ? 'Confirm'
+                        : `Confirm ${selected.size} members`}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          };
+
+          if (isTreating) return <TreatingPicker />;
+
+          // Non-treating: single-pick overlay (IV / Med) ────────────────────
           return (
             <div
-              onClick={() => { if (!isTreating) setCrewPicker(null); }}
+              onClick={() => setCrewPicker(null)}
               style={{
-                position: 'fixed', inset: 0, zIndex: 200, padding: 16,
-                background: 'rgba(15,23,42,0.55)',
+                position: 'fixed', inset: 0, zIndex: 200, padding: 20,
+                background: 'rgba(15,23,42,0.6)',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
+                backdropFilter: 'blur(4px)',
               }}
             >
-              <div
-                onClick={e => e.stopPropagation()}
-                style={{
-                  maxWidth: 480, width: '100%',
-                  background: '#fff', borderRadius: 16, padding: 22,
-                  boxShadow: '0 20px 60px rgba(15,23,42,0.35)',
-                }}
-              >
-                <div style={{ fontWeight: 900, fontSize: '1.05rem', color: S900, marginBottom: 6 }}>
-                  {isTreating
-                    ? 'Who is treating this patient?'
-                    : `Who is administering this ${kindLabel}?`}
-                </div>
-                <div style={{ fontSize: '0.8rem', color: S600, marginBottom: 16, lineHeight: 1.45 }}>
-                  {isTreating
-                    ? 'Required before the clinical section can be filled in. Your HPCSA registration determines which procedures and medications can be recorded.'
-                    : "Tap the crew member responsible. They'll be asked to sign on the next step to verify."}
-                </div>
-                {opts.length === 0 ? (
-                  <div style={{ padding: 14, background: '#fef2f2', border: `1.5px solid ${REDC}40`, borderRadius: 10, fontSize: '0.82rem', color: REDC, marginBottom: 14 }}>
-                    No crew profile loaded yet. Open the PRF from your dashboard so Crew 1 / Crew 2 are set.
+              <div onClick={e => e.stopPropagation()} style={{
+                maxWidth: 460, width: '100%', background: '#fff',
+                borderRadius: 20, overflow: 'hidden',
+                boxShadow: '0 24px 64px rgba(15,23,42,0.3)',
+              }}>
+                <div style={{ padding: '22px 20px 8px' }}>
+                  <div style={{ fontSize: '1.05rem', fontWeight: 900, color: S900, letterSpacing: '-0.01em', marginBottom: 4 }}>
+                    {`Who is administering this ${kindLabel}?`}
                   </div>
-                ) : (
-                  <div style={{ display: 'grid', gap: 10, marginBottom: 14 }}>
-                    {opts.map(o => (
+                  <div style={{ fontSize: '0.78rem', color: S400 }}>
+                    They will be asked to sign on the next step to verify.
+                  </div>
+                </div>
+
+                <div style={{ padding: '12px 20px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {opts.length === 0 ? (
+                    <div style={{ padding: '14px 16px', background: '#fef2f2', border: `1.5px solid ${REDC}40`, borderRadius: 12, fontSize: '0.82rem', color: REDC }}>
+                      No crew profile loaded. Open the PRF from your dashboard so Crew 1 / Crew 2 are set.
+                    </div>
+                  ) : opts.map(o => {
+                    const initials = o.name.split(' ').map((w: string) => w[0]).slice(0, 2).join('').toUpperCase();
+                    return (
                       <button
                         key={o.id}
                         type="button"
                         onClick={() => advance(o)}
                         style={{
-                          textAlign: 'left', cursor: 'pointer',
-                          background: o.bg, border: `1.5px solid ${o.border}`,
-                          borderRadius: 13, padding: '14px 16px',
+                          display: 'flex', alignItems: 'center', gap: 14,
+                          textAlign: 'left', cursor: 'pointer', width: '100%',
+                          background: '#f8fafc', border: `1.5px solid ${S200}`,
+                          borderRadius: 14, padding: '13px 14px',
+                          transition: 'background 0.15s ease',
                         }}
                       >
-                        <div style={{ fontSize: '0.62rem', fontWeight: 800, color: o.accent, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>{o.tag}</div>
-                        <div style={{ fontWeight: 800, color: S900, fontSize: '0.98rem' }}>{o.name}</div>
-                        <div style={{ fontSize: '0.72rem', color: S600, marginTop: 4, fontFamily: 'monospace' }}>{o.hpcsa || '—'}</div>
-                        <div style={{ fontSize: '0.72rem', color: S600, marginTop: 2 }}>{o.qualification || '—'}</div>
+                        <div style={{
+                          width: 42, height: 42, borderRadius: 21, flexShrink: 0,
+                          background: S200,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: '0.88rem', fontWeight: 800, color: S600,
+                        }}>
+                          {initials}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 700, fontSize: '0.92rem', color: S900, marginBottom: 3 }}>{o.name}</div>
+                          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                            {o.qualification && (
+                              <span style={{
+                                fontSize: '0.68rem', fontWeight: 700, color: S600,
+                                background: S100, padding: '2px 7px', borderRadius: 5,
+                                textTransform: 'uppercase', letterSpacing: '0.05em',
+                              }}>
+                                {o.qualification}
+                              </span>
+                            )}
+                            {o.hpcsa && (
+                              <span style={{ fontSize: '0.68rem', color: S400, fontFamily: 'monospace', alignSelf: 'center' }}>
+                                {o.hpcsa}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <span style={{ color: S400, fontSize: '1.1rem', fontWeight: 300 }}>›</span>
                       </button>
-                    ))}
-                  </div>
-                )}
-                <button
-                  type="button"
-                  onClick={() => {
-                    // Just close the picker overlay.
-                    if (isTreating) setDismissedTreating(true);
-                    setCrewPicker(null);
-                  }}
-                  style={{
-                    width: '100%', padding: 12, borderRadius: 10,
-                    border: `1.5px solid ${S200}`, background: '#fff', color: S700,
-                    fontWeight: 800, fontSize: '0.88rem', cursor: 'pointer',
-                  }}
-                >
-                  Cancel
-                </button>
+                    );
+                  })}
+                </div>
+
+                <div style={{ padding: '12px 20px 22px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setCrewPicker(null)}
+                    style={{
+                      width: '100%', padding: '12px 0', borderRadius: 12,
+                      border: `1.5px solid ${S200}`, background: '#fff', color: S600,
+                      fontWeight: 700, fontSize: '0.88rem', cursor: 'pointer',
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
               </div>
             </div>
           );
@@ -6005,7 +6515,7 @@ export default function DigitalPRFForm() {
 
         {/* ── IFT/IHT Transfer Subtype Overlay ── */}
         {transferSubtypeOpen && (
-          <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(15,23,42,0.6)', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', padding: 20, backdropFilter: 'blur(4px)' }} onClick={() => setTransferSubtypeOpen(false)}>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(15,23,42,0.6)', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', padding: 20, backdropFilter: 'blur(4px)' }} onClick={e => { if (e.target === e.currentTarget) setTransferSubtypeOpen(false); }}>
             <div style={{ background: S50, borderRadius: 24, padding: '24px 16px', width: '100%', maxWidth: 500, maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 40px rgba(0,0,0,0.2)' }} onClick={e => e.stopPropagation()}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
                 <div style={{ fontSize: '1.2rem', fontWeight: 900, color: S900, letterSpacing: '-0.02em' }}>Transfer Reason</div>
@@ -6018,7 +6528,14 @@ export default function DigitalPRFForm() {
                     <button
                       key={reason}
                       type="button"
-                      onClick={() => { sf('transfer_subtype', reason); setTransferSubtypeOpen(false); }}
+                      onClick={() => {
+                        sf('transfer_subtype', reason);
+                        setTransferSubtypeOpen(false);
+                        setQuotedAmountModalOpen(true);
+                        // Focus the quoted amount input synchronously in the same user-click call stack
+                        // to bypass mobile OS security restrictions and pop open the numeric keypad instantly.
+                        quotedAmountRef.current?.focus();
+                      }}
                       style={{
                         padding: '16px 12px', borderRadius: 12, fontSize: '0.88rem', fontWeight: 800,
                         border: `2px solid ${on ? G : S200}`, background: on ? G : W, color: on ? W : S700,
@@ -6035,8 +6552,227 @@ export default function DigitalPRFForm() {
           </div>
         )}
 
+        {/* ── IFT/IHT Quoted Payout Amount Overlay ── */}
+        <div style={{ display: quotedAmountModalOpen ? 'flex' : 'none', position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(15,23,42,0.6)', flexDirection: 'column', justifyContent: isMobileView ? 'flex-start' : 'center', alignItems: 'center', padding: 20, paddingTop: isMobileView ? 80 : 20, backdropFilter: 'blur(4px)' }} onClick={e => { if (e.target === e.currentTarget) setQuotedAmountModalOpen(false); }}>
+          <div style={{ background: S50, borderRadius: 24, padding: '24px 16px', width: '100%', maxWidth: 500, maxHeight: '80vh', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', boxShadow: '0 10px 40px rgba(0,0,0,0.2)' }} onClick={e => e.stopPropagation()}>
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                <div style={{ fontSize: '1.2rem', fontWeight: 900, color: S900, letterSpacing: '-0.02em' }}>Quoted Payout Amount</div>
+                <button type="button" onClick={() => setQuotedAmountModalOpen(false)} style={{ width: 32, height: 32, borderRadius: 16, border: 'none', background: S200, color: S600, fontSize: '1.2rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>×</button>
+              </div>
+              <div style={{ marginBottom: 14 }}>
+                <Lbl t="Quoted Payout Amount (R)" />
+                <input
+                  ref={quotedAmountRef}
+                  type="text"
+                  inputMode="decimal"
+                  pattern="[0-9. ]*"
+                  value={fd.med_aid_quoted_amount ?? ''}
+                  onChange={e => {
+                    const val = e.target.value.replace(/[^0-9.]/g, '');
+                    sf('med_aid_quoted_amount', val);
+                  }}
+                  onFocus={onF}
+                  onBlur={onB}
+                  placeholder="0.00"
+                  style={{ ...base, marginBottom: 0, borderColor: '#e2e8f0' }}
+                />
+              </div>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setQuotedAmountModalOpen(false);
+                  setPreauthVisible(true);
+                  setPreauthModalOpen(true);
+                  // Focus the pre-auth input synchronously in the same user-click call stack
+                  // to bypass mobile OS security restrictions and pop open the text keyboard instantly.
+                  preauthRef.current?.focus();
+                }}
+                style={{
+                  padding: '12px 24px', borderRadius: 12, fontSize: '0.9rem',
+                  fontWeight: 800, border: 'none', background: G, color: W,
+                  cursor: 'pointer', boxShadow: `0 4px 12px ${G}40`,
+                  WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
+                  width: '100%', textAlign: 'center'
+                }}
+              >
+                Next →
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* ── IFT/IHT Pre-Auth No. Overlay ── */}
+        <div style={{ display: preauthModalOpen ? 'flex' : 'none', position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(15,23,42,0.6)', flexDirection: 'column', justifyContent: isMobileView ? 'flex-start' : 'center', alignItems: 'center', padding: 20, paddingTop: isMobileView ? 80 : 20, backdropFilter: 'blur(4px)' }} onClick={e => { if (e.target === e.currentTarget) setPreauthModalOpen(false); }}>
+          <div style={{ background: S50, borderRadius: 24, padding: '24px 16px', width: '100%', maxWidth: 500, maxHeight: '80vh', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', boxShadow: '0 10px 40px rgba(0,0,0,0.2)' }} onClick={e => e.stopPropagation()}>
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                <div style={{ fontSize: '1.2rem', fontWeight: 900, color: S900, letterSpacing: '-0.02em' }}>Pre-Auth Number</div>
+                <button type="button" onClick={() => setPreauthModalOpen(false)} style={{ width: 32, height: 32, borderRadius: 16, border: 'none', background: S200, color: S600, fontSize: '1.2rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>×</button>
+              </div>
+              <div style={{ marginBottom: 14 }}>
+                <Lbl t="Pre-Auth No." req />
+                <input
+                  ref={preauthRef}
+                  type="text"
+                  value={fd.preauth_number ?? ''}
+                  onChange={e => sf('preauth_number', e.target.value)}
+                  onFocus={onF}
+                  onBlur={onB}
+                  placeholder="Pre-authorisation reference"
+                  style={{ ...base, marginBottom: 12, borderColor: '#e2e8f0' }}
+                />
+                <div style={{ fontSize: '0.78rem', color: S600, fontWeight: 500 }}>
+                  Enter the medical aid pre-authorisation reference number.
+                </div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setPreauthModalOpen(false);
+                  setDispatchPromptOpen(true);
+                  dispatchKmRef.current?.focus();
+                }}
+                style={{
+                  padding: '12px 24px', borderRadius: 12, fontSize: '0.9rem',
+                  fontWeight: 800, border: 'none', background: G, color: W,
+                  cursor: 'pointer', boxShadow: `0 4px 12px ${G}40`,
+                  WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
+                  width: '100%', textAlign: 'center'
+                }}
+              >
+                Done →
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Dispatch Time & Location/KM Prompt Overlay ── */}
+        <div style={{ display: dispatchPromptOpen ? 'flex' : 'none', position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(15,23,42,0.6)', flexDirection: 'column', justifyContent: isMobileView ? 'flex-start' : 'center', alignItems: 'center', padding: 20, paddingTop: isMobileView ? 80 : 20, backdropFilter: 'blur(4px)' }} onClick={e => { if (e.target === e.currentTarget) setDispatchPromptOpen(false); }}>
+          <div style={{ background: S50, borderRadius: 24, padding: '24px 16px', width: '100%', maxWidth: 500, maxHeight: '80vh', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', boxShadow: '0 10px 40px rgba(0,0,0,0.2)' }} onClick={e => e.stopPropagation()}>
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                <div style={{ fontSize: '1.2rem', fontWeight: 900, color: S900, letterSpacing: '-0.02em' }}>Dispatch Information</div>
+                <button type="button" onClick={() => setDispatchPromptOpen(false)} style={{ width: 32, height: 32, borderRadius: 16, border: 'none', background: S200, color: S600, fontSize: '1.2rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>×</button>
+              </div>
+              <div style={{ marginBottom: 18 }}>
+                <Lbl t="Starting Odometer (KM)" req />
+                <input
+                  ref={dispatchKmRef}
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  value={kms.km_dispatched ?? ''}
+                  onChange={e => handleKmChange('km_dispatched', e.target.value.replace(/[^0-9]/g, ''))}
+                  onFocus={onF}
+                  onBlur={onB}
+                  placeholder="e.g. 14250"
+                  style={{ ...base, marginBottom: 12, borderColor: '#e2e8f0' }}
+                />
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+              <button
+                type="button"
+                onClick={() => setDispatchPromptOpen(false)}
+                style={{
+                  flex: 1, padding: '12px 16px', borderRadius: 12, fontSize: '0.9rem',
+                  fontWeight: 800, border: `1.5px solid ${S200}`, background: W, color: S700,
+                  cursor: 'pointer', WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
+                  textAlign: 'center'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setDispatchPromptOpen(false);
+                  markTime('time_dispatched', 'km_dispatched', () => {
+                    setEnRouteOverlay(true);
+                  });
+                }}
+                style={{
+                  flex: 2, padding: '12px 24px', borderRadius: 12, fontSize: '0.9rem',
+                  fontWeight: 800, border: 'none', background: G, color: W,
+                  cursor: 'pointer', boxShadow: `0 4px 12px ${G}40`,
+                  WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
+                  textAlign: 'center'
+                }}
+              >
+                Start Route
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Arrive On Scene Time & Location/KM Prompt Overlay ── */}
+        <div style={{ display: onScenePromptOpen ? 'flex' : 'none', position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(15,23,42,0.6)', flexDirection: 'column', justifyContent: isMobileView ? 'flex-start' : 'center', alignItems: 'center', padding: 20, paddingTop: isMobileView ? 80 : 20, backdropFilter: 'blur(4px)' }} onClick={e => { if (e.target === e.currentTarget) setOnScenePromptOpen(false); }}>
+          <div style={{ background: S50, borderRadius: 24, padding: '24px 16px', width: '100%', maxWidth: 500, maxHeight: '80vh', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', boxShadow: '0 10px 40px rgba(0,0,0,0.2)' }} onClick={e => e.stopPropagation()}>
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                <div style={{ fontSize: '1.2rem', fontWeight: 900, color: S900, letterSpacing: '-0.02em' }}>Arrival Information</div>
+                <button type="button" onClick={() => setOnScenePromptOpen(false)} style={{ width: 32, height: 32, borderRadius: 16, border: 'none', background: S200, color: S600, fontSize: '1.2rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>×</button>
+              </div>
+              <div style={{ marginBottom: 18 }}>
+                <Lbl t="Arrival Odometer (KM)" req />
+                <input
+                  ref={onSceneKmRef}
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  value={kms.km_on_scene ?? ''}
+                  onChange={e => handleKmChange('km_on_scene', e.target.value.replace(/[^0-9]/g, ''))}
+                  onFocus={onF}
+                  onBlur={onB}
+                  placeholder="e.g. 14265"
+                  style={{ ...base, marginBottom: 12, borderColor: '#e2e8f0' }}
+                />
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setOnScenePromptOpen(false);
+                  // If they cancel, we bring them back to the En Route timer
+                  setEnRouteOverlay(true);
+                }}
+                style={{
+                  flex: 1, padding: '12px 16px', borderRadius: 12, fontSize: '0.9rem',
+                  fontWeight: 800, border: `1.5px solid ${S200}`, background: W, color: S700,
+                  cursor: 'pointer', WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
+                  textAlign: 'center'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setOnScenePromptOpen(false);
+                  markTime('time_on_scene', 'km_on_scene');
+                }}
+                style={{
+                  flex: 2, padding: '12px 24px', borderRadius: 12, fontSize: '0.9rem',
+                  fontWeight: 800, border: 'none', background: G, color: W,
+                  cursor: 'pointer', boxShadow: `0 4px 12px ${G}40`,
+                  WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
+                  textAlign: 'center'
+                }}
+              >
+                Confirm Arrival
+              </button>
+            </div>
+          </div>
+        </div>
+
         {rhtCallOutFeeOpen && (
-          <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(15,23,42,0.6)', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', padding: 20, backdropFilter: 'blur(4px)' }} onClick={() => setRhtCallOutFeeOpen(false)}>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(15,23,42,0.6)', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', padding: 20, backdropFilter: 'blur(4px)' }} onClick={e => { if (e.target === e.currentTarget) setRhtCallOutFeeOpen(false); }}>
             <div style={{ background: S50, borderRadius: 24, padding: '24px 16px', width: '100%', maxWidth: 500, maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 40px rgba(0,0,0,0.2)' }} onClick={e => e.stopPropagation()}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
                 <div style={{ fontSize: '1.2rem', fontWeight: 900, color: S900, letterSpacing: '-0.02em' }}>Call Out Fee</div>
@@ -6049,7 +6785,12 @@ export default function DigitalPRFForm() {
                     <button
                       key={reason}
                       type="button"
-                      onClick={() => { sf('rht_call_out_fee', reason); setRhtCallOutFeeOpen(false); }}
+                      onClick={() => { 
+                        sf('rht_call_out_fee', reason); 
+                        setRhtCallOutFeeOpen(false); 
+                        setDispatchPromptOpen(true);
+                        window.setTimeout(() => dispatchKmRef.current?.focus(), 50);
+                      }}
                       style={{
                         padding: '16px 12px', borderRadius: 12, fontSize: '0.88rem', fontWeight: 800,
                         border: `2px solid ${on ? G : S200}`, background: on ? G : W, color: on ? W : S700,
@@ -6066,7 +6807,244 @@ export default function DigitalPRFForm() {
           </div>
         )}
 
-        {/* ── Bottom nav (Submit PRF on final phase only) ── */}
+        {/* ── Assessment Level Modal ──────────────────────────────────────────
+            Auto-opens after treating practitioner is confirmed (if not yet set).
+            Can also be re-opened by tapping "Change" in the assessment chip.
+            BLS / ILS / ALS selection only — no other options. ────────────── */}
+        {assessmentModalOpen && (() => {
+          const LEVELS = fd.call_type === 'RESUS' ? (['ILS', 'ALS'] as const) : (['BLS', 'ILS', 'ALS'] as const);
+          type Level = typeof LEVELS[number];
+          const DESC: Record<Level, string> = {
+            BLS: 'Basic Life Support — primary care & stabilisation',
+            ILS: 'Intermediate Life Support — advanced assessment',
+            ALS: 'Advanced Life Support — critical care & ALS procedures',
+          };
+          return (
+            <div style={{
+              position: 'fixed', inset: 0, zIndex: 10000,
+              background: 'rgba(15,23,42,0.65)', backdropFilter: 'blur(5px)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+            }}>
+              <div onClick={e => e.stopPropagation()} style={{
+                maxWidth: 440, width: '100%', background: '#fff',
+                borderRadius: 22, overflow: 'hidden',
+                boxShadow: '0 28px 72px rgba(15,23,42,0.3)',
+              }}>
+                {/* Header */}
+                <div style={{
+                  padding: '20px 20px 12px',
+                  borderBottom: `1px solid ${S100}`,
+                }}>
+                  <div style={{ fontSize: '1.1rem', fontWeight: 900, color: S900, letterSpacing: '-0.01em' }}>
+                    Assessment Level
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: S400, marginTop: 3 }}>
+                    Select the level at which this patient was assessed
+                  </div>
+                </div>
+
+                {/* Options */}
+                <div style={{ padding: '14px 20px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {LEVELS.map(lvl => {
+                    const isOn = fd.assessment_level === lvl;
+                    return (
+                      <button
+                        key={lvl}
+                        type="button"
+                        onClick={() => {
+                          sf('assessment_level', lvl);
+                          setAssessmentModalOpen(false);
+                        }}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 14,
+                          textAlign: 'left', cursor: 'pointer', width: '100%',
+                          background: isOn ? '#f0fdf4' : S50,
+                          border: `1.5px solid ${isOn ? G : S200}`,
+                          borderRadius: 14, padding: '13px 14px',
+                          transition: 'all 0.15s ease',
+                          boxShadow: isOn ? `0 2px 10px ${G}25` : 'none',
+                        }}
+                      >
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 800, fontSize: '0.96rem', color: isOn ? GDK : S900 }}>{lvl}</div>
+                          <div style={{ fontSize: '0.72rem', color: isOn ? GDK : S400, marginTop: 2, lineHeight: 1.4 }}>{DESC[lvl]}</div>
+                        </div>
+                        <div style={{
+                          width: 22, height: 22, borderRadius: 11, flexShrink: 0,
+                          border: `2px solid ${isOn ? G : S200}`,
+                          background: isOn ? G : 'transparent',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          transition: 'all 0.15s ease',
+                        }}>
+                          {isOn && <span style={{ color: '#fff', fontSize: '0.72rem', fontWeight: 900, lineHeight: 1 }}>✓</span>}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Cancel only if already has a value set */}
+                {fd.assessment_level && (
+                  <div style={{ padding: '0 20px 20px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setAssessmentModalOpen(false)}
+                      style={{
+                        width: '100%', padding: '11px 0', borderRadius: 12,
+                        border: `1.5px solid ${S200}`, background: '#fff', color: S600,
+                        fontWeight: 700, fontSize: '0.88rem', cursor: 'pointer',
+                      }}
+                    >Cancel</button>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* ── Monitoring Level Modal ──────────────────────────────────────────
+            Intercepts "Patient Information →" CTA if monitoring level not yet set.
+            Shows upgrade / downgrade warning when level differs from assessment. ── */}
+        {monitoringModalOpen && (() => {
+          const LEVELS = fd.call_type === 'RESUS' ? (['ILS', 'ALS'] as const) : (['BLS', 'ILS', 'ALS'] as const);
+          type Level = typeof LEVELS[number];
+          const DESC: Record<Level, string> = {
+            BLS: 'Basic Life Support — ongoing care & transport',
+            ILS: 'Intermediate Life Support — monitored transport',
+            ALS: 'Advanced Life Support — critical monitoring en route',
+          };
+          const RANK: Record<string, number> = { BLS: 0, ILS: 1, ALS: 2 };
+          const assessRank = RANK[fd.assessment_level ?? ''];
+          const monRank = RANK[fd.monitoring_level ?? ''];
+          const hasMismatch = fd.monitoring_level && fd.assessment_level && monRank !== assessRank;
+          const isUpgrade = hasMismatch && monRank > assessRank;
+
+          return (
+            <div style={{
+              position: 'fixed', inset: 0, zIndex: 10000,
+              background: 'rgba(15,23,42,0.65)', backdropFilter: 'blur(5px)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+            }}>
+              <div onClick={e => e.stopPropagation()} style={{
+                maxWidth: 440, width: '100%', background: '#fff',
+                borderRadius: 22, overflow: 'hidden',
+                boxShadow: '0 28px 72px rgba(15,23,42,0.3)',
+              }}>
+                {/* Header */}
+                <div style={{
+                  padding: '20px 20px 12px',
+                  borderBottom: `1px solid ${S100}`,
+                }}>
+                  <div style={{ fontSize: '1.1rem', fontWeight: 900, color: S900, letterSpacing: '-0.01em' }}>
+                    Monitoring Level
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: S400, marginTop: 3 }}>
+                    Level of care monitored during transport
+                    {fd.assessment_level && (
+                      <span style={{ marginLeft: 4 }}>
+                        · Assessed at <b style={{ color: S700 }}>{fd.assessment_level}</b>
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Options */}
+                <div style={{ padding: '14px 20px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {LEVELS.map(lvl => {
+                    const isOn = fd.monitoring_level === lvl;
+                    return (
+                      <button
+                        key={lvl}
+                        type="button"
+                        onClick={() => sf('monitoring_level', lvl)}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 14,
+                          textAlign: 'left', cursor: 'pointer', width: '100%',
+                          background: isOn ? '#f0fdf4' : S50,
+                          border: `1.5px solid ${isOn ? G : S200}`,
+                          borderRadius: 14, padding: '13px 14px',
+                          transition: 'all 0.15s ease',
+                          boxShadow: isOn ? `0 2px 10px ${G}25` : 'none',
+                        }}
+                      >
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{ fontWeight: 800, fontSize: '0.96rem', color: isOn ? GDK : S900 }}>{lvl}</span>
+                          </div>
+                          <div style={{ fontSize: '0.72rem', color: isOn ? GDK : S400, marginTop: 2, lineHeight: 1.4 }}>{DESC[lvl]}</div>
+                        </div>
+                        <div style={{
+                          width: 22, height: 22, borderRadius: 11, flexShrink: 0,
+                          border: `2px solid ${isOn ? G : S200}`,
+                          background: isOn ? G : 'transparent',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          transition: 'all 0.15s ease',
+                        }}>
+                          {isOn && <span style={{ color: '#fff', fontSize: '0.72rem', fontWeight: 900, lineHeight: 1 }}>✓</span>}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Mismatch warning */}
+                {hasMismatch && (
+                  <div style={{
+                    margin: '0 20px 12px',
+                    padding: '12px 14px', borderRadius: 12,
+                    border: `1.5px solid ${S200}`,
+                    background: S50,
+                    color: S700,
+                    fontSize: '0.8rem', fontWeight: 600, lineHeight: 1.5,
+                    display: 'flex', gap: 8, alignItems: 'flex-start',
+                  }}>
+                    <span style={{ fontSize: '1rem', flexShrink: 0, color: S400 }}>{isUpgrade ? '↑' : '↓'}</span>
+                    <span>
+                      {isUpgrade
+                        ? <><b style={{ color: S900 }}>Upgrade required.</b> Monitoring ({fd.monitoring_level}) exceeds the assessed level ({fd.assessment_level}). Notify dispatch to upgrade this call to {fd.monitoring_level}.</>
+                        : <><b style={{ color: S900 }}>Downgrade required.</b> Monitoring ({fd.monitoring_level}) is below the assessed level ({fd.assessment_level}). Notify dispatch to downgrade this call to {fd.monitoring_level}.</>
+                      }
+                    </span>
+                  </div>
+                )}
+
+                {/* Footer */}
+                <div style={{ padding: '0 20px 20px', display: 'flex', gap: 10 }}>
+                  <button
+                    type="button"
+                    onClick={() => setMonitoringModalOpen(false)}
+                    style={{
+                      flex: 1, padding: '11px 0', borderRadius: 12,
+                      border: `1.5px solid ${S200}`, background: '#fff', color: S600,
+                      fontWeight: 700, fontSize: '0.88rem', cursor: 'pointer',
+                    }}
+                  >Cancel</button>
+                  <button
+                    type="button"
+                    disabled={!fd.monitoring_level}
+                    onClick={() => {
+                      setMonitoringModalOpen(false);
+                      advancePhase(2);
+                    }}
+                    style={{
+                      flex: 2, padding: '11px 0', borderRadius: 12, border: 'none',
+                      background: fd.monitoring_level ? `linear-gradient(135deg,${G},${GDK})` : S200,
+                      color: fd.monitoring_level ? '#fff' : S400,
+                      fontWeight: 800, fontSize: '0.9rem',
+                      cursor: fd.monitoring_level ? 'pointer' : 'not-allowed',
+                      boxShadow: fd.monitoring_level ? `0 4px 14px ${G}35` : 'none',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    {fd.monitoring_level ? 'Continue →' : 'Select a level'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+
         {phase === PHASES.length - 1 && (
           <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 40, display: 'flex', gap: 10, padding: '12px 18px', background: 'rgba(255,255,255,0.97)', backdropFilter: 'blur(12px)', borderTop: `1px solid ${S200}`, boxShadow: '0 -4px 16px rgba(0,0,0,0.06)' }}>
             <button type="button" onClick={handleSubmit} disabled={submitting} style={{ flex: 1, padding: '15px 0', borderRadius: 12, fontSize: '0.88rem', fontWeight: 800, border: 'none', cursor: submitting ? 'wait' : 'pointer', background: submitting ? S400 : `linear-gradient(135deg,${ROSE},#be123c)`, color: W, boxShadow: submitting ? 'none' : `0 4px 14px rgba(225,29,72,0.3)` }}>{submitting ? 'Submitting...' : 'Submit PRF'}</button>
