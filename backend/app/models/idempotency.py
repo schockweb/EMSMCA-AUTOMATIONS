@@ -1,6 +1,7 @@
 """
 Idempotency Model — Tracks API requests to prevent double processing.
 """
+from typing import Union
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import String, DateTime, JSON, Integer
 from sqlalchemy.orm import Mapped, mapped_column
@@ -18,8 +19,8 @@ class IdempotencyKey(Base):
     key: Mapped[str] = mapped_column(String(255), primary_key=True)
     status: Mapped[str] = mapped_column(String(50), nullable=False)  # "IN_PROGRESS" or "COMPLETED"
     
-    response_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    response_body: Mapped[dict | list | None] = mapped_column(JSON, nullable=True)
+    response_code: Mapped[Union[int, None]] = mapped_column(Integer, nullable=True)
+    response_body: Mapped[Union[dict, list, None]] = mapped_column(JSON, nullable=True)
     
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)

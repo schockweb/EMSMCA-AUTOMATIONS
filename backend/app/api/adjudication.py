@@ -1,6 +1,7 @@
 """
 Adjudication API — Clinical scrubbing endpoints.
 """
+from __future__ import annotations
 import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select

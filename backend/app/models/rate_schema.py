@@ -5,6 +5,7 @@ Each rate schema defines how a medical scheme is billed: rate per km,
 base fees, rounding rules, after-hours / weekend multipliers, etc.
 A PRF is linked to a rate schema via `digital_prfs.billing_schema_code`.
 """
+from typing import Union
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from sqlalchemy import Boolean, Integer, String, Text, Date, DateTime, Numeric
@@ -30,7 +31,7 @@ class RateSchema(Base):
         Date, nullable=False,
         comment="Start date this tariff is active"
     )
-    effective_to: Mapped[date | None] = mapped_column(
+    effective_to: Mapped[Union[date, None]] = mapped_column(
         Date, nullable=True,
         comment="End date — NULL means currently active"
     )
@@ -78,7 +79,7 @@ class RateSchema(Base):
         Boolean, nullable=False, default=True,
         comment="Hard disable flag — inactive schemas cannot be used for new bills"
     )
-    notes: Mapped[str | None] = mapped_column(
+    notes: Mapped[Union[str, None]] = mapped_column(
         Text, nullable=True,
         comment="Free-text notes about this tariff"
     )
@@ -86,7 +87,7 @@ class RateSchema(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
-    updated_at: Mapped[datetime | None] = mapped_column(
+    updated_at: Mapped[Union[datetime, None]] = mapped_column(
         DateTime(timezone=True), nullable=True,
     )
 

@@ -6,6 +6,7 @@ automatically appends necessary modifiers for legally mandated scheme coverage.
 Reference: Medical Schemes Act No. 131 of 1998, Regulation 8
 PMBs cover 270+ diagnosis-treatment pairs (DTPs) and 26+ chronic disease list (CDL) conditions.
 """
+from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 import re

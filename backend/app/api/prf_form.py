@@ -14,6 +14,7 @@ Validation rules enforced at ingestion time (Pydantic model_validator):
   - BHF Practice Number is required
   - Minimum 2 vital sign sets for Primary; 3 for IFT
 """
+from __future__ import annotations
 import uuid
 import re
 import logging

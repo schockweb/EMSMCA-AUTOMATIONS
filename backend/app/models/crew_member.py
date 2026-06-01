@@ -2,6 +2,7 @@
 Crew Member model — EMS personnel belonging to a ServiceProvider.
 Crew members self-assign to shifts by typing their name + HPCSA#.
 """
+from typing import Union
 import uuid
 from datetime import datetime, timezone
 from sqlalchemy import String, Boolean, ForeignKey, DateTime
@@ -27,11 +28,11 @@ class CrewMember(Base):
         String(255), nullable=False,
         comment="Full name e.g. 'A. Ishwar'"
     )
-    initials: Mapped[str | None] = mapped_column(
+    initials: Mapped[Union[str, None]] = mapped_column(
         String(10), nullable=True,
         comment="Initials e.g. 'A.I.'"
     )
-    hpcsa_number: Mapped[str | None] = mapped_column(
+    hpcsa_number: Mapped[Union[str, None]] = mapped_column(
         String(20), nullable=True,
         comment="HPCSA registration number e.g. '0049530'"
     )
@@ -40,13 +41,13 @@ class CrewMember(Base):
         comment="HPCSA registration category: BAA / AEA / ECT / ECA / ANT / ECP. "
                 "See app.utils.hpcsa for the tier translation used by the rules + tariff engines."
     )
-    phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    phone: Mapped[Union[str, None]] = mapped_column(String(20), nullable=True)
     role: Mapped[str] = mapped_column(
         String(20), nullable=False, default="crew",
         comment="'admin' = provider admin dashboard, 'crew' = mobile PRF"
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    last_login: Mapped[datetime | None] = mapped_column(
+    last_login: Mapped[Union[datetime, None]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
 

@@ -1,6 +1,7 @@
 """
 User / Provider model — RBAC profiles, BHF practice details.
 """
+from typing import Union
 import uuid
 from datetime import datetime, timezone
 from sqlalchemy import String, Boolean, Integer, Enum as SAEnum, DateTime, JSON
@@ -55,9 +56,9 @@ class User(Base):
     role: Mapped[UserRole] = mapped_column(
         SAEnum(UserRole, name="user_role"), nullable=False, default=UserRole.PARAMEDIC
     )
-    bhf_practice_number: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    bhf_practice_number: Mapped[Union[str, None]] = mapped_column(String(20), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    permissions: Mapped[list | None] = mapped_column(
+    permissions: Mapped[Union[list, None]] = mapped_column(
         JSON, nullable=True, default=lambda: list(ALL_PERMISSIONS),
         comment="List of page-keys the user can access"
     )
@@ -67,13 +68,13 @@ class User(Base):
         Integer, default=0, server_default="0",
         comment="Consecutive failed login attempts"
     )
-    locked_until: Mapped[datetime | None] = mapped_column(
+    locked_until: Mapped[Union[datetime, None]] = mapped_column(
         DateTime(timezone=True), nullable=True,
         comment="Account locked until this timestamp (NULL = not locked)"
     )
 
     # ── Password Tracking ──
-    password_changed_at: Mapped[datetime | None] = mapped_column(
+    password_changed_at: Mapped[Union[datetime, None]] = mapped_column(
         DateTime(timezone=True), nullable=True,
         comment="Last password change timestamp"
     )

@@ -10,15 +10,15 @@ from sqlalchemy import select
 
 async def migrate_and_seed():
     # 1. Add role column if missing
-    from sqlalchemy.exc import OperationalError
+    from sqlalchemy.exc import OperationalError, ProgrammingError
     async with engine.begin() as conn:
         try:
             await conn.execute(text(
                 "ALTER TABLE crew_members ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'crew'"
             ))
             print("role column added")
-        except OperationalError as e:
-            if "duplicate column name" in str(e):
+        except (OperationalError, ProgrammingError) as e:
+            if "duplicate column name" in str(e).lower() or "already exists" in str(e).lower():
                 print("role column already exists")
             else:
                 raise

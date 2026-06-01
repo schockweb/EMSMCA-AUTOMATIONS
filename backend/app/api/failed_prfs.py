@@ -2,6 +2,7 @@
 Failed PRF Management API — Admin tools for reviewing and reprocessing
 PRFs that failed during the automated processing pipeline.
 """
+from __future__ import annotations
 import logging
 from datetime import datetime, timezone, date
 

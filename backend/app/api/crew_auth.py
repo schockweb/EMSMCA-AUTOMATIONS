@@ -2,6 +2,7 @@
 Crew Authentication API — Login, profile, and password management for crew members.
 Separate from the admin auth system — crew get a JWT with provider_id + crew_id claims.
 """
+from __future__ import annotations
 import logging
 from datetime import datetime, timedelta, timezone
 

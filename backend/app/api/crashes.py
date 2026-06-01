@@ -2,6 +2,7 @@
 Crashes API — CRUD and analytics for the CrashEvent monitoring system.
 Admin-only access (except POST /api/crashes for frontend error reporting).
 """
+from __future__ import annotations
 import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Optional

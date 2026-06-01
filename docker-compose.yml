@@ -44,6 +44,10 @@ services:
     env_file:
       - .env
       - ./backend/.env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-ems_admin}:${POSTGRES_PASSWORD:-ems_secure_2024}@postgres:5432/${POSTGRES_DB:-ems_claims}
+      - CELERY_BROKER_URL=amqp://${RABBITMQ_USER:-ems_rabbit}:${RABBITMQ_PASS:-rabbit_secure_2024}@rabbitmq:5672//
+      - UPLOAD_DIR=/app/uploads
     ports:
       - "8001:8000"
     volumes:
@@ -65,6 +69,10 @@ services:
     env_file:
       - .env
       - ./backend/.env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-ems_admin}:${POSTGRES_PASSWORD:-ems_secure_2024}@postgres:5432/${POSTGRES_DB:-ems_claims}
+      - CELERY_BROKER_URL=amqp://${RABBITMQ_USER:-ems_rabbit}:${RABBITMQ_PASS:-rabbit_secure_2024}@rabbitmq:5672//
+      - UPLOAD_DIR=/app/uploads
     volumes:
       - ./backend:/app
       - upload_data:/app/uploads
@@ -73,6 +81,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+    healthcheck:
+      disable: true
     command: celery -A app.tasks.celery_app worker --loglevel=info --pool=solo
 
   frontend:

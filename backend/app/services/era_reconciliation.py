@@ -2,6 +2,7 @@
 ERA Parsing & Auto-Reconciliation Service
 Parses Electronic Remittance Advices from schemes and auto-reconciles against claims.
 """
+from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal

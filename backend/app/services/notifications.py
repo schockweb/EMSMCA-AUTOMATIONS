@@ -2,6 +2,7 @@
 Notification Service — Omnichannel alerts via SMS, WhatsApp, and Email.
 Supports Infobip (primary) and Twilio (fallback) for SMS/WhatsApp delivery.
 """
+from __future__ import annotations
 import httpx
 from dataclasses import dataclass, field
 from typing import Optional

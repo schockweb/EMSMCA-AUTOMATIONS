@@ -1,6 +1,7 @@
 """
 Analytics & Payout API — Dashboard metrics, ERA management, and notifications.
 """
+from __future__ import annotations
 import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select

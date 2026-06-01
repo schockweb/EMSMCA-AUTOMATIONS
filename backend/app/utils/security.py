@@ -2,6 +2,7 @@
 Security utilities — JWT token handling with JTI claims, password hashing
 with complexity validation, token blacklisting, and role-based guards.
 """
+from __future__ import annotations
 import re
 import uuid
 from datetime import datetime, timedelta, timezone

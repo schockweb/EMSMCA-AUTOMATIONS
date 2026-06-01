@@ -2,6 +2,7 @@
 Spreadsheet Export Service — Generates Excel workbooks from extracted PRF data.
 Creates a structured spreadsheet with all extracted fields from processed documents.
 """
+from __future__ import annotations
 import io
 from datetime import datetime, timezone
 from typing import List

@@ -1,6 +1,7 @@
 """
 Idempotency Utility — Prevents duplicate processing of financial API requests.
 """
+from __future__ import annotations
 import hashlib
 import json
 import logging

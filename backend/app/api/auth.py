@@ -2,6 +2,7 @@
 Auth API — Login (with account lockout), Token Refresh (with rotation blacklisting),
 Logout (server-side token revocation), and Current User Profile.
 """
+from __future__ import annotations
 from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request

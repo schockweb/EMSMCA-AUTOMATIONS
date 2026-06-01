@@ -2,6 +2,7 @@
 EMS Medical Claims Ingestion Portal — Configuration
 Loads all environment variables via Pydantic Settings.
 """
+from __future__ import annotations
 import json
 import os
 from functools import lru_cache

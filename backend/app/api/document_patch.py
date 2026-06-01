@@ -1,3 +1,4 @@
+from __future__ import annotations
 @router.patch("/{doc_id}/review", response_model=DocumentResponse)
 async def review_document(
     doc_id: str,

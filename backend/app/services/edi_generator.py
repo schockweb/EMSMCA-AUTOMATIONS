@@ -5,6 +5,7 @@ compliant with SA healthcare clearinghouse standards.
 
 Generates HPCSA-compliant claim messages for electronic submission.
 """
+from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 from xml.etree.ElementTree import Element, SubElement, tostring

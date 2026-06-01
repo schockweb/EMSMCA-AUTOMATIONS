@@ -2,6 +2,7 @@
 Mock Scheme API — simulates a South African medical scheme's B2B authorization server.
 Used for testing when no real scheme credentials are available.
 """
+from __future__ import annotations
 import uuid
 import asyncio
 import random

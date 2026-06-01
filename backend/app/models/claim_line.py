@@ -1,6 +1,7 @@
 """
 ClaimLine model — Granular billing lines (CPT, NAPPI, ICD-10).
 """
+from typing import Union
 import uuid
 from decimal import Decimal
 from sqlalchemy import String, Integer, Text, ForeignKey, Numeric
@@ -19,15 +20,15 @@ class ClaimLine(Base):
         UUID(as_uuid=True), ForeignKey("claims.id"), nullable=False, index=True
     )
     line_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    cpt_code: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    nappi_code: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    icd10_primary: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    icd10_secondary: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cpt_code: Mapped[Union[str, None]] = mapped_column(String(255), nullable=True)
+    nappi_code: Mapped[Union[str, None]] = mapped_column(String(255), nullable=True)
+    icd10_primary: Mapped[Union[str, None]] = mapped_column(String(50), nullable=True)
+    icd10_secondary: Mapped[Union[str, None]] = mapped_column(String(50), nullable=True)
+    description: Mapped[Union[str, None]] = mapped_column(Text, nullable=True)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     unit_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False, default=0)
     total_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False, default=0)
-    modifier: Mapped[str | None] = mapped_column(
+    modifier: Mapped[Union[str, None]] = mapped_column(
         String(50), nullable=True, comment="PMB or other modifier"
     )
 

@@ -2,6 +2,7 @@
 Service Provider model — Multi-tenant root entity for EMS companies.
 Each provider (e.g., JEMS Medical Services) has their own crew, vehicles, and PRFs.
 """
+from typing import Union
 import uuid
 from datetime import datetime, timezone
 from sqlalchemy import String, Boolean, Text, DateTime
@@ -24,18 +25,18 @@ class ServiceProvider(Base):
         String(100), unique=True, nullable=False, index=True,
         comment="URL slug e.g. 'jems' → /jems/crew"
     )
-    pr_number: Mapped[str | None] = mapped_column(
+    pr_number: Mapped[Union[str, None]] = mapped_column(
         String(50), nullable=True,
         comment="BHF/PCNS Practice Registration Number"
     )
-    pty_reg_number: Mapped[str | None] = mapped_column(
+    pty_reg_number: Mapped[Union[str, None]] = mapped_column(
         String(50), nullable=True,
         comment="PTY Registration Number"
     )
-    phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    address: Mapped[str | None] = mapped_column(Text, nullable=True)
-    logo_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    phone: Mapped[Union[str, None]] = mapped_column(String(20), nullable=True)
+    email: Mapped[Union[str, None]] = mapped_column(String(255), nullable=True)
+    address: Mapped[Union[str, None]] = mapped_column(Text, nullable=True)
+    logo_url: Mapped[Union[str, None]] = mapped_column(String(500), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
     created_at: Mapped[datetime] = mapped_column(

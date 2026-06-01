@@ -1,6 +1,7 @@
 """
 Pydantic schemas for Cases (Pre-authorizations).
 """
+from __future__ import annotations
 from datetime import datetime, date
 from pydantic import BaseModel
 from typing import Optional
