@@ -163,6 +163,7 @@ export default function CrewDashboard() {
   const [newPrfError, setNewPrfError] = useState('');
   const [endingShift, setEndingShift] = useState(false);
   const [drafts, setDrafts] = useState<any[]>([]);
+  const [baaWarningOpen, setBaaWarningOpen] = useState(false);
 
   // Live list of additional crew shown on the personal dashboard. Mirrors
   // localStorage so refreshes don't drop the roster.
@@ -445,15 +446,10 @@ export default function CrewDashboard() {
       // HPCSA staffing rule (June 2017 §2.1, DoH EMS Regs 1 Dec 2017 §7.2):
       const allCrew = [crew1Profile, ...extraProfiles];
       const allBaa = allCrew.length > 0 && allCrew.every(c => BLS_CATEGORIES.includes((c.qualification || '').toUpperCase()));
-      if (allBaa) {
-        setError('Please add another crew member that is higher than BLS qualification.');
-        setCrewPickerOpen(false);
-        setStep('crew');
-      } else {
-        localStorage.removeItem('shift_supervisor');
-        setShiftSupervisor(null);
-        setStep(null);
-      }
+      
+      localStorage.removeItem('shift_supervisor');
+      setShiftSupervisor(null);
+      setStep(null);
     } catch (err: any) {
       setError(err.response?.data?.detail || 'HPCSA number not found. Ensure the entered crew member(s) are registered.');
       setCrewPickerOpen(false);
@@ -1103,11 +1099,24 @@ export default function CrewDashboard() {
                               key={c.id}
                               type="button"
                               onClick={() => {
-                                setSelectedCrewHpcsas(prev =>
-                                  isSelected
-                                    ? prev.filter(h => h !== c.hpcsa_number)
-                                    : [...prev, c.hpcsa_number]
-                                );
+                                const next = isSelected
+                                  ? selectedCrewHpcsas.filter(h => h !== c.hpcsa_number)
+                                  : [...selectedCrewHpcsas, c.hpcsa_number];
+                                setSelectedCrewHpcsas(next);
+
+                                if (!isSelected && next.length === 2) {
+                                  const c1 = crewRoster.find(x => x.hpcsa_number === next[0]);
+                                  const c2 = crewRoster.find(x => x.hpcsa_number === next[1]);
+                                  if (
+                                    c1 && c2 &&
+                                    BLS_CATEGORIES.includes((c1.qualification || '').toUpperCase()) &&
+                                    BLS_CATEGORIES.includes((c2.qualification || '').toUpperCase())
+                                  ) {
+                                    setTimeout(() => {
+                                      setBaaWarningOpen(true);
+                                    }, 50);
+                                  }
+                                }
                               }}
                               style={{
                                 width: '100%', padding: '13px 16px',
@@ -1214,6 +1223,42 @@ export default function CrewDashboard() {
                 <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {baaWarningOpen && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.55)',
+          backdropFilter: 'blur(6px)', zIndex: 500,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: 20,
+        }}>
+          <div style={{
+            background: '#fff', borderRadius: 18,
+            padding: '26px 26px 28px',
+            width: '100%', maxWidth: 420,
+            boxShadow: '0 24px 60px rgba(0,0,0,0.25), 0 6px 20px rgba(0,0,0,0.12)',
+            border: `1px solid ${B}`, textAlign: 'center',
+          }}>
+            <div style={{ fontSize: '2rem', marginBottom: 16 }}>⚠️</div>
+            <div style={{ fontSize: '1.1rem', fontWeight: 800, color: T, marginBottom: 12 }}>
+              BAA Shift Notice
+            </div>
+            <div style={{ fontSize: '0.88rem', color: M, marginBottom: 24, lineHeight: 1.5 }}>
+              Please note that the overseen practitioner ALS or ILS details and consultation information is documented in the PRF.
+            </div>
+            <button
+              onClick={() => setBaaWarningOpen(false)}
+              style={{
+                width: '100%', padding: '14px',
+                background: `linear-gradient(135deg, ${G}, ${GD})`, color: '#fff',
+                border: 'none', borderRadius: 12, fontSize: '0.97rem', fontWeight: 800,
+                cursor: 'pointer',
+              }}
+            >
+              Acknowledge
+            </button>
           </div>
         </div>
       )}

@@ -4,10 +4,12 @@
  * Each phase mirrors the real-world call flow so crew always know where they are.
  */
 import React, { useState, useEffect, useRef, useMemo, useCallback, createContext, useContext } from 'react';
+import ReactDOM from 'react-dom';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import SignaturePad from '../../components/SignaturePad';
 import FullscreenSignaturePad, { FullscreenCanvas } from '../../components/FullscreenSignaturePad';
+import PatientDocumentsCapture from '../../components/PatientDocumentsCapture';
 import StickerCameraCapture from '../../components/StickerCameraCapture';
 import DocumentsCapture from '../../components/DocumentsCapture';
 import BodyDiagram from '../../components/BodyDiagram';
@@ -37,9 +39,13 @@ const API = import.meta.env.VITE_API_URL || '';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const G = '#5b8def'; const GDK = '#3b6fde'; const GBG = 'rgba(91,141,239,0.09)';
+// Full Tailwind "slate" scale S50–S900. Keep ALL shades defined even if a given
+// shade isn't referenced yet — a missing rung (e.g. S300/S500) is an undefined
+// global that crashes the whole page via the ErrorBoundary the instant any code
+// touches it. Defining the complete scale removes that entire failure mode.
 const S900 = '#0f172a'; const S800 = '#1e293b'; const S700 = '#334155'; const S600 = '#475569';
-const S400 = '#94a3b8'; const S300 = '#cbd5e1'; const S200 = '#e2e8f0'; const S100 = '#f1f5f9';
-const S50 = '#f8fafc'; const W = '#ffffff';
+const S500 = '#64748b'; const S400 = '#94a3b8'; const S300 = '#cbd5e1'; const S200 = '#e2e8f0';
+const S100 = '#f1f5f9'; const S50 = '#f8fafc'; const W = '#ffffff';
 const ROSE = '#e11d48'; const AMB = '#f59e0b'; const REDC = '#ef4444';
 
 function api() {
@@ -735,6 +741,7 @@ function KmInput({ kmKey, value, onChange, onCommit }: {
   };
   return (
     <input
+      id={`input-${kmKey}`}
       type="text"
       inputMode="decimal"
       pattern="[0-9. ]*"
@@ -767,7 +774,11 @@ function KmInput({ kmKey, value, onChange, onCommit }: {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 // ── Shared UI Context & Primitives ──────────────────────────────────────────────────
-export const FormContext = createContext<any>(null);
+// NOT exported on purpose: this is used only within this file. Exporting a
+// non-component value from a module that also exports components disables React
+// Fast Refresh, forcing a full page reload on every edit (and losing the crew's
+// place in the form). Keep all non-component values in this file un-exported.
+const FormContext = createContext<any>(null);
 
 const base: React.CSSProperties = {
   width: '100%', padding: '13px 14px', fontSize: '0.93rem', color: '#0f172a',
@@ -876,13 +887,15 @@ const formatNominatimSuggestion = (item: any): AddrSuggestion => {
   };
 };
 
-export type ResolvedAddress = {
+type ResolvedAddress = {
   street: string;
   suburb: string | null;
   raw: any;
 };
 
-export const reverseGeocode = async (
+// Not exported — used only in this file. See the FormContext note above: any
+// non-component runtime export here breaks Fast Refresh for the whole module.
+const reverseGeocode = async (
   lat: number, lng: number, signal: AbortSignal,
 ): Promise<ResolvedAddress | null> => {
   const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&addressdetails=1&lat=${lat}&lon=${lng}&email=system@jemsmedical.co.za`;
@@ -903,6 +916,343 @@ export const reverseGeocode = async (
     suburb: a.suburb || a.neighbourhood || a.city_district || null,
     raw: data,
   };
+};
+
+// ── SA Hospital database ────────────────────────────────────────────────────
+const SA_HOSPITALS: { province: string; hospitals: { name: string; wards: string[] }[] }[] = [
+  {
+    province: 'Gauteng',
+    hospitals: [
+      { name: 'Netcare Akasia Hospital', wards: ['Emergency', 'ICU', 'Maternity', 'General Ward', 'Theatre', 'Casualty'] },
+      { name: 'Netcare Alberton Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Paediatrics', 'Theatre'] },
+      { name: 'Netcare Constantia Clinic', wards: ['Emergency', 'ICU', 'General Ward', 'Theatre'] },
+      { name: 'Netcare Femina Hospital', wards: ['Emergency', 'Maternity', 'NICU', 'General Ward', 'Theatre'] },
+      { name: 'Netcare Garden City Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Paediatrics', 'Theatre'] },
+      { name: 'Netcare Jakaranda Hospital', wards: ['Emergency', 'ICU', 'Maternity', 'NICU', 'General Ward', 'Theatre'] },
+      { name: 'Netcare Krugersdorp Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Netcare Lakeview Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Theatre'] },
+      { name: 'Netcare Linksfield Hospital', wards: ['Emergency', 'ICU', 'CCU', 'General Ward', 'Theatre', 'Orthopaedics'] },
+      { name: 'Netcare Milpark Hospital', wards: ['Emergency', 'ICU', 'CCU', 'Trauma', 'General Ward', 'Theatre', 'Neurosurgery'] },
+      { name: 'Netcare Montana Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Netcare Moot Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Netcare Mulbarton Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Netcare Olivedale Hospital', wards: ['Emergency', 'ICU', 'CCU', 'General Ward', 'Paediatrics', 'Theatre'] },
+      { name: 'Netcare Park Lane Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Oncology', 'Theatre'] },
+      { name: 'Netcare Pinehaven Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Netcare Pretoria East Hospital', wards: ['Emergency', 'ICU', 'CCU', 'General Ward', 'Maternity', 'Theatre', 'Oncology'] },
+      { name: 'Netcare Rehabilitation Hospital', wards: ['Rehabilitation', 'Neurological Rehab', 'Orthopaedic Rehab', 'General Ward'] },
+      { name: 'Netcare Rosebank Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Theatre', 'Oncology'] },
+      { name: 'Netcare Sunninghill Hospital', wards: ['Emergency', 'ICU', 'CCU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Netcare Sunward Park Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Netcare Unitas Hospital', wards: ['Emergency', 'ICU', 'CCU', 'General Ward', 'Maternity', 'Theatre', 'Paediatrics'] },
+      { name: 'Netcare Waterfall City Hospital', wards: ['Emergency', 'ICU', 'CCU', 'General Ward', 'Maternity', 'Theatre', 'Paediatrics', 'Oncology'] },
+      { name: 'Life Bedford Gardens Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Life Brenthurst Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Oncology', 'Theatre'] },
+      { name: 'Life Carstenhof Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Theatre'] },
+      { name: 'Life Eugene Marais Hospital', wards: ['Emergency', 'ICU', 'CCU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Life Faerie Glen Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Life Flora Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Life Fourways Hospital', wards: ['Emergency', 'ICU', 'CCU', 'General Ward', 'Maternity', 'Paediatrics', 'Theatre'] },
+      { name: 'Life Groenkloof Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Theatre'] },
+      { name: 'Life Roseacres Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Theatre'] },
+      { name: 'Life Springs Parkland Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Life Wilgeheuwel Hospital', wards: ['Emergency', 'ICU', 'CCU', 'General Ward', 'Maternity', 'Paediatrics', 'Theatre'] },
+      { name: 'Life Wilgers Hospital', wards: ['Emergency', 'ICU', 'CCU', 'General Ward', 'Maternity', 'Theatre', 'Oncology'] },
+      { name: 'Mediclinic Heart Hospital', wards: ['Emergency', 'ICU', 'CCU', 'Cardiac ICU', 'Cardiology', 'Theatre', 'General Ward'] },
+      { name: 'Mediclinic Kloof', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Mediclinic Medforum', wards: ['Emergency', 'ICU', 'General Ward', 'Theatre'] },
+      { name: 'Mediclinic Midstream', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Mediclinic Morningside', wards: ['Emergency', 'ICU', 'CCU', 'General Ward', 'Maternity', 'Theatre', 'Oncology'] },
+      { name: 'Mediclinic Sandton', wards: ['Emergency', 'ICU', 'CCU', 'General Ward', 'Maternity', 'Theatre', 'Paediatrics'] },
+      { name: 'Mediclinic Vereeniging', wards: ['Emergency', 'ICU', 'General Ward', 'Theatre'] },
+      { name: 'Busamed Modderfontein Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Theatre'] },
+      { name: 'Ahmed Kathrada Private Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Lenmed Randfontein Private Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Theatre'] },
+    ],
+  },
+  {
+    province: 'KwaZulu-Natal',
+    hospitals: [
+      { name: 'Netcare Alberlito Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Netcare Kingsway Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Netcare Margate Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Theatre'] },
+      { name: 'Netcare Parklands Hospital', wards: ['Emergency', 'ICU', 'CCU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: "Netcare St Augustine's Hospital", wards: ['Emergency', 'ICU', 'CCU', 'General Ward', 'Maternity', 'Theatre', 'Neurosurgery'] },
+      { name: "Netcare St Anne's Hospital", wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Netcare The Bay Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Netcare Umhlanga Hospital', wards: ['Emergency', 'ICU', 'CCU', 'General Ward', 'Maternity', 'Theatre', 'Oncology'] },
+      { name: 'Life Chatsmed Garden Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Life Empangeni Private Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Life Entabeni Hospital', wards: ['Emergency', 'ICU', 'CCU', 'General Ward', 'Maternity', 'Theatre', 'Oncology'] },
+      { name: 'Life Hilton Private Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Theatre'] },
+      { name: 'Life Mount Edgecombe Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Life The Crompton Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Theatre'] },
+      { name: 'Life Westville Hospital', wards: ['Emergency', 'ICU', 'CCU', 'General Ward', 'Maternity', 'Theatre', 'Paediatrics'] },
+      { name: 'Busamed Gateway Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Busamed Hillcrest Private Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Ethekwini Hospital & Heart Centre', wards: ['Emergency', 'ICU', 'CCU', 'Cardiac ICU', 'Cardiology', 'General Ward', 'Theatre'] },
+      { name: 'Mediclinic Newcastle', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Mediclinic Pietermaritzburg', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Mediclinic Victoria', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'City Hospital Durban', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Lenmed Durdoc Centre', wards: ['Emergency', 'ICU', 'General Ward', 'Theatre'] },
+    ],
+  },
+  {
+    province: 'Western Cape',
+    hospitals: [
+      { name: 'Netcare Blaauwberg Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Netcare Christiaan Barnard Memorial Hospital', wards: ['Emergency', 'ICU', 'CCU', 'Cardiac ICU', 'Cardiology', 'General Ward', 'Theatre'] },
+      { name: 'Netcare Kuilsriver Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Netcare N1 City Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Netcare UCT Private Academic Hospital', wards: ['Emergency', 'ICU', 'CCU', 'General Ward', 'Theatre', 'Oncology', 'Neurology'] },
+      { name: 'Life Bay View Private Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Theatre'] },
+      { name: 'Life Kingsbury Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre', 'Oncology'] },
+      { name: 'Life Knysna Private Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Theatre'] },
+      { name: 'Life Paarl Valley Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Life Vincent Pallotti Hospital', wards: ['Emergency', 'ICU', 'CCU', 'General Ward', 'Maternity', 'Theatre', 'Oncology'] },
+      { name: 'Life West Coast Private Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Theatre'] },
+      { name: 'Mediclinic Cape Gate', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Mediclinic Cape Town', wards: ['Emergency', 'ICU', 'CCU', 'General Ward', 'Maternity', 'Theatre', 'Oncology'] },
+      { name: 'Mediclinic Constantiaberg', wards: ['Emergency', 'ICU', 'CCU', 'General Ward', 'Maternity', 'Theatre', 'Oncology'] },
+      { name: 'Mediclinic Durbanville', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Mediclinic George', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Mediclinic Hermanus', wards: ['Emergency', 'ICU', 'General Ward', 'Theatre'] },
+      { name: 'Mediclinic Louis Leipoldt', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Mediclinic Milnerton', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Mediclinic Panorama', wards: ['Emergency', 'ICU', 'CCU', 'General Ward', 'Maternity', 'Theatre', 'Paediatrics'] },
+      { name: 'Mediclinic Paarl', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Mediclinic Stellenbosch', wards: ['Emergency', 'ICU', 'General Ward', 'Theatre'] },
+      { name: 'Mediclinic Vergelegen', wards: ['Emergency', 'ICU', 'CCU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Mediclinic Worcester', wards: ['Emergency', 'ICU', 'General Ward', 'Theatre'] },
+      { name: 'Melomed Bellville', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Melomed Claremont', wards: ['Emergency', 'ICU', 'General Ward', 'Theatre'] },
+      { name: 'Melomed Gatesville', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: "Melomed Mitchell's Plain", wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Melomed Tokai', wards: ['Emergency', 'ICU', 'General Ward', 'Theatre'] },
+    ],
+  },
+  {
+    province: 'Eastern Cape',
+    hospitals: [
+      { name: 'Netcare Greenacres Hospital', wards: ['Emergency', 'ICU', 'CCU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Netcare Cuyler Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Theatre'] },
+      { name: 'Life Beacon Bay Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Life East London Private Hospital', wards: ['Emergency', 'ICU', 'CCU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Life Mercantile Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Life Queenstown Private Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Theatre'] },
+      { name: "Life St Dominic's Hospital", wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: "Life St George's Hospital", wards: ['Emergency', 'ICU', 'CCU', 'General Ward', 'Maternity', 'Theatre', 'Oncology'] },
+      { name: 'Life Hunterscraig Private Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Theatre'] },
+      { name: 'Disa Clinic', wards: ['Emergency', 'ICU', 'General Ward', 'Theatre'] },
+    ],
+  },
+  {
+    province: 'Limpopo',
+    hospitals: [
+      { name: 'Netcare Pholoso Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Mediclinic Polokwane', wards: ['Emergency', 'ICU', 'CCU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Mediclinic Tzaneen', wards: ['Emergency', 'ICU', 'General Ward', 'Theatre'] },
+      { name: 'Busamed Bela Bela Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Theatre'] },
+    ],
+  },
+  {
+    province: 'Mpumalanga',
+    hospitals: [
+      { name: 'Mediclinic Nelspruit', wards: ['Emergency', 'ICU', 'CCU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Mediclinic Trichardt', wards: ['Emergency', 'ICU', 'General Ward', 'Theatre'] },
+      { name: 'Life The Glynnwood', wards: ['Emergency', 'ICU', 'General Ward', 'Theatre'] },
+      { name: 'Rob Ferreira Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+    ],
+  },
+  {
+    province: 'Free State',
+    hospitals: [
+      { name: 'Netcare Vaalpark Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Netcare Kroon Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Theatre'] },
+      { name: 'Mediclinic Bloemfontein', wards: ['Emergency', 'ICU', 'CCU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Mediclinic Welkom', wards: ['Emergency', 'ICU', 'General Ward', 'Theatre'] },
+      { name: 'Life Pasteur Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+    ],
+  },
+  {
+    province: 'Northern Cape',
+    hospitals: [
+      { name: 'Mediclinic Kimberley', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Mediclinic Upington', wards: ['Emergency', 'ICU', 'General Ward', 'Theatre'] },
+      { name: 'Lenmed Kathu Private Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Theatre'] },
+    ],
+  },
+  {
+    province: 'North West',
+    hospitals: [
+      { name: 'Netcare Ferncrest Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Theatre'] },
+      { name: 'Mediclinic Klerksdorp', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Mediclinic Potchefstroom', wards: ['Emergency', 'ICU', 'General Ward', 'Maternity', 'Theatre'] },
+      { name: 'Life Wilmed Park Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Theatre'] },
+      { name: 'Busamed Harrismith Private Hospital', wards: ['Emergency', 'ICU', 'General Ward', 'Theatre'] },
+    ],
+  },
+];
+
+// Common ward options shown for any hospital (fallback if no specific wards listed)
+const COMMON_WARDS = [
+  'Emergency', 'ICU', 'CCU', 'CICU (Cardiac ICU)', 'NICU', 'High Care',
+  'General Ward', 'Maternity', 'Paediatrics', 'Theatre', 'Casualty',
+  'Orthopaedics', 'Oncology', 'Neurology', 'Neurosurgery', 'Psychiatry',
+  'Renal / Dialysis', 'Burns Unit', 'Rehabilitation',
+];
+
+// ── HospitalPicker ──────────────────────────────────────────────────────────
+// Inline autocomplete: type to see up to 3 matching hospitals, pick one,
+// then choose the ward from a compact list below the input.
+const HospitalPicker = ({ wardKey }: { wardKey?: string }) => {
+  const { fd, sf } = useContext(FormContext);
+  const fk = 'receiving_facility';
+  const val: string = fd[fk] ?? '';
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [showWards, setShowWards] = useState(false);
+  const [selectedHospital, setSelectedHospital] = useState<{ name: string; wards: string[] } | null>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setShowDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  // Flat list filtered to top 3 matches
+  const allHospitals = SA_HOSPITALS.flatMap(p => p.hospitals);
+  const suggestions = val.trim().length >= 1
+    ? allHospitals.filter(h => h.name.toLowerCase().includes(val.toLowerCase())).slice(0, 3)
+    : [];
+
+  const handleInputChange = (v: string) => {
+    sf(fk, v);
+    setShowDropdown(true);
+    setShowWards(false);
+    setSelectedHospital(null);
+  };
+
+  const handlePick = (h: { name: string; wards: string[] }) => {
+    sf(fk, h.name);
+    setSelectedHospital(h);
+    setShowDropdown(false);
+    setShowWards(true);
+  };
+
+  const handleSelectWard = (w: string) => {
+    if (wardKey) sf(wardKey, w);
+    setShowWards(false);
+  };
+
+  const wardOptions = selectedHospital?.wards?.length ? selectedHospital.wards : COMMON_WARDS;
+
+  return (
+    <div ref={wrapRef} style={{ position: 'relative', marginBottom: 14 }}>
+      {/* Text input */}
+      <input
+        type="text"
+        value={val}
+        onChange={e => handleInputChange(e.target.value)}
+        onFocus={() => { if (val.trim().length >= 1) setShowDropdown(true); }}
+        placeholder=""
+        autoComplete="off"
+        style={{ ...base, marginBottom: 0, borderColor: showDropdown && suggestions.length > 0 ? G : '#e2e8f0' }}
+      />
+
+      {/* 3-suggestion dropdown */}
+      {showDropdown && suggestions.length > 0 && (
+        <div style={{
+          position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50,
+          marginTop: 3, background: W,
+          border: `1.5px solid ${G}`,
+          borderRadius: 10,
+          boxShadow: '0 8px 24px rgba(91,141,239,0.13)',
+          overflow: 'hidden',
+        }}>
+          {suggestions.map((h, idx) => (
+            <button
+              key={h.name}
+              type="button"
+              onMouseDown={e => { e.preventDefault(); handlePick(h); }}
+              style={{
+                width: '100%', padding: '11px 14px',
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                background: W, border: 'none',
+                borderBottom: idx < suggestions.length - 1 ? `1px solid ${S200}` : 'none',
+                cursor: 'pointer', textAlign: 'left',
+              }}
+              onMouseOver={e => { e.currentTarget.style.background = S100; }}
+              onMouseOut={e => { e.currentTarget.style.background = W; }}
+            >
+              <div>
+                <div style={{ fontWeight: 700, fontSize: '0.88rem', color: S900 }}>{h.name}</div>
+                <div style={{ fontSize: '0.7rem', color: S400, marginTop: 2 }}>
+                  {SA_HOSPITALS.find(p => p.hospitals.some(ph => ph.name === h.name))?.province ?? ''}
+                </div>
+              </div>
+              <span style={{ color: G, fontSize: '0.8rem', fontWeight: 700 }}>›</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Ward picker — shown after a hospital is selected */}
+      {showWards && selectedHospital && (
+        <div style={{
+          marginTop: 8, border: `1.5px solid ${S200}`,
+          borderRadius: 10, overflow: 'hidden',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.06)',
+        }}>
+          <div style={{
+            padding: '7px 12px', fontSize: '0.62rem', fontWeight: 800,
+            color: S600, textTransform: 'uppercase', letterSpacing: '0.09em',
+            background: S100, borderBottom: `1px solid ${S200}`,
+          }}>
+            📋 Select Ward / Unit
+          </div>
+          {wardOptions.map((w, idx) => (
+            <button
+              key={w}
+              type="button"
+              onClick={() => handleSelectWard(w)}
+              style={{
+                width: '100%', padding: '10px 14px',
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                background: fd[wardKey ?? 'ward'] === w ? 'rgba(91,141,239,0.06)' : W,
+                border: 'none',
+                borderBottom: idx < wardOptions.length - 1 ? `1px solid ${S200}` : 'none',
+                cursor: 'pointer', textAlign: 'left',
+              }}
+              onMouseOver={e => { e.currentTarget.style.background = S100; }}
+              onMouseOut={e => { e.currentTarget.style.background = fd[wardKey ?? 'ward'] === w ? 'rgba(91,141,239,0.06)' : W; }}
+            >
+              <span style={{ fontWeight: 600, fontSize: '0.87rem', color: S900 }}>{w}</span>
+              {fd[wardKey ?? 'ward'] === w && (
+                <span style={{ color: G, fontWeight: 800, fontSize: '0.9rem' }}>✓</span>
+              )}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => setShowWards(false)}
+            style={{
+              width: '100%', padding: '9px 14px', background: S50,
+              border: 'none', borderTop: `1px solid ${S200}`,
+              cursor: 'pointer', textAlign: 'center',
+              fontSize: '0.78rem', color: S600, fontWeight: 600,
+            }}
+          >Skip — set ward later</button>
+        </div>
+      )}
+    </div>
+  );
 };
 
 const AddrInp = ({ fk, suburbKey, ph, containerStyle, inputStyle, label }: { fk: string; ph?: string; req?: boolean; suburbKey?: string; containerStyle?: React.CSSProperties; inputStyle?: React.CSSProperties; label?: string }) => {
@@ -1965,6 +2315,17 @@ const DodDispatchTimesEmbed = () => {
 // FormContext so it doesn't matter which mount point captures the data.
 const DodFormBody = () => {
   const { fd, sf } = useContext(FormContext);
+
+  useEffect(() => {
+    if (!fd['med_aid_dec_death_date']) {
+      const today = new Date();
+      const yyyy = today.getFullYear();
+      const mm = String(today.getMonth() + 1).padStart(2, '0');
+      const dd = String(today.getDate()).padStart(2, '0');
+      sf('med_aid_dec_death_date', `${yyyy}-${mm}-${dd}`);
+    }
+  }, []);
+
   return (
     <>
       <DodG2>
@@ -1976,7 +2337,7 @@ const DodFormBody = () => {
       <Inp fk="med_aid_dec_death_case_no" ph="Case number" />
 
       <Lbl t="Precise location of body" />
-      <AddrInp fk="med_aid_dec_death_location" ph="Where the body is located" />
+      <Inp fk="med_aid_dec_death_location" ph="Where the body is located" />
 
       <Lbl t="Deceased Identified by (Full Name and Surname)" />
       <Inp fk="med_aid_dec_death_identified_by" ph="Identifier's full name and surname" />
@@ -2426,9 +2787,14 @@ const Card = ({ children, style }: { children: React.ReactNode; style?: React.CS
 // iOS Safari have an intrinsic min-content (picker chrome + 16px font from the
 // auto-zoom guard in index.css) that otherwise pushes each track past half the
 // container, blowing the whole form past the viewport on phone widths.
-const G2 = ({ children }: { children: React.ReactNode }) => (
-  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '0 12px' }}>{children}</div>
-);
+const G2 = ({ children }: { children: React.ReactNode }) => {
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) minmax(0, 1fr)', gap: isMobile ? '12px' : '0 12px' }}>
+      {children}
+    </div>
+  );
+};
 
 // ── Quick Vitals Overlay ────────────────────────────────────────────────────
 // Module-scope so its identity stays stable across parent re-renders.
@@ -2639,9 +3005,52 @@ const FadeIn = ({ children, show, delay = 0 }: { children: React.ReactNode; show
       opacity: visible ? 1 : 0,
       transform: visible ? 'translateY(0)' : `translateY(${translateAmt})`,
       transition: `opacity ${duration} cubic-bezier(0.25, 1, 0.5, 1), transform ${duration} cubic-bezier(0.25, 1, 0.5, 1)`,
+      pointerEvents: visible ? 'auto' : 'none',
+      position: 'relative',
+      zIndex: visible ? 1 : 0,
     }}>
       {children}
     </div>
+  );
+};
+
+// ── Portal Modal ────────────────────────────────────────────────────────────
+// ALL pop-up overlays MUST use this component. It renders into document.body
+// via React Portal, which guarantees position:fixed is relative to the viewport
+// and not broken by any parent CSS (backdrop-filter, transform, overflow, etc.).
+// This permanently prevents the mobile "cursor misalignment" bug.
+const Modal = ({ open, onClose, children }: { open: boolean; onClose: () => void; children: React.ReactNode }) => {
+  if (!open) return null;
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+  return ReactDOM.createPortal(
+    <div
+      style={{
+        position: 'fixed', inset: 0, zIndex: 99999,
+        background: 'rgba(15,23,42,0.6)',
+        backdropFilter: 'blur(4px)',
+        display: 'flex', flexDirection: 'column',
+        justifyContent: isMobile ? 'flex-start' : 'center',
+        alignItems: 'center',
+        padding: 20,
+        paddingTop: isMobile ? 80 : 20,
+        WebkitTapHighlightColor: 'transparent',
+        touchAction: 'manipulation',
+      }}
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div
+        style={{
+          background: '#f8fafc', borderRadius: 24,
+          padding: '24px 16px', width: '100%', maxWidth: 500,
+          maxHeight: '80vh', display: 'flex', flexDirection: 'column',
+          boxShadow: '0 10px 40px rgba(0,0,0,0.2)',
+        }}
+        onClick={e => e.stopPropagation()}
+      >
+        {children}
+      </div>
+    </div>,
+    document.body
   );
 };
 
@@ -2837,6 +3246,9 @@ export default function DigitalPRFForm() {
   const [vsAlphaKeys, setVsAlphaKeys] = useState<Set<string>>(() => new Set());
   const [ivRows, setIvRows] = useState<any[]>([]);
   const [medRows, setMedRows] = useState<any[]>([]);
+  // Toggle buttons: crew activates IV Therapy / Medication sections explicitly
+  const [ivSectionOpen, setIvSectionOpen] = useState(false);
+  const [medSectionOpen, setMedSectionOpen] = useState(false);
   // Crew-picker overlay drives three flows:
   //   • IV / med rows — each new line is attributed to a specific crew member
   //     AND signed for, so the PRF carries an audit trail of who administered
@@ -2861,6 +3273,55 @@ export default function DigitalPRFForm() {
   const [enRouteOverlay, setEnRouteOverlay] = useState(false);
   const [assessmentModalOpen, setAssessmentModalOpen] = useState(false);
   const [monitoringModalOpen, setMonitoringModalOpen] = useState(false);
+  const [wcaDocKey, setWcaDocKey] = useState<string | null>(null);
+  const [wcaPromptOpen, setWcaPromptOpen] = useState(false);
+  const [tempMedReason, setTempMedReason] = useState<string | null>(null);
+  const [medReasonPromptOpen, setMedReasonPromptOpen] = useState(false);
+  const [ivReasonModalOpen, setIvReasonModalOpen] = useState(false);
+
+  const handleWcaPhoto = (key: string, file: File | null) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, 1600 / Math.max(img.width, img.height));
+        const w = Math.round(img.width * scale);
+        const h = Math.round(img.height * scale);
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
+          ctx.drawImage(img, 0, 0, w, h);
+          sf(key, { name: file.name, size: file.size, data_url: canvas.toDataURL('image/jpeg', 0.85) });
+        } else {
+          sf(key, { name: file.name, size: file.size, data_url: String(reader.result) });
+        }
+        setWcaPromptOpen(false);
+        setWcaDocKey(null);
+      };
+      img.src = String(reader.result);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleWcaPdf = (key: string, file: File | null) => {
+    if (!file) return;
+    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+      alert('Only PDF files are accepted.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      sf(key, { name: file.name, size: file.size, data_url: String(reader.result) });
+      setWcaPromptOpen(false);
+      setWcaDocKey(null);
+    };
+    reader.readAsDataURL(file);
+  };
 
   const [preauthVisible, setPreauthVisible] = useState(false);
   const quotedAmountRef = useRef<HTMLInputElement>(null);
@@ -2869,48 +3330,28 @@ export default function DigitalPRFForm() {
   const dispatchKmRef = useRef<HTMLInputElement>(null);
   const [onScenePromptOpen, setOnScenePromptOpen] = useState(false);
   const onSceneKmRef = useRef<HTMLInputElement>(null);
+  const [departPromptOpen, setDepartPromptOpen] = useState(false);
+  const departKmRef = useRef<HTMLInputElement>(null);
+  const [destinationPromptOpen, setDestinationPromptOpen] = useState(false);
+  const destinationKmRef = useRef<HTMLInputElement>(null);
+  const chiefComplaintRef = useRef<HTMLDivElement>(null);
   const isMobileView = typeof window !== 'undefined' && window.innerWidth < 768;
 
+
   // ── IFT/IHT Automation Flow ──
-  // 1. Automatically open the subtype picker overlay when IFT/IHT is chosen
-  useEffect(() => {
-    if (fd.call_type === 'IHT' && !fd.transfer_subtype && !loading) {
-      setTransferSubtypeOpen(true);
-    }
-  }, [fd.call_type, fd.transfer_subtype, loading]);
 
-  // 2. Automatically open and focus the quoted payout amount modal when subtype is selected
+  // 2. Pre-auth field visibility — show once transfer subtype is selected (IHT)
+  // or immediately for IFT. No modal automation needed — fields are native inputs.
   useEffect(() => {
-    if (fd.call_type === 'IHT' && !!fd.transfer_subtype && !loading && !preauthVisible && !fd.med_aid_quoted_amount) {
-      setQuotedAmountModalOpen(true);
+    if (fd.call_type === 'IHT' && !!fd.transfer_subtype) {
+      setPreauthVisible(true);
+    } else if (fd.call_type === 'IFT') {
+      setPreauthVisible(true);
     }
-  }, [fd.call_type, fd.transfer_subtype, loading, preauthVisible]);
-
-  useEffect(() => {
-    if (quotedAmountModalOpen) {
-      const t = setTimeout(() => {
-        quotedAmountRef.current?.focus();
-      }, 250);
-      return () => clearTimeout(t);
-    }
-  }, [quotedAmountModalOpen]);
-
-  // 3. Pre-auth card visibility sync with existing data
-  useEffect(() => {
     if (fd.preauth_number) {
       setPreauthVisible(true);
     }
-  }, [fd.preauth_number]);
-
-  // 4. Automatically focus pre-auth field when its modal becomes visible
-  useEffect(() => {
-    if (preauthModalOpen) {
-      const t = setTimeout(() => {
-        preauthRef.current?.focus();
-      }, 250);
-      return () => clearTimeout(t);
-    }
-  }, [preauthModalOpen]);
+  }, [fd.call_type, fd.transfer_subtype, fd.preauth_number, loading]);
 
   const profile = JSON.parse(localStorage.getItem('crew_profile') || '{}');
   const dirtyRef = useRef(false);
@@ -2955,6 +3396,18 @@ export default function DigitalPRFForm() {
     if (!data.assessor_qualifications && leadQ) data.assessor_qualifications = leadQ;
     if (!data.managed_by && partner) data.managed_by = partner;
     if (!data.manager_qualifications && partnerQ) data.manager_qualifications = partnerQ;
+
+    const extraCrews = (() => {
+      try {
+        const raw = JSON.parse(localStorage.getItem('extra_crew_profiles') || 'null');
+        return Array.isArray(raw) ? raw : [];
+      } catch { return []; }
+    })();
+    if (prf.status === 'draft' && prf.crew_member_1_id === profile.id) {
+      if (extraCrews.length > 1) {
+        data.extra_crew = extraCrews.slice(1);
+      }
+    }
 
     setPrfMeta(prf);
     setFd(normalizeFormData(data));
@@ -3359,14 +3812,15 @@ export default function DigitalPRFForm() {
     previousLabel: string;
     previousValue: number;
     delta: number;            // signed — negative when odometer rolls backwards
+    onConfirmCallback?: () => void;
   };
   const [kmConfirm, setKmConfirm] = useState<KmConfirm | null>(null);
 
-  const handleKmCommit = useCallback((kmKey: string, raw: string) => {
+  const handleKmCommit = useCallback((kmKey: string, raw: string, onConfirmCallback?: () => void): boolean => {
     const newVal = parseInt(raw, 10);
-    if (isNaN(newVal)) return;
+    if (isNaN(newVal)) return false;
     const idx = ALL_TIME_ROWS.findIndex(r => r.kmKey === kmKey);
-    if (idx <= 0) return;  // first leg has nothing to compare against
+    if (idx <= 0) return false;  // first leg has nothing to compare against
     // Most recent earlier-in-sequence non-empty reading.
     let prevRow: typeof ALL_TIME_ROWS[number] | null = null;
     let prevVal = NaN;
@@ -3375,7 +3829,7 @@ export default function DigitalPRFForm() {
       const v = parseInt(kms[row.kmKey] ?? '', 10);
       if (!isNaN(v)) { prevRow = row; prevVal = v; break; }
     }
-    if (!prevRow || isNaN(prevVal)) return;
+    if (!prevRow || isNaN(prevVal)) return false;
     const delta = newVal - prevVal;
     if (delta > ABSURD_KM_DELTA || delta < 0) {
       setKmConfirm({
@@ -3386,8 +3840,11 @@ export default function DigitalPRFForm() {
         previousLabel: prevRow.label,
         previousValue: prevVal,
         delta,
+        onConfirmCallback,
       });
+      return true;
     }
+    return false;
   }, [kms]);
 
   // ── Scheme-based validation (Netcare CMG v5.2 rules + others) ───────────
@@ -3597,6 +4054,14 @@ export default function DigitalPRFForm() {
     // open the geo-confirm dialog. Advance happens in the dialog's onAfterCommit
     // callback so the crew confirms GPS before the journey moves forward.
     if (timeKey && !timestamps[timeKey]) {
+      if (timeKey === 'time_depart_scene') {
+        setDepartPromptOpen(true);
+        return;
+      }
+      if (timeKey === 'time_at_destination') {
+        setDestinationPromptOpen(true);
+        return;
+      }
       markTime(timeKey, kmKey || '', async () => {
         await doSave();
         setPhase(target);
@@ -3685,148 +4150,6 @@ export default function DigitalPRFForm() {
     setSubmit(false);
   };
 
-  // ── DEV ONLY: Fill form with test data ─────────────────────────────────────
-  // Populates every field with realistic South African EMS data for a
-  // Primary + MED AID scenario. Includes 3 vital sets, medications, IVs,
-  // survey findings, ICD-10 codes, and patient/debtor demographics.
-  // Only available in development mode (import.meta.env.DEV).
-  const fillTestData = () => {
-    const now = new Date();
-    const hhmm = (d: Date) => `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
-    const t1 = new Date(now.getTime() - 45 * 60000);
-    const t2 = new Date(now.getTime() - 30 * 60000);
-    const t3 = new Date(now.getTime() - 15 * 60000);
-
-    const testFd: Record<string, any> = {
-      // ── Call & Billing ──
-      call_type: 'PRIMARY',
-      billing_type: 'MED AID',
-      med_aid_dec_death: false,
-
-      // ── Incident ──
-      incident_location: '123 Main Road, Sandton, Johannesburg, Gauteng, 2196',
-      suburb_ward: 'Sandton',
-      receiving_facility: 'Milpark Hospital',
-      ward: 'Emergency Department',
-      receiving_doctor: 'Dr. P. van der Merwe',
-
-      // ── Patient Demographics ──
-      gender: 'Male',
-      patient_name: 'Thabo',
-      patient_surname: 'Mokoena',
-      patient_id_number: '8503125432089',
-      age: '41',
-      patient_dob: '1985-03-12',
-      patient_address: '45 Rivonia Boulevard, Sandton',
-      patient_suburb: 'Sandton',
-      patient_postal_code: '2196',
-      patient_phone_cell: '0821234567',
-      patient_phone_home: '0111234567',
-
-      // ── Medical Aid ──
-      medical_scheme: 'Discovery Health',
-      scheme_option: 'Classic Comprehensive',
-      medical_aid_number: 'DH12345678',
-      dependent_number: '00',
-      main_member_id: '8503125432089',
-      preauth_number: 'PA-2026-00451',
-
-      // ── Priority & Assessment ──
-      priority: 'P2',
-      assessment_level: 'ILS',
-      monitoring_level: 'ILS',
-
-      // ── Mechanism ──
-      mechanism: 'Fall',
-      mechanism_other: 'Fell from a 2m ladder while painting at home',
-
-      // ── Chief Complaint & AMPLE ──
-      chief_complaint: 'Fall from height — left wrist deformity, pain 8/10',
-      findings_on_arrival: 'Patient found seated on ground, cradling left arm. Alert, oriented x4. Visible deformity left distal radius. No LOC reported. No head/spinal tenderness.',
-      allergies: 'Penicillin',
-      current_medications: 'Amlodipine 5mg daily, Metformin 500mg BD',
-      past_medical_history: 'Hypertension, Type 2 DM — well controlled',
-      last_meal: 'Breakfast — toast and coffee',
-      last_meal_time: '07:30',
-      events_hpi: 'Patient was painting the exterior of his house using a ladder. Ladder slipped on wet surface causing patient to fall approximately 2 metres onto paved area, landing on outstretched left hand. Immediate pain and swelling to left wrist. No LOC, no head injury, no back pain.',
-
-      // ── Primary Survey ──
-      survey_a: 'Patent, self-maintaining. No stridor.',
-      survey_b: 'RR 18, bilateral air entry, SpO₂ 98% RA. No distress.',
-      survey_c: 'Radial pulse strong & regular, CRT <2s. No active bleeding. BP 138/82.',
-      survey_head_back: 'No tenderness, no deformity. PERRL.',
-      survey_neuro: 'GCS 15 (E4 V5 M6). Alert and oriented x4.',
-      survey_chest: 'No tenderness. Equal air entry bilaterally.',
-      survey_abdo: 'Soft, non-tender. No guarding.',
-      survey_limbs: 'Left distal radius — obvious deformity, swelling, TTP. NV intact distally. Right upper and both lower limbs — no injuries.',
-      survey_back: 'No tenderness on palpation.',
-
-      // ── Clinical Notes ──
-      management_notes: 'Left wrist immobilised with SAM splint and sling. Ice pack applied. Analgesia administered (see medications). NV checks post-splinting — intact. Patient comfortable for transport.',
-
-      // ── ICD-10 ──
-      icd10_primary: 'S52.5',
-      icd10_secondary: 'W11',
-
-      // ── O₂ Therapy ──
-      o2_flow_rate: '',
-      o2_device: '',
-
-      // ── Handover ──
-      handover_name: 'Sr. N. Dlamini',
-      handover_qualification: 'RN',
-      handover_doctor_email: 'ed@milpark.co.za',
-      handover_notes: 'Stable. Left Colles fracture, splinted. Vitals stable throughout transport. Analgesia given. For X-ray and ortho review.',
-
-      // ── Debtor (same as patient) ──
-      debtor_gender: 'Male',
-      debtor_name: 'Thabo',
-      debtor_surname: 'Mokoena',
-      debtor_id_number: '8503125432089',
-      debtor_age: '41',
-      debtor_dob: '1985-03-12',
-      debtor_address: '45 Rivonia Boulevard, Sandton',
-      debtor_suburb: 'Sandton',
-      debtor_postal_code: '2196',
-      debtor_phone_cell: '0821234567',
-      debtor_relation: 'Self',
-
-      // ── Crew (auto-filled from session but set fallback) ──
-      assessed_by: fd.assessed_by || 'A. Ishwar',
-      assessor_qualifications: fd.assessor_qualifications || 'ILS',
-      managed_by: fd.managed_by || 'A. Naidu',
-      manager_qualifications: fd.manager_qualifications || 'ALS',
-      treating_practitioner_name: fd.treating_practitioner_name || 'A. Ishwar',
-      treating_practitioner_category: fd.treating_practitioner_category || 'ILS',
-      treating_practitioner_hpcsa: fd.treating_practitioner_hpcsa || 'ANA-0049530',
-    };
-
-    // ── Vitals (3 sets — meets minimum requirement) ──
-    const testVitals = [
-      { time: hhmm(t1), bp: '138/82', hr: '92', rr: '18', spo2: '98', temp: '36.8', gcs_e: '4', gcs_v: '5', gcs_m: '6', pupils: 'PERRL', bgl: '6.2', pain: '8' },
-      { time: hhmm(t2), bp: '132/78', hr: '88', rr: '16', spo2: '99', temp: '36.7', gcs_e: '4', gcs_v: '5', gcs_m: '6', pupils: 'PERRL', bgl: '6.0', pain: '6' },
-      { time: hhmm(t3), bp: '128/76', hr: '84', rr: '16', spo2: '99', temp: '36.6', gcs_e: '4', gcs_v: '5', gcs_m: '6', pupils: 'PERRL', bgl: '5.8', pain: '4' },
-    ];
-
-    // ── IV Therapy ──
-    const testIv = [
-      { type: 'Ringers Lactate', site: 'Right ACF', gauge: '18G', vol_infused: '250ml', rate: 'TKO' },
-    ];
-
-    // ── Medications ──
-    const testMeds = [
-      { type: 'Morphine', dose: '5mg', route: 'IV', time: hhmm(t2) },
-      { type: 'Ondansetron', dose: '4mg', route: 'IV', time: hhmm(t2) },
-    ];
-
-    setFd(prev => ({ ...prev, ...testFd }));
-    setVitals(testVitals);
-    setIvRows(testIv);
-    setMedRows(testMeds);
-    dirtyRef.current = true;
-    alert('✅ Test data loaded — Primary + MED AID (Discovery Health)\n\nPatient: Thabo Mokoena — Colles fracture from fall\nScheme: Discovery Health Classic Comprehensive\n\nYou can now step through all phases and submit.');
-  };
-
   // ── Computed smart values ─────────────────────────────────────────────────
   const criticalAlerts = useMemo(() => {
     const alerts: string[] = [];
@@ -3893,6 +4216,15 @@ export default function DigitalPRFForm() {
     const geo = geos[row.timeKey];
     const addressKey = `address_${row.timeKey}`;
     const addressVal: string = fd[addressKey] || '';
+    const isIftDispatch = row.timeKey === 'time_dispatched' && ['IFT', 'IHT'].includes(fd.call_type);
+    const handleMark = () => {
+      if (isIftDispatch) {
+        setDispatchPromptOpen(true);
+        window.setTimeout(() => dispatchKmRef.current?.focus(), 50);
+      } else {
+        markTime(row.timeKey, row.kmKey);
+      }
+    };
     const addressInput = has ? (
       <AddrInp
         fk={addressKey}
@@ -3907,7 +4239,7 @@ export default function DigitalPRFForm() {
       />
     ) : (
       <div
-        onClick={() => markTime(row.timeKey, row.kmKey)}
+        onClick={handleMark}
         style={{
           width: '100%', padding: '16.5px 10px',
           borderRadius: 7, border: `1px solid ${S200}`, background: W,
@@ -3956,7 +4288,7 @@ export default function DigitalPRFForm() {
                 }}
               />
             ) : (
-              <button type="button" onClick={() => markTime(row.timeKey, row.kmKey)} style={{ width: '100%', padding: '11px 0', borderRadius: 9, fontSize: '0.8rem', fontWeight: 800, border: `2px solid ${G}`, background: GBG, color: GDK, cursor: 'pointer' }}>Mark Time</button>
+              <button type="button" onClick={handleMark} style={{ width: '100%', padding: '11px 0', borderRadius: 9, fontSize: '0.8rem', fontWeight: 800, border: `2px solid ${G}`, background: GBG, color: GDK, cursor: 'pointer' }}>Mark Time</button>
             )}
           </div>
           <div style={{ padding: '7px 4px', borderRight: timeRowsNarrow ? 'none' : `1px solid ${S200}`, minWidth: 0 }}>
@@ -3964,7 +4296,7 @@ export default function DigitalPRFForm() {
               <KmInput kmKey={row.kmKey} value={kms[row.kmKey] ?? ''} onChange={handleKmChange} onCommit={handleKmCommit} />
             ) : (
               <div
-                onClick={() => markTime(row.timeKey, row.kmKey)}
+                onClick={handleMark}
                 style={{
                   width: '100%', padding: '17px 6px',
                   borderRadius: 10, border: `1.5px solid #e2e8f0`, background: '#ffffff',
@@ -4062,10 +4394,10 @@ export default function DigitalPRFForm() {
 
         {/* Active editor */}
         {editing && (
-          <div style={{ background: '#f0fdf4', border: `2px solid ${G}`, borderRadius: 14, padding: 18, marginBottom: 16 }}>
+          <div style={{ background: '#ffffff', border: `1.5px solid ${S200}`, borderRadius: 14, padding: 18, marginBottom: 16, boxShadow: '0 4px 14px rgba(0,0,0,0.03)' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-              <div style={{ fontWeight: 800, color: GDK }}>Vitals Set #{editVital + 1}</div>
-              <button type="button" onClick={() => setEditVital(-1)} style={{ padding: '8px 18px', borderRadius: 8, fontSize: '0.82rem', fontWeight: 800, border: 'none', background: G, color: W, cursor: 'pointer' }}>Done</button>
+              <div style={{ fontWeight: 800, color: S900 }}>Vitals Set #{editVital + 1}</div>
+              <button type="button" onClick={() => setEditVital(-1)} style={{ padding: '8px 18px', borderRadius: 8, fontSize: '0.82rem', fontWeight: 800, border: 'none', background: S800, color: W, cursor: 'pointer' }}>Done</button>
             </div>
             <Lbl t="Time Recorded" />
             <input type="time" value={editing.time ?? ''} onChange={e => updVS('time', e.target.value)} onFocus={onF} onBlur={onB} style={{ ...base, marginBottom: 14 }} />
@@ -4073,34 +4405,22 @@ export default function DigitalPRFForm() {
             {fields.map(f => {
               const hasOpts = 'opts' in f && f.opts;
               const isNumericField = 'type' in f && f.type === 'number';
-              const alphaOn = vsAlphaKeys.has(f.key);
-              const toggleAlpha = () => setVsAlphaKeys(prev => {
-                const next = new Set(prev);
-                if (next.has(f.key)) next.delete(f.key); else next.add(f.key);
-                return next;
-              });
               return (
                 <div key={f.key} style={{ marginBottom: 14 }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 7 }}>
                     <div style={{ fontSize: '0.68rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.07em' }}>{f.label}</div>
-                    {isNumericField && !hasOpts && (
-                      <div style={{ display: 'inline-flex', borderRadius: 6, border: `1.5px solid ${S200}`, overflow: 'hidden', flexShrink: 0 }}>
-                        <button type="button" onClick={() => { if (alphaOn) toggleAlpha(); }} style={{ padding: '2px 9px', fontSize: '0.65rem', fontWeight: 800, border: 'none', background: !alphaOn ? G : W, color: !alphaOn ? W : S600, cursor: 'pointer' }}>123</button>
-                        <button type="button" onClick={() => { if (!alphaOn) toggleAlpha(); }} style={{ padding: '2px 9px', fontSize: '0.65rem', fontWeight: 800, border: 'none', background: alphaOn ? G : W, color: alphaOn ? W : S600, cursor: 'pointer' }}>Aa</button>
-                      </div>
-                    )}
                   </div>
                   {hasOpts ? (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                       {f.opts!.map(o => {
                         const on = editing[f.key] === o;
-                        return <button key={o} type="button" onClick={() => updVS(f.key, o)} style={{ padding: '9px 14px', borderRadius: 8, fontSize: '0.8rem', fontWeight: 700, border: `2px solid ${on ? G : S200}`, background: on ? GBG : W, color: on ? GDK : S600, cursor: 'pointer', transition: 'all 0.12s' }}>{o}</button>;
+                        return <button key={o} type="button" onClick={() => updVS(f.key, o)} style={{ padding: '9px 14px', borderRadius: 8, fontSize: '0.8rem', fontWeight: 700, border: `2px solid ${on ? S700 : S200}`, background: on ? S50 : W, color: on ? S900 : S600, cursor: 'pointer', transition: 'all 0.12s' }}>{o}</button>;
                       })}
                     </div>
                   ) : (
                     <input
-                      type={isNumericField && !alphaOn ? 'number' : 'text'}
-                      inputMode={isNumericField && !alphaOn ? 'decimal' : 'text'}
+                      type="text"
+                      inputMode={isNumericField ? 'decimal' : 'text'}
                       value={editing[f.key] ?? ''}
                       onChange={e => updVS(f.key, e.target.value)}
                       placeholder=""
@@ -4177,43 +4497,40 @@ export default function DigitalPRFForm() {
         }
       }} />
 
-      {/* ── IFT/IHT flow ── */}
       <FadeIn show={fd.call_type === 'IHT'} delay={150}>
         <div style={{ marginBottom: 14 }}>
           <Lbl t="Why is this an IFT/IHT call?" req />
-          <div
-            onClick={() => setTransferSubtypeOpen(true)}
+          <select
+            value={fd.transfer_subtype ?? ''}
+            onChange={e => sf('transfer_subtype', e.target.value)}
             style={{
               width: '100%', padding: '12px 14px', fontSize: '0.88rem',
               borderRadius: 10, border: `1.5px solid ${S200}`, background: W,
               color: fd.transfer_subtype ? S900 : S400, cursor: 'pointer',
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.03)'
+              fontWeight: fd.transfer_subtype ? 700 : 400,
+              boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
+              appearance: 'auto',
             }}
           >
-            <span style={{ fontWeight: fd.transfer_subtype ? 700 : 400 }}>{fd.transfer_subtype || 'Tap to select…'}</span>
-            <span style={{ fontSize: '0.7rem' }}>▼</span>
-          </div>
+            <option value="" disabled>Select reason…</option>
+            {TRANSFER_SUBTYPES.map(r => <option key={r} value={r}>{r}</option>)}
+          </select>
         </div>
       </FadeIn>
 
       <FadeIn show={fd.call_type === 'IHT' && !!fd.transfer_subtype} delay={150}>
         <div style={{ marginBottom: 14 }}>
           <Lbl t="Quoted Payout Amount (R)" />
-          <div
-            onClick={() => setQuotedAmountModalOpen(true)}
-            style={{
-              width: '100%', padding: '12px 14px', fontSize: '0.88rem',
-              borderRadius: 10, border: `1.5px solid ${S200}`, background: W,
-              color: fd.med_aid_quoted_amount ? S900 : S400, cursor: 'pointer',
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.03)'
-            }}
-          >
-            <span style={{ fontWeight: fd.med_aid_quoted_amount ? 700 : 400 }}>
-              {fd.med_aid_quoted_amount ? `R ${fd.med_aid_quoted_amount}` : 'Tap to enter amount…'}
-            </span>
-            <span style={{ fontSize: '0.7rem' }}>▼</span>
+          <div style={{ position: 'relative' }}>
+            <span style={{ position: 'absolute', left: 14, top: 12, fontWeight: 800, color: S900 }}>R</span>
+            <input
+              type="number"
+              value={fd.med_aid_quoted_amount || ''}
+              onChange={e => sf('med_aid_quoted_amount', e.target.value)}
+              placeholder="Amount..."
+              onFocus={onF} onBlur={onB}
+              style={{ ...base, paddingLeft: 36, background: W }}
+            />
           </div>
         </div>
       </FadeIn>
@@ -4221,21 +4538,7 @@ export default function DigitalPRFForm() {
       <FadeIn show={['IHT', 'IFT'].includes(fd.call_type) && (fd.call_type !== 'IHT' || !!fd.transfer_subtype) && preauthVisible} delay={150}>
         <div style={{ marginBottom: 14 }}>
           <Lbl t="Pre-Auth No." req />
-          <div
-            onClick={() => setPreauthModalOpen(true)}
-            style={{
-              width: '100%', padding: '12px 14px', fontSize: '0.88rem',
-              borderRadius: 10, border: `1.5px solid ${S200}`, background: W,
-              color: fd.preauth_number ? S900 : S400, cursor: 'pointer',
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.03)'
-            }}
-          >
-            <span style={{ fontWeight: fd.preauth_number ? 700 : 400 }}>
-              {fd.preauth_number ? fd.preauth_number : 'Tap to enter Pre-Auth No.…'}
-            </span>
-            <span style={{ fontSize: '0.7rem' }}>▼</span>
-          </div>
+          <Inp fk="preauth_number" ph="Tap to enter Pre-Auth No.…" />
         </div>
       </FadeIn>
 
@@ -4401,6 +4704,19 @@ export default function DigitalPRFForm() {
         </>
       )}
 
+      {startedExam && ['IFT', 'IHT'].includes(fd.call_type) && (
+        <div style={{ marginTop: 14, marginBottom: 20 }}>
+          <SHdr t="Nursing Notes" />
+          <Card>
+            <DocumentsCapture
+              value={fd.nursing_notes}
+              onChange={v => sf('nursing_notes', v)}
+              buttonLabel="Photograph Nursing Notes"
+            />
+          </Card>
+        </div>
+      )}
+
       {/* Patient Information CTA — DOD shows CTA inside its own form body */}
       {!!fd.chief_complaint && fd.call_type !== 'DOD' && (
         CTA({
@@ -4433,14 +4749,16 @@ export default function DigitalPRFForm() {
             <Lbl t="Referring Dr" /><Inp fk="referring_doctor" ph="e.g. Dr R.K. Naidoo" />
           </>
         )}
-        <Lbl t="Destination" req /><AddrInp fk="receiving_facility" ph="e.g. Capital Hospital" req />
+        <Lbl t="Destination" req /><HospitalPicker wardKey="ward" />
         {!fd.med_aid_dec_death && (
           <>
             <Lbl t="Ward" /><Inp fk="ward" ph="e.g. C.I.C.U" />
-            <Lbl t="Receiving Dr" /><Inp fk="receiving_doctor" ph="e.g. Dr R.K. Naidoo" />
+            <Lbl t={fd.call_type === 'COURTESY' ? "Receiving Dr / Person" : "Receiving Dr"} /><Inp fk="receiving_doctor" ph={fd.call_type === 'COURTESY' ? "Name" : "e.g. Dr R.K. Naidoo"} />
           </>
         )}
       </Card>
+
+
 
       {CTA({ label: "ON SCENE  →", onClick: () => advancePhase(2, 'time_on_scene', 'km_on_scene') })}
     </>
@@ -4508,6 +4826,7 @@ export default function DigitalPRFForm() {
           <Card>
             <Lbl t="Payment Method" req />
             <Toggle fk="pvt_payment_method" opts={['Cash', 'Card', 'EFT', 'Account', 'Indigent']} />
+            <Lbl t="Amount Quoted (R)" /><Inp fk="pvt_amount_quoted" ph="e.g. 1500.00" type="number" />
             <Lbl t="Account Holder Full Name" req /><Inp fk="pvt_account_holder" ph="Person responsible for payment" req />
             <G2>
               <div><Lbl t="Account Holder ID Number" /><Inp fk="pvt_account_holder_id" ph="13-digit SA ID" /></div>
@@ -4515,6 +4834,65 @@ export default function DigitalPRFForm() {
             </G2>
             <Lbl t="Billing Address" /><AddrInp fk="pvt_account_holder_address" ph="For invoice delivery" />
           </Card>
+
+          {/* Cash payment verification — only shown when Cash is selected */}
+          {fd.pvt_payment_method === 'Cash' && (
+            <>
+              <SHdr t="Cash Payment Verification" />
+              <Card>
+                {/* Amount paid dropdown */}
+                <Lbl t="Amount Paid (R)" req />
+                <select
+                  value={fd.pvt_cash_amount_paid ?? ''}
+                  onChange={e => sf('pvt_cash_amount_paid', e.target.value)}
+                  onFocus={onF}
+                  onBlur={onB}
+                  style={{ ...base, marginBottom: 14, appearance: 'auto' }}
+                >
+                  <option value="">— Select amount —</option>
+                  {['100','200','300','400','500','600','700','800','900','1000',
+                    '1100','1200','1300','1400','1500','1600','1700','1800','1900','2000',
+                    '2500','3000','3500','4000','4500','5000','6000','7000','8000','9000','10000',
+                    'Other'].map(v => <option key={v} value={v}>R {v}</option>)}
+                </select>
+
+                {/* Payer signature block */}
+                <div style={{ padding: '12px 14px', border: `1.5px solid ${S200}`, borderRadius: 10, marginBottom: 14 }}>
+                  <div style={{ fontSize: '0.76rem', color: S600, lineHeight: 1.55, marginBottom: 12, fontStyle: 'italic' }}>
+                    By signing below, I confirm that I have handed over{' '}
+                    <strong style={{ color: S900 }}>R {fd.pvt_cash_amount_paid || '___'}</strong>{' '}
+                    in cash to the attending crew member.
+                  </div>
+                  <Lbl t="Payer Full Name" />
+                  <Inp fk="pvt_cash_payer_name" ph="Full name of person handing over cash" />
+                  <FullscreenSignaturePad
+                    label="Payer Signature — Cash Handover Confirmation"
+                    value={fd.pvt_cash_payer_signature}
+                    onChange={v => { sf('pvt_cash_payer_signature', v); dirtyRef.current = true; }}
+                  />
+                </div>
+
+                {/* Crew receipt confirmation block */}
+                <div style={{ padding: '12px 14px', border: `1.5px solid ${S200}`, borderRadius: 10, marginBottom: 4 }}>
+                  <div style={{ fontSize: '0.72rem', fontWeight: 700, color: S500, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>
+                    Crew Receipt Confirmation
+                  </div>
+                  <Lbl t="Amount Received by Crew (R)" req />
+                  <Inp fk="pvt_cash_crew_received" ph="Exact amount received" type="number" />
+                  <div style={{ fontSize: '0.76rem', color: S600, lineHeight: 1.55, marginBottom: 12, fontStyle: 'italic' }}>
+                    By signing below, I confirm that I have received{' '}
+                    <strong style={{ color: S900 }}>R {fd.pvt_cash_crew_received || '___'}</strong>{' '}
+                    in cash from the patient / responsible person.
+                  </div>
+                  <FullscreenSignaturePad
+                    label="Crew Member Signature — Cash Receipt Confirmation"
+                    value={fd.pvt_cash_crew_signature}
+                    onChange={v => { sf('pvt_cash_crew_signature', v); dirtyRef.current = true; }}
+                  />
+                </div>
+              </Card>
+            </>
+          )}
         </>
       )}
 
@@ -4542,14 +4920,97 @@ export default function DigitalPRFForm() {
 
         {fd.billing_type === 'IOD' && (
           <Card>
-            <Lbl t="Employer Name" req /><Inp fk="wca_employer" ph="e.g. Eskom Holdings" req />
+            <Lbl t="Company Name" req /><Inp fk="wca_employer" ph="e.g. Eskom Holdings" req />
+            <Lbl t="Company Address" /><AddrInp fk="wca_employer_address" ph="Physical address of employer" />
+            <Lbl t="Employer Responsible Person" /><Inp fk="wca_employer_responsible_person" ph="Name of person responsible for the claim" />
+            <G2>
+              <div><Lbl t="Employer Contact Number" /><Inp fk="wca_employer_contact" ph="Office / HR number" type="tel" /></div>
+              <div><Lbl t="Employee Number" /><Inp fk="wca_employee_number" ph="Optional" /></div>
+            </G2>
             <Lbl t="Compensation Reference" req /><Inp fk="compensation_reference" ph="IOD claim / reference number" req />
             <G2>
               <div><Lbl t="Date of Injury" req /><Inp fk="wca_injury_date" type="date" req /></div>
-              <div><Lbl t="Employee Number" /><Inp fk="wca_employee_number" ph="Optional" /></div>
             </G2>
-            <Lbl t="OAR Number" /><Inp fk="wca_oar_number" ph="Occupational Accident Report number" />
-            <PdfDrop fk="wca_oar_report_pdf" />
+            <Lbl t="Description of Incident" />
+            <Txt fk="wca_incident_description" ph="Describe how the injury occurred, what happened, mechanism of injury..." rows={3} />
+            <div style={{ marginBottom: 14 }}>
+              <Lbl t="Documents (WCA / Employee)" />
+              <select
+                onChange={e => {
+                  const val = e.target.value;
+                  if (val) {
+                    setWcaDocKey(val);
+                    setWcaPromptOpen(true);
+                    e.target.value = ""; // Reset dropdown
+                  }
+                }}
+                style={{ ...base, appearance: 'auto', marginBottom: 14 }}
+              >
+                <option value="">-- Add / Photograph a Document --</option>
+                {[
+                  { key: 'wca_oar_report_pdf', label: 'WCA Document (PDF)' },
+                  { key: 'wca_employee_id_pdf', label: 'Employee ID (PDF)' },
+                  { key: 'wca_payslip_pdf', label: 'Payslip (PDF)' },
+                  { key: 'wca_medical_report_pdf', label: 'Medical Report (PDF)' },
+                ].map(d => {
+                  const attached = !!fd[d.key];
+                  return (
+                    <option key={d.key} value={d.key}>
+                      {d.label}{attached ? ' (Attached)' : ''}
+                    </option>
+                  );
+                })}
+              </select>
+
+              {/* List of attached documents */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {[
+                  { key: 'wca_oar_report_pdf', label: 'WCA Document' },
+                  { key: 'wca_employee_id_pdf', label: 'Employee ID' },
+                  { key: 'wca_payslip_pdf', label: 'Payslip' },
+                  { key: 'wca_medical_report_pdf', label: 'Medical Report' },
+                ].map(d => {
+                  const file = fd[d.key];
+                  if (!file) return null;
+                  const isPdf = file.name.toLowerCase().endsWith('.pdf');
+                  return (
+                    <div key={d.key} style={{
+                      display: 'flex', gap: 12, alignItems: 'center', padding: '10px 14px',
+                      borderRadius: 10, border: `1.5px solid ${G}`, background: GBG
+                    }}>
+                      {isPdf ? (
+                        <div style={{
+                          width: 50, height: 40, borderRadius: 6, border: `1px solid ${S200}`,
+                          background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: '0.8rem', fontWeight: 800, color: '#475569'
+                        }}>PDF</div>
+                      ) : (
+                        <img
+                          src={file.data_url}
+                          alt={d.label}
+                          style={{
+                            width: 50, height: 40, objectFit: 'cover',
+                            borderRadius: 6, border: `1px solid ${S200}`, background: W
+                          }}
+                        />
+                      )}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 800, fontSize: '0.82rem', color: GDK }}>{d.label} attached</div>
+                        <div style={{ fontSize: '0.68rem', color: S500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.name} · {(file.size / 1024).toFixed(1)} KB</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => sf(d.key, undefined)}
+                        style={{
+                          padding: '6px 12px', borderRadius: 8, fontSize: '0.72rem', fontWeight: 700,
+                          border: '1px solid #fecaca', background: W, color: REDC, cursor: 'pointer'
+                        }}
+                      >Remove</button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </Card>
         )}
 
@@ -4617,8 +5078,12 @@ export default function DigitalPRFForm() {
       </>)}
       </>)}
 
-      <Lbl t="Persons Accompanying Patient in Ambulance" />
-      <Inp fk="accompanying_persons_count" type="number" ph="0" />
+      {fd.call_type !== 'DOD' && (
+        <>
+          <Lbl t="Persons Accompanying Patient in Ambulance" />
+          <Inp fk="accompanying_persons_count" type="number" ph="0" />
+        </>
+      )}
 
       {/* Declaration of Death short-circuits the Clinical phase — the
           patient is deceased so there's no assessment / vitals / meds to
@@ -4756,10 +5221,323 @@ export default function DigitalPRFForm() {
           </button>
         </>
       ) : (
-        CTA({ label: "DEPART SCENE  →", onClick: () => advancePhase(4) })
+        CTA({ label: "DEPART SCENE  →", onClick: () => advancePhase(4, 'time_depart_scene', 'km_depart_scene') })
       )}
     </>
   );
+
+
+  const IvAndMedsSection = (options: { hideCheckboxes?: boolean; showOnly?: 'both' | 'med_only'; forceOpen?: boolean } = {}) => {
+    const { hideCheckboxes = false, showOnly = 'both', forceOpen = false } = options;
+    const isIft = ['IFT', 'IHT'].includes(fd.call_type);
+    const isPrimary = ['PRIMARY', 'COURTESY'].includes(fd.call_type);
+    const requiresToggle = !hideCheckboxes && (isIft || isPrimary) && !forceOpen;
+
+    // Derive effective open-state: button toggle OR already has data loaded
+    const ivOpen = ivSectionOpen || ivRows.length > 0 ||
+      (isIft && (!!fd.ift_ongoing_iv_treatment || !!fd.primary_iv_profuse_bleeding || !!fd.primary_iv_fluid_resuscitation)) ||
+      (isPrimary && (!!fd.primary_iv_profuse_bleeding || !!fd.primary_iv_fluid_resuscitation));
+    const medOpen = forceOpen || medSectionOpen || medRows.length > 0 || !!fd.iv_medication_administration || !!fd.medication_administered_on_route;
+
+    const showIvAndMeds =
+      hideCheckboxes ||
+      ivOpen ||
+      medOpen ||
+      (!isIft && !isPrimary);
+
+    const eitherActive = requiresToggle ? (ivOpen || medOpen) : true;
+    const showIvReasons = !hideCheckboxes && (isIft || isPrimary);
+    const showMedReasons = !hideCheckboxes && (isIft || isPrimary);
+
+    // Shared warning note — outlined box, no background fill
+    const MedAidNote = () => (
+      <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', marginBottom: 14, padding: '11px 13px', border: `1.5px solid ${S200}`, borderRadius: 10 }}>
+        <span style={{ fontSize: '0.85rem', lineHeight: 1.4, marginTop: 1, flexShrink: 0 }}>⚠️</span>
+        <div style={{ fontSize: '0.76rem', color: S600, lineHeight: 1.55, fontStyle: 'italic' }}>
+          Please note that the IV is only warranted and payable by the medical aid scheme if and
+          when there is <strong style={{ color: S700 }}>profuse bleeding</strong>, <strong style={{ color: S700 }}>fluid resuscitation</strong> required
+          or <strong style={{ color: S700 }}>medication administered</strong> while the patient is in your care.
+        </div>
+      </div>
+    );
+
+    return (
+    <>
+      {/* ── Toggle card-buttons for IV Therapy and Medication ── */}
+      {requiresToggle && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 14 }}>
+
+          {/* IV Therapy — dashed blue button matching "+ Add IV Line" style */}
+          <button
+            type="button"
+            onClick={() => setIvReasonModalOpen(true)}
+            style={{
+              width: '100%',
+              padding: 12,
+              borderRadius: 10,
+              border: `2px dashed ${G}`,
+              background: GBG,
+              color: GDK,
+              fontWeight: 800,
+              fontSize: '0.88rem',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 8,
+              transition: 'all 0.15s ease',
+            }}
+          >
+            {ivOpen ? '✓ IV Therapy (Active)' : '+ IV Therapy'}
+          </button>
+
+          {/* Medication — dashed blue button matching "+ Add Medication" style */}
+          <button
+            type="button"
+            onClick={() => setMedReasonPromptOpen(true)}
+            style={{
+              width: '100%',
+              padding: 12,
+              borderRadius: 10,
+              border: `2px dashed ${G}`,
+              background: GBG,
+              color: GDK,
+              fontWeight: 800,
+              fontSize: '0.88rem',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 8,
+              transition: 'all 0.15s ease',
+            }}
+          >
+            {medOpen ? '✓ Medication (Active)' : '+ Medication'}
+          </button>
+
+        </div>
+      )}
+
+      {/* ── Medical aid scheme warning note ── */}
+      {requiresToggle && eitherActive && showOnly === 'both' && <MedAidNote />}
+
+      {/* ════════════════════════════════════════════════════
+          IV THERAPY — inline section (reason checkboxes +
+          IV line cards with crew member & signature)
+          ════════════════════════════════════════════════════ */}
+      {showOnly === 'both' && (requiresToggle ? ivOpen : showIvAndMeds) && (
+        <>
+          {/* Reason checkboxes */}
+          {showIvReasons && (
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: '0.72rem', fontWeight: 700, color: S500, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>
+                Reason for IV Therapy
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 8 }}>
+                {isIft && (
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 10px', background: W, borderRadius: 8, border: `1.5px solid ${fd.ift_ongoing_iv_treatment ? S700 : S200}`, cursor: 'pointer' }}>
+                    <input type="checkbox" checked={!!fd.ift_ongoing_iv_treatment} onChange={e => sf('ift_ongoing_iv_treatment', e.target.checked)} style={{ width: 16, height: 16, accentColor: S700, cursor: 'pointer' }} />
+                    <span style={{ fontSize: '0.82rem', fontWeight: 600, color: S900 }}>On-going IV treatment</span>
+                  </label>
+                )}
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 10px', background: W, borderRadius: 8, border: `1.5px solid ${fd.primary_iv_profuse_bleeding ? S700 : S200}`, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={!!fd.primary_iv_profuse_bleeding} onChange={e => sf('primary_iv_profuse_bleeding', e.target.checked)} style={{ width: 16, height: 16, accentColor: S700, cursor: 'pointer' }} />
+                  <span style={{ fontSize: '0.82rem', fontWeight: 600, color: S900 }}>Profuse Bleeding</span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 10px', background: W, borderRadius: 8, border: `1.5px solid ${fd.primary_iv_fluid_resuscitation ? S700 : S200}`, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={!!fd.primary_iv_fluid_resuscitation} onChange={e => sf('primary_iv_fluid_resuscitation', e.target.checked)} style={{ width: 16, height: 16, accentColor: S700, cursor: 'pointer' }} />
+                  <span style={{ fontSize: '0.82rem', fontWeight: 600, color: S900 }}>Fluid Resuscitation</span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 10px', background: W, borderRadius: 8, border: `1.5px solid ${fd.iv_medication_administration ? S700 : S200}`, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={!!fd.iv_medication_administration} onChange={e => sf('iv_medication_administration', e.target.checked)} style={{ width: 16, height: 16, accentColor: S700, cursor: 'pointer' }} />
+                  <span style={{ fontSize: '0.82rem', fontWeight: 600, color: S900 }}>Medication Administered via IV</span>
+                </label>
+              </div>
+            </div>
+          )}
+
+          {/* IV line cards */}
+          <SHdr t="IV Therapy" />
+          {ivRows.map((row, i) => (
+            <Card key={i} style={{ marginBottom: 8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10, gap: 8 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: '0.82rem', color: S600 }}>IV Line #{i + 1}</div>
+                  {row.administered_by && (
+                    <div style={{ fontSize: '0.7rem', color: S700, marginTop: 3, wordBreak: 'break-word' }}>
+                      Administered by <b style={{ color: S900 }}>{row.administered_by}</b>
+                      {row.administered_by_qualification ? ` · ${row.administered_by_qualification}` : ''}
+                    </div>
+                  )}
+                </div>
+                <button type="button" onClick={() => { setIvRows(ivRows.filter((_, j) => j !== i)); dirtyRef.current = true; }} style={{ padding: '4px 10px', fontSize: '0.72rem', fontWeight: 700, borderRadius: 6, border: `1px solid ${S200}`, background: S50, color: REDC, cursor: 'pointer', flexShrink: 0 }}>Remove</button>
+              </div>
+              <G2>
+                {([
+                  { l: 'Type / Fluid', k: 'type' },
+                  { l: 'Jelco Size', k: 'jelco_size', opts: ['24g', '22g', '20g', '18g', '16g', '14g'] },
+                  { l: 'Site', k: 'site' },
+                  { l: 'Vol. Infused', k: 'vol_infused' },
+                  { l: 'Time Up', k: 'time_up' },
+                ] as Array<{ l: string; k: string; opts?: string[] }>).map(f => (
+                  <div key={f.k}>
+                    <Lbl t={f.l} />
+                    {f.opts ? (
+                      <select
+                        value={row[f.k] ?? ''}
+                        onChange={e => { const r = [...ivRows]; r[i] = { ...r[i], [f.k]: e.target.value }; setIvRows(r); dirtyRef.current = true; }}
+                        onFocus={onF}
+                        onBlur={onB}
+                        style={{ ...base, marginBottom: 8, appearance: 'auto' }}
+                      >
+                        <option value=""></option>
+                        {f.opts.map(o => <option key={o} value={o}>{o}</option>)}
+                      </select>
+                    ) : (
+                      <input
+                        value={row[f.k] ?? ''}
+                        onChange={e => { const r = [...ivRows]; r[i] = { ...r[i], [f.k]: e.target.value }; setIvRows(r); dirtyRef.current = true; }}
+                        onFocus={onF}
+                        onBlur={onB}
+                        autoComplete="off"
+                        style={{ ...base, marginBottom: 8 }}
+                      />
+                    )}
+                  </div>
+                ))}
+              </G2>
+              <FullscreenSignaturePad
+                label="Sign"
+                value={row.sign}
+                onChange={v => { const r = [...ivRows]; r[i] = { ...r[i], sign: v }; setIvRows(r); dirtyRef.current = true; }}
+              />
+            </Card>
+          ))}
+          {(() => {
+            const cat = normaliseHpcsaCategory(fd.treating_practitioner_category);
+            const canIv = !cat || isAuthorised(cat, 'circ_iv_cannulation_limbs_over_1yr');
+            if (!canIv) return null;
+            return <button type="button" onClick={() => setCrewPicker({ phase: 'select', kind: 'iv' })} style={{ width: '100%', padding: 12, borderRadius: 10, fontWeight: 800, fontSize: '0.88rem', border: `2px dashed ${G}`, background: GBG, color: GDK, cursor: 'pointer', marginBottom: 20 }}>+ Add IV Line</button>;
+          })()}
+        </>
+      )}
+
+      {/* ════════════════════════════════════════════════════
+          MEDICATION — inline section (reason checkboxes +
+          medication cards with crew member & signature)
+          ════════════════════════════════════════════════════ */}
+      {(forceOpen || (requiresToggle ? medOpen : showIvAndMeds)) && (
+        <>
+          {/* Reason checkboxes */}
+
+          {/* Medication cards */}
+          <SHdr t="Medication / Infusion" />
+          {/* Native typeahead — crew can pick from the HPCSA medication catalogue
+            but free-text entry is still permitted so a missing drug never blocks
+            documentation. Source of truth: frontend/src/data/hpcsaScope.ts
+            The list is filtered to the treating practitioner's authorised meds
+            so unauthorised drugs are simply not suggested. Free-text bypass is
+            intentional — the crew may need to record something off-list. */}
+          {(() => {
+            const cat = normaliseHpcsaCategory(fd.treating_practitioner_category);
+            const authorised = medicationNamesForCategory(cat);
+            return (
+              <>
+                {medRows.map((row, i) => {
+                  const treatingCat = normaliseHpcsaCategory(fd.treating_practitioner_category);
+                  const medCap = findMedicationByName(row.type);
+                  const medOutOfScope = !!(treatingCat && medCap && !medCap.authorised.includes(treatingCat));
+                  return (
+                    <Card key={i} style={{ marginBottom: 8 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10, gap: 8 }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 700, fontSize: '0.82rem', color: S600, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                            Medication #{i + 1}
+                            {medOutOfScope && (
+                              <span style={{ fontSize: '0.6rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.07em', color: '#78350f', background: '#fffbeb', border: '1px solid #f59e0b', padding: '2px 6px', borderRadius: 4 }}>
+                                Out of scope for {treatingCat}
+                              </span>
+                            )}
+                          </div>
+                          {row.administered_by && (
+                            <div style={{ fontSize: '0.7rem', color: S700, marginTop: 3, wordBreak: 'break-word' }}>
+                              Administered by <b style={{ color: S900 }}>{row.administered_by}</b>
+                              {row.administered_by_qualification ? ` · ${row.administered_by_qualification}` : ''}
+                            </div>
+                          )}
+                        </div>
+                        <button type="button" onClick={() => { setMedRows(medRows.filter((_, j) => j !== i)); dirtyRef.current = true; }} style={{ padding: '4px 10px', fontSize: '0.72rem', fontWeight: 700, borderRadius: 6, border: `1px solid ${S200}`, background: S50, color: REDC, cursor: 'pointer', flexShrink: 0 }}>Remove</button>
+                      </div>
+                      <G2>
+                        {([
+                          { l: 'Drug / Type', k: 'type' },
+                          { l: 'Route', k: 'route' },
+                          { l: 'Dose', k: 'dose' },
+                          { l: 'Time', k: 'time' },
+                          { l: 'Why medication is needed', k: 'reason', opts: [
+                            'Medication / IV Administered On Route',
+                            'Medication Administered via IV',
+                            'Fluid Resuscitation Required',
+                            'Profuse Bleeding'
+                          ] }
+                        ] as Array<{ l: string; k: string; opts?: string[] }>).map(f => (
+                          <div key={f.k}>
+                            <Lbl t={f.l} />
+                            {f.k === 'type' ? (
+                              <select
+                                value={row[f.k] ?? ''}
+                                onChange={e => { const r = [...medRows]; r[i] = { ...r[i], [f.k]: e.target.value }; setMedRows(r); dirtyRef.current = true; }}
+                                onFocus={onF}
+                                onBlur={onB}
+                                style={{ ...base, marginBottom: 8, appearance: 'auto' }}
+                              >
+                                <option value=""></option>
+                                {authorised.map(n => <option key={n} value={n}>{n}</option>)}
+                                {row[f.k] && !authorised.includes(row[f.k] as string) && (
+                                  <option value={row[f.k]}>{row[f.k]} (Out of Scope)</option>
+                                )}
+                              </select>
+                            ) : f.opts ? (
+                              <select
+                                value={row[f.k] ?? ''}
+                                onChange={e => { const r = [...medRows]; r[i] = { ...r[i], [f.k]: e.target.value }; setMedRows(r); dirtyRef.current = true; }}
+                                onFocus={onF}
+                                onBlur={onB}
+                                style={{ ...base, marginBottom: 8, appearance: 'auto' }}
+                              >
+                                <option value=""></option>
+                                {f.opts.map(o => <option key={o} value={o}>{o}</option>)}
+                              </select>
+                            ) : (
+                              <input
+                                autoComplete="off"
+                                value={row[f.k] ?? ''}
+                                onChange={e => { const r = [...medRows]; r[i] = { ...r[i], [f.k]: e.target.value }; setMedRows(r); dirtyRef.current = true; }}
+                                onFocus={onF}
+                                onBlur={onB}
+                                style={{ ...base, marginBottom: 8 }}
+                              />
+                            )}
+                          </div>
+                        ))}
+                      </G2>
+                      <FullscreenSignaturePad
+                        label="Sign"
+                        value={row.sign}
+                        onChange={v => { const r = [...medRows]; r[i] = { ...r[i], sign: v }; setMedRows(r); dirtyRef.current = true; }}
+                      />
+                    </Card>
+                  );
+                })}
+              </>
+            );
+          })()}
+          <button type="button" onClick={() => setMedReasonPromptOpen(true)} style={{ width: '100%', padding: 12, borderRadius: 10, fontWeight: 800, fontSize: '0.88rem', border: `2px dashed ${G}`, background: GBG, color: GDK, cursor: 'pointer', marginBottom: 20 }}>+ Add Medication</button>
+        </>
+      )}
+    </>
+  );
+};
 
   // ── Phase 3: CLINICAL (assessment & treatment on scene) ───────────────────
   // `embedded=true` renders the clinical body without the LOAD & GO CTA so
@@ -4901,7 +5679,19 @@ export default function DigitalPRFForm() {
           >Select Assessment Level ↓</button>
         )}
 
-        <SHdr t="Patient History" />
+        <div ref={chiefComplaintRef} style={{ scrollMarginTop: 80 }}>
+          {fd.call_type !== 'DOD' && (
+            <>
+              <SHdr t="Overseen Practitioner Communication" />
+              <Card>
+                <Lbl t="Overseen Practitioner Communication details" />
+                <VoiceTxt fk="overseen_practitioner_communication" ph="Document communication with overseen ALS or ILS practitioner here..." rows={3} />
+              </Card>
+            </>
+          )}
+
+          <SHdr t="Patient History" />
+        </div>
         <Card>
           <Lbl t="Chief Complaint / Signs and Symptoms" req /><VoiceTxt fk="chief_complaint" ph="Patient's primary complaint, signs and symptoms..." rows={2} />
           <Lbl t="Findings on Arrival" /><VoiceTxt fk="findings_on_arrival" ph="What you observed on arrival..." rows={2} />
@@ -5012,7 +5802,7 @@ export default function DigitalPRFForm() {
               'Periph. IV Line', 'Cardio Version',
               'IO Line', 'Pacing',
               'Central Line', 'Defib J/NR',
-              'CPR', 'Bleeding',
+              'CPR', 'Bleeding'
             ].map(i => {
               const cat = normaliseHpcsaCategory(fd.treating_practitioner_category);
               const verdict = scopeForFormLabel(i, cat);
@@ -5023,7 +5813,7 @@ export default function DigitalPRFForm() {
               if (disabled) return null;
               return <Chk key={i} fk="circulation_interventions" val={i} disabled={disabled} hint={hint} />;
             })}
-            {inArr('circulation_interventions', 'Bleeding') && (
+            {(inArr('circulation_interventions', 'Bleeding') || !!fd.primary_iv_profuse_bleeding) && (
               <div style={{ gridColumn: '1 / -1', marginTop: 6 }}>
                 <Lbl t="Approx. Blood Loss (ml)" />
                 <Sel fk="blood_loss_ml" opts={['< 50 ml', '50–100 ml', '100–250 ml', '250–500 ml', '500–1000 ml', '1000–1500 ml', '> 1500 ml']} />
@@ -5042,149 +5832,7 @@ export default function DigitalPRFForm() {
         </div>
         <Card><Lbl t="Other Equipment / Adjuncts" /><Inp fk="other_equipment" ph="e.g. M17, other items" /></Card>
 
-        <SHdr t="IV Therapy" />
-        {ivRows.map((row, i) => (
-          <Card key={i} style={{ marginBottom: 8 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10, gap: 8 }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 700, fontSize: '0.82rem', color: S600 }}>IV Line #{i + 1}</div>
-                {row.administered_by && (
-                  <div style={{ fontSize: '0.7rem', color: S700, marginTop: 3, wordBreak: 'break-word' }}>
-                    Administered by <b style={{ color: S900 }}>{row.administered_by}</b>
-                    {row.administered_by_qualification ? ` · ${row.administered_by_qualification}` : ''}
-                  </div>
-                )}
-              </div>
-              <button type="button" onClick={() => { setIvRows(ivRows.filter((_, j) => j !== i)); dirtyRef.current = true; }} style={{ padding: '4px 10px', fontSize: '0.72rem', fontWeight: 700, borderRadius: 6, border: `1px solid ${S200}`, background: S50, color: REDC, cursor: 'pointer', flexShrink: 0 }}>Remove</button>
-            </div>
-            <G2>
-              {([
-                { l: 'Type / Fluid', k: 'type' },
-                { l: 'Jelco Size', k: 'jelco_size', opts: ['24g', '22g', '20g', '18g', '16g', '14g'] },
-                { l: 'Site', k: 'site' },
-                { l: 'Vol. Infused', k: 'vol_infused' },
-                { l: 'Time Up', k: 'time_up' },
-              ] as Array<{ l: string; k: string; opts?: string[] }>).map(f => (
-                <div key={f.k}>
-                  <Lbl t={f.l} />
-                  {f.opts ? (
-                    <select
-                      value={row[f.k] ?? ''}
-                      onChange={e => { const r = [...ivRows]; r[i] = { ...r[i], [f.k]: e.target.value }; setIvRows(r); dirtyRef.current = true; }}
-                      onFocus={onF}
-                      onBlur={onB}
-                      style={{ ...base, marginBottom: 8, appearance: 'auto' }}
-                    >
-                      <option value=""></option>
-                      {f.opts.map(o => <option key={o} value={o}>{o}</option>)}
-                    </select>
-                  ) : (
-                    <input
-                      value={row[f.k] ?? ''}
-                      onChange={e => { const r = [...ivRows]; r[i] = { ...r[i], [f.k]: e.target.value }; setIvRows(r); dirtyRef.current = true; }}
-                      onFocus={onF}
-                      onBlur={onB}
-                      autoComplete="off"
-                      style={{ ...base, marginBottom: 8 }}
-                    />
-                  )}
-                </div>
-              ))}
-            </G2>
-            <FullscreenSignaturePad
-              label="Sign"
-              value={row.sign}
-              onChange={v => { const r = [...ivRows]; r[i] = { ...r[i], sign: v }; setIvRows(r); dirtyRef.current = true; }}
-            />
-          </Card>
-        ))}
-        {(() => {
-          const cat = normaliseHpcsaCategory(fd.treating_practitioner_category);
-          const canIv = !cat || isAuthorised(cat, 'circ_iv_cannulation_limbs_over_1yr');
-          if (!canIv) return null;
-          return <button type="button" onClick={() => setCrewPicker({ phase: 'select', kind: 'iv' })} style={{ width: '100%', padding: 12, borderRadius: 10, fontWeight: 800, fontSize: '0.88rem', border: `2px dashed ${G}`, background: GBG, color: GDK, cursor: 'pointer', marginBottom: 20 }}>+ Add IV Line</button>;
-        })()}
-
-        <SHdr t="Medication / Infusion" />
-        {/* Native typeahead — crew can pick from the HPCSA medication catalogue
-          but free-text entry is still permitted so a missing drug never blocks
-          documentation. Source of truth: frontend/src/data/hpcsaScope.ts
-          The list is filtered to the treating practitioner's authorised meds
-          so unauthorised drugs are simply not suggested. Free-text bypass is
-          intentional — the crew may need to record something off-list. */}
-        {(() => {
-          const cat = normaliseHpcsaCategory(fd.treating_practitioner_category);
-          const authorised = medicationNamesForCategory(cat);
-          return (
-            <>
-              {medRows.map((row, i) => {
-                const treatingCat = normaliseHpcsaCategory(fd.treating_practitioner_category);
-                const medCap = findMedicationByName(row.type);
-                const medOutOfScope = !!(treatingCat && medCap && !medCap.authorised.includes(treatingCat));
-                return (
-                  <Card key={i} style={{ marginBottom: 8 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10, gap: 8 }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 700, fontSize: '0.82rem', color: S600, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                          Medication #{i + 1}
-                          {medOutOfScope && (
-                            <span style={{ fontSize: '0.6rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.07em', color: '#78350f', background: '#fffbeb', border: '1px solid #f59e0b', padding: '2px 6px', borderRadius: 4 }}>
-                              Out of scope for {treatingCat}
-                            </span>
-                          )}
-                        </div>
-                        {row.administered_by && (
-                          <div style={{ fontSize: '0.7rem', color: S700, marginTop: 3, wordBreak: 'break-word' }}>
-                            Administered by <b style={{ color: S900 }}>{row.administered_by}</b>
-                            {row.administered_by_qualification ? ` · ${row.administered_by_qualification}` : ''}
-                          </div>
-                        )}
-                      </div>
-                      <button type="button" onClick={() => { setMedRows(medRows.filter((_, j) => j !== i)); dirtyRef.current = true; }} style={{ padding: '4px 10px', fontSize: '0.72rem', fontWeight: 700, borderRadius: 6, border: `1px solid ${S200}`, background: S50, color: REDC, cursor: 'pointer', flexShrink: 0 }}>Remove</button>
-                    </div>
-                    <G2>
-                      {[{ l: 'Drug / Type', k: 'type' }, { l: 'Route', k: 'route' }, { l: 'Dose', k: 'dose' }, { l: 'Time', k: 'time' }].map(f => (
-                        <div key={f.k}>
-                          <Lbl t={f.l} />
-                          {f.k === 'type' ? (
-                            <select
-                              value={row[f.k] ?? ''}
-                              onChange={e => { const r = [...medRows]; r[i] = { ...r[i], [f.k]: e.target.value }; setMedRows(r); dirtyRef.current = true; }}
-                              onFocus={onF}
-                              onBlur={onB}
-                              style={{ ...base, marginBottom: 8, appearance: 'auto' }}
-                            >
-                              <option value=""></option>
-                              {authorised.map(n => <option key={n} value={n}>{n}</option>)}
-                              {row[f.k] && !authorised.includes(row[f.k] as string) && (
-                                <option value={row[f.k]}>{row[f.k]} (Out of Scope)</option>
-                              )}
-                            </select>
-                          ) : (
-                            <input
-                              autoComplete="off"
-                              value={row[f.k] ?? ''}
-                              onChange={e => { const r = [...medRows]; r[i] = { ...r[i], [f.k]: e.target.value }; setMedRows(r); dirtyRef.current = true; }}
-                              onFocus={onF}
-                              onBlur={onB}
-                              style={{ ...base, marginBottom: 8 }}
-                            />
-                          )}
-                        </div>
-                      ))}
-                    </G2>
-                    <FullscreenSignaturePad
-                      label="Sign"
-                      value={row.sign}
-                      onChange={v => { const r = [...medRows]; r[i] = { ...r[i], sign: v }; setMedRows(r); dirtyRef.current = true; }}
-                    />
-                  </Card>
-                );
-              })}
-            </>
-          );
-        })()}
-        <button type="button" onClick={() => setCrewPicker({ phase: 'select', kind: 'med' })} style={{ width: '100%', padding: 12, borderRadius: 10, fontWeight: 800, fontSize: '0.88rem', border: `2px dashed ${G}`, background: GBG, color: GDK, cursor: 'pointer', marginBottom: 20 }}>+ Add Medication</button>
+        {IvAndMedsSection()}
 
         {!embedded && CTA({ label: "LOAD &amp; GO  →", color: ROSE, onClick: () => advancePhase(4, 'time_depart_scene', 'km_depart_scene') })}
       </>
@@ -5203,14 +5851,7 @@ export default function DigitalPRFForm() {
       {/* Note: the DoD branch is gone — P4 is hidden when DoD is active
           and the Undertaker form now lives on the On Scene phase. */}
       <>
-          {/* Destination confirmation */}
-          <Card>
-            <Lbl t="Destination" /><AddrInp fk="receiving_facility" ph="e.g. Capital Hospital" />
-            <G2>
-              <div><Lbl t="Ward / Unit" /><Inp fk="ward" ph="e.g. C.I.C.U" /></div>
-              <div><Lbl t="Receiving Practitioner" /><Inp fk="receiving_doctor" ph="Practitioner Name" /></div>
-            </G2>
-          </Card>
+          {IvAndMedsSection({ showOnly: 'med_only', forceOpen: true })}
 
           {/* Vitals trend — last 3 sets side by side */}
           {vitals.length > 0 && (
@@ -5248,7 +5889,7 @@ export default function DigitalPRFForm() {
           <VoiceTxt fk="management_notes" ph="Full clinical narrative — care provided, patient response, interventions..." rows={6} />
       </>
 
-      {CTA({ label: "AT DESTINATION  →", color: "#7c3aed", onClick: () => advancePhase(5) })}
+      {CTA({ label: "AT DESTINATION  →", color: "#7c3aed", onClick: () => advancePhase(5, 'time_at_destination', 'km_at_destination') })}
     </>
   );
 
@@ -5307,23 +5948,47 @@ export default function DigitalPRFForm() {
           </>
         ) : (
           <>
-            <Lbl t="Handed Over To" /><Inp fk="handover_name" ph="Receiving person's full name" />
+            <Lbl t="Destination" /><HospitalPicker wardKey="ward" />
+            <Lbl t="Ward / Unit" /><Inp fk="ward" ph="e.g. C.I.C.U" />
+
+
             <Lbl t="Qualification" /><Inp fk="handover_qualification" ph="e.g. RN, Dr, Paramedic" />
             <Lbl t="Receiving Facility Email" /><Inp fk="handover_doctor_email" ph="dr@hospital.co.za" type="email" />
             <Lbl t="Condition on Handover" /><Txt fk="handover_notes" ph="Patient condition at time of handover..." rows={2} />
             <div style={{ marginTop: 14 }}>
-              <Lbl t="Hospital Sticker" />
-              <StickerCameraCapture
-                value={fd.hospital_sticker}
-                onChange={v => sf('hospital_sticker', v)}
+              <Lbl t="Patient Documents" />
+              <PatientDocumentsCapture
+                docs={{
+                  hospital_sticker: fd.hospital_sticker,
+                  admission_form_image: fd.admission_form_image,
+                  id_document_image: fd.id_document_image,
+                  medical_aid_image: fd.medical_aid_image,
+                }}
+                onChange={(key, v) => sf(key, v)}
               />
             </div>
             <div style={{ marginTop: 14 }}>
-              <FullscreenSignaturePad
-                label="Handover Signature"
-                value={sigs.handover_signature}
-                onChange={v => { setSigs(p => ({ ...p, handover_signature: v })); dirtyRef.current = true; }}
-              />
+              <Lbl t={fd.call_type === 'COURTESY' ? "Receiving Practitioner / Person" : "Receiving Practitioner"} />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
+                <div style={{ flex: 1 }}>
+                  <input
+                    type="text"
+                    value={fd.receiving_doctor ?? ''}
+                    onChange={e => sf('receiving_doctor', e.target.value)}
+                    onFocus={onF}
+                    onBlur={onB}
+                    placeholder=""
+                    autoComplete="off"
+                    style={{ ...base, marginBottom: 0, borderColor: '#e2e8f0' }}
+                  />
+                </div>
+                <FullscreenSignaturePad
+                  compact
+                  label="Handover Signature"
+                  value={sigs.handover_signature}
+                  onChange={v => { setSigs(p => ({ ...p, handover_signature: v })); dirtyRef.current = true; }}
+                />
+              </div>
             </div>
           </>
         )}
@@ -5426,6 +6091,18 @@ export default function DigitalPRFForm() {
         />
       </Card>
 
+      {/* Dedicated hospital-sticker capture. Stores to fd.hospital_sticker
+          (the same field the branded PRF / PDF renders in its Hospital
+          Sticker placeholder), so capturing here populates that spot. */}
+      <SHdr t="Hospital Sticker" />
+      <Card>
+        <StickerCameraCapture
+          value={fd.hospital_sticker}
+          onChange={v => sf('hospital_sticker', v)}
+          buttonLabel="Photograph Hospital Sticker"
+        />
+      </Card>
+
       <SHdr t="Medical Aid Information" />
       {fd.billing_type === 'MED AID' && (
         <Card>
@@ -5499,54 +6176,50 @@ export default function DigitalPRFForm() {
         {fd.call_type !== 'RESUS' && (
           <>
             <SHdr t="Crew Details" />
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 }}>
-              <div style={{ background: GBG, border: `1.5px solid ${G}30`, borderRadius: 13, padding: 16 }}>
-                <div style={{ fontSize: '0.62rem', fontWeight: 800, color: GDK, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>Crew 1</div>
-                <div style={{ fontWeight: 800, color: S900 }}>{profile.name}</div>
-                <div style={{ fontSize: '0.7rem', color: S600, marginTop: 3, fontFamily: 'monospace' }}>{profile.hpcsa_number || '—'}</div>
-                <div style={{ fontSize: '0.7rem', color: S600, marginTop: 2 }}>{profile.qualification}</div>
-              </div>
-              <div style={{ background: 'rgba(245,158,11,0.07)', border: '1.5px solid rgba(245,158,11,0.25)', borderRadius: 13, padding: 16 }}>
-                <div style={{ fontSize: '0.62rem', fontWeight: 800, color: '#92400e', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>Crew 2</div>
-                {crew2 ? (<><div style={{ fontWeight: 800, color: S900 }}>{crew2.full_name}</div><div style={{ fontSize: '0.7rem', color: S600, marginTop: 3, fontFamily: 'monospace' }}>{crew2.hpcsa_number || '—'}</div><div style={{ fontSize: '0.7rem', color: S600, marginTop: 2 }}>{crew2.qualification}</div></>) : <div style={{ fontSize: '0.82rem', color: S400, marginTop: 8 }}>Not assigned</div>}
-              </div>
-            </div>
-
             <Card>
               <G2>
-                <div><Lbl t="Assessed By" /><Inp fk="assessed_by" ph={profile.name || 'Full name'} /></div>
-                <div><Lbl t="Qualifications" /><Inp fk="assessor_qualifications" ph={profile.qualification || 'e.g. ILS'} /></div>
-                <div><Lbl t="Managed By" /><Inp fk="managed_by" ph={profile.name || 'Full name'} /></div>
-                <div><Lbl t="Qualifications" /><Inp fk="manager_qualifications" ph={profile.qualification || 'e.g. ALS'} /></div>
+                <div>
+                  <Lbl t="Crew 1" />
+                  <div style={{ ...base, background: '#f8fafc', color: '#334155', fontWeight: 600 }}>
+                    {profile.name || '—'}
+                    {profile.qualification || profile.hpcsa_number ? (
+                      <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: 2, fontWeight: 500 }}>
+                        {profile.qualification || '—'} {profile.hpcsa_number ? `· ${profile.hpcsa_number}` : ''}
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+                {crew2 && (
+                  <div>
+                    <Lbl t="Crew 2" />
+                    <div style={{ ...base, background: '#f8fafc', color: '#334155', fontWeight: 600 }}>
+                      {crew2.full_name || '—'}
+                      {crew2.qualification || crew2.hpcsa_number ? (
+                        <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: 2, fontWeight: 500 }}>
+                          {crew2.qualification || '—'} {crew2.hpcsa_number ? `· ${crew2.hpcsa_number}` : ''}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                )}
+                {Array.isArray(fd.extra_crew) && fd.extra_crew.map((c: any, i: number) => (
+                  <div key={i}>
+                    <Lbl t={`Crew ${i + 3}`} />
+                    <div style={{ ...base, background: '#f8fafc', color: '#334155', fontWeight: 600 }}>
+                      {c.name || c.full_name || '—'}
+                      {c.qualification || c.hpcsa_number ? (
+                        <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: 2, fontWeight: 500 }}>
+                          {c.qualification || '—'} {c.hpcsa_number ? `· ${c.hpcsa_number}` : ''}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
               </G2>
             </Card>
 
             <SHdr t="Final Management Notes" />
             <VoiceTxt fk="management_notes" ph="Full clinical narrative — complete account of care provided..." rows={6} />
-
-            <SHdr t="Signatures" />
-            {[
-              { sk: 'patient_signature', l: 'Patient / Guardian Signature' },
-              { sk: 'witness_signature', l: 'Witness Signature' },
-              { sk: 'crew_signature', l: 'Crew Member Signature' },
-              { sk: 'handover_signature', l: 'Practitioner Signature' },
-            ]
-              // When Declaration of Death is selected the patient is deceased,
-              // so the patient/guardian signature is meaningless — hide it.
-              .filter(({ sk }) => !(fd.med_aid_dec_death && sk === 'patient_signature'))
-              .map(({ sk, l }) => (
-                <Card key={sk}>
-                  <SignaturePad label={l} value={sigs[sk]} onChange={v => { setSigs(p => ({ ...p, [sk]: v })); dirtyRef.current = true; }} />
-                </Card>
-              ))}
-
-            {!fd.med_aid_dec_death && (
-              <div style={{ padding: '14px 16px', background: GBG, borderRadius: 12, border: `1.5px solid ${G}30`, marginBottom: 20, marginTop: 4 }}>
-                <div style={{ fontWeight: 600, fontSize: '0.8rem', color: GDK, lineHeight: 1.5 }}>
-                  By signing, the patient / representative acknowledges responsibility for all payments associated with the treatment and transport provided by JEMS Medical Services.
-                </div>
-              </div>
-            )}
           </>
         )}
 
@@ -5690,23 +6363,6 @@ export default function DigitalPRFForm() {
     <FormContext.Provider value={{ fd, sf, inArr, toggleArr, profile, prfMeta, renderDispatchTimes: () => TimeTable({ rows: ALL_TIME_ROWS.filter(r => r.phase === 0 || r.phase === 2) }) }}>
       <div style={{ minHeight: '100vh', maxWidth: '100vw', overflowX: 'clip', background: S50, color: S900, paddingBottom: 100, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }}>
 
-        {/* ── DEV: Fill Test Data button ── */}
-        {import.meta.env.DEV && (
-          <button
-            type="button"
-            onClick={fillTestData}
-            style={{
-              position: 'fixed', bottom: 80, right: 16, zIndex: 9999,
-              width: 48, height: 48, borderRadius: '50%',
-              background: 'linear-gradient(135deg, #7c3aed, #4f46e5)',
-              color: '#fff', border: 'none', cursor: 'pointer',
-              boxShadow: '0 4px 16px rgba(79,70,229,0.4)',
-              fontSize: '1.2rem', fontWeight: 900,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}
-            title="Fill test data (Primary + MED AID)"
-          >🧪</button>
-        )}
         {/* ── Sticky header — fancy journey-phase bar ──
           Gradient backdrop, glossy nodes with subtle inner highlight, active
           step lifted with a brand-green halo ring, completed steps filled
@@ -6004,11 +6660,11 @@ export default function DigitalPRFForm() {
             dirtyRef.current = true;
             setKmConfirm(null);
           };
-          return (
+          return ReactDOM.createPortal(
             <div
               onClick={close}
               style={{
-                position: 'fixed', inset: 0, zIndex: 200, padding: 16,
+                position: 'fixed', inset: 0, zIndex: 100000, padding: 16,
                 background: 'rgba(15,23,42,0.55)',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}
@@ -6026,8 +6682,8 @@ export default function DigitalPRFForm() {
                 </div>
                 <div style={{ fontSize: '0.82rem', color: S700, marginBottom: 14, lineHeight: 1.5 }}>
                   {rollback
-                    ? <>The reading you entered for <b>{kmConfirm.label}</b> is <b>lower</b> than the previous reading. Odometers don't go backwards — please double-check.</>
-                    : <>The distance between readings is unusually large. Please confirm before continuing.</>}
+                    ? <>The reading you entered for <b>{kmConfirm.label}</b> is <b>lower</b> than the previous reading. Odometers don't go backwards — please double-check. If the KM entered is incorrect, please clear and re-enter. If it is correct, please confirm below.</>
+                    : <>The distance between readings is unusually large. If the KM entered is incorrect, please clear and re-enter. If it is correct, please confirm below.</>}
                 </div>
                 <div style={{
                   background: GBG, border: `1.5px solid ${G}40`, borderRadius: 12,
@@ -6058,7 +6714,15 @@ export default function DigitalPRFForm() {
                     type="button"
                     onClick={() => {
                       sf(kmConfirm.kmKey, '');
+                      setKms(prev => ({ ...prev, [kmConfirm.kmKey]: '' }));
                       close();
+                      setTimeout(() => {
+                        if (kmConfirm.kmKey === 'km_dispatched') setDispatchPromptOpen(true);
+                        if (kmConfirm.kmKey === 'km_on_scene') setOnScenePromptOpen(true);
+                        if (kmConfirm.kmKey === 'km_depart_scene') setDepartPromptOpen(true);
+                        if (kmConfirm.kmKey === 'km_at_destination') setDestinationPromptOpen(true);
+                        setTimeout(() => document.getElementById(`input-${kmConfirm.kmKey}`)?.focus(), 50);
+                      }, 10);
                     }}
                     style={{
                       flex: 1, padding: 12, borderRadius: 10,
@@ -6080,6 +6744,7 @@ export default function DigitalPRFForm() {
                       };
                       sf('km_review_flags', [...existing, newFlag]);
                       close();
+                      if (kmConfirm.onConfirmCallback) kmConfirm.onConfirmCallback();
                     }}
                     style={{
                       flex: 1, padding: 12, borderRadius: 10,
@@ -6091,7 +6756,8 @@ export default function DigitalPRFForm() {
                   >Yes, it's correct</button>
                 </div>
               </div>
-            </div>
+            </div>,
+            document.body
           );
         })()}
 
@@ -6124,6 +6790,18 @@ export default function DigitalPRFForm() {
             qualification: c2.qualification || '',
             hpcsa: c2.hpcsa_number || '',
           });
+          if (Array.isArray(fd.extra_crew)) {
+            fd.extra_crew.forEach((c: any, i: number) => {
+              if (c.name || c.full_name) {
+                opts.push({
+                  id: `crew${i + 3}`, tag: `Crew ${i + 3}`,
+                  name: c.name || c.full_name,
+                  qualification: c.qualification || '',
+                  hpcsa: c.hpcsa_number || '',
+                });
+              }
+            });
+          }
 
           const advance = (o: typeof opts[number]) => {
             if (crewPicker.kind === 'treating') {
@@ -6423,8 +7101,15 @@ export default function DigitalPRFForm() {
                 administered_by_hpcsa: crew.hpcsa,
                 sign: b64,
               };
-              if (kind === 'iv') setIvRows([...ivRows, newRow]);
-              else setMedRows([...medRows, newRow]);
+              if (kind === 'iv') {
+                setIvRows([...ivRows, newRow]);
+              } else {
+                if (tempMedReason) {
+                  newRow.reason = tempMedReason;
+                }
+                setMedRows([...medRows, newRow]);
+                setTempMedReason(null);
+              }
               dirtyRef.current = true;
               setCrewPicker(null);
             }}
@@ -6513,299 +7198,388 @@ export default function DigitalPRFForm() {
           </div>
         )}
 
-        {/* ── IFT/IHT Transfer Subtype Overlay ── */}
-        {transferSubtypeOpen && (
-          <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(15,23,42,0.6)', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', padding: 20, backdropFilter: 'blur(4px)' }} onClick={e => { if (e.target === e.currentTarget) setTransferSubtypeOpen(false); }}>
-            <div style={{ background: S50, borderRadius: 24, padding: '24px 16px', width: '100%', maxWidth: 500, maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 40px rgba(0,0,0,0.2)' }} onClick={e => e.stopPropagation()}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-                <div style={{ fontSize: '1.2rem', fontWeight: 900, color: S900, letterSpacing: '-0.02em' }}>Transfer Reason</div>
-                <button type="button" onClick={() => setTransferSubtypeOpen(false)} style={{ width: 32, height: 32, borderRadius: 16, border: 'none', background: S200, color: S600, fontSize: '1.2rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>×</button>
-              </div>
-              <div style={{ overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 10 }}>
-                {TRANSFER_SUBTYPES.map(reason => {
-                  const on = fd.transfer_subtype === reason;
-                  return (
-                    <button
-                      key={reason}
-                      type="button"
-                      onClick={() => {
-                        sf('transfer_subtype', reason);
-                        setTransferSubtypeOpen(false);
-                        setQuotedAmountModalOpen(true);
-                        // Focus the quoted amount input synchronously in the same user-click call stack
-                        // to bypass mobile OS security restrictions and pop open the numeric keypad instantly.
-                        quotedAmountRef.current?.focus();
-                      }}
-                      style={{
-                        padding: '16px 12px', borderRadius: 12, fontSize: '0.88rem', fontWeight: 800,
-                        border: `2px solid ${on ? G : S200}`, background: on ? G : W, color: on ? W : S700,
-                        cursor: 'pointer', textAlign: 'center', transition: 'all 0.15s',
-                        boxShadow: on ? `0 4px 12px ${G}40` : '0 2px 4px rgba(0,0,0,0.02)'
-                      }}
-                    >
-                      {reason}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        )}
+
 
         {/* ── IFT/IHT Quoted Payout Amount Overlay ── */}
-        <div style={{ display: quotedAmountModalOpen ? 'flex' : 'none', position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(15,23,42,0.6)', flexDirection: 'column', justifyContent: isMobileView ? 'flex-start' : 'center', alignItems: 'center', padding: 20, paddingTop: isMobileView ? 80 : 20, backdropFilter: 'blur(4px)' }} onClick={e => { if (e.target === e.currentTarget) setQuotedAmountModalOpen(false); }}>
-          <div style={{ background: S50, borderRadius: 24, padding: '24px 16px', width: '100%', maxWidth: 500, maxHeight: '80vh', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', boxShadow: '0 10px 40px rgba(0,0,0,0.2)' }} onClick={e => e.stopPropagation()}>
-            <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-                <div style={{ fontSize: '1.2rem', fontWeight: 900, color: S900, letterSpacing: '-0.02em' }}>Quoted Payout Amount</div>
-                <button type="button" onClick={() => setQuotedAmountModalOpen(false)} style={{ width: 32, height: 32, borderRadius: 16, border: 'none', background: S200, color: S600, fontSize: '1.2rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>×</button>
-              </div>
-              <div style={{ marginBottom: 14 }}>
-                <Lbl t="Quoted Payout Amount (R)" />
-                <input
-                  ref={quotedAmountRef}
-                  type="text"
-                  inputMode="decimal"
-                  pattern="[0-9. ]*"
-                  value={fd.med_aid_quoted_amount ?? ''}
-                  onChange={e => {
-                    const val = e.target.value.replace(/[^0-9.]/g, '');
-                    sf('med_aid_quoted_amount', val);
-                  }}
-                  onFocus={onF}
-                  onBlur={onB}
-                  placeholder="0.00"
-                  style={{ ...base, marginBottom: 0, borderColor: '#e2e8f0' }}
-                />
-              </div>
+        <Modal open={quotedAmountModalOpen} onClose={() => setQuotedAmountModalOpen(false)}>
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <div style={{ fontSize: '1.2rem', fontWeight: 900, color: S900, letterSpacing: '-0.02em' }}>Quoted Payout Amount</div>
+              <button type="button" onClick={() => setQuotedAmountModalOpen(false)} style={{ width: 32, height: 32, borderRadius: 16, border: 'none', background: S200, color: S600, fontSize: '1.2rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', touchAction: 'manipulation' }}>×</button>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
-              <button
-                type="button"
-                onClick={() => {
-                  setQuotedAmountModalOpen(false);
-                  setPreauthVisible(true);
-                  setPreauthModalOpen(true);
-                  // Focus the pre-auth input synchronously in the same user-click call stack
-                  // to bypass mobile OS security restrictions and pop open the text keyboard instantly.
-                  preauthRef.current?.focus();
+            <div style={{ marginBottom: 14 }}>
+              <Lbl t="Quoted Payout Amount (R)" />
+              <input
+                ref={quotedAmountRef}
+                type="text"
+                inputMode="decimal"
+                pattern="[0-9. ]*"
+                value={fd.med_aid_quoted_amount ?? ''}
+                onChange={e => {
+                  const val = e.target.value.replace(/[^0-9.]/g, '');
+                  sf('med_aid_quoted_amount', val);
                 }}
-                style={{
-                  padding: '12px 24px', borderRadius: 12, fontSize: '0.9rem',
-                  fontWeight: 800, border: 'none', background: G, color: W,
-                  cursor: 'pointer', boxShadow: `0 4px 12px ${G}40`,
-                  WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
-                  width: '100%', textAlign: 'center'
-                }}
-              >
-                Next →
-              </button>
+                onFocus={onF}
+                onBlur={onB}
+                placeholder="0.00"
+                style={{ ...base, marginBottom: 0, borderColor: '#e2e8f0' }}
+              />
             </div>
           </div>
-        </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+            <button
+              type="button"
+              onClick={() => {
+                setQuotedAmountModalOpen(false);
+                setPreauthVisible(true);
+                setPreauthModalOpen(true);
+                preauthRef.current?.focus();
+              }}
+              style={{
+                padding: '12px 24px', borderRadius: 12, fontSize: '0.9rem',
+                fontWeight: 800, border: 'none', background: G, color: W,
+                cursor: 'pointer', boxShadow: `0 4px 12px ${G}40`,
+                touchAction: 'manipulation',
+                width: '100%', textAlign: 'center'
+              }}
+            >
+              Next →
+            </button>
+          </div>
+        </Modal>
 
         {/* ── IFT/IHT Pre-Auth No. Overlay ── */}
-        <div style={{ display: preauthModalOpen ? 'flex' : 'none', position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(15,23,42,0.6)', flexDirection: 'column', justifyContent: isMobileView ? 'flex-start' : 'center', alignItems: 'center', padding: 20, paddingTop: isMobileView ? 80 : 20, backdropFilter: 'blur(4px)' }} onClick={e => { if (e.target === e.currentTarget) setPreauthModalOpen(false); }}>
-          <div style={{ background: S50, borderRadius: 24, padding: '24px 16px', width: '100%', maxWidth: 500, maxHeight: '80vh', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', boxShadow: '0 10px 40px rgba(0,0,0,0.2)' }} onClick={e => e.stopPropagation()}>
-            <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-                <div style={{ fontSize: '1.2rem', fontWeight: 900, color: S900, letterSpacing: '-0.02em' }}>Pre-Auth Number</div>
-                <button type="button" onClick={() => setPreauthModalOpen(false)} style={{ width: 32, height: 32, borderRadius: 16, border: 'none', background: S200, color: S600, fontSize: '1.2rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>×</button>
-              </div>
-              <div style={{ marginBottom: 14 }}>
-                <Lbl t="Pre-Auth No." req />
-                <input
-                  ref={preauthRef}
-                  type="text"
-                  value={fd.preauth_number ?? ''}
-                  onChange={e => sf('preauth_number', e.target.value)}
-                  onFocus={onF}
-                  onBlur={onB}
-                  placeholder="Pre-authorisation reference"
-                  style={{ ...base, marginBottom: 12, borderColor: '#e2e8f0' }}
-                />
-                <div style={{ fontSize: '0.78rem', color: S600, fontWeight: 500 }}>
-                  Enter the medical aid pre-authorisation reference number.
-                </div>
-              </div>
+        <Modal open={preauthModalOpen} onClose={() => setPreauthModalOpen(false)}>
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <div style={{ fontSize: '1.2rem', fontWeight: 900, color: S900, letterSpacing: '-0.02em' }}>Pre-Auth Number</div>
+              <button type="button" onClick={() => setPreauthModalOpen(false)} style={{ width: 32, height: 32, borderRadius: 16, border: 'none', background: S200, color: S600, fontSize: '1.2rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', touchAction: 'manipulation' }}>×</button>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
-              <button
-                type="button"
-                onClick={() => {
-                  setPreauthModalOpen(false);
-                  setDispatchPromptOpen(true);
-                  dispatchKmRef.current?.focus();
-                }}
-                style={{
-                  padding: '12px 24px', borderRadius: 12, fontSize: '0.9rem',
-                  fontWeight: 800, border: 'none', background: G, color: W,
-                  cursor: 'pointer', boxShadow: `0 4px 12px ${G}40`,
-                  WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
-                  width: '100%', textAlign: 'center'
-                }}
-              >
-                Done →
-              </button>
+            <div style={{ marginBottom: 14 }}>
+              <Lbl t="Pre-Auth No." req />
+              <input
+                ref={preauthRef}
+                type="text"
+                value={fd.preauth_number ?? ''}
+                onChange={e => sf('preauth_number', e.target.value)}
+                onFocus={onF}
+                onBlur={onB}
+                placeholder="Pre-authorisation reference"
+                style={{ ...base, marginBottom: 12, borderColor: '#e2e8f0' }}
+              />
+              <div style={{ fontSize: '0.78rem', color: S600, fontWeight: 500 }}>
+                Enter the medical aid pre-authorisation reference number.
+              </div>
             </div>
           </div>
-        </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+            <button
+              type="button"
+              onClick={() => {
+                setPreauthModalOpen(false);
+                setDispatchPromptOpen(true);
+                dispatchKmRef.current?.focus();
+              }}
+              style={{
+                padding: '12px 24px', borderRadius: 12, fontSize: '0.9rem',
+                fontWeight: 800, border: 'none', background: G, color: W,
+                cursor: 'pointer', boxShadow: `0 4px 12px ${G}40`,
+                touchAction: 'manipulation',
+                width: '100%', textAlign: 'center'
+              }}
+            >
+              Done →
+            </button>
+          </div>
+        </Modal>
 
         {/* ── Dispatch Time & Location/KM Prompt Overlay ── */}
-        <div style={{ display: dispatchPromptOpen ? 'flex' : 'none', position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(15,23,42,0.6)', flexDirection: 'column', justifyContent: isMobileView ? 'flex-start' : 'center', alignItems: 'center', padding: 20, paddingTop: isMobileView ? 80 : 20, backdropFilter: 'blur(4px)' }} onClick={e => { if (e.target === e.currentTarget) setDispatchPromptOpen(false); }}>
-          <div style={{ background: S50, borderRadius: 24, padding: '24px 16px', width: '100%', maxWidth: 500, maxHeight: '80vh', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', boxShadow: '0 10px 40px rgba(0,0,0,0.2)' }} onClick={e => e.stopPropagation()}>
-            <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-                <div style={{ fontSize: '1.2rem', fontWeight: 900, color: S900, letterSpacing: '-0.02em' }}>Dispatch Information</div>
-                <button type="button" onClick={() => setDispatchPromptOpen(false)} style={{ width: 32, height: 32, borderRadius: 16, border: 'none', background: S200, color: S600, fontSize: '1.2rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>×</button>
-              </div>
-              <div style={{ marginBottom: 18 }}>
-                <Lbl t="Starting Odometer (KM)" req />
-                <input
-                  ref={dispatchKmRef}
-                  type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  value={kms.km_dispatched ?? ''}
-                  onChange={e => handleKmChange('km_dispatched', e.target.value.replace(/[^0-9]/g, ''))}
-                  onFocus={onF}
-                  onBlur={onB}
-                  placeholder="e.g. 14250"
-                  style={{ ...base, marginBottom: 12, borderColor: '#e2e8f0' }}
-                />
-              </div>
+        <Modal open={dispatchPromptOpen} onClose={() => setDispatchPromptOpen(false)}>
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <div style={{ fontSize: '1.2rem', fontWeight: 900, color: S900, letterSpacing: '-0.02em' }}>Dispatch Information</div>
+              <button type="button" onClick={() => setDispatchPromptOpen(false)} style={{ width: 32, height: 32, borderRadius: 16, border: 'none', background: S200, color: S600, fontSize: '1.2rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', touchAction: 'manipulation' }}>×</button>
             </div>
-            <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
-              <button
-                type="button"
-                onClick={() => setDispatchPromptOpen(false)}
-                style={{
-                  flex: 1, padding: '12px 16px', borderRadius: 12, fontSize: '0.9rem',
-                  fontWeight: 800, border: `1.5px solid ${S200}`, background: W, color: S700,
-                  cursor: 'pointer', WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
-                  textAlign: 'center'
+            <div style={{ marginBottom: 18 }}>
+              <Lbl t="Starting Odometer (KM)" req />
+              <input
+                id="input-km_dispatched"
+                ref={dispatchKmRef}
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                value={kms.km_dispatched ?? ''}
+                onChange={e => handleKmChange('km_dispatched', e.target.value.replace(/[^0-9]/g, ''))}
+                onFocus={onF}
+                onBlur={e => {
+                  onB();
+                  handleKmCommit('km_dispatched', e.target.value.replace(/[^0-9]/g, ''));
                 }}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setDispatchPromptOpen(false);
-                  markTime('time_dispatched', 'km_dispatched', () => {
-                    setEnRouteOverlay(true);
-                  });
-                }}
-                style={{
-                  flex: 2, padding: '12px 24px', borderRadius: 12, fontSize: '0.9rem',
-                  fontWeight: 800, border: 'none', background: G, color: W,
-                  cursor: 'pointer', boxShadow: `0 4px 12px ${G}40`,
-                  WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
-                  textAlign: 'center'
-                }}
-              >
-                Start Route
-              </button>
+                placeholder="e.g. 14250"
+                style={{ ...base, marginBottom: 12, borderColor: '#e2e8f0' }}
+              />
             </div>
           </div>
-        </div>
+          <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+            <button
+              type="button"
+              onClick={() => setDispatchPromptOpen(false)}
+              style={{
+                flex: 1, padding: '12px 16px', borderRadius: 12, fontSize: '0.9rem',
+                fontWeight: 800, border: `1.5px solid ${S200}`, background: W, color: S700,
+                cursor: 'pointer', touchAction: 'manipulation', textAlign: 'center'
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const runMarkTime = () => markTime('time_dispatched', 'km_dispatched', () => setEnRouteOverlay(true));
+                const hasError = handleKmCommit('km_dispatched', kms.km_dispatched || '', runMarkTime);
+                setDispatchPromptOpen(false);
+                if (hasError) return;
+                runMarkTime();
+              }}
+              style={{
+                flex: 2, padding: '12px 24px', borderRadius: 12, fontSize: '0.9rem',
+                fontWeight: 800, border: 'none', background: G, color: W,
+                cursor: 'pointer', boxShadow: `0 4px 12px ${G}40`,
+                touchAction: 'manipulation', textAlign: 'center'
+              }}
+            >
+              Start Route
+            </button>
+          </div>
+        </Modal>
 
         {/* ── Arrive On Scene Time & Location/KM Prompt Overlay ── */}
-        <div style={{ display: onScenePromptOpen ? 'flex' : 'none', position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(15,23,42,0.6)', flexDirection: 'column', justifyContent: isMobileView ? 'flex-start' : 'center', alignItems: 'center', padding: 20, paddingTop: isMobileView ? 80 : 20, backdropFilter: 'blur(4px)' }} onClick={e => { if (e.target === e.currentTarget) setOnScenePromptOpen(false); }}>
-          <div style={{ background: S50, borderRadius: 24, padding: '24px 16px', width: '100%', maxWidth: 500, maxHeight: '80vh', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', boxShadow: '0 10px 40px rgba(0,0,0,0.2)' }} onClick={e => e.stopPropagation()}>
-            <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-                <div style={{ fontSize: '1.2rem', fontWeight: 900, color: S900, letterSpacing: '-0.02em' }}>Arrival Information</div>
-                <button type="button" onClick={() => setOnScenePromptOpen(false)} style={{ width: 32, height: 32, borderRadius: 16, border: 'none', background: S200, color: S600, fontSize: '1.2rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>×</button>
-              </div>
-              <div style={{ marginBottom: 18 }}>
-                <Lbl t="Arrival Odometer (KM)" req />
-                <input
-                  ref={onSceneKmRef}
-                  type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  value={kms.km_on_scene ?? ''}
-                  onChange={e => handleKmChange('km_on_scene', e.target.value.replace(/[^0-9]/g, ''))}
-                  onFocus={onF}
-                  onBlur={onB}
-                  placeholder="e.g. 14265"
-                  style={{ ...base, marginBottom: 12, borderColor: '#e2e8f0' }}
-                />
-              </div>
+        <Modal open={onScenePromptOpen} onClose={() => setOnScenePromptOpen(false)}>
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <div style={{ fontSize: '1.2rem', fontWeight: 900, color: S900, letterSpacing: '-0.02em' }}>Arrival Information</div>
+              <button type="button" onClick={() => setOnScenePromptOpen(false)} style={{ width: 32, height: 32, borderRadius: 16, border: 'none', background: S200, color: S600, fontSize: '1.2rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', touchAction: 'manipulation' }}>×</button>
             </div>
-            <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
-              <button
-                type="button"
-                onClick={() => {
-                  setOnScenePromptOpen(false);
-                  // If they cancel, we bring them back to the En Route timer
-                  setEnRouteOverlay(true);
+            <div style={{ marginBottom: 18 }}>
+              <Lbl t="Arrival Odometer (KM)" req />
+              <input
+                id="input-km_on_scene"
+                ref={onSceneKmRef}
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                value={kms.km_on_scene ?? ''}
+                onChange={e => handleKmChange('km_on_scene', e.target.value.replace(/[^0-9]/g, ''))}
+                onFocus={onF}
+                onBlur={e => {
+                  onB();
+                  handleKmCommit('km_on_scene', e.target.value.replace(/[^0-9]/g, ''));
                 }}
-                style={{
-                  flex: 1, padding: '12px 16px', borderRadius: 12, fontSize: '0.9rem',
-                  fontWeight: 800, border: `1.5px solid ${S200}`, background: W, color: S700,
-                  cursor: 'pointer', WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
-                  textAlign: 'center'
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setOnScenePromptOpen(false);
-                  markTime('time_on_scene', 'km_on_scene');
-                }}
-                style={{
-                  flex: 2, padding: '12px 24px', borderRadius: 12, fontSize: '0.9rem',
-                  fontWeight: 800, border: 'none', background: G, color: W,
-                  cursor: 'pointer', boxShadow: `0 4px 12px ${G}40`,
-                  WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
-                  textAlign: 'center'
-                }}
-              >
-                Confirm Arrival
-              </button>
+                placeholder="e.g. 14265"
+                style={{ ...base, marginBottom: 12, borderColor: '#e2e8f0' }}
+              />
             </div>
           </div>
-        </div>
+          <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+            <button
+              type="button"
+              onClick={() => {
+                setOnScenePromptOpen(false);
+                setEnRouteOverlay(true);
+              }}
+              style={{
+                flex: 1, padding: '12px 16px', borderRadius: 12, fontSize: '0.9rem',
+                fontWeight: 800, border: `1.5px solid ${S200}`, background: W, color: S700,
+                cursor: 'pointer', touchAction: 'manipulation', textAlign: 'center'
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const runMarkTime = () => markTime('time_on_scene', 'km_on_scene');
+                const hasError = handleKmCommit('km_on_scene', kms.km_on_scene || '', runMarkTime);
+                setOnScenePromptOpen(false);
+                if (hasError) return;
+                runMarkTime();
+              }}
+              style={{
+                flex: 2, padding: '12px 24px', borderRadius: 12, fontSize: '0.9rem',
+                fontWeight: 800, border: 'none', background: G, color: W,
+                cursor: 'pointer', boxShadow: `0 4px 12px ${G}40`,
+                touchAction: 'manipulation', textAlign: 'center'
+              }}
+            >
+              Confirm Arrival
+            </button>
+          </div>
+        </Modal>
 
-        {rhtCallOutFeeOpen && (
-          <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(15,23,42,0.6)', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', padding: 20, backdropFilter: 'blur(4px)' }} onClick={e => { if (e.target === e.currentTarget) setRhtCallOutFeeOpen(false); }}>
-            <div style={{ background: S50, borderRadius: 24, padding: '24px 16px', width: '100%', maxWidth: 500, maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 40px rgba(0,0,0,0.2)' }} onClick={e => e.stopPropagation()}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-                <div style={{ fontSize: '1.2rem', fontWeight: 900, color: S900, letterSpacing: '-0.02em' }}>Call Out Fee</div>
-                <button type="button" onClick={() => setRhtCallOutFeeOpen(false)} style={{ width: 32, height: 32, borderRadius: 16, border: 'none', background: S200, color: S600, fontSize: '1.2rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>×</button>
-              </div>
-              <div style={{ overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 10 }}>
-                {['Standard', 'After Hours', 'Public Holiday', 'Standby Cancellation', 'No Patient Loaded', 'None'].map(reason => {
-                  const on = fd.rht_call_out_fee === reason;
-                  return (
-                    <button
-                      key={reason}
-                      type="button"
-                      onClick={() => { 
-                        sf('rht_call_out_fee', reason); 
-                        setRhtCallOutFeeOpen(false); 
-                        setDispatchPromptOpen(true);
-                        window.setTimeout(() => dispatchKmRef.current?.focus(), 50);
-                      }}
-                      style={{
-                        padding: '16px 12px', borderRadius: 12, fontSize: '0.88rem', fontWeight: 800,
-                        border: `2px solid ${on ? G : S200}`, background: on ? G : W, color: on ? W : S700,
-                        cursor: 'pointer', textAlign: 'center', transition: 'all 0.15s',
-                        boxShadow: on ? `0 4px 12px ${G}40` : '0 2px 4px rgba(0,0,0,0.02)'
-                      }}
-                    >
-                      {reason}
-                    </button>
-                  );
-                })}
-              </div>
+        {/* ── Depart Scene Time & Location/KM Prompt Overlay ── */}
+        <Modal open={departPromptOpen} onClose={() => setDepartPromptOpen(false)}>
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <div style={{ fontSize: '1.2rem', fontWeight: 900, color: S900, letterSpacing: '-0.02em' }}>Depart Information</div>
+              <button type="button" onClick={() => setDepartPromptOpen(false)} style={{ width: 32, height: 32, borderRadius: 16, border: 'none', background: S200, color: S600, fontSize: '1.2rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', touchAction: 'manipulation' }}>×</button>
+            </div>
+            <div style={{ marginBottom: 18 }}>
+              <Lbl t="Depart Odometer (KM)" req />
+              <input
+                id="input-km_depart_scene"
+                ref={departKmRef}
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                value={kms.km_depart_scene ?? ''}
+                onChange={e => handleKmChange('km_depart_scene', e.target.value.replace(/[^0-9]/g, ''))}
+                onFocus={onF}
+                onBlur={e => {
+                  onB();
+                  handleKmCommit('km_depart_scene', e.target.value.replace(/[^0-9]/g, ''));
+                }}
+                placeholder="e.g. 14270"
+                style={{ ...base, marginBottom: 12, borderColor: '#e2e8f0' }}
+              />
             </div>
           </div>
-        )}
+          <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+            <button
+              type="button"
+              onClick={() => {
+                setDepartPromptOpen(false);
+              }}
+              style={{
+                flex: 1, padding: '12px 16px', borderRadius: 12, fontSize: '0.9rem',
+                fontWeight: 800, border: `1.5px solid ${S200}`, background: W, color: S700,
+                cursor: 'pointer', touchAction: 'manipulation', textAlign: 'center'
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                // time_depart_scene always advances to phase 4 (Transport)
+                const runMarkTime = () => markTime('time_depart_scene', 'km_depart_scene', async () => {
+                  await doSave();
+                  setPhase(4);
+                });
+                const hasError = handleKmCommit('km_depart_scene', kms.km_depart_scene || '', runMarkTime);
+                setDepartPromptOpen(false);
+                if (hasError) return;
+                runMarkTime();
+              }}
+              style={{
+                flex: 2, padding: '12px 24px', borderRadius: 12, fontSize: '0.9rem',
+                fontWeight: 800, border: 'none', background: G, color: W,
+                cursor: 'pointer', boxShadow: `0 4px 12px ${G}40`,
+                touchAction: 'manipulation', textAlign: 'center'
+              }}
+            >
+              Confirm Depart
+            </button>
+          </div>
+        </Modal>
+
+        {/* ── Arrival At Facility Time & Location/KM Prompt Overlay ── */}
+        <Modal open={destinationPromptOpen} onClose={() => setDestinationPromptOpen(false)}>
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <div style={{ fontSize: '1.2rem', fontWeight: 900, color: S900, letterSpacing: '-0.02em' }}>Arrival At Facility</div>
+              <button type="button" onClick={() => setDestinationPromptOpen(false)} style={{ width: 32, height: 32, borderRadius: 16, border: 'none', background: S200, color: S600, fontSize: '1.2rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', touchAction: 'manipulation' }}>×</button>
+            </div>
+            <div style={{ marginBottom: 18 }}>
+              <Lbl t="Arrival Odometer (KM)" req />
+              <input
+                id="input-km_at_destination"
+                ref={destinationKmRef}
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                value={kms.km_at_destination ?? ''}
+                onChange={e => handleKmChange('km_at_destination', e.target.value.replace(/[^0-9]/g, ''))}
+                onFocus={onF}
+                onBlur={e => {
+                  onB();
+                  handleKmCommit('km_at_destination', e.target.value.replace(/[^0-9]/g, ''));
+                }}
+                placeholder="e.g. 14285"
+                style={{ ...base, marginBottom: 12, borderColor: '#e2e8f0' }}
+              />
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+            <button
+              type="button"
+              onClick={() => {
+                setDestinationPromptOpen(false);
+              }}
+              style={{
+                flex: 1, padding: '12px 16px', borderRadius: 12, fontSize: '0.9rem',
+                fontWeight: 800, border: `1.5px solid ${S200}`, background: W, color: S700,
+                cursor: 'pointer', touchAction: 'manipulation', textAlign: 'center'
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                // time_at_destination always advances to phase 5 (Handover)
+                const runMarkTime = () => markTime('time_at_destination', 'km_at_destination', async () => {
+                  await doSave();
+                  setPhase(5);
+                });
+                const hasError = handleKmCommit('km_at_destination', kms.km_at_destination || '', runMarkTime);
+                setDestinationPromptOpen(false);
+                if (hasError) return;
+                runMarkTime();
+              }}
+              style={{
+                flex: 2, padding: '12px 24px', borderRadius: 12, fontSize: '0.9rem',
+                fontWeight: 800, border: 'none', background: G, color: W,
+                cursor: 'pointer', boxShadow: `0 4px 12px ${G}40`,
+                touchAction: 'manipulation', textAlign: 'center'
+              }}
+            >
+              Confirm Arrival
+            </button>
+          </div>
+        </Modal>
+
+        <Modal open={rhtCallOutFeeOpen} onClose={() => setRhtCallOutFeeOpen(false)}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+            <div style={{ fontSize: '1.2rem', fontWeight: 900, color: S900, letterSpacing: '-0.02em' }}>Call Out Fee</div>
+            <button type="button" onClick={() => setRhtCallOutFeeOpen(false)} style={{ width: 32, height: 32, borderRadius: 16, border: 'none', background: S200, color: S600, fontSize: '1.2rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', touchAction: 'manipulation' }}>×</button>
+          </div>
+          <div style={{ overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 10 }}>
+            {['Standard', 'After Hours', 'Public Holiday', 'Standby Cancellation', 'No Patient Loaded', 'None'].map(reason => {
+              const on = fd.rht_call_out_fee === reason;
+              return (
+                <button
+                  key={reason}
+                  type="button"
+                  onClick={() => { 
+                    sf('rht_call_out_fee', reason); 
+                    setRhtCallOutFeeOpen(false); 
+                    setDispatchPromptOpen(true);
+                    window.setTimeout(() => dispatchKmRef.current?.focus(), 50);
+                  }}
+                  style={{
+                    padding: '16px 12px', borderRadius: 12, fontSize: '0.88rem', fontWeight: 800,
+                    border: `2px solid ${on ? G : S200}`, background: on ? G : W, color: on ? W : S700,
+                    cursor: 'pointer', textAlign: 'center', transition: 'all 0.15s',
+                    boxShadow: on ? `0 4px 12px ${G}40` : '0 2px 4px rgba(0,0,0,0.02)',
+                    touchAction: 'manipulation',
+                  }}
+                >
+                  {reason}
+                </button>
+              );
+            })}
+          </div>
+        </Modal>
 
         {/* ── Assessment Level Modal ──────────────────────────────────────────
             Auto-opens after treating practitioner is confirmed (if not yet set).
@@ -6820,85 +7594,72 @@ export default function DigitalPRFForm() {
             ALS: 'Advanced Life Support — critical care & ALS procedures',
           };
           return (
-            <div style={{
-              position: 'fixed', inset: 0, zIndex: 10000,
-              background: 'rgba(15,23,42,0.65)', backdropFilter: 'blur(5px)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
-            }}>
-              <div onClick={e => e.stopPropagation()} style={{
-                maxWidth: 440, width: '100%', background: '#fff',
-                borderRadius: 22, overflow: 'hidden',
-                boxShadow: '0 28px 72px rgba(15,23,42,0.3)',
-              }}>
-                {/* Header */}
-                <div style={{
-                  padding: '20px 20px 12px',
-                  borderBottom: `1px solid ${S100}`,
-                }}>
-                  <div style={{ fontSize: '1.1rem', fontWeight: 900, color: S900, letterSpacing: '-0.01em' }}>
-                    Assessment Level
-                  </div>
-                  <div style={{ fontSize: '0.78rem', color: S400, marginTop: 3 }}>
-                    Select the level at which this patient was assessed
-                  </div>
+            <Modal open={true} onClose={() => setAssessmentModalOpen(false)}>
+              <div style={{ padding: '0 4px 0px', borderBottom: `1px solid ${S100}`, marginBottom: 14 }}>
+                <div style={{ fontSize: '1.1rem', fontWeight: 900, color: S900, letterSpacing: '-0.01em' }}>
+                  Assessment Level
                 </div>
-
-                {/* Options */}
-                <div style={{ padding: '14px 20px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  {LEVELS.map(lvl => {
-                    const isOn = fd.assessment_level === lvl;
-                    return (
-                      <button
-                        key={lvl}
-                        type="button"
-                        onClick={() => {
-                          sf('assessment_level', lvl);
-                          setAssessmentModalOpen(false);
-                        }}
-                        style={{
-                          display: 'flex', alignItems: 'center', gap: 14,
-                          textAlign: 'left', cursor: 'pointer', width: '100%',
-                          background: isOn ? '#f0fdf4' : S50,
-                          border: `1.5px solid ${isOn ? G : S200}`,
-                          borderRadius: 14, padding: '13px 14px',
-                          transition: 'all 0.15s ease',
-                          boxShadow: isOn ? `0 2px 10px ${G}25` : 'none',
-                        }}
-                      >
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontWeight: 800, fontSize: '0.96rem', color: isOn ? GDK : S900 }}>{lvl}</div>
-                          <div style={{ fontSize: '0.72rem', color: isOn ? GDK : S400, marginTop: 2, lineHeight: 1.4 }}>{DESC[lvl]}</div>
-                        </div>
-                        <div style={{
-                          width: 22, height: 22, borderRadius: 11, flexShrink: 0,
-                          border: `2px solid ${isOn ? G : S200}`,
-                          background: isOn ? G : 'transparent',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          transition: 'all 0.15s ease',
-                        }}>
-                          {isOn && <span style={{ color: '#fff', fontSize: '0.72rem', fontWeight: 900, lineHeight: 1 }}>✓</span>}
-                        </div>
-                      </button>
-                    );
-                  })}
+                <div style={{ fontSize: '0.78rem', color: S400, marginTop: 3, marginBottom: 12 }}>
+                  Select the level at which this patient was assessed
                 </div>
-
-                {/* Cancel only if already has a value set */}
-                {fd.assessment_level && (
-                  <div style={{ padding: '0 20px 20px' }}>
-                    <button
-                      type="button"
-                      onClick={() => setAssessmentModalOpen(false)}
-                      style={{
-                        width: '100%', padding: '11px 0', borderRadius: 12,
-                        border: `1.5px solid ${S200}`, background: '#fff', color: S600,
-                        fontWeight: 700, fontSize: '0.88rem', cursor: 'pointer',
-                      }}
-                    >Cancel</button>
-                  </div>
-                )}
               </div>
-            </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {LEVELS.map(lvl => {
+                  const isOn = fd.assessment_level === lvl;
+                  return (
+                    <button
+                      key={lvl}
+                      type="button"
+                      onClick={() => {
+                        sf('assessment_level', lvl);
+                        setAssessmentModalOpen(false);
+                        setTimeout(() => chiefComplaintRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
+                      }}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 14,
+                        textAlign: 'left', cursor: 'pointer', width: '100%',
+                        background: isOn ? '#f0fdf4' : S50,
+                        border: `1.5px solid ${isOn ? G : S200}`,
+                        borderRadius: 14, padding: '13px 14px',
+                        transition: 'all 0.15s ease',
+                        boxShadow: isOn ? `0 2px 10px ${G}25` : 'none',
+                        touchAction: 'manipulation',
+                      }}
+                    >
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 800, fontSize: '0.96rem', color: isOn ? GDK : S900 }}>{lvl}</div>
+                        <div style={{ fontSize: '0.72rem', color: isOn ? GDK : S400, marginTop: 2, lineHeight: 1.4 }}>{DESC[lvl]}</div>
+                      </div>
+                      <div style={{
+                        width: 22, height: 22, borderRadius: 11, flexShrink: 0,
+                        border: `2px solid ${isOn ? G : S200}`,
+                        background: isOn ? G : 'transparent',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        transition: 'all 0.15s ease',
+                      }}>
+                        {isOn && <span style={{ color: '#fff', fontSize: '0.72rem', fontWeight: 900, lineHeight: 1 }}>✓</span>}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {fd.assessment_level && (
+                <div style={{ marginTop: 14 }}>
+                  <button
+                    type="button"
+                    onClick={() => setAssessmentModalOpen(false)}
+                    style={{
+                      width: '100%', padding: '11px 0', borderRadius: 12,
+                      border: `1.5px solid ${S200}`, background: '#fff', color: S600,
+                      fontWeight: 700, fontSize: '0.88rem', cursor: 'pointer',
+                      touchAction: 'manipulation',
+                    }}
+                  >Cancel</button>
+                </div>
+              )}
+            </Modal>
           );
         })()}
 
@@ -6920,129 +7681,268 @@ export default function DigitalPRFForm() {
           const isUpgrade = hasMismatch && monRank > assessRank;
 
           return (
-            <div style={{
-              position: 'fixed', inset: 0, zIndex: 10000,
-              background: 'rgba(15,23,42,0.65)', backdropFilter: 'blur(5px)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
-            }}>
-              <div onClick={e => e.stopPropagation()} style={{
-                maxWidth: 440, width: '100%', background: '#fff',
-                borderRadius: 22, overflow: 'hidden',
-                boxShadow: '0 28px 72px rgba(15,23,42,0.3)',
-              }}>
-                {/* Header */}
-                <div style={{
-                  padding: '20px 20px 12px',
-                  borderBottom: `1px solid ${S100}`,
-                }}>
-                  <div style={{ fontSize: '1.1rem', fontWeight: 900, color: S900, letterSpacing: '-0.01em' }}>
-                    Monitoring Level
-                  </div>
-                  <div style={{ fontSize: '0.78rem', color: S400, marginTop: 3 }}>
-                    Level of care monitored during transport
-                    {fd.assessment_level && (
-                      <span style={{ marginLeft: 4 }}>
-                        · Assessed at <b style={{ color: S700 }}>{fd.assessment_level}</b>
-                      </span>
-                    )}
-                  </div>
+            <Modal open={true} onClose={() => setMonitoringModalOpen(false)}>
+              <div style={{ padding: '0 4px 0px', borderBottom: `1px solid ${S100}`, marginBottom: 14 }}>
+                <div style={{ fontSize: '1.1rem', fontWeight: 900, color: S900, letterSpacing: '-0.01em' }}>
+                  Monitoring Level
                 </div>
-
-                {/* Options */}
-                <div style={{ padding: '14px 20px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  {LEVELS.map(lvl => {
-                    const isOn = fd.monitoring_level === lvl;
-                    return (
-                      <button
-                        key={lvl}
-                        type="button"
-                        onClick={() => sf('monitoring_level', lvl)}
-                        style={{
-                          display: 'flex', alignItems: 'center', gap: 14,
-                          textAlign: 'left', cursor: 'pointer', width: '100%',
-                          background: isOn ? '#f0fdf4' : S50,
-                          border: `1.5px solid ${isOn ? G : S200}`,
-                          borderRadius: 14, padding: '13px 14px',
-                          transition: 'all 0.15s ease',
-                          boxShadow: isOn ? `0 2px 10px ${G}25` : 'none',
-                        }}
-                      >
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <span style={{ fontWeight: 800, fontSize: '0.96rem', color: isOn ? GDK : S900 }}>{lvl}</span>
-                          </div>
-                          <div style={{ fontSize: '0.72rem', color: isOn ? GDK : S400, marginTop: 2, lineHeight: 1.4 }}>{DESC[lvl]}</div>
-                        </div>
-                        <div style={{
-                          width: 22, height: 22, borderRadius: 11, flexShrink: 0,
-                          border: `2px solid ${isOn ? G : S200}`,
-                          background: isOn ? G : 'transparent',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          transition: 'all 0.15s ease',
-                        }}>
-                          {isOn && <span style={{ color: '#fff', fontSize: '0.72rem', fontWeight: 900, lineHeight: 1 }}>✓</span>}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {/* Mismatch warning */}
-                {hasMismatch && (
-                  <div style={{
-                    margin: '0 20px 12px',
-                    padding: '12px 14px', borderRadius: 12,
-                    border: `1.5px solid ${S200}`,
-                    background: S50,
-                    color: S700,
-                    fontSize: '0.8rem', fontWeight: 600, lineHeight: 1.5,
-                    display: 'flex', gap: 8, alignItems: 'flex-start',
-                  }}>
-                    <span style={{ fontSize: '1rem', flexShrink: 0, color: S400 }}>{isUpgrade ? '↑' : '↓'}</span>
-                    <span>
-                      {isUpgrade
-                        ? <><b style={{ color: S900 }}>Upgrade required.</b> Monitoring ({fd.monitoring_level}) exceeds the assessed level ({fd.assessment_level}). Notify dispatch to upgrade this call to {fd.monitoring_level}.</>
-                        : <><b style={{ color: S900 }}>Downgrade required.</b> Monitoring ({fd.monitoring_level}) is below the assessed level ({fd.assessment_level}). Notify dispatch to downgrade this call to {fd.monitoring_level}.</>
-                      }
+                <div style={{ fontSize: '0.78rem', color: S400, marginTop: 3, marginBottom: 12 }}>
+                  Level of care monitored during transport
+                  {fd.assessment_level && (
+                    <span style={{ marginLeft: 4 }}>
+                      · Assessed at <b style={{ color: S700 }}>{fd.assessment_level}</b>
                     </span>
-                  </div>
-                )}
-
-                {/* Footer */}
-                <div style={{ padding: '0 20px 20px', display: 'flex', gap: 10 }}>
-                  <button
-                    type="button"
-                    onClick={() => setMonitoringModalOpen(false)}
-                    style={{
-                      flex: 1, padding: '11px 0', borderRadius: 12,
-                      border: `1.5px solid ${S200}`, background: '#fff', color: S600,
-                      fontWeight: 700, fontSize: '0.88rem', cursor: 'pointer',
-                    }}
-                  >Cancel</button>
-                  <button
-                    type="button"
-                    disabled={!fd.monitoring_level}
-                    onClick={() => {
-                      setMonitoringModalOpen(false);
-                      advancePhase(2);
-                    }}
-                    style={{
-                      flex: 2, padding: '11px 0', borderRadius: 12, border: 'none',
-                      background: fd.monitoring_level ? `linear-gradient(135deg,${G},${GDK})` : S200,
-                      color: fd.monitoring_level ? '#fff' : S400,
-                      fontWeight: 800, fontSize: '0.9rem',
-                      cursor: fd.monitoring_level ? 'pointer' : 'not-allowed',
-                      boxShadow: fd.monitoring_level ? `0 4px 14px ${G}35` : 'none',
-                      transition: 'all 0.15s ease',
-                    }}
-                  >
-                    {fd.monitoring_level ? 'Continue →' : 'Select a level'}
-                  </button>
+                  )}
                 </div>
               </div>
-            </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {LEVELS.map(lvl => {
+                  const isOn = fd.monitoring_level === lvl;
+                  return (
+                    <button
+                      key={lvl}
+                      type="button"
+                      onClick={() => sf('monitoring_level', lvl)}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 14,
+                        textAlign: 'left', cursor: 'pointer', width: '100%',
+                        background: isOn ? '#f0fdf4' : S50,
+                        border: `1.5px solid ${isOn ? G : S200}`,
+                        borderRadius: 14, padding: '13px 14px',
+                        transition: 'all 0.15s ease',
+                        boxShadow: isOn ? `0 2px 10px ${G}25` : 'none',
+                        touchAction: 'manipulation',
+                      }}
+                    >
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ fontWeight: 800, fontSize: '0.96rem', color: isOn ? GDK : S900 }}>{lvl}</span>
+                        </div>
+                        <div style={{ fontSize: '0.72rem', color: isOn ? GDK : S400, marginTop: 2, lineHeight: 1.4 }}>{DESC[lvl]}</div>
+                      </div>
+                      <div style={{
+                        width: 22, height: 22, borderRadius: 11, flexShrink: 0,
+                        border: `2px solid ${isOn ? G : S200}`,
+                        background: isOn ? G : 'transparent',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        transition: 'all 0.15s ease',
+                      }}>
+                        {isOn && <span style={{ color: '#fff', fontSize: '0.72rem', fontWeight: 900, lineHeight: 1 }}>✓</span>}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {hasMismatch && (
+                <div style={{
+                  marginTop: 12,
+                  padding: '12px 14px', borderRadius: 12,
+                  border: `1.5px solid ${S200}`,
+                  background: S50,
+                  color: S700,
+                  fontSize: '0.8rem', fontWeight: 600, lineHeight: 1.5,
+                  display: 'flex', gap: 8, alignItems: 'flex-start',
+                }}>
+                  <span style={{ fontSize: '1rem', flexShrink: 0, color: S400 }}>{isUpgrade ? '↑' : '↓'}</span>
+                  <span>
+                    {isUpgrade
+                      ? <><b style={{ color: S900 }}>Upgrade required.</b> Monitoring ({fd.monitoring_level}) exceeds the assessed level ({fd.assessment_level}). Notify dispatch to upgrade this call to {fd.monitoring_level}.</>
+                      : <><b style={{ color: S900 }}>Downgrade required.</b> Monitoring ({fd.monitoring_level}) is below the assessed level ({fd.assessment_level}). Notify dispatch to downgrade this call to {fd.monitoring_level}.</>
+                    }
+                  </span>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
+                <button
+                  type="button"
+                  onClick={() => setMonitoringModalOpen(false)}
+                  style={{
+                    flex: 1, padding: '11px 0', borderRadius: 12,
+                    border: `1.5px solid ${S200}`, background: '#fff', color: S600,
+                    fontWeight: 700, fontSize: '0.88rem', cursor: 'pointer',
+                    touchAction: 'manipulation',
+                  }}
+                >Cancel</button>
+                <button
+                  type="button"
+                  disabled={!fd.monitoring_level}
+                  onClick={() => {
+                    setMonitoringModalOpen(false);
+                    advancePhase(2);
+                  }}
+                  style={{
+                    flex: 2, padding: '11px 0', borderRadius: 12, border: 'none',
+                    background: fd.monitoring_level ? `linear-gradient(135deg,${G},${GDK})` : S200,
+                    color: fd.monitoring_level ? '#fff' : S400,
+                    fontWeight: 800, fontSize: '0.9rem',
+                    cursor: fd.monitoring_level ? 'pointer' : 'not-allowed',
+                    boxShadow: fd.monitoring_level ? `0 4px 14px ${G}35` : 'none',
+                    transition: 'all 0.15s ease',
+                    touchAction: 'manipulation',
+                  }}
+                >
+                  {fd.monitoring_level ? 'Continue →' : 'Select a level'}
+                </button>
+              </div>
+            </Modal>
           );
         })()}
+
+        {wcaPromptOpen && wcaDocKey && (() => {
+          const doc = [
+            { key: 'wca_oar_report_pdf', label: 'WCA Document (PDF)' },
+            { key: 'wca_employee_id_pdf', label: 'Employee ID (PDF)' },
+            { key: 'wca_payslip_pdf', label: 'Payslip (PDF)' },
+            { key: 'wca_medical_report_pdf', label: 'Medical Report (PDF)' },
+          ].find(d => d.key === wcaDocKey);
+          if (!doc) return null;
+          return (
+            <Modal open={true} onClose={() => { setWcaPromptOpen(false); setWcaDocKey(null); }}>
+              <div style={{ padding: '0 4px 0px', borderBottom: `1px solid ${S100}`, marginBottom: 14 }}>
+                <div style={{ fontSize: '1.1rem', fontWeight: 900, color: S900, letterSpacing: '-0.01em' }}>
+                  Attach {doc.label}
+                </div>
+                <div style={{ fontSize: '0.78rem', color: S400, marginTop: 3, marginBottom: 12 }}>
+                  Select how you would like to upload this document
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {/* Option 1: Take Photo */}
+                <label style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+                  padding: '16px', borderRadius: 12, border: `2px dashed ${G}`, background: GBG,
+                  color: GDK, fontSize: '0.94rem', fontWeight: 800, cursor: 'pointer', textAlign: 'center',
+                  transition: 'all 0.15s ease',
+                }}>
+                  📷 Take a Photo
+                  <input
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    onChange={e => handleWcaPhoto(wcaDocKey, e.target.files?.[0] || null)}
+                    style={{ display: 'none' }}
+                  />
+                </label>
+
+                {/* Option 2: Upload PDF */}
+                <label style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+                  padding: '16px', borderRadius: 12, border: `2px dashed #3b82f6`, background: `rgba(59,130,246,0.09)`,
+                  color: `#2563eb`, fontSize: '0.94rem', fontWeight: 800, cursor: 'pointer', textAlign: 'center',
+                  transition: 'all 0.15s ease',
+                }}>
+                  📄 Choose PDF File
+                  <input
+                    type="file"
+                    accept="application/pdf,.pdf"
+                    onChange={e => handleWcaPdf(wcaDocKey, e.target.files?.[0] || null)}
+                    style={{ display: 'none' }}
+                  />
+                </label>
+              </div>
+            </Modal>
+          );
+        })()}
+
+        {medReasonPromptOpen && (
+          <Modal open={true} onClose={() => { setMedReasonPromptOpen(false); setTempMedReason(null); }}>
+            <div style={{ padding: '0 4px 0px', borderBottom: `1px solid ${S100}`, marginBottom: 14 }}>
+              <div style={{ fontSize: '1.1rem', fontWeight: 900, color: S900, letterSpacing: '-0.01em' }}>
+                Reason for Medication
+              </div>
+              <div style={{ fontSize: '0.78rem', color: S400, marginTop: 3, marginBottom: 12 }}>
+                Why is this medication needed?
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {[
+                'Medication / IV Administered On Route',
+                'Medication Administered via IV',
+                'Fluid Resuscitation Required',
+                'Profuse Bleeding'
+              ].map(opt => (
+                <button
+                  key={opt}
+                  type="button"
+                  onClick={() => {
+                    setTempMedReason(opt);
+                    setMedReasonPromptOpen(false);
+                    setCrewPicker({ phase: 'select', kind: 'med' });
+                  }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 14,
+                    textAlign: 'left', cursor: 'pointer', width: '100%',
+                    background: S50,
+                    border: `1.5px solid ${S200}`,
+                    borderRadius: 14, padding: '13px 14px',
+                    transition: 'all 0.15s ease',
+                    fontWeight: 700,
+                    color: S900,
+                  }}
+                >
+                  {opt}
+                </button>
+              ))}
+            </div>
+          </Modal>
+        )}
+
+        {/* ── IV Therapy Reason Modal ── */}
+        {ivReasonModalOpen && (
+          <Modal open={true} onClose={() => setIvReasonModalOpen(false)}>
+            <div style={{ padding: '0 4px 0px', borderBottom: `1px solid ${S100}`, marginBottom: 14 }}>
+              <div style={{ fontSize: '1.1rem', fontWeight: 900, color: S900, letterSpacing: '-0.01em' }}>
+                Reason for IV Therapy
+              </div>
+              <div style={{ fontSize: '0.78rem', color: S400, marginTop: 3, marginBottom: 12 }}>
+                Select all that apply and tap Continue to add an IV line.
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 18 }}>
+              {(['IFT', 'IHT'].includes(fd.call_type)) && (
+                <label style={{ display: 'flex', alignItems: 'center', gap: 14, cursor: 'pointer', background: S50, border: `1.5px solid ${fd.ift_ongoing_iv_treatment ? '#0369a1' : S200}`, borderRadius: 14, padding: '13px 14px', transition: 'all 0.15s ease' }}>
+                  <input type="checkbox" checked={!!fd.ift_ongoing_iv_treatment} onChange={e => sf('ift_ongoing_iv_treatment', e.target.checked)} style={{ width: 18, height: 18, accentColor: '#0369a1', cursor: 'pointer', flexShrink: 0 }} />
+                  <span style={{ fontWeight: 700, color: S900 }}>On-going IV treatment</span>
+                </label>
+              )}
+              <label style={{ display: 'flex', alignItems: 'center', gap: 14, cursor: 'pointer', background: S50, border: `1.5px solid ${fd.primary_iv_profuse_bleeding ? '#0369a1' : S200}`, borderRadius: 14, padding: '13px 14px', transition: 'all 0.15s ease' }}>
+                <input type="checkbox" checked={!!fd.primary_iv_profuse_bleeding} onChange={e => sf('primary_iv_profuse_bleeding', e.target.checked)} style={{ width: 18, height: 18, accentColor: '#0369a1', cursor: 'pointer', flexShrink: 0 }} />
+                <span style={{ fontWeight: 700, color: S900 }}>Profuse Bleeding</span>
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 14, cursor: 'pointer', background: S50, border: `1.5px solid ${fd.primary_iv_fluid_resuscitation ? '#0369a1' : S200}`, borderRadius: 14, padding: '13px 14px', transition: 'all 0.15s ease' }}>
+                <input type="checkbox" checked={!!fd.primary_iv_fluid_resuscitation} onChange={e => sf('primary_iv_fluid_resuscitation', e.target.checked)} style={{ width: 18, height: 18, accentColor: '#0369a1', cursor: 'pointer', flexShrink: 0 }} />
+                <span style={{ fontWeight: 700, color: S900 }}>Fluid Resuscitation</span>
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 14, cursor: 'pointer', background: S50, border: `1.5px solid ${fd.iv_medication_administration ? '#0369a1' : S200}`, borderRadius: 14, padding: '13px 14px', transition: 'all 0.15s ease' }}>
+                <input type="checkbox" checked={!!fd.iv_medication_administration} onChange={e => sf('iv_medication_administration', e.target.checked)} style={{ width: 18, height: 18, accentColor: '#0369a1', cursor: 'pointer', flexShrink: 0 }} />
+                <span style={{ fontWeight: 700, color: S900 }}>Medication Administered via IV</span>
+              </label>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setIvReasonModalOpen(false);
+                setIvSectionOpen(true);
+                setCrewPicker({ phase: 'select', kind: 'iv' });
+              }}
+              style={{
+                width: '100%', padding: '14px', borderRadius: 12, border: 'none',
+                background: 'linear-gradient(135deg,#0369a1,#0284c7)',
+                color: '#fff', fontSize: '0.92rem', fontWeight: 900,
+                cursor: 'pointer', boxShadow: '0 4px 14px rgba(3,105,161,0.3)',
+              }}
+            >
+              Continue — Add IV Line →
+            </button>
+          </Modal>
+        )}
 
 
         {phase === PHASES.length - 1 && (

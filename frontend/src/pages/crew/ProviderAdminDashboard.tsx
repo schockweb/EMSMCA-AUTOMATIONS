@@ -6,7 +6,6 @@ import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { HPCSA_CATEGORIES, CATEGORY_META, type HpcsaCategory } from '../../data/hpcsaScope';
-import { HomeTabIcon, AmbulanceTabIcon, EmployeeTabIcon, AmbulanceLargeIcon, EmployeeLargeIcon } from '../../components/AnimatedIcons';
 
 // ── Tokens ───────────────────────────────────────────────────────
 const INK = '#0a0a0a';
@@ -22,7 +21,7 @@ function getApi() {
   return axios.create({ headers: { Authorization: `Bearer ${localStorage.getItem('crew_token')}` } });
 }
 
-type Tab = 'dashboard' | 'employees' | 'vehicles';
+type Tab = 'employees' | 'vehicles';
 
 interface Employee {
   id: string;
@@ -34,6 +33,7 @@ interface Employee {
   phone: string | null;
   is_active: boolean;
   last_login: string | null;
+  role?: string;
 }
 
 interface Vehicle {
@@ -66,43 +66,9 @@ const HPCSA_QUAL_OPTIONS = HPCSA_CATEGORIES.map(code => ({
   label: `${code} — ${CATEGORY_META[code].label}`,
 }));
 
-const blankEmp = () => ({ full_name: '', initials: '', hpcsa_number: '', qualification: 'AEA', phone: '' });
+const blankEmp = () => ({ full_name: '', initials: '', hpcsa_number: '', qualification: 'AEA', phone: '', role: 'crew', is_active: true });
 const blankVeh = () => ({ callsign: '', registration: '', vehicle_type: 'Ambulance' });
-
-const resizeImage = (file: File, callback: (base64: string) => void) => {
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      const MAX_WIDTH = 240;
-      const MAX_HEIGHT = 240;
-      let width = img.width;
-      let height = img.height;
-
-      if (width > height) {
-        if (width > MAX_WIDTH) {
-          height *= MAX_WIDTH / width;
-          width = MAX_WIDTH;
-        }
-      } else {
-        if (height > MAX_HEIGHT) {
-          width *= MAX_HEIGHT / height;
-          height = MAX_HEIGHT;
-        }
-      }
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.drawImage(img, 0, 0, width, height);
-        callback(canvas.toDataURL('image/jpeg', 0.8));
-      }
-    };
-    img.src = e.target?.result as string;
-  };
-  reader.readAsDataURL(file);
-};
+const blankVehEdit = () => ({ callsign: '', registration: '', vehicle_type: 'Ambulance', is_active: true });
 
 // ── Field primitives ────────────────────────────────────────────
 const inputStyle: React.CSSProperties = {
@@ -250,7 +216,11 @@ export default function ProviderAdminDashboard() {
   const profile    = JSON.parse(localStorage.getItem('crew_profile') || '{}');
   const providerId = profile.provider_id || null;
 
-  const [activeTab, setActiveTab] = useState<Tab>('dashboard');
+  const [activeTab, setActiveTab] = useState<Tab>('employees');
+
+  // search + status filter (reset on tab switch)
+  const [search,       setSearch]       = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
 
   // data
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -272,28 +242,20 @@ export default function ProviderAdminDashboard() {
   const [editEmpErr, setEditEmpErr] = useState('');
   const [editEmpSav, setEditEmpSav] = useState(false);
 
-  // edit vehicle
-  const [editVehId,  setEditVehId]  = useState<string | null>(null);
-  const [editVeh,    setEditVeh]    = useState(blankVeh());
-  const [editVehErr, setEditVehErr] = useState('');
-  const [editVehSav, setEditVehSav] = useState(false);
-
-  // temporary photos during edit
-  const [tempEmpPhoto, setTempEmpPhoto] = useState<string | null>(null);
-  const [tempVehPhoto, setTempVehPhoto] = useState<string | null>(null);
-
-  // confirm delete states
-  const [confirmEmpDelete, setConfirmEmpDelete] = useState(false);
-  const [confirmVehDelete, setConfirmVehDelete] = useState(false);
-
-  // search states
-  const [empSearch, setEmpSearch] = useState('');
-  const [vehSearch, setVehSearch] = useState('');
-
   // add vehicle
   const [newVeh,    setNewVeh]    = useState(blankVeh());
   const [newVehErr, setNewVehErr] = useState('');
   const [newVehSav, setNewVehSav] = useState(false);
+
+  // edit vehicle
+  const [editVehId,  setEditVehId]  = useState<string | null>(null);
+  const [editVeh,    setEditVeh]    = useState(blankVehEdit());
+  const [editVehErr, setEditVehErr] = useState('');
+  const [editVehSav, setEditVehSav] = useState(false);
+
+  // reset-password result (shown inside the edit employee modal)
+  const [pwReset,    setPwReset]    = useState<string | null>(null);
+  const [pwResetBusy, setPwResetBusy] = useState(false);
 
   // auth guard
   useEffect(() => {
@@ -317,29 +279,45 @@ export default function ProviderAdminDashboard() {
   }, [providerId]);
 
   useEffect(() => {
-    fetchEmployees();
-    fetchVehicles();
-  }, [fetchEmployees, fetchVehicles]);
+    if (activeTab === 'employees') fetchEmployees(); else fetchVehicles();
+  }, [activeTab]);
 
-  useEffect(() => {
-    if (activeTab === 'employees') fetchEmployees();
-    else if (activeTab === 'vehicles') fetchVehicles();
-  }, [activeTab, fetchEmployees, fetchVehicles]);
+  // ── Search + status filtering (client-side; lists are small) ─────
+  const q = search.trim().toLowerCase();
+  const matchStatus = (active: boolean) =>
+    statusFilter === 'all' || (statusFilter === 'active' ? active : !active);
+
+  const filteredEmployees = employees.filter(e =>
+    matchStatus(e.is_active) &&
+    (!q || [e.full_name, e.hpcsa_number, e.qualification, e.phone, e.role]
+      .some(f => (f || '').toLowerCase().includes(q)))
+  );
+  const filteredVehicles = vehicles.filter(v =>
+    matchStatus(v.is_active) &&
+    (!q || [v.callsign, v.registration, v.vehicle_type]
+      .some(f => (f || '').toLowerCase().includes(q)))
+  );
+
+  // Small headline counts shown as chips beneath the title.
+  const empActive = employees.filter(e => e.is_active).length;
+  const vehActive = vehicles.filter(v => v.is_active).length;
+  const vehInUse  = vehicles.filter(v => v.in_use).length;
 
   // ── Actions ─────────────────────────────────────────────────────
   const submitNewEmp = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!providerId) { setNewEmpErr('Session invalid.'); return; }
-    if (!newEmp.hpcsa_number.trim()) { setNewEmpErr('HPCSA number is required.'); return; }
+    if (newEmp.role !== 'admin' && !newEmp.hpcsa_number.trim()) { setNewEmpErr('HPCSA number is required for crew.'); return; }
     setNewEmpSav(true); setNewEmpErr('');
     try {
       await getApi().post(`/api/providers/${providerId}/crew`, {
         full_name:    newEmp.full_name.trim(),
-        initials:     newEmp.initials.trim() || null,
-        email:        `${newEmp.hpcsa_number.trim().toLowerCase()}@noemail.local`,
-        hpcsa_number: newEmp.hpcsa_number.trim().toUpperCase(),
-        qualification: newEmp.qualification,
-        phone:        newEmp.phone.trim() || null,
+        initials:     newEmp.role === 'admin' ? null : newEmp.initials.trim() || null,
+        email:        newEmp.role === 'admin' ? null : `${newEmp.hpcsa_number.trim().toLowerCase()}@noemail.local`, // backend will auto-gen if email is missing
+        hpcsa_number: newEmp.role === 'admin' ? null : newEmp.hpcsa_number.trim().toUpperCase(),
+        qualification: newEmp.role === 'admin' ? 'Admin' : newEmp.qualification,
+        phone:        newEmp.role === 'admin' ? null : newEmp.phone.trim() || null,
+        role:         newEmp.role,
       });
       setNewEmp(blankEmp());
       setAddEmpOpen(false);
@@ -358,32 +336,28 @@ export default function ProviderAdminDashboard() {
       hpcsa_number: e.hpcsa_number || '',
       qualification: e.qualification,
       phone:        e.phone || '',
+      role:         e.role || 'crew',
+      is_active:    e.is_active,
     });
     setEditEmpErr('');
-    setTempEmpPhoto(localStorage.getItem(`photo_employee_${e.id}`));
-    setConfirmEmpDelete(false);
+    setPwReset(null);
   };
 
   const submitEditEmp = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editEmpId || !providerId) return;
+    if (editEmp.role !== 'admin' && !editEmp.hpcsa_number.trim()) { setEditEmpErr('HPCSA number is required for crew.'); return; }
     setEditEmpSav(true); setEditEmpErr('');
     try {
       await getApi().patch(`/api/providers/${providerId}/crew/${editEmpId}`, {
         full_name:    editEmp.full_name.trim(),
-        initials:     editEmp.initials.trim() || null,
-        hpcsa_number: editEmp.hpcsa_number.trim().toUpperCase() || null,
-        qualification: editEmp.qualification,
-        phone:        editEmp.phone.trim() || null,
+        initials:     editEmp.role === 'admin' ? null : editEmp.initials.trim() || null,
+        hpcsa_number: editEmp.role === 'admin' ? null : editEmp.hpcsa_number.trim().toUpperCase() || null,
+        qualification: editEmp.role === 'admin' ? 'Admin' : editEmp.qualification,
+        phone:        editEmp.role === 'admin' ? null : editEmp.phone.trim() || null,
+        role:         editEmp.role,
+        is_active:    editEmp.is_active,
       });
-
-      // Save photo to localStorage
-      if (tempEmpPhoto) {
-        localStorage.setItem(`photo_employee_${editEmpId}`, tempEmpPhoto);
-      } else {
-        localStorage.removeItem(`photo_employee_${editEmpId}`);
-      }
-
       setEditEmpId(null);
       fetchEmployees();
     } catch (err: any) {
@@ -394,10 +368,9 @@ export default function ProviderAdminDashboard() {
 
   const deleteEmployee = async (id: string, name: string) => {
     if (!providerId) return;
+    if (!window.confirm(`Permanently delete ${name}?`)) return;
     try {
       await getApi().delete(`/api/providers/${providerId}/crew/${id}`);
-      localStorage.removeItem(`photo_employee_${id}`);
-      setEditEmpId(null);
       fetchEmployees();
     } catch (err: any) {
       alert(err.response?.data?.detail || 'Failed to delete.');
@@ -423,36 +396,39 @@ export default function ProviderAdminDashboard() {
     setNewVehSav(false);
   };
 
+  const deleteVehicle = async (id: string, callsign: string) => {
+    if (!providerId) return;
+    if (!window.confirm(`Permanently delete vehicle ${callsign}?`)) return;
+    try {
+      await getApi().delete(`/api/providers/${providerId}/vehicles/${id}`);
+      fetchVehicles();
+    } catch (err: any) {
+      alert(err.response?.data?.detail || 'Failed to delete vehicle.');
+    }
+  };
+
   const openEditVeh = (v: Vehicle) => {
     setEditVehId(v.id);
     setEditVeh({
-      callsign: v.callsign,
+      callsign:     v.callsign,
       registration: v.registration,
       vehicle_type: v.vehicle_type,
+      is_active:    v.is_active,
     });
     setEditVehErr('');
-    setTempVehPhoto(localStorage.getItem(`photo_vehicle_${v.id}`));
-    setConfirmVehDelete(false);
   };
 
   const submitEditVeh = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!providerId || !editVehId) return;
+    if (!editVehId || !providerId) return;
     setEditVehSav(true); setEditVehErr('');
     try {
       await getApi().patch(`/api/providers/${providerId}/vehicles/${editVehId}`, {
-        callsign: editVeh.callsign.trim(),
+        callsign:     editVeh.callsign.trim(),
         registration: editVeh.registration.trim(),
         vehicle_type: editVeh.vehicle_type,
+        is_active:    editVeh.is_active,
       });
-
-      // Save photo to localStorage
-      if (tempVehPhoto) {
-        localStorage.setItem(`photo_vehicle_${editVehId}`, tempVehPhoto);
-      } else {
-        localStorage.removeItem(`photo_vehicle_${editVehId}`);
-      }
-
       setEditVehId(null);
       fetchVehicles();
     } catch (err: any) {
@@ -461,16 +437,19 @@ export default function ProviderAdminDashboard() {
     setEditVehSav(false);
   };
 
-  const deleteVehicle = async (id: string, callsign: string) => {
-    if (!providerId) return;
+  // Reset a crew member's password — backend returns a one-time temp password
+  // that the admin reads out / sends to the crew member. Surfaced inside the
+  // edit modal so it stays in context with the employee being edited.
+  const resetPassword = async () => {
+    if (!editEmpId || !providerId) return;
+    setPwResetBusy(true); setPwReset(null); setEditEmpErr('');
     try {
-      await getApi().delete(`/api/providers/${providerId}/vehicles/${id}`);
-      localStorage.removeItem(`photo_vehicle_${id}`);
-      setEditVehId(null);
-      fetchVehicles();
+      const { data } = await getApi().post(`/api/providers/${providerId}/crew/${editEmpId}/reset-password`);
+      setPwReset(data.temp_password || '');
     } catch (err: any) {
-      alert(err.response?.data?.detail || 'Failed to delete vehicle.');
+      setEditEmpErr(err.response?.data?.detail || 'Failed to reset password.');
     }
+    setPwResetBusy(false);
   };
 
   const handleLogout = () => {
@@ -482,7 +461,7 @@ export default function ProviderAdminDashboard() {
   const SideBtn = ({ tab, label, count }: { tab: Tab; label: string; count: number }) => {
     const active = activeTab === tab;
     return (
-      <button onClick={() => setActiveTab(tab)} style={{
+      <button onClick={() => { setActiveTab(tab); setSearch(''); setStatusFilter('all'); }} style={{
         display: 'flex', alignItems: 'center',
         justifyContent: isMobile ? 'center' : 'space-between',
         gap: isMobile ? 8 : 0,
@@ -514,6 +493,13 @@ export default function ProviderAdminDashboard() {
   const tdStyle: React.CSSProperties = {
     padding: '11px 14px', fontSize: '0.82rem', color: INK, verticalAlign: 'middle',
   };
+  // Small headline count pill. `color` tints the dot + value; default is neutral.
+  const chipStyle = (color: string = MUT): React.CSSProperties => ({
+    display: 'inline-flex', alignItems: 'center', gap: 5,
+    padding: '2px 9px', borderRadius: 999, border: `1px solid ${LN}`,
+    background: '#fff', fontSize: '0.68rem', fontWeight: 700, color,
+    whiteSpace: 'nowrap',
+  });
 
   // ── Render ─────────────────────────────────────────────────────
   return (
@@ -526,57 +512,16 @@ export default function ProviderAdminDashboard() {
       {/* Header — on mobile we drop the user name/role line so just the
           logo and Logout button fit on a single phone-width row. */}
       <header style={{
-        padding: isMobile ? '8px 12px' : '10px 24px',
+        padding: isMobile ? '10px 14px' : '11px 22px',
         background: '#fff', borderBottom: `1px solid ${LN}`,
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        flexShrink: 0, gap: isMobile ? 12 : 24,
-        flexWrap: 'wrap',
+        flexShrink: 0, gap: 10,
       }}>
         {providerSlug?.toLowerCase() === 'jems' ? (
-          <img src="/jems_logo.png" alt="JEMS Medical Services" style={{ height: isMobile ? 32 : 38, width: 'auto' }} />
+          <img src="/jems_logo.png" alt="JEMS Medical Services" style={{ height: 28, width: 'auto' }} />
         ) : (
-          <div style={{ fontWeight: 800, fontSize: isMobile ? '0.95rem' : '1.1rem', color: INK }}>{profile.provider_name}</div>
+          <div style={{ fontWeight: 800, fontSize: '0.9rem', color: INK }}>{profile.provider_name}</div>
         )}
-
-        {/* ── Centered Animated Tab Bar ─────────────────────────────── */}
-        <nav style={{
-          display: 'flex', justifyContent: 'center', alignItems: 'center',
-          gap: isMobile ? 16 : 32,
-        }}>
-          {([
-            { key: 'dashboard' as Tab, label: 'Dashboard', Icon: HomeTabIcon, color: '#059669', bgLight: 'rgba(5, 150, 105, 0.1)' },
-            { key: 'vehicles' as Tab,  label: 'Ambulances', Icon: AmbulanceTabIcon, color: '#10b981', bgLight: 'rgba(16, 185, 129, 0.1)' },
-            { key: 'employees' as Tab, label: 'Employees', Icon: EmployeeTabIcon, color: '#34d399', bgLight: 'rgba(52, 211, 153, 0.1)' },
-          ]).map(({ key, label, Icon, color, bgLight }) => {
-            const isActive = activeTab === key;
-            return (
-              <button key={key} onClick={() => setActiveTab(key)} style={{
-                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
-                padding: 0, background: 'transparent',
-                border: 'none', cursor: 'pointer', transition: 'all 0.2s ease',
-                fontFamily: 'inherit',
-              }}>
-                <div style={{
-                  width: isMobile ? 36 : 44, height: isMobile ? 36 : 44,
-                  borderRadius: '50%',
-                  background: isActive ? color : bgLight,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  transition: 'all 0.25s ease',
-                  boxShadow: isActive ? `0 2px 10px ${color}30` : 'none',
-                  border: isActive ? `2px solid ${color}` : `1px solid ${color}40`,
-                }}>
-                  <Icon size={isMobile ? 18 : 22} active={isActive} />
-                </div>
-                <span style={{
-                  fontSize: isMobile ? '0.55rem' : '0.65rem', fontWeight: 800,
-                  color: isActive ? color : MUT, letterSpacing: '0.03em',
-                  textTransform: 'uppercase',
-                }}>{label}</span>
-              </button>
-            );
-          })}
-        </nav>
-
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           {!isMobile && (
             <div style={{ textAlign: 'right' }}>
@@ -588,536 +533,348 @@ export default function ProviderAdminDashboard() {
         </div>
       </header>
 
-      {/* ── Tab Content ───────────────────────────────────────────── */}
-      <main style={{ flex: 1, overflowY: 'auto', padding: 0, minWidth: 0 }}>
+      {/* Body — column layout on mobile so the sidebar becomes a horizontal
+          tab strip above the main content. The desktop side-by-side layout
+          collapses on phones because a 200px sidebar leaves only ~150px for
+          the table on a 360px screen. */}
+      <div style={{
+        display: 'flex',
+        flex: 1,
+        overflow: 'hidden',
+        flexDirection: isMobile ? 'column' : 'row',
+      }}>
 
-        {/* ══════════════════ DASHBOARD TAB ══════════════════ */}
-        {/* ══════════════════ DASHBOARD TAB ══════════════════ */}
-        {activeTab === 'dashboard' && (() => {
-          return (
-            <div style={{ padding: isMobile ? '16px 12px' : '28px 36px', maxWidth: 1200, margin: '0 auto' }}>
-              {/* Header */}
-              <h1 style={{ fontSize: isMobile ? '1.3rem' : '1.7rem', fontWeight: 800, margin: '0 0 20px', color: INK }}>
-                Dashboard Overview
+        {/* Sidebar / top tabs */}
+        <aside style={{
+          ...(isMobile
+            ? {
+              width: '100%', flexShrink: 0, background: '#fff',
+              borderBottom: `1px solid ${LN}`, padding: '8px 10px',
+              display: 'flex', flexDirection: 'row', gap: 6,
+              overflowX: 'auto',
+            }
+            : {
+              width: 200, flexShrink: 0, background: '#fff',
+              borderRight: `1px solid ${LN}`, padding: '18px 10px',
+              display: 'flex', flexDirection: 'column', gap: 2,
+            }),
+        }}>
+          {!isMobile && (
+            <div style={{
+              fontSize: '0.58rem', fontWeight: 800, color: MUT,
+              textTransform: 'uppercase', letterSpacing: '0.16em',
+              padding: '0 10px 10px', marginBottom: 2,
+            }}>Registry</div>
+          )}
+          <SideBtn tab="employees" label="Employees" count={employees.length} />
+          <SideBtn tab="vehicles"  label="Vehicles"  count={vehicles.length}  />
+        </aside>
+
+        {/* Main */}
+        <main style={{ flex: 1, overflowY: 'auto', padding: isMobile ? '14px 12px' : '24px 28px', minWidth: 0 }}>
+          {/* Title bar — stacks vertically on mobile so the title and
+              the Refresh / New button row each get a full screen-width line. */}
+          <div style={{
+            display: 'flex', alignItems: isMobile ? 'stretch' : 'flex-end',
+            justifyContent: 'space-between', flexDirection: isMobile ? 'column' : 'row',
+            gap: 12, marginBottom: 16,
+          }}>
+            <div>
+              <h1 style={{
+                margin: 0, fontSize: '1.05rem', fontWeight: 800, color: INK,
+                textTransform: 'uppercase', letterSpacing: '0.04em',
+              }}>
+                {activeTab === 'employees' ? 'Crew Members' : 'Fleet'}
               </h1>
+              <div style={{ display: 'flex', gap: 6, marginTop: 7, flexWrap: 'wrap' }}>
+                {activeTab === 'employees' ? (
+                  <>
+                    <span style={chipStyle()}>{employees.length} total</span>
+                    <span style={chipStyle(GD)}>● {empActive} active</span>
+                    {employees.length - empActive > 0 && <span style={chipStyle(RED)}>● {employees.length - empActive} inactive</span>}
+                  </>
+                ) : (
+                  <>
+                    <span style={chipStyle()}>{vehicles.length} total</span>
+                    <span style={chipStyle(GD)}>● {vehActive} active</span>
+                    {vehInUse > 0 && <span style={chipStyle('#d97706')}>● {vehInUse} in use</span>}
+                    {vehicles.length - vehActive > 0 && <span style={chipStyle(RED)}>● {vehicles.length - vehActive} inactive</span>}
+                  </>
+                )}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Btn onClick={activeTab === 'employees' ? fetchEmployees : fetchVehicles}
+                style={isMobile ? { flex: 1, padding: '10px 14px' } : undefined}>Refresh</Btn>
+              <Btn kind="primary" onClick={() => activeTab === 'employees' ? setAddEmpOpen(true) : setAddVehOpen(true)}
+                style={isMobile ? { flex: 2, padding: '10px 14px' } : undefined}>
+                + New {activeTab === 'employees' ? 'Employee' : 'Vehicle'}
+              </Btn>
+            </div>
+          </div>
 
-              {/* Dynamic Analytics Counters Row */}
-              <div style={{
-                display: 'grid',
-                gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, 1fr)',
-                gap: isMobile ? 10 : 16, marginBottom: 28,
-              }}>
-                {[
-                  { label: 'Total Vehicles', value: vehicles.length, accent: G },
-                  { label: 'In Service', value: vehicles.filter(v => v.in_use).length, accent: '#d97706' },
-                  { label: 'Total Crew', value: employees.length, accent: '#0ea5e9' },
-                  { label: 'Active Crew', value: employees.filter(e => e.is_active).length, accent: '#7c3aed' },
-                ].map(s => (
-                  <div key={s.label} style={{
-                    background: '#fff', border: `1px solid ${LN}`, borderRadius: 10,
-                    padding: isMobile ? '14px 10px' : '20px 24px', textAlign: 'center',
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
-                  }}>
-                    <div style={{ fontSize: isMobile ? '1.6rem' : '2rem', fontWeight: 800, color: s.accent, lineHeight: 1 }}>
-                      {s.value}
-                    </div>
-                    <div style={{
-                      fontSize: '0.68rem', fontWeight: 700, color: MUT,
-                      textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: 6,
-                    }}>{s.label}</div>
+          {/* Toolbar — live search + status filter. Filtering is client-side
+              because the registry lists are small (tens, not thousands). */}
+          <div style={{
+            display: 'flex', gap: 8, marginBottom: 14,
+            flexDirection: isMobile ? 'column' : 'row',
+            alignItems: isMobile ? 'stretch' : 'center',
+          }}>
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder={activeTab === 'employees' ? 'Search name, HPCSA, level…' : 'Search callsign, registration, type…'}
+              onFocus={onFc} onBlur={onBl}
+              autoComplete="off"
+              style={{ ...inputStyle, padding: '9px 12px', flex: 1, minWidth: 0 }}
+            />
+            <div style={{ display: 'flex', border: `1px solid ${LN2}`, borderRadius: 4, overflow: 'hidden', flexShrink: 0 }}>
+              {(['all', 'active', 'inactive'] as const).map(s => (
+                <button key={s} type="button" onClick={() => setStatusFilter(s)} style={{
+                  padding: '9px 16px', fontSize: '0.74rem', fontWeight: 700, cursor: 'pointer',
+                  border: 'none', borderLeft: s !== 'all' ? `1px solid ${LN2}` : 'none',
+                  background: statusFilter === s ? G : '#fff',
+                  color: statusFilter === s ? '#fff' : MUT,
+                  textTransform: 'capitalize', fontFamily: 'inherit', flex: isMobile ? 1 : undefined,
+                }}>{s}</button>
+              ))}
+            </div>
+          </div>
+
+          {/* List — table on desktop, stacked card list on mobile.
+              Tables don't fit a phone screen; cards keep all info visible
+              without horizontal scrolling. */}
+          {isMobile ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {activeTab === 'employees' ? (
+                loading ? (
+                  <div style={{ padding: 32, textAlign: 'center', color: MUT, fontSize: '0.84rem', background: '#fff', border: `1px solid ${LN}`, borderRadius: 6 }}>Loading…</div>
+                ) : filteredEmployees.length === 0 ? (
+                  <div style={{ padding: 32, textAlign: 'center', color: MUT, fontSize: '0.84rem', background: '#fff', border: `1px solid ${LN}`, borderRadius: 6 }}>
+                    {employees.length === 0 ? <>No crew members. Tap <b>New Employee</b> to register.</> : 'No crew members match your search or filter.'}
                   </div>
-                ))}
-              </div>
-
-              {/* Core Operational Lists (Vehicles & Employees) — Full Width Column Layout */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 32 }}>
-                
-                {/* Fleet Overview widget */}
-                <div>
-                  <h2 style={{ fontSize: '1.1rem', fontWeight: 800, margin: '0 0 14px', color: INK, textAlign: 'left' }}>Fleet Overview</h2>
-                  {vehicles.length === 0 ? (
-                    <div style={{ padding: 32, textAlign: 'center', color: MUT, background: '#fff', border: `1px solid ${LN}`, borderRadius: 8 }}>
-                      No vehicles registered yet.
-                    </div>
-                  ) : (
-                    <div style={{
-                      display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(280px, 1fr))',
-                      gap: 14,
-                    }}>
-                      {vehicles.map(v => (
-                        <div key={v.id} style={{
-                          background: '#fff', border: `1px solid ${LN}`, borderRadius: 10,
-                          padding: '16px 18px', display: 'flex', alignItems: 'center', gap: 14,
-                          boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
-                        }}>
-                          {localStorage.getItem(`photo_vehicle_${v.id}`) ? (
-                            <img src={localStorage.getItem(`photo_vehicle_${v.id}`)!} style={{ width: 60, height: 60, borderRadius: '50%', objectFit: 'cover', border: `2px solid ${v.in_use ? '#d97706' : LN}` }} />
-                          ) : (
-                            <AmbulanceLargeIcon width={60} inUse={v.in_use || false} />
-                          )}
-                          <div style={{ flex: 1, textAlign: 'left' }}>
-                            <div style={{ fontWeight: 800, fontSize: '1rem', color: INK }}>{v.callsign}</div>
-                            <div style={{ fontFamily: 'ui-monospace, monospace', fontSize: '0.76rem', color: MUT }}>{v.registration}</div>
-                          </div>
-                          <div style={{
-                            padding: '4px 10px', borderRadius: 12, fontSize: '0.68rem', fontWeight: 700,
-                            background: v.in_use ? '#fef3c7' : '#dcfce7',
-                            color: v.in_use ? '#92400e' : '#166534',
-                          }}>
-                            {v.in_use ? 'IN USE' : 'AVAILABLE'}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Crew at a glance widget */}
-                <div>
-                  <h2 style={{ fontSize: '1.1rem', fontWeight: 800, margin: '0 0 14px', color: INK, textAlign: 'left' }}>Crew at a Glance</h2>
-                  {employees.length === 0 ? (
-                    <div style={{ padding: 32, textAlign: 'center', color: MUT, background: '#fff', border: `1px solid ${LN}`, borderRadius: 8 }}>
-                      No crew members registered yet.
-                    </div>
-                  ) : (
-                    <div style={{
-                      display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(240px, 1fr))',
-                      gap: 14,
-                    }}>
-                      {employees.map(e => {
-                        const meta = CATEGORY_META[e.qualification as HpcsaCategory];
-                        return (
-                          <div key={e.id} style={{
-                            background: '#fff', border: `1px solid ${LN}`, borderRadius: 10,
-                            padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 12,
-                            boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
-                          }}>
-                            {localStorage.getItem(`photo_employee_${e.id}`) ? (
-                              <img src={localStorage.getItem(`photo_employee_${e.id}`)!} style={{ width: 36, height: 36, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }} />
-                            ) : (
-                              <div style={{
-                                width: 36, height: 36, borderRadius: '50%',
-                                background: `${qualColour(e.qualification)}18`, color: qualColour(e.qualification),
-                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                fontSize: '0.7rem', fontWeight: 800, flexShrink: 0,
-                              }}>
-                                {(e.initials || e.full_name.split(' ').map(n => n[0]).join('')).slice(0, 2).toUpperCase()}
-                              </div>
-                            )}
-                            <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
-                              <div style={{ fontWeight: 700, fontSize: '0.88rem', color: INK, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.full_name}</div>
-                              <div style={{ fontSize: '0.7rem', color: MUT }}>{e.qualification}{e.hpcsa_number ? ` — ${e.hpcsa_number}` : ''}</div>
-                            </div>
-                            <div style={{
-                              width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
-                              background: e.is_active ? G : '#a8afc2',
-                            }} title={e.is_active ? 'Active' : 'Inactive'} />
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-
-              </div>
-            </div>
-          );
-        })()}
-
-        {/* ══════════════════ AMBULANCES TAB ══════════════════ */}
-        {/* ══════════════════ AMBULANCES TAB ══════════════════ */}
-        {activeTab === 'vehicles' && (() => {
-          const filteredVehicles = vehicles.filter(v => 
-            v.callsign.toLowerCase().includes(vehSearch.toLowerCase()) ||
-            v.registration.toLowerCase().includes(vehSearch.toLowerCase()) ||
-            v.vehicle_type.toLowerCase().includes(vehSearch.toLowerCase())
-          );
-          return (
-            <div style={{ padding: isMobile ? '16px 12px' : '28px 36px', maxWidth: 1200, margin: '0 auto' }}>
-              <div style={{
-                display: 'flex', alignItems: isMobile ? 'stretch' : 'center',
-                justifyContent: 'space-between', flexDirection: isMobile ? 'column' : 'row',
-                gap: 12, marginBottom: 24,
-              }}>
-                <div>
-                  <h1 style={{ margin: 0, fontSize: isMobile ? '1.3rem' : '1.7rem', fontWeight: 800, color: INK }}>
-                    Ambulances
-                  </h1>
-                  <p style={{ fontSize: '0.85rem', color: MUT, margin: '4px 0 0' }}>
-                    {vehicles.length} vehicle{vehicles.length !== 1 ? 's' : ''} registered
-                  </p>
-                </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <Btn onClick={fetchVehicles} style={{ borderRadius: 24 }}>Refresh</Btn>
-                  <Btn kind="primary" onClick={() => setAddVehOpen(true)} style={{ borderRadius: 24 }}>+ New Ambulance</Btn>
-                </div>
-              </div>
-
-              {/* Search Bar */}
-              <div style={{ marginBottom: 24 }}>
-                <input
-                  type="text"
-                  placeholder="Search ambulances by callsign, registration or type..."
-                  value={vehSearch}
-                  onChange={e => setVehSearch(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '12px 18px',
-                    fontSize: '0.88rem',
-                    border: `1px solid ${LN2}`,
-                    borderRadius: 24,
-                    outline: 'none',
-                    background: '#fff',
-                    color: INK,
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
-                    transition: 'all 0.2s ease',
-                    boxSizing: 'border-box',
-                  }}
-                  onFocus={e => { e.currentTarget.style.borderColor = G; e.currentTarget.style.boxShadow = `0 4px 12px ${G}15`; }}
-                  onBlur={e => { e.currentTarget.style.borderColor = LN2; e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.04)'; }}
-                />
-              </div>
-
-              {loading ? (
-                <div style={{ padding: 40, textAlign: 'center', color: MUT, background: '#fff', borderRadius: 8, border: `1px solid ${LN}` }}>Loading…</div>
-              ) : vehicles.length === 0 ? (
-                <div style={{ padding: 48, textAlign: 'center', color: MUT, background: '#fff', borderRadius: 8, border: `1px solid ${LN}` }}>
-                  No vehicles registered. Click <b>+ New Ambulance</b> to add your fleet.
-                </div>
-              ) : filteredVehicles.length === 0 ? (
-                <div style={{ padding: 48, textAlign: 'center', color: MUT, background: '#fff', borderRadius: 8, border: `1px solid ${LN}` }}>
-                  No ambulances found matching "<b>{vehSearch}</b>".
-                </div>
-              ) : (
-                <div style={{
-                  display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(340px, 1fr))',
-                  gap: 24,
-                }}>
-                  {filteredVehicles.map(v => (
-                    <div key={v.id} style={{
-                      background: '#fff', borderRadius: 28, border: `1px solid ${LN}`,
-                      overflow: 'hidden', boxShadow: '0 4px 16px rgba(0,0,0,0.06)',
-                      position: 'relative', transition: 'transform 0.25s, box-shadow 0.25s',
-                      display: 'flex', flexDirection: 'column', alignItems: 'center',
-                      padding: '28px 24px 20px', textAlign: 'center',
-                    }}
-                    onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.transform = 'translateY(-4px)'; (e.currentTarget as HTMLDivElement).style.boxShadow = '0 12px 32px rgba(8, 145, 178, 0.15)'; }}
-                    onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.transform = ''; (e.currentTarget as HTMLDivElement).style.boxShadow = '0 4px 16px rgba(0,0,0,0.06)'; }}
-                    >
-                      {/* In-use badge — top right */}
+                ) : filteredEmployees.map(e => (
+                  <div key={e.id} style={{ background: '#fff', border: `1px solid ${LN}`, borderRadius: 6, padding: 12 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
                       <div style={{
-                        position: 'absolute', top: 16, right: 16,
-                        display: 'flex', alignItems: 'center', gap: 6,
-                        padding: '4px 12px', borderRadius: 20,
-                        background: v.in_use ? 'rgba(16, 185, 129, 0.1)' : '#f3f4f6',
-                        border: `1px solid ${v.in_use ? 'rgba(16, 185, 129, 0.2)' : LN}`,
-                      }}>
-                        <div style={{
-                          width: 8, height: 8, borderRadius: '50%',
-                          background: v.in_use ? G : '#a8afc2',
-                          boxShadow: v.in_use ? `0 0 8px ${G}60` : 'none',
-                        }} />
-                        <span style={{
-                          fontSize: '0.68rem', fontWeight: 700,
-                          color: v.in_use ? GD : MUT, textTransform: 'uppercase',
-                        }}>
-                          {v.in_use ? 'In Use' : 'Available'}
-                        </span>
-                      </div>
-
-                      {/* Ambulance illustration in circular frame */}
-                      <div style={{
-                        width: isMobile ? 120 : 150, height: isMobile ? 120 : 150,
-                        borderRadius: '50%', overflow: 'hidden',
-                        background: v.in_use ? 'rgba(8, 145, 178, 0.06)' : 'rgba(0,0,0,0.02)',
-                        border: `3px solid ${v.in_use ? '#0891b2' : LN}`,
+                        width: 34, height: 34, background: G, color: '#fff',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        marginBottom: 16,
+                        fontSize: '0.7rem', fontWeight: 800,
+                        fontFamily: 'ui-monospace, monospace', borderRadius: 4, flexShrink: 0,
                       }}>
-                        {localStorage.getItem(`photo_vehicle_${v.id}`) ? (
-                          <img src={localStorage.getItem(`photo_vehicle_${v.id}`)!} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                        ) : (
-                          <AmbulanceLargeIcon width={isMobile ? 100 : 120} inUse={v.in_use || false} />
-                        )}
+                        {(e.initials || e.full_name.split(' ').map(n => n[0]).join('')).slice(0, 2).toUpperCase()}
                       </div>
-
-                      {/* Callsign */}
-                      <h3 style={{ fontSize: '1.3rem', fontWeight: 800, color: INK, margin: '0 0 8px' }}>
-                        {v.callsign}
-                      </h3>
-
-                      {/* Registration plate */}
-                      <div style={{
-                        display: 'inline-block', padding: '5px 14px', borderRadius: 20,
-                        background: '#fef9c3', border: '2px solid #ca8a04',
-                        fontFamily: 'ui-monospace, monospace', fontSize: '0.85rem',
-                        fontWeight: 800, color: '#1a1d2e', letterSpacing: '0.1em',
-                        marginBottom: 10,
-                      }}>
-                        {v.registration}
-                      </div>
-
-                      {/* Vehicle type badge */}
-                      <div style={{
-                        padding: '3px 12px', borderRadius: 20,
-                        background: 'rgba(8, 145, 178, 0.08)', color: '#0891b2',
-                        fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase',
-                        letterSpacing: '0.06em', marginBottom: 12,
-                      }}>
-                        {v.vehicle_type}
-                      </div>
-
-                      {/* Active / Inactive status */}
-                      <div style={{
-                        display: 'flex', alignItems: 'center', gap: 6, marginBottom: 16,
-                      }}>
-                        <div style={{
-                          width: 7, height: 7, borderRadius: '50%',
-                          background: v.is_active ? G : '#a8afc2',
-                        }} />
-                        <span style={{
-                          fontSize: '0.72rem', fontWeight: 600,
-                          color: v.is_active ? GD : MUT,
-                        }}>
-                          {v.is_active ? 'Active' : 'Deactivated'}
-                        </span>
-                      </div>
-
-                      {/* Edit button */}
-                      <Btn onClick={() => openEditVeh(v)} style={{ width: '100%' }}>Edit</Btn>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          );
-        })()}
-
-        {/* ══════════════════ EMPLOYEES TAB ══════════════════ */}
-        {activeTab === 'employees' && (() => {
-          const filteredEmployees = employees.filter(e => 
-            e.full_name.toLowerCase().includes(empSearch.toLowerCase()) ||
-            (e.qualification && e.qualification.toLowerCase().includes(empSearch.toLowerCase())) ||
-            (e.hpcsa_number && e.hpcsa_number.toLowerCase().includes(empSearch.toLowerCase())) ||
-            (e.phone && e.phone.toLowerCase().includes(empSearch.toLowerCase()))
-          );
-          return (
-            <div style={{ padding: isMobile ? '16px 12px' : '28px 36px', maxWidth: 1200, margin: '0 auto' }}>
-              <div style={{
-                display: 'flex', alignItems: isMobile ? 'stretch' : 'center',
-                justifyContent: 'space-between', flexDirection: isMobile ? 'column' : 'row',
-                gap: 12, marginBottom: 24,
-              }}>
-                <div>
-                  <h1 style={{ margin: 0, fontSize: isMobile ? '1.3rem' : '1.7rem', fontWeight: 800, color: INK }}>
-                    Crew Members
-                  </h1>
-                  <p style={{ fontSize: '0.85rem', color: MUT, margin: '4px 0 0' }}>
-                    {employees.length} crew member{employees.length !== 1 ? 's' : ''} registered
-                  </p>
-                </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <Btn onClick={fetchEmployees} style={{ borderRadius: 24 }}>Refresh</Btn>
-                  <Btn kind="primary" onClick={() => setAddEmpOpen(true)} style={{ borderRadius: 24 }}>+ New Employee</Btn>
-                </div>
-              </div>
-
-              {/* Search Bar */}
-              <div style={{ marginBottom: 24 }}>
-                <input
-                  type="text"
-                  placeholder="Search crew members by name, qualification, HPCSA number or phone..."
-                  value={empSearch}
-                  onChange={e => setEmpSearch(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '12px 18px',
-                    fontSize: '0.88rem',
-                    border: `1px solid ${LN2}`,
-                    borderRadius: 24,
-                    outline: 'none',
-                    background: '#fff',
-                    color: INK,
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
-                    transition: 'all 0.2s ease',
-                    boxSizing: 'border-box',
-                  }}
-                  onFocus={e => { e.currentTarget.style.borderColor = G; e.currentTarget.style.boxShadow = `0 4px 12px ${G}15`; }}
-                  onBlur={e => { e.currentTarget.style.borderColor = LN2; e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.04)'; }}
-                />
-              </div>
-
-              {loading ? (
-                <div style={{ padding: 40, textAlign: 'center', color: MUT, background: '#fff', borderRadius: 8, border: `1px solid ${LN}` }}>Loading…</div>
-              ) : employees.length === 0 ? (
-                <div style={{ padding: 48, textAlign: 'center', color: MUT, background: '#fff', borderRadius: 8, border: `1px solid ${LN}` }}>
-                  No crew members registered. Click <b>+ New Employee</b> to add your team.
-                </div>
-              ) : filteredEmployees.length === 0 ? (
-                <div style={{ padding: 48, textAlign: 'center', color: MUT, background: '#fff', borderRadius: 8, border: `1px solid ${LN}` }}>
-                  No crew members found matching "<b>{empSearch}</b>".
-                </div>
-              ) : (
-                <div style={{
-                  display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(280px, 1fr))',
-                  gap: 20,
-                }}>
-                  {filteredEmployees.map(e => {
-                    const meta = CATEGORY_META[e.qualification as HpcsaCategory] || { label: e.qualification, tier: 'BLS' };
-                    const qColor = qualColour(e.qualification);
-                    return (
-                      <div key={e.id} style={{
-                        background: '#fff', borderRadius: 28, border: `1px solid ${LN}`,
-                        boxShadow: '0 4px 16px rgba(0,0,0,0.06)',
-                        display: 'flex', flexDirection: 'column', alignItems: 'center',
-                        padding: '28px 22px 22px', textAlign: 'center', position: 'relative',
-                        transition: 'transform 0.25s, box-shadow 0.25s',
-                      }}
-                      onMouseEnter={ev => { (ev.currentTarget as HTMLDivElement).style.transform = 'translateY(-4px)'; (ev.currentTarget as HTMLDivElement).style.boxShadow = `0 12px 32px ${qColor}20`; }}
-                      onMouseLeave={ev => { (ev.currentTarget as HTMLDivElement).style.transform = ''; (ev.currentTarget as HTMLDivElement).style.boxShadow = '0 4px 16px rgba(0,0,0,0.06)'; }}
-                      >
-                        {/* Active status bar */}
-                        <div style={{
-                          position: 'absolute', top: 0, left: 0, right: 0, height: 4,
-                          borderRadius: '28px 28px 0 0',
-                          background: e.is_active ? `linear-gradient(90deg, ${qColor}, ${G})` : LN,
-                        }} />
-
-                        {/* Profile icon with unified status badge */}
-                        <div style={{ position: 'relative', width: 100, height: 100, marginBottom: 14 }}>
-                          {localStorage.getItem(`photo_employee_${e.id}`) ? (
-                            <img src={localStorage.getItem(`photo_employee_${e.id}`)!} style={{ width: 100, height: 100, borderRadius: '50%', objectFit: 'cover', border: `3px solid ${e.is_active ? qColor : LN}` }} />
-                          ) : (
-                            <EmployeeLargeIcon
-                              size={100}
-                              initials={(e.initials || e.full_name.split(' ').map(n => n[0]).join('')).slice(0, 2).toUpperCase()}
-                              onShift={e.is_active}
-                              showDot={false}
-                            />
-                          )}
-
-                          {/* Unified status pill badge — top-right overlapping the avatar */}
-                          <div style={{
-                            position: 'absolute',
-                            top: -6,
-                            right: -24, // floats over the top-right beautifully
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 5,
-                            padding: '4px 10px',
-                            borderRadius: 20,
-                            background: e.is_active ? 'rgba(16, 185, 129, 0.1)' : 'rgba(107, 114, 128, 0.08)',
-                            border: `1.5px solid ${e.is_active ? 'rgba(16, 185, 129, 0.3)' : 'rgba(107, 114, 128, 0.2)'}`,
-                            boxShadow: '0 2px 10px rgba(0,0,0,0.06)',
-                            whiteSpace: 'nowrap',
-                            zIndex: 5,
-                          }}>
-                            <div style={{
-                              width: 7,
-                              height: 7,
-                              borderRadius: '50%',
-                              background: e.is_active ? '#388E3C' : '#a8afc2',
-                              boxShadow: e.is_active ? '0 0 6px rgba(56, 142, 60, 0.5)' : 'none',
-                              animation: e.is_active ? 'status-pulse 2s ease-in-out infinite' : 'none',
-                            }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: '0.9rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.full_name}</div>
+                        <div style={{ display: 'flex', gap: 8, marginTop: 3, flexWrap: 'wrap', alignItems: 'center' }}>
+                          {e.role === 'admin' ? (
                             <span style={{
-                              fontSize: '0.68rem',
-                              fontWeight: 700,
-                              color: e.is_active ? GD : MUT,
-                              letterSpacing: '0.01em',
-                            }}>
-                              {e.is_active ? 'On shift and at base' : 'Off duty'}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Name */}
-                        <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: INK, margin: '0 0 4px' }}>
-                          {e.full_name}
-                        </h3>
-
-                        {/* Email — subtle */}
-                        <div style={{ fontSize: '0.68rem', color: `${MUT}aa`, marginBottom: 8, fontStyle: 'italic' }}>
-                          {e.email}
-                        </div>
-
-                        {/* HPCSA number */}
-                        <div style={{
-                          fontSize: '0.76rem', color: MUT, marginBottom: 10,
-                          fontFamily: 'ui-monospace, monospace',
-                        }}>
-                          HPCSA: {e.hpcsa_number || '—'}
-                        </div>
-
-                        {/* Qualification badge */}
-                        <div style={{
-                          display: 'inline-flex', alignItems: 'center', gap: 6,
-                          padding: '5px 14px', borderRadius: 20,
-                          background: `${qColor}12`,
-                          border: `1px solid ${qColor}30`,
-                          marginBottom: 10,
-                        }}>
-                          <span style={{
-                            fontSize: '0.74rem', fontWeight: 800,
-                            color: qColor, letterSpacing: '0.04em',
-                          }}>
-                            {e.qualification}
-                          </span>
-                          <span style={{ fontSize: '0.64rem', color: MUT, fontWeight: 500 }}>
-                            {meta.label}
-                          </span>
-                        </div>
-
-                        {/* Divider */}
-                        <div style={{ width: '80%', height: 1, background: LN, margin: '4px 0 10px' }} />
-
-                        {/* Phone — subtle */}
-                        <div style={{
-                          fontSize: '0.7rem', color: `${MUT}99`,
-                          marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4,
-                        }}>
-                          <span style={{ fontSize: '0.65rem' }}>📞</span> {e.phone || '—'}
-                        </div>
-
-                        {/* Last Login */}
-                        <div style={{
-                          fontSize: '0.85rem', color: `${MUT}99`,
-                          marginBottom: 14, display: 'flex', alignItems: 'center', gap: 4, fontWeight: 600,
-                        }}>
-                          <span style={{ fontSize: '0.8rem' }}>🕐</span> Last login: {e.last_login ? new Date(e.last_login).toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : 'Never'}
-                        </div>
-
-                        {/* Action buttons */}
-                        <div style={{ display: 'flex', width: '100%', marginTop: 'auto' }}>
-                          <Btn onClick={() => openEditEmp(e)} style={{ width: '100%' }}>Edit Profile</Btn>
+                              display: 'inline-block', padding: '1px 6px',
+                              border: `1px solid ${INK}`, color: INK,
+                              fontSize: '0.6rem', fontWeight: 700,
+                              letterSpacing: '0.06em', borderRadius: 3,
+                            }}>ADMIN</span>
+                          ) : (
+                            <span style={{
+                              display: 'inline-block', padding: '1px 6px',
+                              border: `1px solid ${qualColour(e.qualification) || MUT}`,
+                              color: qualColour(e.qualification) || INK,
+                              fontSize: '0.6rem', fontWeight: 700,
+                              letterSpacing: '0.06em', borderRadius: 3,
+                            }}>{e.qualification}</span>
+                          )}
+                          {!e.is_active && <span style={{ fontSize: '0.6rem', color: RED, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Inactive</span>}
                         </div>
                       </div>
-                    );
-                  })}
-                </div>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 12px', fontSize: '0.76rem', color: MUT, marginBottom: 10 }}>
+                      <div><span style={{ fontWeight: 700, color: INK }}>HPCSA:</span> <span style={{ fontFamily: 'ui-monospace, monospace' }}>{e.hpcsa_number || '—'}</span></div>
+                      <div><span style={{ fontWeight: 700, color: INK }}>Phone:</span> {e.phone || '—'}</div>
+                      <div style={{ gridColumn: '1 / -1' }}><span style={{ fontWeight: 700, color: INK }}>Last login:</span> {e.last_login ? new Date(e.last_login).toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: '2-digit' }) : '—'}</div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <Btn onClick={() => openEditEmp(e)} style={{ flex: 1, padding: '8px 10px', fontSize: '0.78rem' }}>Edit</Btn>
+                      <Btn kind="danger" onClick={() => deleteEmployee(e.id, e.full_name)} style={{ flex: 1, padding: '8px 10px', fontSize: '0.78rem' }}>Delete</Btn>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                loading ? (
+                  <div style={{ padding: 32, textAlign: 'center', color: MUT, fontSize: '0.84rem', background: '#fff', border: `1px solid ${LN}`, borderRadius: 6 }}>Loading…</div>
+                ) : filteredVehicles.length === 0 ? (
+                  <div style={{ padding: 32, textAlign: 'center', color: MUT, fontSize: '0.84rem', background: '#fff', border: `1px solid ${LN}`, borderRadius: 6 }}>
+                    {vehicles.length === 0 ? <>No vehicles. Tap <b>New Vehicle</b> to register your fleet.</> : 'No vehicles match your search or filter.'}
+                  </div>
+                ) : filteredVehicles.map(v => (
+                  <div key={v.id} style={{ background: '#fff', border: `1px solid ${LN}`, borderRadius: 6, padding: 12 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8 }}>
+                      <div style={{ fontWeight: 700, fontSize: '0.9rem', fontFamily: 'ui-monospace, monospace' }}>{v.callsign}</div>
+                      <div style={{ fontSize: '0.7rem', fontWeight: 700, color: !v.is_active ? RED : v.in_use ? '#d97706' : GD }}>
+                        ● {!v.is_active ? 'Inactive' : v.in_use ? 'In Use' : 'Available'}
+                      </div>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 12px', fontSize: '0.76rem', color: MUT, marginBottom: 10 }}>
+                      <div><span style={{ fontWeight: 700, color: INK }}>Reg:</span> <span style={{ fontFamily: 'ui-monospace, monospace' }}>{v.registration}</span></div>
+                      <div><span style={{ fontWeight: 700, color: INK }}>Type:</span> {v.vehicle_type}</div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <Btn onClick={() => openEditVeh(v)} style={{ flex: 1, padding: '8px 10px', fontSize: '0.78rem' }}>Edit</Btn>
+                      <Btn kind="danger" onClick={() => deleteVehicle(v.id, v.callsign)} style={{ flex: 1, padding: '8px 10px', fontSize: '0.78rem' }}>Delete</Btn>
+                    </div>
+                  </div>
+                ))
               )}
             </div>
-          );
-        })()}
-      </main>
+          ) : (
+          <div style={{ background: '#fff', border: `1px solid ${LN}`, borderRadius: 6, overflowX: 'auto' }}>
+            {activeTab === 'employees' ? (
+              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 760 }}>
+                <thead>
+                  <tr>
+                    <th style={{ ...thStyle, width: 52 }}></th>
+                    <th style={thStyle}>Name</th>
+                    <th style={thStyle}>HPCSA</th>
+                    <th style={thStyle}>Level</th>
+                    <th style={thStyle}>Phone</th>
+                    <th style={thStyle}>Last Login</th>
+                    <th style={{ ...thStyle, textAlign: 'right' }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading ? (
+                    <tr><td colSpan={7} style={{ padding: 40, textAlign: 'center', color: MUT, fontSize: '0.82rem' }}>Loading…</td></tr>
+                  ) : filteredEmployees.length === 0 ? (
+                    <tr><td colSpan={7} style={{ padding: 48, textAlign: 'center', color: MUT, fontSize: '0.82rem' }}>
+                      {employees.length === 0 ? <>No crew members. Click <b>New Employee</b> to register.</> : 'No crew members match your search or filter.'}
+                    </td></tr>
+                  ) : filteredEmployees.map(e => (
+                    <tr key={e.id} style={{ borderTop: `1px solid ${LN}` }}
+                      onMouseEnter={ev => ev.currentTarget.style.background = '#fafafa'}
+                      onMouseLeave={ev => ev.currentTarget.style.background = 'transparent'}>
+                      <td style={tdStyle}>
+                        <div style={{
+                          width: 30, height: 30, background: G, color: '#fff',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: '0.66rem', fontWeight: 800,
+                          fontFamily: 'ui-monospace, monospace', borderRadius: 4,
+                        }}>
+                          {(e.initials || e.full_name.split(' ').map(n => n[0]).join('')).slice(0, 2).toUpperCase()}
+                        </div>
+                      </td>
+                      <td style={tdStyle}>
+                        <div style={{ fontWeight: 700 }}>{e.full_name}</div>
+                        {!e.is_active && <div style={{ fontSize: '0.66rem', color: RED, fontWeight: 700, marginTop: 2, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Inactive</div>}
+                      </td>
+                      <td style={{ ...tdStyle, fontFamily: 'ui-monospace, monospace', fontSize: '0.78rem' }}>
+                        {e.hpcsa_number || '—'}
+                      </td>
+                      <td style={tdStyle}>
+                        {e.role === 'admin' ? (
+                          <span style={{
+                            display: 'inline-block', padding: '2px 7px',
+                            border: `1px solid ${INK}`, color: INK,
+                            fontSize: '0.64rem', fontWeight: 700,
+                            letterSpacing: '0.06em', borderRadius: 3,
+                          }}>ADMIN</span>
+                        ) : (
+                          <span style={{
+                            display: 'inline-block', padding: '2px 7px',
+                            border: `1px solid ${qualColour(e.qualification)}`,
+                            color: qualColour(e.qualification),
+                            fontSize: '0.64rem', fontWeight: 700,
+                            letterSpacing: '0.06em', borderRadius: 3,
+                          }}>{e.qualification}</span>
+                        )}
+                      </td>
+                      <td style={{ ...tdStyle, color: MUT, fontSize: '0.78rem' }}>{e.phone || '—'}</td>
+                      <td style={{ ...tdStyle, color: MUT, fontSize: '0.78rem' }}>
+                        {e.last_login ? new Date(e.last_login).toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: '2-digit' }) : '—'}
+                      </td>
+                      <td style={{ ...tdStyle, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                        <Btn onClick={() => openEditEmp(e)} style={{ marginRight: 6 }}>Edit</Btn>
+                        <Btn kind="danger" onClick={() => deleteEmployee(e.id, e.full_name)}>Delete</Btn>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr>
+                    <th style={thStyle}>Callsign</th>
+                    <th style={thStyle}>Registration</th>
+                    <th style={thStyle}>Type</th>
+                    <th style={thStyle}>Status</th>
+                    <th style={{ ...thStyle, textAlign: 'right' }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading ? (
+                    <tr><td colSpan={5} style={{ padding: 40, textAlign: 'center', color: MUT, fontSize: '0.82rem' }}>Loading…</td></tr>
+                  ) : filteredVehicles.length === 0 ? (
+                    <tr><td colSpan={5} style={{ padding: 48, textAlign: 'center', color: MUT, fontSize: '0.82rem' }}>
+                      {vehicles.length === 0 ? <>No vehicles. Click <b>New Vehicle</b> to register your fleet.</> : 'No vehicles match your search or filter.'}
+                    </td></tr>
+                  ) : filteredVehicles.map(v => (
+                    <tr key={v.id} style={{ borderTop: `1px solid ${LN}` }}
+                      onMouseEnter={ev => ev.currentTarget.style.background = '#fafafa'}
+                      onMouseLeave={ev => ev.currentTarget.style.background = 'transparent'}>
+                      <td style={{ ...tdStyle, fontFamily: 'ui-monospace, monospace', fontWeight: 700, letterSpacing: '0.04em' }}>
+                        {v.callsign}
+                      </td>
+                      <td style={{ ...tdStyle, fontFamily: 'ui-monospace, monospace', fontSize: '0.78rem' }}>
+                        {v.registration}
+                      </td>
+                      <td style={{ ...tdStyle, color: MUT, fontSize: '0.78rem' }}>{v.vehicle_type}</td>
+                      <td style={{ ...tdStyle, fontSize: '0.72rem', fontWeight: 700 }}>
+                        {!v.is_active ? (
+                          <span style={{ color: RED }}>● Inactive</span>
+                        ) : v.in_use ? (
+                          <span style={{ color: '#d97706' }}>● In Use</span>
+                        ) : (
+                          <span style={{ color: GD }}>● Available</span>
+                        )}
+                      </td>
+                      <td style={{ ...tdStyle, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                        <Btn onClick={() => openEditVeh(v)} style={{ marginRight: 6 }}>Edit</Btn>
+                        <Btn kind="danger" onClick={() => deleteVehicle(v.id, v.callsign)}>Delete</Btn>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+          )}
+        </main>
+      </div>
 
       {/* Add Employee Modal */}
       {addEmpOpen && (
         <Modal title="Register New Employee" onClose={() => { setAddEmpOpen(false); setNewEmpErr(''); }}>
           {newEmpErr && <Alert type="error" text={newEmpErr} />}
           <form onSubmit={submitNewEmp}>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer' }}>
+                <input type="checkbox" checked={newEmp.role === 'admin'} onChange={e => setNewEmp(p => ({ ...p, role: e.target.checked ? 'admin' : 'crew' }))} style={{ width: 16, height: 16, cursor: 'pointer' }} />
+                This user is an Administrator
+              </label>
+            </div>
             <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '0 14px' }}>
               <Field label="Full Name" value={newEmp.full_name} onChange={v => setNewEmp(p => ({ ...p, full_name: v }))} placeholder="John Smith" required />
-              <Field label="Initials" value={newEmp.initials} onChange={v => setNewEmp(p => ({ ...p, initials: v }))} placeholder="J.S." />
-              <Field label="HPCSA Number" value={newEmp.hpcsa_number} onChange={v => setNewEmp(p => ({ ...p, hpcsa_number: v }))} placeholder="MT0012345" required mono />
-              <Field label="Phone" value={newEmp.phone} onChange={v => setNewEmp(p => ({ ...p, phone: v }))} placeholder="082 000 0000" />
+              {newEmp.role !== 'admin' && <Field label="Initials" value={newEmp.initials} onChange={v => setNewEmp(p => ({ ...p, initials: v }))} placeholder="J.S." />}
+              {newEmp.role !== 'admin' && <Field label="HPCSA Number" value={newEmp.hpcsa_number} onChange={v => setNewEmp(p => ({ ...p, hpcsa_number: v }))} placeholder="MT0012345" required mono />}
+              {newEmp.role !== 'admin' && <Field label="Phone" value={newEmp.phone} onChange={v => setNewEmp(p => ({ ...p, phone: v }))} placeholder="082 000 0000" />}
             </div>
-            <SelectField
-              label="HPCSA Registration"
-              value={newEmp.qualification}
-              onChange={v => setNewEmp(p => ({ ...p, qualification: v }))}
-              options={HPCSA_QUAL_OPTIONS}
-            />
+            {newEmp.role !== 'admin' && (
+              <SelectField
+                label="HPCSA Registration"
+                value={newEmp.qualification}
+                onChange={v => setNewEmp(p => ({ ...p, qualification: v }))}
+                options={HPCSA_QUAL_OPTIONS}
+              />
+            )}
             <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
               <Btn kind="secondary" onClick={() => setAddEmpOpen(false)} style={{ flex: 1, padding: '11px 14px' }}>Cancel</Btn>
               <button type="submit" disabled={newEmpSav} style={{
@@ -1137,67 +894,41 @@ export default function ProviderAdminDashboard() {
         <Modal title="Edit Employee" onClose={() => { setEditEmpId(null); setEditEmpErr(''); }}>
           {editEmpErr && <Alert type="error" text={editEmpErr} />}
           <form onSubmit={submitEditEmp}>
-            {/* Photo Section */}
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, marginBottom: 20 }}>
-              <div style={{ position: 'relative', width: 90, height: 90 }}>
-                {tempEmpPhoto ? (
-                  <img src={tempEmpPhoto} style={{ width: 90, height: 90, borderRadius: '50%', objectFit: 'cover', border: `3px solid ${qualColour(editEmp.qualification)}` }} />
-                ) : (
-                  <div style={{ width: 90, height: 90, borderRadius: '50%', background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px dashed #d1d5db' }}>
-                    <span style={{ fontSize: '2.2rem' }}>👤</span>
-                  </div>
-                )}
-                <label htmlFor="emp-photo-upload" style={{
-                  position: 'absolute', bottom: 0, right: 0, width: 28, height: 28, borderRadius: '50%',
-                  background: '#fff', border: `1px solid ${LN}`, display: 'flex', alignItems: 'center',
-                  justifyContent: 'center', cursor: 'pointer', boxShadow: '0 2px 6px rgba(0,0,0,0.1)'
-                }}>
-                  📷
-                </label>
-                <input
-                  type="file"
-                  id="emp-photo-upload"
-                  accept="image/*"
-                  onChange={(evt) => {
-                    const file = evt.target.files?.[0];
-                    if (file) {
-                      resizeImage(file, (base64) => {
-                        setTempEmpPhoto(base64);
-                      });
-                    }
-                  }}
-                  style={{ display: 'none' }}
-                />
-              </div>
-              <div style={{ display: 'flex', gap: 12 }}>
-                <button type="button" onClick={() => document.getElementById('emp-photo-upload')?.click()} style={{
-                  background: 'transparent', border: 'none', color: '#0891b2', fontSize: '0.78rem', fontWeight: 700, cursor: 'pointer'
-                }}>
-                  Upload Photo
-                </button>
-                {tempEmpPhoto && (
-                  <button type="button" onClick={() => setTempEmpPhoto(null)} style={{
-                    background: 'transparent', border: 'none', color: '#ef4444', fontSize: '0.78rem', fontWeight: 700, cursor: 'pointer'
-                  }}>
-                    Remove Photo
-                  </button>
-                )}
-              </div>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer' }}>
+                <input type="checkbox" checked={editEmp.role === 'admin'} onChange={e => setEditEmp(p => ({ ...p, role: e.target.checked ? 'admin' : 'crew' }))} style={{ width: 16, height: 16, cursor: 'pointer' }} />
+                This user is an Administrator
+              </label>
             </div>
-
             <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '0 14px' }}>
               <Field label="Full Name" value={editEmp.full_name} onChange={v => setEditEmp(p => ({ ...p, full_name: v }))} required />
-              <Field label="Initials" value={editEmp.initials} onChange={v => setEditEmp(p => ({ ...p, initials: v }))} />
-              <Field label="HPCSA Number" value={editEmp.hpcsa_number} onChange={v => setEditEmp(p => ({ ...p, hpcsa_number: v }))} mono />
-              <Field label="Phone" value={editEmp.phone} onChange={v => setEditEmp(p => ({ ...p, phone: v }))} />
+              {editEmp.role !== 'admin' && <Field label="Initials" value={editEmp.initials} onChange={v => setEditEmp(p => ({ ...p, initials: v }))} />}
+              {editEmp.role !== 'admin' && <Field label="HPCSA Number" value={editEmp.hpcsa_number} onChange={v => setEditEmp(p => ({ ...p, hpcsa_number: v }))} mono />}
+              {editEmp.role !== 'admin' && <Field label="Phone" value={editEmp.phone} onChange={v => setEditEmp(p => ({ ...p, phone: v }))} />}
             </div>
-            <SelectField
-              label="HPCSA Registration"
-              value={editEmp.qualification}
-              onChange={v => setEditEmp(p => ({ ...p, qualification: v }))}
-              options={HPCSA_QUAL_OPTIONS}
-            />
-            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+            {editEmp.role !== 'admin' && (
+              <SelectField
+                label="HPCSA Registration"
+                value={editEmp.qualification}
+                onChange={v => setEditEmp(p => ({ ...p, qualification: v }))}
+                options={HPCSA_QUAL_OPTIONS}
+              />
+            )}
+            {/* ── Account & status ── */}
+            <div style={{ borderTop: `1px solid ${LN}`, margin: '4px 0 14px' }} />
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer', marginBottom: 14 }}>
+              <input type="checkbox" checked={editEmp.is_active} onChange={e => setEditEmp(p => ({ ...p, is_active: e.target.checked }))} style={{ width: 16, height: 16, cursor: 'pointer' }} />
+              Active — can log in and be assigned to shifts
+            </label>
+            {pwReset !== null && (
+              <Alert type="success" text={`Temporary password: ${pwReset} — share it with the employee; they can change it after logging in.`} />
+            )}
+            <div style={{ marginBottom: 16 }}>
+              <Btn kind="secondary" onClick={resetPassword} disabled={pwResetBusy} style={{ width: '100%', padding: '10px 14px' }}>
+                {pwResetBusy ? 'Resetting…' : 'Reset Password'}
+              </Btn>
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
               <Btn kind="secondary" onClick={() => setEditEmpId(null)} style={{ flex: 1, padding: '11px 14px' }}>Cancel</Btn>
               <button type="submit" disabled={editEmpSav} style={{
                 flex: 2, padding: '11px 14px', background: G, color: '#fff',
@@ -1205,44 +936,6 @@ export default function ProviderAdminDashboard() {
                 cursor: editEmpSav ? 'wait' : 'pointer', fontFamily: 'inherit',
               }}>
                 {editEmpSav ? 'Saving…' : 'Save Changes'}
-              </button>
-            </div>
-
-            {/* Danger Zone */}
-            <div style={{
-              marginTop: 24, padding: 16, border: '1px solid #fecaca', borderRadius: 12, background: '#fef2f2',
-              textAlign: 'left'
-            }}>
-              <h4 style={{ margin: '0 0 4px', fontSize: '0.85rem', fontWeight: 800, color: '#991b1b' }}>Danger Zone</h4>
-              <p style={{ margin: '0 0 12px', fontSize: '0.72rem', color: '#7f1d1d', lineHeight: 1.4 }}>
-                Deleting this crew member is permanent and cannot be undone. All database records and logs mapped to this user will lose active references.
-              </p>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                <input
-                  type="checkbox"
-                  id="confirmEmpDelete"
-                  checked={confirmEmpDelete}
-                  onChange={e => setConfirmEmpDelete(e.target.checked)}
-                  style={{ cursor: 'pointer' }}
-                />
-                <label htmlFor="confirmEmpDelete" style={{ fontSize: '0.72rem', fontWeight: 700, color: '#7f1d1d', cursor: 'pointer', userSelect: 'none' }}>
-                  I confirm I want to permanently delete this crew member
-                </label>
-              </div>
-              <button
-                type="button"
-                disabled={!confirmEmpDelete}
-                onClick={() => deleteEmployee(editEmpId, editEmp.full_name)}
-                style={{
-                  width: '100%', padding: '10px 14px', background: '#dc2626', color: '#fff',
-                  border: 'none', borderRadius: 4, fontSize: '0.8rem', fontWeight: 700,
-                  cursor: confirmEmpDelete ? 'pointer' : 'not-allowed',
-                  opacity: confirmEmpDelete ? 1 : 0.4,
-                  transition: 'opacity 0.2s',
-                  fontFamily: 'inherit',
-                }}
-              >
-                Permanently Delete Employee
               </button>
             </div>
           </form>
@@ -1287,61 +980,12 @@ export default function ProviderAdminDashboard() {
         <Modal title="Edit Vehicle" onClose={() => { setEditVehId(null); setEditVehErr(''); }}>
           {editVehErr && <Alert type="error" text={editVehErr} />}
           <form onSubmit={submitEditVeh}>
-            {/* Photo Section */}
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, marginBottom: 20 }}>
-              <div style={{ position: 'relative', width: 140, height: 90, borderRadius: 12, overflow: 'hidden', border: `1px solid ${LN}`, background: '#f9fafb' }}>
-                {tempVehPhoto ? (
-                  <img src={tempVehPhoto} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                ) : (
-                  <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <span style={{ fontSize: '2.5rem' }}>🚑</span>
-                  </div>
-                )}
-                <label htmlFor="veh-photo-upload" style={{
-                  position: 'absolute', bottom: 6, right: 6, width: 28, height: 28, borderRadius: '50%',
-                  background: '#fff', border: `1px solid ${LN}`, display: 'flex', alignItems: 'center',
-                  justifyContent: 'center', cursor: 'pointer', boxShadow: '0 2px 6px rgba(0,0,0,0.1)'
-                }}>
-                  📷
-                </label>
-                <input
-                  type="file"
-                  id="veh-photo-upload"
-                  accept="image/*"
-                  onChange={(evt) => {
-                    const file = evt.target.files?.[0];
-                    if (file) {
-                      resizeImage(file, (base64) => {
-                        setTempVehPhoto(base64);
-                      });
-                    }
-                  }}
-                  style={{ display: 'none' }}
-                />
-              </div>
-              <div style={{ display: 'flex', gap: 12 }}>
-                <button type="button" onClick={() => document.getElementById('veh-photo-upload')?.click()} style={{
-                  background: 'transparent', border: 'none', color: '#0891b2', fontSize: '0.78rem', fontWeight: 700, cursor: 'pointer'
-                }}>
-                  Upload Photo
-                </button>
-                {tempVehPhoto && (
-                  <button type="button" onClick={() => setTempVehPhoto(null)} style={{
-                    background: 'transparent', border: 'none', color: '#ef4444', fontSize: '0.78rem', fontWeight: 700, cursor: 'pointer'
-                  }}>
-                    Remove Photo
-                  </button>
-                )}
-              </div>
-            </div>
-
             <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '0 14px' }}>
               <Field label="Callsign" value={editVeh.callsign} onChange={v => setEditVeh(p => ({ ...p, callsign: v }))} placeholder="JEMS-1" required mono />
               <Field label="Registration" value={editVeh.registration} onChange={v => setEditVeh(p => ({ ...p, registration: v }))} placeholder="GP 12-34-56" required mono />
             </div>
             <SelectField
-              label="Vehicle Type"
-              value={editVeh.vehicle_type}
+              label="Vehicle Type" value={editVeh.vehicle_type}
               onChange={v => setEditVeh(p => ({ ...p, vehicle_type: v }))}
               options={[
                 { value: 'Ambulance',         label: 'Ambulance' },
@@ -1350,7 +994,13 @@ export default function ProviderAdminDashboard() {
                 { value: 'Supervisor',        label: 'Supervisor' },
               ]}
             />
-            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+            {/* ── Status ── */}
+            <div style={{ borderTop: `1px solid ${LN}`, margin: '4px 0 14px' }} />
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer', marginBottom: 16 }}>
+              <input type="checkbox" checked={editVeh.is_active} onChange={e => setEditVeh(p => ({ ...p, is_active: e.target.checked }))} style={{ width: 16, height: 16, cursor: 'pointer' }} />
+              Active — available to crews for new shifts
+            </label>
+            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
               <Btn kind="secondary" onClick={() => setEditVehId(null)} style={{ flex: 1, padding: '11px 14px' }}>Cancel</Btn>
               <button type="submit" disabled={editVehSav} style={{
                 flex: 2, padding: '11px 14px', background: G, color: '#fff',
@@ -1358,44 +1008,6 @@ export default function ProviderAdminDashboard() {
                 cursor: editVehSav ? 'wait' : 'pointer', fontFamily: 'inherit',
               }}>
                 {editVehSav ? 'Saving…' : 'Save Changes'}
-              </button>
-            </div>
-
-            {/* Danger Zone */}
-            <div style={{
-              marginTop: 24, padding: 16, border: '1px solid #fecaca', borderRadius: 12, background: '#fef2f2',
-              textAlign: 'left'
-            }}>
-              <h4 style={{ margin: '0 0 4px', fontSize: '0.85rem', fontWeight: 800, color: '#991b1b' }}>Danger Zone</h4>
-              <p style={{ margin: '0 0 12px', fontSize: '0.72rem', color: '#7f1d1d', lineHeight: 1.4 }}>
-                Deleting this vehicle is permanent and cannot be undone. Active cases and PRFs that rely on this vehicle callsign will retain archived logs but callsign lookup will be removed.
-              </p>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                <input
-                  type="checkbox"
-                  id="confirmVehDelete"
-                  checked={confirmVehDelete}
-                  onChange={e => setConfirmVehDelete(e.target.checked)}
-                  style={{ cursor: 'pointer' }}
-                />
-                <label htmlFor="confirmVehDelete" style={{ fontSize: '0.72rem', fontWeight: 700, color: '#7f1d1d', cursor: 'pointer', userSelect: 'none' }}>
-                  I confirm I want to permanently delete this vehicle
-                </label>
-              </div>
-              <button
-                type="button"
-                disabled={!confirmVehDelete}
-                onClick={() => deleteVehicle(editVehId, editVeh.callsign)}
-                style={{
-                  width: '100%', padding: '10px 14px', background: '#dc2626', color: '#fff',
-                  border: 'none', borderRadius: 4, fontSize: '0.8rem', fontWeight: 700,
-                  cursor: confirmVehDelete ? 'pointer' : 'not-allowed',
-                  opacity: confirmVehDelete ? 1 : 0.4,
-                  transition: 'opacity 0.2s',
-                  fontFamily: 'inherit',
-                }}
-              >
-                Permanently Delete Vehicle
               </button>
             </div>
           </form>

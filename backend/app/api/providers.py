@@ -92,12 +92,13 @@ class ProviderUpdate(BaseModel):
 
 class CrewMemberCreate(BaseModel):
     full_name: str
-    hpcsa_number: str              # Primary identifier — required
+    hpcsa_number: str | None = None  # Primary identifier for crew, optional for admin
     qualification: str = DEFAULT_CATEGORY   # HPCSA category — see app.utils.hpcsa
     email: str | None = None       # Optional — auto-generated if omitted
     initials: str | None = None
     phone: str | None = None
     password: str | None = None    # Not used for login — ignored
+    role: str = "crew"
 
 class CrewMemberUpdate(BaseModel):
     full_name: str | None = None
@@ -106,6 +107,7 @@ class CrewMemberUpdate(BaseModel):
     qualification: str | None = None        # HPCSA category — see app.utils.hpcsa
     phone: str | None = None
     is_active: bool | None = None
+    role: str | None = None
 
 
 def _validate_category(value: str | None, *, required: bool = True) -> str | None:
@@ -213,7 +215,11 @@ async def list_crew_public_by_slug(slug: str, db: AsyncSession = Depends(get_db)
 
     crew_result = await db.execute(
         select(CrewMember)
-        .where(CrewMember.provider_id == provider.id, CrewMember.is_active == True)
+        .where(
+            CrewMember.provider_id == provider.id,
+            CrewMember.is_active == True,
+            CrewMember.role != 'admin'
+        )
         .order_by(CrewMember.full_name)
     )
     return [
@@ -378,6 +384,7 @@ async def list_crew(
             "hpcsa_number": c.hpcsa_number,
             "qualification": c.qualification,
             "phone": c.phone,
+            "role": c.role,
             "is_active": c.is_active,
             "last_login": c.last_login.isoformat() if c.last_login else None,
             "created_at": c.created_at.isoformat() if c.created_at else None,
@@ -427,8 +434,9 @@ async def add_crew_member(
         full_name=body.full_name.strip(),
         initials=body.initials,
         hpcsa_number=body.hpcsa_number.strip().upper() if body.hpcsa_number else None,
-        qualification=_validate_category(body.qualification, required=True),
+        qualification=_validate_category(body.qualification, required=False) if body.role == "admin" else _validate_category(body.qualification, required=True),
         phone=body.phone,
+        role=body.role,
     )
     db.add(crew)
     await db.commit()
