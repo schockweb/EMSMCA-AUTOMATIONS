@@ -91,7 +91,7 @@ export default function StickerCameraCapture({ value, onChange, buttonLabel }: P
           }}
         >
           <CameraIcon />
-          {buttonLabel || 'Photograph Hospital Sticker'}
+          {buttonLabel || 'Photograph Sticker / Form / Card / ID'}
         </button>
       )}
 
@@ -359,7 +359,7 @@ function CameraOverlay({ onCancel, onCapture }: OverlayProps) {
           }}
         >Cancel</button>
         <div style={{ fontSize: '0.78rem', fontWeight: 800, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-          Hospital Sticker
+          Hospital Sticker / Admission Form / Scheme Card / ID Card
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {torchSupported && !captured && (

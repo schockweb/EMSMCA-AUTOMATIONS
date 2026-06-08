@@ -381,11 +381,11 @@ export const RULES: ValidationRule[] = [
     schemes: ['all'],
     phases: [5, 6],
     severity: 'block',
-    field: 'handover_name',
-    check: (d) => has(d, 'handover_name') && has(d, 'handover_qualification'),
+    field: 'handover_qualification',
+    check: (d) => has(d, 'handover_qualification'),
     message:
-      'Receiving practitioner full name and qualification are required at handover.',
-    source: 'Netcare CMG §4 — Signature, full name, and qualification of the receiving practitioner',
+      'Receiving practitioner qualification is required at handover.',
+    source: 'Netcare CMG §4 — Signature, and qualification of the receiving practitioner',
   },
   {
     id: 'NTC-4-HANDOVER-SIG',

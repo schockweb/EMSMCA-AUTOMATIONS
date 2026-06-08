@@ -55,6 +55,43 @@ const EmptySignature = ({ label = 'Not captured' }: { label?: string }) => (
   }}>{label}</div>
 );
 
+// Provider logo — the client brand mark shown top-left on the PDF / print
+// pages. Resolution order:
+//   1. The provider's own uploaded logo (`logo_url`, returned by the
+//      /admin/by-case endpoint) — works for every tenant.
+//   2. The bundled JEMS asset for that specific tenant.
+//   3. The provider name as text when no artwork is available.
+// crossOrigin is set so html2canvas can paint a same-origin / CORS-enabled
+// logo into the snapshot canvas without tainting it (which would otherwise
+// break `canvas.toDataURL()` during PDF export).
+const ProviderLogo = ({ prov, height = 36 }: { prov: any; height?: number }) => {
+  // If a remote logo_url fails to load (404, or a host without CORS headers
+  // which crossOrigin="anonymous" turns into a hard load failure) we fall
+  // through to the provider name text instead of leaving a broken-image icon.
+  const [failed, setFailed] = useState(false);
+  const src: string | null =
+    (prov?.logo_url && String(prov.logo_url).trim()) ||
+    (prov?.slug?.toLowerCase() === 'jems' ? '/jems_logo.png' : null);
+  if (src && !failed) {
+    return (
+      <img
+        src={src}
+        alt={prov?.name || 'Service Provider'}
+        crossOrigin="anonymous"
+        onError={() => setFailed(true)}
+        // maxWidth:'100%' keeps the logo inside whatever cell it sits in (the
+        // narrow page-1 brand column included) regardless of its aspect ratio.
+        style={{ height, width: 'auto', maxWidth: '100%', objectFit: 'contain', display: 'block' }}
+      />
+    );
+  }
+  return (
+    <div style={{ fontWeight: 900, color: GREEN_DK, fontSize: '0.9rem', letterSpacing: '0.02em' }}>
+      {prov?.name || 'Service Provider'}
+    </div>
+  );
+};
+
 // ── Primitives ───────────────────────────────────────────────────────
 // Densities are deliberately tight: the whole form has to fit two A4
 // landscape pages with every captured field rendered, so vertical
@@ -196,11 +233,19 @@ export default function PRFView() {
     if (!prf) return;
     if (pdfBuildStartedRef.current) return;
     pdfBuildStartedRef.current = true;
-    // Wait a frame so the .prf-page DOM is laid out before html2canvas
-    // tries to snapshot it. requestAnimationFrame fires after the next
-    // paint; 200ms after that gives the green tables / signatures /
-    // sticker box time to settle.
+    // Give the layout a short beat to settle, THEN wait for every on-page
+    // <img> to finish decoding before snapshotting. html2canvas paints
+    // whatever has decoded at snapshot time, so without this gate a slow
+    // remote provider logo could be baked into the shared PDF as a blank
+    // box. Signatures / sketches / attachments are inline data-URLs and
+    // decode instantly; the logo is the one image that can lag.
     const t = window.setTimeout(async () => {
+      const imgs = Array.from(document.querySelectorAll<HTMLImageElement>('.prf-page img'));
+      await Promise.all(imgs.map(img =>
+        (img.complete && img.naturalWidth > 0)
+          ? Promise.resolve()
+          : (img.decode ? img.decode().catch(() => undefined) : Promise.resolve()),
+      ));
       const pdf = await buildPrfPdf();
       if (!pdf) return;
       const blob = pdf.output('blob');
@@ -210,18 +255,24 @@ export default function PRFView() {
         { type: 'application/pdf' },
       );
       setSharePdfFile(file);
-    }, 800);
+    }, 400);
     return () => window.clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prf]);
 
-  // Build the 2-page PDF by snapshotting each .prf-page independently and
-  // placing it on its own A4 landscape sheet. This bypasses the browser's
-  // CSS print pagination (which fought with the 1220px-wide layout and
-  // produced 5–7 pages instead of 2). Each .prf-page is rendered to a
-  // canvas with html2canvas, then drawn into the jsPDF document scaled
-  // to fit the 297mm × 210mm printable area exactly — never more than
-  // one page per .prf-page in the DOM.
+  // Build the PDF by snapshotting each .prf-page independently and placing
+  // it on its own A4 landscape sheet. This bypasses the browser's CSS print
+  // pagination (which fought with the 1220px-wide layout and produced 5–7
+  // pages instead of the intended ones).
+  //
+  // Each .prf-page now grows to its NATURAL content height (min one A4
+  // sheet) instead of being clamped to a fixed 862px box. We snapshot the
+  // element at its full scroll size — so every captured field is included,
+  // nothing clipped — then place it on its sheet scaled UNIFORMLY (same
+  // factor on both axes) to fit inside the 297×210mm printable area. Because
+  // the scale is uniform the aspect ratio is preserved: rows can never smear
+  // or overlap one another. A denser page simply renders slightly smaller,
+  // top-aligned and horizontally centred.
   //
   // Returns the jsPDF instance so callers can either `.save()` (download)
   // or `.output('blob')` (Web Share API attachment).
@@ -229,32 +280,80 @@ export default function PRFView() {
     const pages = Array.from(document.querySelectorAll<HTMLElement>('.prf-page'));
     if (pages.length === 0) return null;
 
+    // A4 landscape printable area with a 5mm safety inset on every edge.
     const PAGE_W_MM = 297;
     const PAGE_H_MM = 210;
     const INSET_MM = 5;
-    const drawW = PAGE_W_MM - INSET_MM * 2;
-    const drawH = PAGE_H_MM - INSET_MM * 2;
-    const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'landscape' });
+    const maxW = PAGE_W_MM - INSET_MM * 2;   // 287mm
+    const maxH = PAGE_H_MM - INSET_MM * 2;   // 200mm
+    // Beyond this height we slice instead of shrinking, so a very tall page
+    // never scales text below ~70% (1 / 1.4) and stays legible.
+    const SHRINK_LIMIT_MM = maxH * 1.4;
 
-    // Each .prf-page in the DOM is sized to A4-landscape aspect
-    // (1220×862 ≈ 1.415:1, vs the 287×200mm draw area at 1.435:1) and
-    // clipped via overflow:hidden, so the captured canvas already
-    // matches the destination — no slicing, no stretching, just a
-    // straight 1:1 placement. PNG + scale:3 keeps text edges crisp.
-    for (let i = 0; i < pages.length; i++) {
-      const el = pages[i];
-      const canvas = await html2canvas(el, {
-        scale: 3,
-        useCORS: true,
-        backgroundColor: '#ffffff',
-        windowWidth: el.scrollWidth,
-        windowHeight: el.scrollHeight,
-      });
-      if (i > 0) pdf.addPage('a4', 'landscape');
-      pdf.addImage(
-        canvas.toDataURL('image/png'),
-        'PNG', INSET_MM, INSET_MM, drawW, drawH, undefined, 'NONE',
-      );
+    const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'landscape' });
+    let firstSheet = true;
+    const newSheet = () => {
+      if (!firstSheet) pdf.addPage('a4', 'landscape');
+      firstSheet = false;
+    };
+
+    try {
+      for (let i = 0; i < pages.length; i++) {
+        const el = pages[i];
+        const canvas = await html2canvas(el, {
+          scale: 3,
+          useCORS: true,
+          backgroundColor: '#ffffff',
+          windowWidth: el.scrollWidth,
+          windowHeight: el.scrollHeight,
+        });
+
+        const cw = canvas.width;
+        const ch = canvas.height;
+        if (!cw || !ch) continue;                 // skip a zero-size snapshot
+
+        const wScale = maxW / cw;                  // mm per source px at full width
+        const fullH = ch * wScale;                 // page height in mm rendered full-width
+
+        if (fullH <= maxH + 0.5) {
+          // Common case — the whole page fits one sheet at full width. Place
+          // it at the top, aspect preserved (no stretch → no row overlap).
+          newSheet();
+          pdf.addImage(canvas.toDataURL('image/png'), 'PNG', INSET_MM, INSET_MM, maxW, fullH, undefined, 'NONE');
+        } else if (fullH <= SHRINK_LIMIT_MM) {
+          // Modest overflow — shrink uniformly onto ONE clean sheet, centred.
+          // Aspect ratio is preserved so fields can never smear or overlap.
+          const scale = Math.min(maxW / cw, maxH / ch);
+          const drawW = cw * scale;
+          const drawH = ch * scale;
+          newSheet();
+          pdf.addImage(canvas.toDataURL('image/png'), 'PNG', INSET_MM + (maxW - drawW) / 2, INSET_MM, drawW, drawH, undefined, 'NONE');
+        } else {
+          // Very tall page — slice into full-width A4 bands across consecutive
+          // sheets so every row stays full size and readable, never clipped.
+          const sliceHpx = Math.max(1, Math.floor(maxH / wScale));   // source px per sheet
+          for (let sy = 0; sy < ch; sy += sliceHpx) {
+            const hpx = Math.min(sliceHpx, ch - sy);
+            const band = document.createElement('canvas');
+            band.width = cw;
+            band.height = hpx;
+            const ctx = band.getContext('2d');
+            if (ctx) {
+              ctx.fillStyle = '#ffffff';
+              ctx.fillRect(0, 0, cw, hpx);
+              ctx.drawImage(canvas, 0, sy, cw, hpx, 0, 0, cw, hpx);
+            }
+            newSheet();
+            pdf.addImage(band.toDataURL('image/png'), 'PNG', INSET_MM, INSET_MM, maxW, hpx * wScale, undefined, 'NONE');
+          }
+        }
+      }
+    } catch (e) {
+      // A single bad image — e.g. a cross-origin logo that tainted the canvas
+      // and made toDataURL throw — must never silently brick the whole export.
+      // Returning null lets callers show their "couldn't build" fallback.
+      console.error('PRF PDF build failed:', e);
+      return null;
     }
 
     return pdf;
@@ -262,9 +361,44 @@ export default function PRFView() {
 
   const handleDownloadPdf = async () => {
     const pdf = await buildPrfPdf();
-    if (!pdf) return;
+    if (!pdf) {
+      // buildPrfPdf only returns null on a real failure (e.g. a tainted
+      // canvas). Surface it on this explicit, user-initiated action rather
+      // than letting the button appear to do nothing.
+      window.alert('Could not generate the PDF just now. Please try again, and reload the page if it keeps failing.');
+      return;
+    }
     pdf.save(`PRF_${prf.prf_number || 'export'}.pdf`);
   };
+
+  // Native browser print (Ctrl/Cmd-P). The on-screen pages now grow to their
+  // natural height (≥ one A4 sheet) and are wider than a sheet (1220px), so
+  // without scaling the @media print frame (297×210mm, overflow:hidden) would
+  // clip them. Mirror the PDF export's fit-to-page logic: on `beforeprint`
+  // shrink each .prf-page with CSS `zoom` so it lands inside one sheet, and
+  // restore on `afterprint`. The "Save as PDF" button uses buildPrfPdf and is
+  // unaffected by this.
+  useEffect(() => {
+    const PX_PER_MM = 96 / 25.4;
+    const frameW = 297 * PX_PER_MM;
+    const frameH = 210 * PX_PER_MM;
+    const fit = () => {
+      document.querySelectorAll<HTMLElement>('.prf-page').forEach(p => {
+        p.style.removeProperty('zoom');
+        const z = Math.min(frameW / p.scrollWidth, frameH / p.scrollHeight, 1);
+        p.style.setProperty('zoom', String(z > 0 ? z : 1));
+      });
+    };
+    const reset = () => {
+      document.querySelectorAll<HTMLElement>('.prf-page').forEach(p => p.style.removeProperty('zoom'));
+    };
+    window.addEventListener('beforeprint', fit);
+    window.addEventListener('afterprint', reset);
+    return () => {
+      window.removeEventListener('beforeprint', fit);
+      window.removeEventListener('afterprint', reset);
+    };
+  }, [prf]);
 
   // Send-to-receiving-facility flow. Two paths depending on whether
   // the browser is on a secure context (HTTPS) with Web Share API
@@ -429,7 +563,6 @@ export default function PRFView() {
 
   const timeRows = [
     { label: 'Call Disp',           t: 'time_dispatched',     k: 'km_dispatched'     },
-    { label: 'Mobile',              t: 'time_mobile',         k: 'km_mobile'         },
     { label: 'Scene',               t: 'time_on_scene',       k: 'km_on_scene'       },
     { label: 'Depart',              t: 'time_depart_scene',   k: 'km_depart_scene'   },
     { label: 'Arrival At Facility', t: 'time_at_destination', k: 'km_at_destination' },
@@ -446,6 +579,17 @@ export default function PRFView() {
     fd.return_handover_time || fd.return_available_time ||
     fd.return_depart_time
   );
+
+  // Channel Detail section — only render if at least one sub-block has data
+  const anyChannelDetail = anyValue(fd, [
+    'compensation_reference', 'raf_accident_date', 'raf_police_case_number', 'raf_accident_location',
+    'wca_employer', 'wca_employee_number', 'wca_injury_date', 'wca_oar_number',
+    'ems_provider_name', 'ems_provider_ref', 'ems_provider_bhf',
+    'pvt_payment_method', 'pvt_account_holder', 'pvt_account_holder_id', 'pvt_account_holder_phone', 'pvt_account_holder_address',
+    'event_name', 'event_organiser', 'event_date', 'event_booking_ref', 'event_contact_person',
+    'callout_requested_by', 'callout_authorisation', 'callout_standdown_reason',
+    'quote_number', 'quote_amount', 'quote_authorised_by', 'quote_valid_until',
+  ]) || returnTripHasContent;
 
   // ── Empty-section detection ──
   const debtorKeys = [
@@ -627,7 +771,7 @@ export default function PRFView() {
           Every captured field is rendered; empty-only sections fold. */}
       <div className="prf-print-frame">
       <div className="prf-page" style={{
-        width: 1220, height: 862, overflow: 'hidden',
+        width: 1220, minHeight: 862,
         margin: '0 auto', background: '#fff', color: INK,
         border: `2px solid ${LN}`, boxShadow: '0 6px 24px rgba(0,0,0,0.1)',
         display: 'flex', flexDirection: 'column',
@@ -639,13 +783,7 @@ export default function PRFView() {
             padding: '10px 12px', borderRight: `1px solid ${LN}`,
             display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4,
           }}>
-            {prov.slug?.toLowerCase() === 'jems' ? (
-              <img src="/jems_logo.png" alt={prov.name} style={{ height: 36, width: 'auto' }} />
-            ) : (
-              <div style={{ fontWeight: 900, color: GREEN_DK, fontSize: '0.9rem', letterSpacing: '0.02em' }}>
-                {prov.name || 'Service Provider'}
-              </div>
-            )}
+            <ProviderLogo prov={prov} height={40} />
             {prov.phone && (
               <div style={{
                 fontSize: '0.82rem', fontWeight: 900, color: INK,
@@ -727,7 +865,7 @@ export default function PRFView() {
             <FieldRow label="Referring Dr"  value={fd.referring_doctor} />
             <FieldRow label="Dest Facility" value={fd.receiving_facility} />
             <FieldRow label="Ward"          value={fd.ward} />
-            <FieldRow label="Receiving Dr"  value={fd.receiving_doctor} />
+            <FieldRow label={fd.call_type === 'COURTESY' ? "Receiving Dr/Person" : "Receiving Dr"}  value={fd.receiving_doctor} />
             <div style={{ flex: 1, borderTop: `1px solid ${LN}` }} />
           </div>
 
@@ -894,7 +1032,8 @@ export default function PRFView() {
             <div style={{ flex: 1, borderTop: `1px solid ${LN}` }} />
           </div>
 
-          {/* Channel-specific + Return Trip (all conditional — empty sub-blocks fold) */}
+          {/* Channel-specific + Return Trip (hidden entirely when no data) */}
+          {anyChannelDetail && (
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             <SectionHead label="Channel Detail" />
             <SubBlock title="RAF" rows={[
@@ -953,6 +1092,7 @@ export default function PRFView() {
             )}
             <div style={{ flex: 1, borderTop: `1px solid ${LN}` }} />
           </div>
+          )}
         </div>
 
         {/* ── BAND C — Debtor │ Handover+Sticker │ Valuables+Sigs │ Motivation+Terms ── */}
@@ -1017,7 +1157,7 @@ export default function PRFView() {
                 : <EmptySignature />}
             </div>
             <FieldRow label="Condition" value={fd.handover_notes} valueMin={32} />
-            <SectionHead label="Hospital Sticker" />
+            <SectionHead label="Patient Documents" />
             <div style={{
               borderTop: `1px solid ${LN}`, padding: 4,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -1029,14 +1169,44 @@ export default function PRFView() {
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 padding: 3, overflow: 'hidden',
               }}>
-                {fd.hospital_sticker ? (
-                  <img src={fd.hospital_sticker} alt="hospital sticker"
-                       style={{ maxWidth: '100%', maxHeight: 54, objectFit: 'contain' }} />
+                {fd.hospital_sticker || fd.admission_form_image || fd.id_document_image || fd.medical_aid_image || (Array.isArray(fd.nursing_notes) && fd.nursing_notes.length > 0) ? (
+                  <div style={{ fontSize: '0.66rem', fontWeight: 800, color: GREEN_DK, textTransform: 'uppercase', letterSpacing: '0.04em', textAlign: 'center', lineHeight: 1.4 }}>
+                    ✓ Documents Attached<br/>
+                    <span style={{fontSize:'0.54rem',color:MUT}}>See Attachments</span>
+                  </div>
                 ) : (
                   <div style={{
                     fontSize: '0.54rem', fontWeight: 700, color: MUT,
                     textTransform: 'uppercase', letterSpacing: '0.06em', textAlign: 'center',
-                  }}>Affix patient sticker here</div>
+                  }}>No documents attached</div>
+                )}
+              </div>
+            </div>
+            {/* Hospital Sticker — dedicated placeholder. Shows the captured
+                sticker inline when present, otherwise a reserved "affix here"
+                box so the slot is always visible on the printed/exported PRF. */}
+            <SectionHead label="Hospital Sticker" />
+            <div style={{
+              borderTop: `1px solid ${LN}`, padding: 6,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flex: 1,
+            }}>
+              <div style={{
+                width: '96%', minHeight: 120,
+                border: `1.6px dashed ${MUT}`, borderRadius: 4,
+                background: SOFT_BG,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                padding: 6, overflow: 'hidden',
+              }}>
+                {fd.hospital_sticker ? (
+                  <img src={fd.hospital_sticker} alt="hospital sticker"
+                       style={{ maxWidth: '100%', maxHeight: 200, objectFit: 'contain' }} />
+                ) : (
+                  <div style={{
+                    fontSize: '0.62rem', fontWeight: 700, color: DIM,
+                    textTransform: 'uppercase', letterSpacing: '0.08em', textAlign: 'center',
+                    lineHeight: 1.6,
+                  }}>Affix hospital sticker here</div>
                 )}
               </div>
             </div>
@@ -1169,7 +1339,7 @@ export default function PRFView() {
           checks | history narrative | vitals + IV + meds + management). */}
       <div className="prf-print-frame">
       <div className="prf-page" style={{
-        width: 1220, height: 862, overflow: 'hidden',
+        width: 1220, minHeight: 862,
         margin: '28px auto 0', background: '#fff', color: INK,
         border: `2px solid ${LN}`, boxShadow: '0 6px 24px rgba(0,0,0,0.1)',
         display: 'flex', flexDirection: 'column',
@@ -1420,7 +1590,7 @@ export default function PRFView() {
               padding: '6px 9px', fontSize: '0.74rem', color: INK,
               whiteSpace: 'pre-wrap', lineHeight: 1.45,
               borderTop: `1px solid ${LN}`,
-              flex: 1, overflow: 'hidden',
+              flex: 1,
             }}>
               {fd.management_notes
                 ? fd.management_notes
@@ -1438,7 +1608,7 @@ export default function PRFView() {
       {vitalsOverflow.length > 0 && (
         <div className="prf-print-frame">
           <div className="prf-page" style={{
-            width: 1220, height: 862, overflow: 'hidden',
+            width: 1220, minHeight: 862,
             margin: '28px auto 0', background: '#fff', color: INK,
             border: `2px solid ${LN}`, boxShadow: '0 6px 24px rgba(0,0,0,0.1)',
             display: 'flex', flexDirection: 'column',
@@ -1452,13 +1622,7 @@ export default function PRFView() {
                 padding: '10px 12px', borderRight: `1px solid ${LN}`,
                 display: 'flex', alignItems: 'center',
               }}>
-                {prov.slug?.toLowerCase() === 'jems' ? (
-                  <img src="/jems_logo.png" alt={prov.name} style={{ height: 30, width: 'auto' }} />
-                ) : (
-                  <div style={{ fontWeight: 900, color: GREEN_DK, fontSize: '0.86rem', letterSpacing: '0.02em' }}>
-                    {prov.name || 'Service Provider'}
-                  </div>
-                )}
+                <ProviderLogo prov={prov} height={30} />
               </div>
               <div style={{
                 padding: '10px 12px', borderRight: `1px solid ${LN}`,
@@ -1539,6 +1703,34 @@ export default function PRFView() {
           </div>
         </div>
       )}
+
+      {/* ═══════════════════ ATTACHMENT PAGES ═══════════════════ */}
+      {[
+        { label: 'Hospital Sticker', val: fd.hospital_sticker },
+        { label: 'Admission Form', val: fd.admission_form_image },
+        { label: 'ID Document', val: fd.id_document_image },
+        { label: 'Medical Aid Card', val: fd.medical_aid_image },
+        ...(Array.isArray(fd.nursing_notes) ? fd.nursing_notes : []).map((n: any, i: number) => ({
+          label: `Nursing Note #${i + 1}`,
+          val: n.data_url
+        }))
+      ].filter(d => d.val).map((doc, i) => (
+        <div key={`attachment-${i}`} className="prf-print-frame">
+          <div className="prf-page" style={{
+            width: 1220, minHeight: 862,
+            margin: '28px auto 0', background: '#fff', color: INK,
+            border: `2px solid ${LN}`, boxShadow: '0 6px 24px rgba(0,0,0,0.1)',
+            display: 'flex', flexDirection: 'column',
+          }}>
+            <div style={{ background: GREEN, color: '#fff', padding: '12px 24px', fontSize: '1.2rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+              Patient Documents (Attachments) - {doc.label}
+            </div>
+            <div style={{ flex: 1, padding: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', background: SOFT_BG, overflow: 'hidden' }}>
+              <img src={doc.val} alt={doc.label} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', border: `1px solid ${LN}`, borderRadius: 8 }} />
+            </div>
+          </div>
+        </div>
+      ))}
       </div>{/* /prf-pdf-content */}
     </div>
   );
