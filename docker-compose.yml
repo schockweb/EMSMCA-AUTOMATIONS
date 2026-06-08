@@ -1,21 +1,4 @@
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: ems_postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-ems_admin}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ems_secure_2024}
-      POSTGRES_DB: ${POSTGRES_DB:-ems_claims}
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ems_admin}"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
 
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
@@ -45,7 +28,7 @@ services:
       - .env
       - ./backend/.env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-ems_admin}:${POSTGRES_PASSWORD:-ems_secure_2024}@postgres:5432/${POSTGRES_DB:-ems_claims}
+      - DATABASE_URL=postgresql+asyncpg://postgres.pssxfjbstlznijbjgfdo:MichaelSchuttler924@aws-0-eu-west-1.pooler.supabase.com:5432/postgres?ssl=require
       - CELERY_BROKER_URL=amqp://${RABBITMQ_USER:-ems_rabbit}:${RABBITMQ_PASS:-rabbit_secure_2024}@rabbitmq:5672//
       - UPLOAD_DIR=/app/uploads
     ports:
@@ -54,8 +37,6 @@ services:
       - ./backend:/app
       - upload_data:/app/uploads
     depends_on:
-      postgres:
-        condition: service_healthy
       rabbitmq:
         condition: service_healthy
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
@@ -70,15 +51,13 @@ services:
       - .env
       - ./backend/.env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-ems_admin}:${POSTGRES_PASSWORD:-ems_secure_2024}@postgres:5432/${POSTGRES_DB:-ems_claims}
+      - DATABASE_URL=postgresql+asyncpg://postgres.pssxfjbstlznijbjgfdo:MichaelSchuttler924@aws-0-eu-west-1.pooler.supabase.com:5432/postgres?ssl=require
       - CELERY_BROKER_URL=amqp://${RABBITMQ_USER:-ems_rabbit}:${RABBITMQ_PASS:-rabbit_secure_2024}@rabbitmq:5672//
       - UPLOAD_DIR=/app/uploads
     volumes:
       - ./backend:/app
       - upload_data:/app/uploads
     depends_on:
-      postgres:
-        condition: service_healthy
       rabbitmq:
         condition: service_healthy
     healthcheck:
@@ -100,6 +79,5 @@ services:
     command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
 
 volumes:
-  postgres_data:
   rabbitmq_data:
   upload_data:
