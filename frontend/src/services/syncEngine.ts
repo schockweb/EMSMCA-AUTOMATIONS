@@ -10,8 +10,14 @@ export async function startSync() {
   try {
     const pending = await getPending();
     for (const entry of pending) {
-      if (entry.retries > 5) continue; // Give up after 5 retries
-      
+      if (entry.retries > 5) {
+        // Give up cleanly after repeated failures: delete the entry so it can
+        // never linger in the "pending upload" counter forever.
+        await markSynced(entry.id);
+        window.dispatchEvent(new CustomEvent('outbox-change'));
+        continue;
+      }
+
       const token = localStorage.getItem('crew_token');
       if (!token) break;
       
@@ -45,11 +51,31 @@ export async function startSync() {
   }
 }
 
+let listenersInitialised = false;
+
 export function initSyncListeners() {
+  // Guard against double-registration (e.g. React StrictMode / HMR).
+  if (listenersInitialised) return;
+  listenersInitialised = true;
+
+  // Flush the outbox the moment connectivity returns.
   window.addEventListener('online', () => {
     setTimeout(startSync, 1000); // 1s delay to let connection stabilize
   });
-  
+
+  // Flush when the crew brings the tab/app back to the foreground.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && navigator.onLine) {
+      startSync();
+    }
+  });
+
+  // Periodic background drain — covers the case where the crew stays on the
+  // form for a long time and never navigates back to the dashboard.
+  setInterval(() => {
+    if (navigator.onLine) startSync();
+  }, 60000);
+
   // Try syncing on startup
   if (navigator.onLine) {
     setTimeout(startSync, 3000);

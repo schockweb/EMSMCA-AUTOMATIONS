@@ -35,6 +35,13 @@ else:
         pool_timeout=settings.DB_POOL_TIMEOUT,
         pool_recycle=settings.DB_POOL_RECYCLE,
         pool_pre_ping=True,
+        # Disable asyncpg prepared statement cache for Supabase transaction-mode
+        # pooler (PgBouncer). Prepared statements are per-connection server-side
+        # state and break when PgBouncer reassigns the backend connection.
+        connect_args={
+            "prepared_statement_cache_size": 0,
+            "statement_cache_size": 0,
+        },
     )
 
 

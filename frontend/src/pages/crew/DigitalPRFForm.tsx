@@ -725,6 +725,7 @@ function KmInput({ kmKey, value, onChange, onCommit }: {
   onCommit?: (kmKey: string, value: string) => void;
 }) {
   const [focused, setFocused] = useState(false);
+  const nf = useNoAutofill(kmKey);
   const fmt = (v: string) => {
     // Coerce defensively: loaded data may arrive as a number despite the string type.
     const str = String(v ?? '');
@@ -747,7 +748,7 @@ function KmInput({ kmKey, value, onChange, onCommit }: {
       pattern="[0-9. ]*"
       value={fmt(value)}
       placeholder=""
-      autoComplete="off"
+      {...nf}
       onChange={e => {
         let v = e.target.value.replace(/[^0-9.]/g, '');
         // Prevent multiple decimal points
@@ -795,15 +796,40 @@ const Lbl = ({ t, req }: { t: string; req?: boolean }) => (
   </div>
 );
 
+// Browser form-history / autofill suppression. PRF data is unique per patient,
+// so the browser re-offering previously typed values (e.g. "23" on a KM field)
+// is never useful and can mislead. `autocomplete="off"` alone is ignored by
+// Chrome, so we also give the field a randomised `name` the browser can't match
+// against any stored value. The Ward field is exempted (returns only the plain
+// autocomplete attr) so its behaviour is left exactly as it was, per request.
+// One random token per page load — appended to field names so the browser
+// can't match them against values stored in a previous session.
+const NF_NONCE = Math.random().toString(36).slice(2);
+const NO_AUTOFILL = {
+  autoComplete: 'off',
+  autoCorrect: 'off',
+  autoCapitalize: 'off',
+  spellCheck: false,
+} as const;
+function useNoAutofill(fk?: string): Record<string, any> {
+  const nameRef = useRef(`nf-${fk || 'x'}-${NF_NONCE}`);
+  if (fk === 'ward') return { autoComplete: 'off' };
+  return { ...NO_AUTOFILL, name: nameRef.current };
+}
+
 // Placeholder hint text is suppressed across all input components for the
 // live rollout — crew should see clean, empty fields rather than fine-print
 // example text. The `ph` prop is kept on the type signature so the ~120
 // callsites passing it continue to compile; we just ignore it. Re-enable
 // hints by changing `placeholder=""` back to `placeholder={ph}` in Inp,
 // ComboInp and Txt below.
-const Inp = ({ fk, type = 'text' }: { fk: string; ph?: string; type?: string; req?: boolean }) => {
+const Inp = ({ fk, type = 'text', onBlur }: { fk: string; ph?: string; type?: string; req?: boolean; onBlur?: (e: React.FocusEvent<HTMLInputElement>) => void }) => {
   const { fd, sf } = useContext(FormContext);
-  return <input type={type} value={fd[fk] ?? ''} onChange={e => sf(fk, e.target.value)} onFocus={onF} onBlur={onB} placeholder="" autoComplete="off" style={{ ...base, marginBottom: 14, borderColor: '#e2e8f0' }} />
+  // PRF data is unique per patient, so browser form-history suggestions (e.g.
+  // re-offering the last value you typed) are never useful and are turned off.
+  // The Ward field is deliberately left untouched per request.
+  const nf = useNoAutofill(fk);
+  return <input type={type} value={fd[fk] ?? ''} onChange={e => sf(fk, e.target.value)} onFocus={onF} onBlur={e => { onB(e); if (onBlur) onBlur(e); }} placeholder="" {...nf} style={{ ...base, marginBottom: 14, borderColor: '#e2e8f0' }} />
 };
 
 // ── Address autocomplete (forward-search via Nominatim) ─────────────────────
@@ -1735,7 +1761,7 @@ const Txt = ({ fk, rows = 3 }: { fk: string; ph?: string; rows?: number }) => {
 // (chief complaint, findings on arrival, HPI, management notes) so crew can
 // keep their gloves on and dictate while attending the patient.
 //
-// • Tap to start, tap again to stop. Recording state is a pulsing red mic.
+// • Push and hold to dictate; release to stop. Recording is a pulsing red mic.
 // • Final transcripts are appended to whatever the crew already typed —
 //   never overwrite, so the mic can extend partial entries.
 // • Auto-hides on browsers that don't expose SpeechRecognition (no harm,
@@ -1832,9 +1858,20 @@ const VoiceTxt = ({ fk, rows = 3 }: { fk: string; ph?: string; rows?: number }) 
         <>
           <button
             type="button"
-            onClick={recording ? stop : start}
-            aria-label={recording ? 'Stop dictation' : 'Dictate into field'}
-            title={recording ? 'Stop dictation' : 'Tap to dictate'}
+            // Push and hold: start dictating on press, stop on release. Pointer
+            // capture keeps the release event on the button even if the finger
+            // drifts off it while speaking.
+            onPointerDown={e => {
+              e.preventDefault();
+              try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+              start();
+            }}
+            onPointerUp={e => { e.preventDefault(); stop(); }}
+            onPointerCancel={() => stop()}
+            onLostPointerCapture={() => { if (recording) stop(); }}
+            onContextMenu={e => e.preventDefault()}
+            aria-label={recording ? 'Recording — release to stop' : 'Hold to dictate'}
+            title={recording ? 'Release to stop' : 'Hold to dictate'}
             style={{
               position: 'absolute',
               top: 8, right: 8,
@@ -1847,6 +1884,8 @@ const VoiceTxt = ({ fk, rows = 3 }: { fk: string; ph?: string; rows?: number }) 
               boxShadow: recording ? '0 0 0 4px rgba(239,68,68,0.18)' : 'none',
               animation: recording ? 'voicePulse 1.4s ease-in-out infinite' : 'none',
               transition: 'all 0.15s',
+              touchAction: 'none',
+              userSelect: 'none',
               WebkitTapHighlightColor: 'transparent',
             }}
           >
@@ -3198,14 +3237,19 @@ export default function DigitalPRFForm() {
       forceScrollToTop();
     }
   }, [loading]);
-  // `saving` was previously surfaced in the sticky-header save icon which
-  // has been removed. We keep the setter so doSave() still records the
-  // in-flight state for any future indicator, but the value itself is unused.
+  // Save state is tracked internally but intentionally NOT surfaced to the crew —
+  // they don't need a "saved" notification; the form just saves silently after
+  // every change. Setters are kept so doSave() records state for any future use.
   const [, setSaving] = useState(false);
   const [submitting, setSubmit] = useState(false);
-  // `lastSaved` is no longer surfaced in the header but doSave() still
-  // records it for any future indicator.
   const [, setLastSaved] = useState<Date | null>(null);
+  const [, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'offline' | 'error'>('idle');
+  // Shown when the crew submits with fewer than 3 vital sets — they must record
+  // a motivation before the PRF can go through.
+  const [vitalsMotivationOpen, setVitalsMotivationOpen] = useState(false);
+  // Crew sign-off gate — on Submit, every crew member must sign before the PRF
+  // can go through. Signatures are stored in fd.crew_signoff_sigs keyed by crew.
+  const [crewSignOffOpen, setCrewSignOffOpen] = useState(false);
   const [prfMeta, setPrfMeta] = useState<any>({});
 
   const [fd, setFd] = useState<Record<string, any>>({});
@@ -3243,6 +3287,9 @@ export default function DigitalPRFForm() {
   const [vitals, setVitals] = useState<any[]>([]);
   const [editVital, setEditVital] = useState(-1);
   const [quickVital, setQV] = useState(false);
+  // Dev/QA test-fill — opens a chooser to auto-populate the form for a given
+  // call-type × billing-type combination so testers don't retype everything.
+  const [testFillOpen, setTestFillOpen] = useState(false);
   const [vsAlphaKeys, setVsAlphaKeys] = useState<Set<string>>(() => new Set());
   const [ivRows, setIvRows] = useState<any[]>([]);
   const [medRows, setMedRows] = useState<any[]>([]);
@@ -3353,7 +3400,12 @@ export default function DigitalPRFForm() {
     }
   }, [fd.call_type, fd.transfer_subtype, fd.preauth_number, loading]);
 
-  const profile = JSON.parse(localStorage.getItem('crew_profile') || '{}');
+  const profile = (() => {
+    // Guard against a corrupted localStorage value — an unguarded JSON.parse
+    // here throws during render and white-screens the whole form.
+    try { return JSON.parse(localStorage.getItem('crew_profile') || '{}'); }
+    catch { return {}; }
+  })();
   const dirtyRef = useRef(false);
 
   // (Live header timer is owned by the <LiveTimer> component — keeping the
@@ -3410,6 +3462,8 @@ export default function DigitalPRFForm() {
     }
 
     setPrfMeta(prf);
+    // Seed the optimistic-concurrency token from the freshly loaded row.
+    baseUpdatedAtRef.current = prf.updated_at || null;
     setFd(normalizeFormData(data));
     setVehicle(prf.vehicle_id || '');
     setCrew2Id(prf.crew_member_2_id || '');
@@ -3590,11 +3644,49 @@ export default function DigitalPRFForm() {
   };
   const inArr = (k: string, v: string) => Array.isArray(fd[k]) && (fd[k] as string[]).includes(v);
 
-  const lastSavedPayloadRef = useRef<string | null>(null);
+  // When the crew ticks "Debtor is same as patient", wipe any debtor details
+  // they had already typed. Previously the values lingered in the record (the
+  // input card is merely hidden) and then resurfaced on the submitted PDF
+  // instead of the "Same as Patient" panel. Defined AFTER sf/inArr so it isn't
+  // in their temporal dead zone.
+  const debtorSameAsPatient = inArr('flags', 'debtor_same_as_patient');
+  useEffect(() => {
+    if (!debtorSameAsPatient) return;
+    const debtorKeys = [
+      'debtor_gender', 'debtor_name', 'debtor_surname', 'debtor_id_number',
+      'debtor_passport_number', 'debtor_dob', 'debtor_age', 'debtor_phone_cell',
+      'debtor_phone_home', 'debtor_address', 'debtor_suburb', 'debtor_postal_code',
+    ];
+    debtorKeys.forEach(k => { if ((fd[k] ?? '') !== '') sf(k, ''); });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debtorSameAsPatient]);
 
-  const doSave = async () => {
-    // Strip empty strings from kms and timestamps — the backend's
-    // Numeric columns reject '' and the entire save crashes.
+  // Handover Ward/Unit defaults to 'casualty' (the most common destination).
+  // Set once after the PRF loads if the field is empty; the input itself clears
+  // it on focus and restores it on a blank blur.
+  const wardDefaultedRef = useRef(false);
+  useEffect(() => {
+    if (loading || wardDefaultedRef.current) return;
+    wardDefaultedRef.current = true;
+    if (!fd.med_aid_dec_death && !(fd.ward ?? '').trim()) sf('ward', 'casualty');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading]);
+
+  const lastSavedPayloadRef = useRef<string | null>(null);
+  // Optimistic-concurrency token echoed back to the server on each save.
+  const baseUpdatedAtRef = useRef<string | null>(null);
+  // Save serialization — never allow two PATCHes in flight (the source of
+  // last-write-wins clobbering when an older request lands after a newer one).
+  const savingInFlightRef = useRef(false);
+  const savePendingRef = useRef(false);
+  const sessionExpiredRef = useRef(false);
+  // Synchronous guard against a double-tap submitting the PRF twice (the
+  // `submitting` state flips a render later, which is too slow on laggy phones).
+  const submitInFlightRef = useRef(false);
+
+  const buildSavePayload = (): any => {
+    // Strip empty strings from kms and timestamps — the backend's Numeric
+    // columns reject '' and the entire save crashes.
     const cleanKms: Record<string, string | null> = {};
     for (const [k, v] of Object.entries(kms)) {
       cleanKms[k] = v && String(v).trim() ? v : null;
@@ -3603,32 +3695,109 @@ export default function DigitalPRFForm() {
     for (const [k, v] of Object.entries(timestamps)) {
       cleanTs[k] = v || null;
     }
-    const payload = {
+    return {
       form_data: { ...fd, vitals_sets: vitals, iv_therapy: ivRows, medications: medRows },
       vehicle_id: vehicle || null, crew_member_2_id: crew2Id || null,
       ...cleanTs, ...cleanKms, ...sigs,
     };
-    
+  };
+
+  const queueToOutbox = async (payload: any) => {
+    try {
+      const { queueSave } = await import('../../services/offlineDb');
+      await queueSave(prfId!, payload);
+      window.dispatchEvent(new CustomEvent('outbox-change'));
+    } catch { /* IndexedDB unavailable */ }
+  };
+
+  const handleSessionExpired = () => {
+    // Session/token expired mid-shift. The work has already been queued to the
+    // offline outbox by the caller, so it will sync after re-login. Send the
+    // crew to log in again — never silently drop their PRF.
+    if (sessionExpiredRef.current) return;
+    sessionExpiredRef.current = true;
+    setSaveState('offline');
+    alert('Your session has expired. Your PRF has been saved on this device and will finish saving automatically once you log in again.');
+    navigate(`/${providerSlug}/login`, { replace: true });
+  };
+
+  const doSave = async () => {
+    if (!prfId) return;
+    // Coalesce concurrent saves: if one is already running, request exactly one
+    // more pass when it finishes rather than racing a second request.
+    if (savingInFlightRef.current) { savePendingRef.current = true; return; }
+
+    const payload = buildSavePayload();
     const payloadStr = JSON.stringify(payload);
     if (payloadStr === lastSavedPayloadRef.current) return;
-    lastSavedPayloadRef.current = payloadStr;
 
+    if (baseUpdatedAtRef.current) payload.client_base_updated_at = baseUpdatedAtRef.current;
+
+    savingInFlightRef.current = true;
     setSaving(true);
+    setSaveState('saving');
     try {
-      await api().patch(`/api/digital-prf/${prfId}`, payload);
+      const resp = await api().patch(`/api/digital-prf/${prfId}`, payload);
+      lastSavedPayloadRef.current = payloadStr;
+      if (resp?.data?.updated_at) baseUpdatedAtRef.current = resp.data.updated_at;
       setLastSaved(new Date());
+      setSaveState('saved');
     } catch (err: any) {
-      // Offline fallback: queue to IndexedDB outbox
-      if (!navigator.onLine || err?.code === 'ECONNABORTED' || err?.code === 'ERR_NETWORK') {
+      const statusCode = err?.response?.status;
+      if (statusCode === 401) {
+        // Expired session — preserve the work offline, then route to login.
+        await queueToOutbox(payload);
+        handleSessionExpired();
+        return;
+      }
+      if (statusCode === 409) {
+        // Another writer touched this PRF. Refresh the version token and force a
+        // retry on the next pass so this device's data still persists.
         try {
-          const { queueSave } = await import('../../services/offlineDb');
-          await queueSave(prfId!, payload);
-          window.dispatchEvent(new CustomEvent('outbox-change'));
-        } catch { /* IndexedDB unavailable */ }
+          const fresh = await api().get(`/api/digital-prf/${prfId}`);
+          baseUpdatedAtRef.current = fresh?.data?.updated_at || null;
+        } catch { /* ignore */ }
+        lastSavedPayloadRef.current = null;
+        savePendingRef.current = true;
+        setSaveState('saving');
+      } else if (!navigator.onLine || err?.code === 'ECONNABORTED' || err?.code === 'ERR_NETWORK') {
+        // Offline / network error — queue to the outbox so nothing is lost.
+        await queueToOutbox(payload);
+        setSaveState('offline');
+      } else {
+        // Unknown server error (e.g. 500). Do NOT advance lastSavedPayloadRef so
+        // the same data is retried on the next change/cycle.
+        setSaveState('error');
+      }
+    } finally {
+      savingInFlightRef.current = false;
+      setSaving(false);
+      if (savePendingRef.current) {
+        savePendingRef.current = false;
+        setTimeout(() => { doSave(); }, 0);
       }
     }
-    setSaving(false);
   };
+
+  // Always hold the latest doSave so unmount/beforeunload flushes current data
+  // (not a stale closure).
+  const doSaveRef = useRef(doSave);
+  doSaveRef.current = doSave;
+
+  // ── Warn before leaving with unsaved changes + best-effort final save ──────
+  // Covers the back-swipe / tab-close / refresh case so a crew can't lose the
+  // last edits inside the 400ms autosave debounce window.
+  useEffect(() => {
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (dirtyRef.current) { e.preventDefault(); e.returnValue = ''; }
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', onBeforeUnload);
+      if (dirtyRef.current && prfId) { doSaveRef.current(); }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prfId]);
 
 
   // ── In-form adjudication ──────────────────────────────────────────────────
@@ -3817,7 +3986,7 @@ export default function DigitalPRFForm() {
   const [kmConfirm, setKmConfirm] = useState<KmConfirm | null>(null);
 
   const handleKmCommit = useCallback((kmKey: string, raw: string, onConfirmCallback?: () => void): boolean => {
-    const newVal = parseInt(raw, 10);
+    const newVal = parseFloat(raw);
     if (isNaN(newVal)) return false;
     const idx = ALL_TIME_ROWS.findIndex(r => r.kmKey === kmKey);
     if (idx <= 0) return false;  // first leg has nothing to compare against
@@ -3826,7 +3995,7 @@ export default function DigitalPRFForm() {
     let prevVal = NaN;
     for (let i = idx - 1; i >= 0; i--) {
       const row = ALL_TIME_ROWS[i];
-      const v = parseInt(kms[row.kmKey] ?? '', 10);
+      const v = parseFloat(kms[row.kmKey] ?? '');
       if (!isNaN(v)) { prevRow = row; prevVal = v; break; }
     }
     if (!prevRow || isNaN(prevVal)) return false;
@@ -3855,7 +4024,7 @@ export default function DigitalPRFForm() {
   const runValidation = (targetPhase: ValidationPhase): { ok: boolean; findings: ValidationFinding[] } => {
     const ctx = buildValidationContext({
       vitals, ivRows, medRows, sigs,
-      crew2Id, prfMeta,
+      crew2Id, prfMeta, timestamps, kms,
     });
     const all = validatePhaseRules(targetPhase, fd, ctx, fd.medical_scheme);
     setFindings(all);
@@ -3943,15 +4112,10 @@ export default function DigitalPRFForm() {
       }
     }
 
-    if (fromPhase === 5 && vitals.length < MIN_VITALS && !fd.med_aid_dec_death) {
-      blockers.push({
-        id: 'INLINE-MIN-VITALS',
-        severity: 'block',
-        field: 'vitals_sets',
-        message: `At least ${MIN_VITALS} sets of vitals are required (currently ${vitals.length}). Add more vitals on the Clinical or Transport phase before completing the call.`,
-        source: 'Operational — minimum vitals capture per call.',
-      });
-    }
+    // Note: fewer than 3 vital sets no longer blocks leaving the Handover
+    // phase. The crew is gated at Submit instead, where a motivation popup
+    // captures why fewer than 3 sets were taken (rare, but valid) before the
+    // PRF can go through.
 
     return blockers;
   };
@@ -4072,23 +4236,49 @@ export default function DigitalPRFForm() {
     setPhase(target);
   };
 
-  const handleSubmit = async () => {
-    // Hard floor — submission is blocked unless at least MIN_VITALS vital
-    // sets are captured, regardless of how the crew navigated here.
-    // RHT is exempt: the patient refused treatment, so there's no
-    // assessment workflow that would yield vitals.
-    if (vitals.length < MIN_VITALS && !fd.med_aid_dec_death && fd.call_type !== 'RHT') {
-      const banner: ValidationFinding[] = [{
-        id: 'INLINE-MIN-VITALS',
-        severity: 'block',
-        field: 'vitals_sets',
-        message: `At least ${MIN_VITALS} sets of vitals are required to submit (currently ${vitals.length}).`,
-        source: 'Operational — minimum vitals capture per call.',
-      }];
-      showBlockerBanner(banner);
-      alert(`Cannot submit — minimum ${MIN_VITALS} vital sets required (currently ${vitals.length}).`);
-      return;
+  // Crew members on this PRF, used for the submit sign-off list. Crew 1 is the
+  // logged-in crew; crew 2 + any extra crew come from the PRF record.
+  const getCrewSignList = (): Array<{ key: string; name: string; sub: string }> => {
+    const c2 = prfMeta?.crew_member_2 || null;
+    const sub = (q?: string, h?: string) => [q, h].filter(Boolean).join(' · ');
+    const list = [{ key: 'c1', name: profile?.name || 'Crew 1', sub: sub(profile?.qualification, profile?.hpcsa_number) }];
+    if (c2) list.push({ key: 'c2', name: c2.full_name || 'Crew 2', sub: sub(c2.qualification, c2.hpcsa_number) });
+    if (Array.isArray(fd.extra_crew)) {
+      fd.extra_crew.forEach((c: any, i: number) => list.push({
+        key: `c${i + 3}`,
+        name: c.name || c.full_name || `Crew ${i + 3}`,
+        sub: sub(c.qualification, c.hpcsa_number),
+      }));
     }
+    return list;
+  };
+  const allCrewSigned = (): boolean => {
+    const sigs = fd.crew_signoff_sigs || {};
+    return getCrewSignList().every(c => !!(sigs[c.key] && String(sigs[c.key]).trim()));
+  };
+
+  const handleSubmit = async () => {
+    // Vitals-shortfall motivation gate. Three sets of vitals is the norm; in
+    // rare cases (e.g. very short transport) the crew can record fewer — that's
+    // allowed, but they must give a motivation first. RHT / death are exempt.
+    //
+    // This gate is evaluated BEFORE the in-flight guard below so the prompt can
+    // ALWAYS (re)open: if a previous submit attempt ever left submitInFlightRef
+    // stuck true, gating the popup behind that ref made every later tap return
+    // silently and the motivation block could never be reopened. We also clear
+    // the ref here defensively so the subsequent real submit isn't blocked.
+    if (vitals.length < MIN_VITALS && !fd.med_aid_dec_death && fd.call_type !== 'RHT') {
+      if (!(fd.vitals_shortfall_motivation ?? '').trim()) {
+        submitInFlightRef.current = false;
+        setVitalsMotivationOpen(true);
+        return;
+      }
+    }
+
+    // Synchronous double-tap guard — bail immediately if a submit is already
+    // running so a fast double-tap can't create two cases.
+    if (submitInFlightRef.current) return;
+    submitInFlightRef.current = true;
 
     // Final pre-submit validation runs the SUBMIT phase (6) ruleset, which
     // includes everything from earlier phases marked phases:[...,6].
@@ -4097,9 +4287,17 @@ export default function DigitalPRFForm() {
       alert(
         `Cannot submit yet — ${validationBlockers(f).length} required item(s) missing. See the highlighted issues at the top of the form.`,
       );
+      submitInFlightRef.current = false;
       return;
     }
-    if (!confirm('Submit PRF? It will be saved to the Cases page and cannot be undone.')) return;
+    // Crew sign-off gate (replaces the plain confirm). Every crew member must
+    // sign in the popup before the PRF goes through. The popup's "Confirm &
+    // Submit" calls handleSubmit again once everyone has signed.
+    if (!allCrewSigned()) {
+      submitInFlightRef.current = false;
+      setCrewSignOffOpen(true);
+      return;
+    }
     setSubmit(true);
     await doSave();
     try {
@@ -4128,15 +4326,25 @@ export default function DigitalPRFForm() {
         navigate(`/${providerSlug}/crew/dashboard`);
       }
     } catch (e: any) {
+      const statusCode = e?.response?.status;
+      if (statusCode === 401) {
+        // Session expired — preserve the submission offline so it completes
+        // automatically after re-login, then route to login.
+        try {
+          const { queueSubmit } = await import('../../services/offlineDb');
+          await queueSubmit(prfId!, buildSavePayload());
+          window.dispatchEvent(new CustomEvent('outbox-change'));
+        } catch { /* IndexedDB unavailable */ }
+        submitInFlightRef.current = false;
+        setSubmit(false);
+        handleSessionExpired();
+        return;
+      }
       // Offline fallback: queue submission to outbox
       if (!navigator.onLine || e?.code === 'ECONNABORTED' || e?.code === 'ERR_NETWORK') {
         try {
           const { queueSubmit } = await import('../../services/offlineDb');
-          await queueSubmit(prfId!, {
-            form_data: { ...fd, vitals_sets: vitals, iv_therapy: ivRows, medications: medRows },
-            vehicle_id: vehicle || null, crew_member_2_id: crew2Id || null,
-            ...timestamps, ...kms, ...sigs,
-          });
+          await queueSubmit(prfId!, buildSavePayload());
           window.dispatchEvent(new CustomEvent('outbox-change'));
           alert('You are offline. PRF has been saved locally and will submit automatically when connectivity returns.');
           navigate(`/${providerSlug}/crew/dashboard`);
@@ -4144,10 +4352,18 @@ export default function DigitalPRFForm() {
           alert('Submission failed and offline save is unavailable. Please try again.');
         }
       } else {
-        alert(e.response?.data?.detail || 'Submission failed');
+        // Surface server-side validation errors (422) clearly to the crew.
+        const detail = e?.response?.data?.detail;
+        if (statusCode === 422 && detail) {
+          const msgs = Array.isArray(detail?.errors) ? detail.errors.join('\n• ') : (detail?.message || detail);
+          alert(`Cannot submit:\n• ${msgs}`);
+        } else {
+          alert((typeof detail === 'string' ? detail : detail?.message) || 'Submission failed');
+        }
       }
     }
     setSubmit(false);
+    submitInFlightRef.current = false;
   };
 
   // ── Computed smart values ─────────────────────────────────────────────────
@@ -4424,7 +4640,8 @@ export default function DigitalPRFForm() {
                       value={editing[f.key] ?? ''}
                       onChange={e => updVS(f.key, e.target.value)}
                       placeholder=""
-                      autoComplete="off"
+                      {...NO_AUTOFILL}
+                      name={`nf-vit-${editVital}-${f.key}-${NF_NONCE}`}
                       onFocus={onF}
                       onBlur={onB}
                       style={{ ...base, marginBottom: 0 }}
@@ -4461,6 +4678,141 @@ export default function DigitalPRFForm() {
 
 
 
+  // ── QA test-fill ──────────────────────────────────────────────────────────
+  // Auto-populates the whole PRF for a chosen call-type × billing-type combo so
+  // testers can reach Submit / PDF quickly without retyping every field.
+  const TEST_MATRIX: Record<string, string[]> = {
+    PRIMARY:  ['MED AID', 'IOD', 'RAF', 'PVT', 'EVENT', 'CALL OUT FEE'],
+    IHT:      ['MED AID', 'IOD', 'RAF', 'PVT', 'EVENT', 'CALL OUT FEE'],
+    RHT:      ['MED AID', 'IOD', 'RAF', 'PVT', 'EVENT', 'CALL OUT FEE'],
+    COURTESY: ['MED AID', 'IOD', 'RAF', 'PVT', 'EVENT', 'CALL OUT FEE'],
+    RESUS:    ['MED AID', 'PVT'],
+    DOD:      ['MED AID', 'PVT'],
+  };
+  const TEST_CALL_LABEL: Record<string, string> = { IHT: 'IFT/IHT' };
+
+  const applyTestFill = (callType: string, billingType: string) => {
+    const base: Record<string, any> = {
+      call_type: callType,
+      billing_type: billingType,
+      med_aid_dec_death: callType === 'DOD',
+      med_aid_resus: callType === 'RESUS',
+      // Call information
+      incident_location: '12 Test Incident Road, Durban',
+      suburb_ward: 'Testville',
+      referring_doctor: 'Dr Test Referrer',
+      receiving_facility: 'Test General Hospital',
+      ward: 'casualty',
+      receiving_doctor: 'Dr Test Receiver',
+      // Patient (debtor marked same-as-patient for speed)
+      gender: 'Male',
+      patient_name: 'Test', patient_surname: 'Patient',
+      patient_id_number: '9001015800086', patient_dob: '1990-01-01', age: '36',
+      patient_address: '34 Test Residence Ave', patient_suburb: 'Testville', patient_postal_code: '4001',
+      patient_phone_cell: '0820000001', patient_phone_home: '0310000001', patient_phone_work: '0310000002',
+      accompanying_persons_count: '1',
+      flags: ['debtor_same_as_patient'],
+      // Priority / assessment / mechanism
+      priority: (callType === 'RESUS' || callType === 'DOD') ? '' : 'RED',
+      assessment_level: 'BLS', monitoring_level: 'BLS',
+      mechanism: ['FALL'], mechanism_other: 'Test mechanism detail',
+      // Handover / valuables / notes
+      handover_name: 'Test Handover Nurse', handover_qualification: 'PN',
+      handover_doctor_email: 'test@hospital.example', handover_notes: 'Stable on handover',
+      valuables_handed_to: 'Test Security', valuables_description: 'Phone and wallet',
+      management_notes: 'Test management narrative for QA fill.',
+      motivation_notes: 'Test motivation / other notes for QA fill.',
+      // Oxygen / airway / circulation / immobilisation
+      o2_flow_rate: '8', o2_percent: '60', o2_device: 'NRB', o2_bvm: 'No',
+      o2_start_time: '09:40', o2_stop_time: '10:00',
+      airway_interventions: ['SELF-MAINTAINED'],
+      circulation_interventions: ['PERIPH. IV LINE'], iv_attempts: '1',
+      immob_equipment: ['COLLAR'],
+      // Surveys
+      survey_a: 'Clear', survey_b: 'Equal AE', survey_c: 'Strong pulse',
+      survey_head_back: 'NAD', survey_neuro: 'GCS 15', survey_chest: 'Clear',
+      survey_abdo: 'Soft', survey_limbs: 'Intact', survey_back: 'NAD',
+      // History
+      chief_complaint: 'Test chief complaint', primary_diagnosis: 'Test diagnosis',
+      findings_on_arrival: 'Test findings', allergies: 'NKDA', current_medications: 'None',
+      past_medical_history: 'None', last_meal: 'Breakfast', last_meal_time: '07:00',
+      events_hpi: 'Test HPI narrative',
+    };
+
+    // Call-type-specific extras
+    if (callType === 'DOD') {
+      base.med_aid_dec_death_time = '09:45';
+      base.med_aid_dec_death_declared_by = 'Dr Test';
+      base.med_aid_dec_death_hpcsa = 'PHC123';
+    }
+    if (callType === 'RESUS') {
+      base.med_aid_resus_level = 'ALS';
+      base.med_aid_resus_fee = '1500';
+    }
+    if (callType === 'IHT') {
+      base.transfer_subtype = 'IHT';
+      base.preauth_number = 'PRE-TEST-001';
+      base.post_auth_number = 'POST-TEST-001';
+    }
+    if (callType === 'RHT') {
+      base.rht_call_out_fee = '750';
+      base.return_despatch_time = '11:00';
+      base.return_on_scene_time = '11:10';
+      base.return_depart_scene_time = '11:20';
+      base.return_at_destination_time = '11:40';
+      base.return_handover_time = '11:45';
+      base.return_available_time = '11:55';
+    }
+
+    // Billing-type-specific extras
+    switch (billingType) {
+      case 'MED AID':
+        Object.assign(base, { medical_scheme: 'Discovery Health', medical_aid_number: 'MA-TEST-123', dependent_number: '01', main_member_id: 'MM-TEST-1', scheme_option: 'Classic Comprehensive' });
+        break;
+      case 'IOD':
+        Object.assign(base, { compensation_reference: 'IOD-REF-1', wca_employer: 'Test Employer', wca_employee_number: 'EMP-1', wca_injury_date: '2026-06-10', wca_oar_number: 'OAR-1' });
+        break;
+      case 'RAF':
+        Object.assign(base, { compensation_reference: 'RAF-REF-1', raf_accident_date: '2026-06-10', raf_police_case_number: 'CAS-1', raf_accident_location: 'N2 Highway' });
+        break;
+      case 'PVT':
+        Object.assign(base, { pvt_payment_method: 'EFT', pvt_account_holder: 'Test Holder', pvt_account_holder_id: '9001015800086', pvt_account_holder_phone: '0820000009', pvt_account_holder_address: '34 Test Ave' });
+        break;
+      case 'EVENT':
+        Object.assign(base, { event_name: 'Test Event', event_organiser: 'Test Org', event_date: '2026-06-12', event_booking_ref: 'BK-1', event_contact_person: 'Test Contact' });
+        break;
+      case 'CALL OUT FEE':
+        Object.assign(base, { callout_requested_by: 'Test Requester', callout_authorisation: 'AUTH-1', callout_standdown_reason: 'Stood down on arrival' });
+        break;
+    }
+
+    setFd(prev => ({ ...prev, ...base }));
+
+    // Times + odometer
+    const now = Date.now();
+    const iso = (m: number) => new Date(now + m * 60000).toISOString();
+    setTs(prev => ({ ...prev,
+      time_dispatched: iso(0), time_mobile: iso(2), time_on_scene: iso(6),
+      time_depart_scene: iso(20), time_at_destination: iso(30), time_available: iso(40),
+    }));
+    setKms(prev => ({ ...prev,
+      km_dispatched: '23', km_mobile: '24', km_on_scene: '24',
+      km_depart_scene: '45', km_at_destination: '45', km_available: '70',
+    }));
+
+    // 3 vitals sets + IV / medication rows
+    setVitals([
+      { time: '09:45', resp_rate: '18', spo2: '97', hr: '88', bp: '130/85', gcs_e: '4', gcs_v: '5', gcs_m: '6', gcs_total: '15', temp: '36.8', pain: '6' },
+      { time: '09:55', resp_rate: '17', spo2: '98', hr: '84', bp: '128/84', gcs_e: '4', gcs_v: '5', gcs_m: '6', gcs_total: '15', temp: '36.7', pain: '4' },
+      { time: '10:05', resp_rate: '16', spo2: '99', hr: '80', bp: '126/82', gcs_e: '4', gcs_v: '5', gcs_m: '6', gcs_total: '15', temp: '36.6', pain: '3' },
+    ]);
+    setIvRows([{ type: 'Ringers', jelco_size: '18G', site: 'L cubital', vol_infused: '500', time_up: '09:50', indication: 'Volume', sign: 'TT' }]);
+    setMedRows([{ type: 'Morphine', route: 'IV', dose: '5mg', time: '09:55', reason: 'Analgesia', sign: 'TT' }]);
+
+    dirtyRef.current = true;
+    setTestFillOpen(false);
+  };
+
   // ── Phase 0: DISPATCH ─────────────────────────────────────────────────────
   const P0 = () => {
     const startExamBtn = (
@@ -4486,6 +4838,62 @@ export default function DigitalPRFForm() {
 
     return (
     <div>
+      {/* QA / Dev test-fill — quickly populate the whole PRF for a chosen
+          call-type × billing-type combination. Lives on the Dispatch screen so
+          it's reachable for every call type (the En Route phase is auto-skipped). */}
+      <button
+        type="button"
+        onClick={() => setTestFillOpen(true)}
+        style={{
+          width: '100%', padding: '12px', borderRadius: 12, marginBottom: 16,
+          border: `2px dashed ${S300}`, background: S50, color: S700,
+          fontSize: '0.85rem', fontWeight: 800, cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+        }}
+      >
+        🧪 Test Fill — auto-populate for testing
+      </button>
+
+      {testFillOpen && (
+        <div
+          onClick={() => setTestFillOpen(false)}
+          style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(15,23,42,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{ background: W, borderRadius: 16, padding: '22px 20px', maxWidth: 460, width: '100%', maxHeight: '85vh', overflowY: 'auto', boxShadow: '0 16px 48px rgba(0,0,0,0.3)' }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+              <div style={{ fontSize: '1.05rem', fontWeight: 900, color: S900 }}>Test Fill</div>
+              <button type="button" onClick={() => setTestFillOpen(false)} style={{ background: S100, border: 'none', borderRadius: 8, padding: '6px 12px', fontSize: '0.8rem', fontWeight: 700, color: S600, cursor: 'pointer' }}>Close</button>
+            </div>
+            <div style={{ fontSize: '0.82rem', color: S600, lineHeight: 1.45, marginBottom: 16 }}>
+              Pick a call type, then a billing type. The form will be auto-filled with realistic test data for that combination.
+            </div>
+            {Object.keys(TEST_MATRIX).map(ct => (
+              <div key={ct} style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: '0.72rem', fontWeight: 800, color: S700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>
+                  {TEST_CALL_LABEL[ct] ?? ct}
+                  {(ct === 'RESUS' || ct === 'DOD') && <span style={{ color: S400, fontWeight: 600, textTransform: 'none', letterSpacing: 0 }}> · restricted</span>}
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {TEST_MATRIX[ct].map(bt => (
+                    <button
+                      key={bt}
+                      type="button"
+                      onClick={() => applyTestFill(ct, bt)}
+                      style={{ padding: '8px 12px', borderRadius: 8, fontSize: '0.78rem', fontWeight: 700, border: `1.5px solid ${S200}`, background: S50, color: S700, cursor: 'pointer' }}
+                    >
+                      {bt}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <SHdr t="Call Type" />
       <CallTypePicker onPick={(type) => {
         if (type === 'PRIMARY' || type === 'RESUS' || type === 'COURTESY' || type === 'DOD') {
@@ -4738,6 +5146,7 @@ export default function DigitalPRFForm() {
   const P1 = () => (
     <>
       <SHdr t="En Route" />
+
       {TimeTable({ rows: ALL_TIME_ROWS.filter(r => r.phase === 1) })}
 
       <SHdr t="Call Information" />
@@ -5379,6 +5788,7 @@ export default function DigitalPRFForm() {
                   { l: 'Site', k: 'site' },
                   { l: 'Vol. Infused', k: 'vol_infused' },
                   { l: 'Time Up', k: 'time_up' },
+                  { l: 'Indication / Reason', k: 'indication' },
                 ] as Array<{ l: string; k: string; opts?: string[] }>).map(f => (
                   <div key={f.k}>
                     <Lbl t={f.l} />
@@ -5694,6 +6104,12 @@ export default function DigitalPRFForm() {
         </div>
         <Card>
           <Lbl t="Chief Complaint / Signs and Symptoms" req /><VoiceTxt fk="chief_complaint" ph="Patient's primary complaint, signs and symptoms..." rows={2} />
+          <Lbl t="Primary Diagnosis" req /><Inp fk="primary_diagnosis" ph="e.g. Suspected appendicitis?" req onBlur={e => {
+            const val = e.target.value.trim();
+            if (val && !val.endsWith('?')) {
+              sf('primary_diagnosis', val + '?');
+            }
+          }} />
           <Lbl t="Findings on Arrival" /><VoiceTxt fk="findings_on_arrival" ph="What you observed on arrival..." rows={2} />
           <Lbl t="Allergies" req /><Inp fk="allergies" ph="Known allergies (or None Known)" req />
           <Lbl t="Current Medications" /><Txt fk="current_medications" ph="List current medications..." rows={2} />
@@ -5949,25 +6365,28 @@ export default function DigitalPRFForm() {
         ) : (
           <>
             <Lbl t="Destination" /><HospitalPicker wardKey="ward" />
-            <Lbl t="Ward / Unit" /><Inp fk="ward" ph="e.g. C.I.C.U" />
+            <Lbl t="Ward / Unit" />
+            <input
+              type="text"
+              value={fd.ward ?? ''}
+              onChange={e => sf('ward', e.target.value)}
+              onFocus={e => {
+                // Clear the 'casualty' default the moment the crew taps in so
+                // they can type the actual ward without deleting it manually.
+                if ((fd.ward ?? '').trim().toLowerCase() === 'casualty') sf('ward', '');
+                onF(e);
+              }}
+              onBlur={e => {
+                // Field is always filled — restore the default if left blank.
+                if (!(fd.ward ?? '').trim()) sf('ward', 'casualty');
+                onB(e);
+              }}
+              placeholder=""
+              autoComplete="off"
+              style={{ ...base, marginBottom: 14, borderColor: '#e2e8f0' }}
+            />
 
-
-            <Lbl t="Qualification" /><Inp fk="handover_qualification" ph="e.g. RN, Dr, Paramedic" />
-            <Lbl t="Receiving Facility Email" /><Inp fk="handover_doctor_email" ph="dr@hospital.co.za" type="email" />
-            <Lbl t="Condition on Handover" /><Txt fk="handover_notes" ph="Patient condition at time of handover..." rows={2} />
-            <div style={{ marginTop: 14 }}>
-              <Lbl t="Patient Documents" />
-              <PatientDocumentsCapture
-                docs={{
-                  hospital_sticker: fd.hospital_sticker,
-                  admission_form_image: fd.admission_form_image,
-                  id_document_image: fd.id_document_image,
-                  medical_aid_image: fd.medical_aid_image,
-                }}
-                onChange={(key, v) => sf(key, v)}
-              />
-            </div>
-            <div style={{ marginTop: 14 }}>
+            <div style={{ marginBottom: 14 }}>
               <Lbl t={fd.call_type === 'COURTESY' ? "Receiving Practitioner / Person" : "Receiving Practitioner"} />
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
                 <div style={{ flex: 1 }}>
@@ -5989,6 +6408,22 @@ export default function DigitalPRFForm() {
                   onChange={v => { setSigs(p => ({ ...p, handover_signature: v })); dirtyRef.current = true; }}
                 />
               </div>
+            </div>
+
+            <Lbl t="HPCSA No." /><Inp fk="handover_qualification" ph="e.g. PR0123456" />
+            <Lbl t="Receiving Facility Email" /><Inp fk="handover_doctor_email" ph="dr@hospital.co.za" type="email" />
+            <Lbl t="Condition on Handover" /><Txt fk="handover_notes" ph="Patient condition at time of handover..." rows={2} />
+            <div style={{ marginTop: 14 }}>
+              <Lbl t="Patient Documents" />
+              <PatientDocumentsCapture
+                docs={{
+                  hospital_sticker: fd.hospital_sticker,
+                  admission_form_image: fd.admission_form_image,
+                  id_document_image: fd.id_document_image,
+                  medical_aid_image: fd.medical_aid_image,
+                }}
+                onChange={(key, v) => sf(key, v)}
+              />
             </div>
           </>
         )}
@@ -6220,12 +6655,156 @@ export default function DigitalPRFForm() {
 
             <SHdr t="Final Management Notes" />
             <VoiceTxt fk="management_notes" ph="Full clinical narrative — complete account of care provided..." rows={6} />
+
+            <SHdr t="Motivation / Other Notes" />
+            <VoiceTxt fk="motivation_notes" ph="Billing motivation / other notes — e.g. times, A/B/C/D, IV, drugs, immobilisation." rows={3} />
+
+            {/* Terms & Conditions — patient/representative acknowledgment of
+                treatment, financial responsibility, data disclosure, assumption
+                of risk and indemnity. Company name is the crew's provider. */}
+            <SHdr t="Terms and Conditions" />
+            <Card>
+              {(() => {
+                const company = profile?.provider_name || 'the Service Provider';
+                const clauses: Array<[string, string]> = [
+                  ['Acknowledgment of Treatment & Financial Responsibility',
+                    `I, the person whose name appears on this form as the patient, patient's parent, patient's guardian, or authorized representative, hereby acknowledge that the treatment and/or transportation noted on this document was received by the patient. I accept full responsibility for all payments associated with such treatment and/or transport as recorded on this document, irrespective of whether I am covered by a medical aid scheme or not.`],
+                  ['Authorization for Data Disclosure & Debt Collection',
+                    `I hereby authorize ${company} to disclose any patient details in this document to third parties (for example, the Road Accident Fund, Compensation Commissioner, or collection agencies) and to trace any details not contained in this document to assist in the collection of any overdue or outstanding amounts due in respect of the treatment or transport provided to the patient by ${company}.`],
+                  ['Assumption of Risk',
+                    `I hereby accept all risks associated with the emergency medical treatment and/or transportation provided or to be provided by ${company}.`],
+                  ['Indemnity & Release of Liability',
+                    `I hereby release ${company} (including its directors, employees, agents, and representatives) from any liability, and indemnify and hold ${company} harmless against all loss, damages, or claims arising from or related to the emergency medical treatment and/or transportation provided or to be provided by ${company} as noted in this form.`],
+                ];
+                return (
+                  <div style={{ fontSize: '0.8rem', color: S700, lineHeight: 1.5 }}>
+                    {clauses.map(([h, b], idx) => (
+                      <div key={idx} style={{ marginBottom: 10 }}>
+                        <div style={{ fontWeight: 800, color: S900, marginBottom: 2 }}>{idx + 1}. {h}</div>
+                        <div>{b}</div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+              <div style={{ marginTop: 8 }}>
+                <FullscreenSignaturePad
+                  label="Patient / Representative Signature"
+                  value={fd.tc_patient_signature}
+                  onChange={v => { sf('tc_patient_signature', v); }}
+                />
+                <FullscreenSignaturePad
+                  label="Witness Signature"
+                  value={fd.tc_witness_signature}
+                  onChange={v => { sf('tc_witness_signature', v); }}
+                />
+                <FullscreenSignaturePad
+                  label="Next of Kin Signature"
+                  value={fd.next_of_kin_signature}
+                  onChange={v => { sf('next_of_kin_signature', v); }}
+                />
+              </div>
+            </Card>
           </>
         )}
 
         <button type="button" onClick={handleSubmit} disabled={submitting} style={{ width: '100%', padding: 18, borderRadius: 14, fontSize: '1.05rem', fontWeight: 800, border: 'none', cursor: submitting ? 'wait' : 'pointer', background: submitting ? S400 : `linear-gradient(135deg,${ROSE},#be123c)`, color: W, boxShadow: submitting ? 'none' : `0 6px 24px rgba(225,29,72,0.3)` }}>
           {submitting ? 'Submitting PRF...' : 'Complete & Submit PRF'}
         </button>
+
+        {/* Motivation prompt — shown when submitting with fewer than 3 vital sets. */}
+        {vitalsMotivationOpen && (
+          <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(15,23,42,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+            <div style={{ background: W, borderRadius: 16, padding: '22px 20px', maxWidth: 420, width: '100%', boxShadow: '0 12px 40px rgba(0,0,0,0.25)' }}>
+              <div style={{ fontSize: '1rem', fontWeight: 800, color: S900, marginBottom: 8 }}>
+                Fewer than 3 sets of vitals
+              </div>
+              <div style={{ fontSize: '0.84rem', color: S600, lineHeight: 1.5, marginBottom: 14 }}>
+                Only {vitals.length} set{vitals.length === 1 ? '' : 's'} of vitals {vitals.length === 1 ? 'was' : 'were'} recorded. Please give a brief motivation for why fewer than 3 sets were taken before submitting.
+              </div>
+              {/* Voice-to-text enabled — the crew can tap the mic and dictate
+                  the motivation instead of typing (gloves-on friendly). */}
+              <VoiceTxt fk="vitals_shortfall_motivation" ph="e.g. Very short transport time; patient handed over within minutes." rows={4} />
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button
+                  type="button"
+                  onClick={() => { setVitalsMotivationOpen(false); submitInFlightRef.current = false; }}
+                  style={{ flex: 1, padding: '12px 0', borderRadius: 10, fontWeight: 700, border: `2px solid ${S200}`, background: W, color: S600, cursor: 'pointer' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={!(fd.vitals_shortfall_motivation ?? '').trim()}
+                  onClick={() => { setVitalsMotivationOpen(false); submitInFlightRef.current = false; void handleSubmit(); }}
+                  style={{
+                    flex: 2, padding: '12px 0', borderRadius: 10, fontWeight: 800, border: 'none', color: W,
+                    background: (fd.vitals_shortfall_motivation ?? '').trim() ? `linear-gradient(135deg,${ROSE},#be123c)` : S400,
+                    cursor: (fd.vitals_shortfall_motivation ?? '').trim() ? 'pointer' : 'not-allowed',
+                  }}
+                >
+                  Continue & Submit
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Crew sign-off — every crew member signs before the PRF is submitted. */}
+        {crewSignOffOpen && (
+          <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(15,23,42,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+            <div style={{ background: W, borderRadius: 16, padding: '22px 20px', maxWidth: 460, width: '100%', maxHeight: '85vh', overflowY: 'auto', boxShadow: '0 12px 40px rgba(0,0,0,0.25)' }}>
+              <div style={{ fontSize: '1.05rem', fontWeight: 900, color: S900, marginBottom: 6 }}>Crew Sign-Off</div>
+              <div style={{ fontSize: '0.84rem', color: S600, lineHeight: 1.5, marginBottom: 8 }}>
+                Each crew member must sign to submit this PRF. Tap the pencil next to your name.
+              </div>
+              {getCrewSignList().map(c => {
+                const cs = fd.crew_signoff_sigs || {};
+                return (
+                  <div key={c.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '10px 0', borderTop: `1px solid ${S100}` }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, color: S900, fontSize: '0.9rem' }}>{c.name}</div>
+                      {c.sub ? <div style={{ fontSize: '0.74rem', color: S500 }}>{c.sub}</div> : null}
+                    </div>
+                    <FullscreenSignaturePad
+                      compact
+                      label={`${c.name} Signature`}
+                      value={cs[c.key] || null}
+                      onChange={v => {
+                        sf('crew_signoff_sigs', { ...(fd.crew_signoff_sigs || {}), [c.key]: v });
+                        // Mirror crew 1 to the dedicated crew_signature column so it
+                        // shows in the existing PDF crew strip.
+                        if (c.key === 'c1') setSigs(p => ({ ...p, crew_signature: v }));
+                        dirtyRef.current = true;
+                      }}
+                    />
+                  </div>
+                );
+              })}
+              <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+                <button
+                  type="button"
+                  onClick={() => { setCrewSignOffOpen(false); submitInFlightRef.current = false; }}
+                  style={{ flex: 1, padding: '12px 0', borderRadius: 10, fontWeight: 700, border: `2px solid ${S200}`, background: W, color: S600, cursor: 'pointer' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={!allCrewSigned()}
+                  onClick={() => { setCrewSignOffOpen(false); submitInFlightRef.current = false; void handleSubmit(); }}
+                  style={{
+                    flex: 2, padding: '12px 0', borderRadius: 10, fontWeight: 800, border: 'none', color: W,
+                    background: allCrewSigned() ? `linear-gradient(135deg,${ROSE},#be123c)` : S400,
+                    cursor: allCrewSigned() ? 'pointer' : 'not-allowed',
+                  }}
+                >
+                  Confirm & Submit
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </>
     );
   };
@@ -7308,12 +7887,14 @@ export default function DigitalPRFForm() {
                 type="text"
                 inputMode="numeric"
                 pattern="[0-9]*"
+                {...NO_AUTOFILL}
+                name={`nf-km_dispatched-${NF_NONCE}`}
                 value={kms.km_dispatched ?? ''}
-                onChange={e => handleKmChange('km_dispatched', e.target.value.replace(/[^0-9]/g, ''))}
+                onChange={e => handleKmChange('km_dispatched', e.target.value.replace(/[^0-9.]/g, ''))}
                 onFocus={onF}
                 onBlur={e => {
                   onB();
-                  handleKmCommit('km_dispatched', e.target.value.replace(/[^0-9]/g, ''));
+                  handleKmCommit('km_dispatched', e.target.value.replace(/[^0-9.]/g, ''));
                 }}
                 placeholder="e.g. 14250"
                 style={{ ...base, marginBottom: 12, borderColor: '#e2e8f0' }}
@@ -7369,11 +7950,11 @@ export default function DigitalPRFForm() {
                 inputMode="numeric"
                 pattern="[0-9]*"
                 value={kms.km_on_scene ?? ''}
-                onChange={e => handleKmChange('km_on_scene', e.target.value.replace(/[^0-9]/g, ''))}
+                onChange={e => handleKmChange('km_on_scene', e.target.value.replace(/[^0-9.]/g, ''))}
                 onFocus={onF}
                 onBlur={e => {
                   onB();
-                  handleKmCommit('km_on_scene', e.target.value.replace(/[^0-9]/g, ''));
+                  handleKmCommit('km_on_scene', e.target.value.replace(/[^0-9.]/g, ''));
                 }}
                 placeholder="e.g. 14265"
                 style={{ ...base, marginBottom: 12, borderColor: '#e2e8f0' }}
@@ -7432,11 +8013,11 @@ export default function DigitalPRFForm() {
                 inputMode="numeric"
                 pattern="[0-9]*"
                 value={kms.km_depart_scene ?? ''}
-                onChange={e => handleKmChange('km_depart_scene', e.target.value.replace(/[^0-9]/g, ''))}
+                onChange={e => handleKmChange('km_depart_scene', e.target.value.replace(/[^0-9.]/g, ''))}
                 onFocus={onF}
                 onBlur={e => {
                   onB();
-                  handleKmCommit('km_depart_scene', e.target.value.replace(/[^0-9]/g, ''));
+                  handleKmCommit('km_depart_scene', e.target.value.replace(/[^0-9.]/g, ''));
                 }}
                 placeholder="e.g. 14270"
                 style={{ ...base, marginBottom: 12, borderColor: '#e2e8f0' }}
@@ -7498,11 +8079,11 @@ export default function DigitalPRFForm() {
                 inputMode="numeric"
                 pattern="[0-9]*"
                 value={kms.km_at_destination ?? ''}
-                onChange={e => handleKmChange('km_at_destination', e.target.value.replace(/[^0-9]/g, ''))}
+                onChange={e => handleKmChange('km_at_destination', e.target.value.replace(/[^0-9.]/g, ''))}
                 onFocus={onF}
                 onBlur={e => {
                   onB();
-                  handleKmCommit('km_at_destination', e.target.value.replace(/[^0-9]/g, ''));
+                  handleKmCommit('km_at_destination', e.target.value.replace(/[^0-9.]/g, ''));
                 }}
                 placeholder="e.g. 14285"
                 style={{ ...base, marginBottom: 12, borderColor: '#e2e8f0' }}

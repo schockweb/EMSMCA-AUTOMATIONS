@@ -21,6 +21,7 @@ from app.models.crew_member import CrewMember
 from app.models.service_provider import ServiceProvider
 from app.utils.security import (
     verify_password,
+    verify_password_async,
     hash_password,
     create_access_token,
     decode_token,
@@ -95,7 +96,9 @@ async def crew_login(body: CrewLoginRequest, db: AsyncSession = Depends(get_db))
     )
     crew = result.scalar_one_or_none()
 
-    if not crew or not verify_password(body.password, crew.hashed_password):
+    # Run bcrypt in a thread executor so the event loop (and DB pool) isn't
+    # blocked by the ~200 ms CPU-bound hash check.
+    if not crew or not await verify_password_async(body.password, crew.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     if not crew.is_active:

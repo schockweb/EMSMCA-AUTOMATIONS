@@ -24,10 +24,12 @@ function ctx(overrides: Partial<ValidationContext> = {}): ValidationContext {
     vitalsCount: 3,
     ivCount: 0,
     medCount: 0,
+    medTypesLower: '',
     hasCrew2: true,
     hasPatientSig: true,
     hasCrewSig: true,
     hasHandoverSig: true,
+    sceneMinutes: null,
     totalCallMinutes: null,
     patientCarryingKm: null,
     ...overrides,
@@ -129,6 +131,23 @@ describe('NTC-4-ICD10-PRIMARY — standard ICD-10 format', () => {
 
   it('fails for a code missing the leading letter', () => {
     expect(evalRule('NTC-4-ICD10-PRIMARY', { icd10_primary: '21.0' })).toBe(false);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Primary Diagnosis (NTC-3.7-PRIMARY-DIAGNOSIS)
+// ══════════════════════════════════════════════════════════════════════════════
+describe('NTC-3.7-PRIMARY-DIAGNOSIS — primary diagnosis must end with a question mark', () => {
+  it('passes when diagnosis is present and ends with a question mark', () => {
+    expect(evalRule('NTC-3.7-PRIMARY-DIAGNOSIS', { primary_diagnosis: 'Suspected appendicitis?' })).toBe(true);
+  });
+
+  it('fails when diagnosis does not end with a question mark', () => {
+    expect(evalRule('NTC-3.7-PRIMARY-DIAGNOSIS', { primary_diagnosis: 'Suspected appendicitis' })).toBe(false);
+  });
+
+  it('fails when diagnosis is empty', () => {
+    expect(evalRule('NTC-3.7-PRIMARY-DIAGNOSIS', { primary_diagnosis: '' })).toBe(false);
   });
 });
 
@@ -317,11 +336,75 @@ describe('blockers() and warnings() filter functions', () => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-// validatePhase — live-rollout short-circuit
+// validatePhase — Discovery warn-only surfacing
 // ══════════════════════════════════════════════════════════════════════════════
-describe('validatePhase — returns empty array (disabled for live rollout)', () => {
-  it('always returns [] regardless of phase or data', () => {
+describe('validatePhase — legacy "all" rules stay suppressed', () => {
+  it('returns [] when no scheme is supplied (crew never warned by all-rules)', () => {
     expect(validatePhase(6, { icd10_primary: 'INVALID' }, ctx())).toEqual([]);
     expect(validatePhase(0, {}, ctx({ vitalsCount: 0 }))).toEqual([]);
+  });
+
+  it('returns [] for a non-Discovery scheme', () => {
+    expect(validatePhase(6, { icd10_primary: 'INVALID' }, ctx(), 'Netcare 911')).toEqual([]);
+  });
+});
+
+describe('validatePhase — Discovery rules surface as non-blocking warnings only', () => {
+  const DISCOVERY = 'Discovery Health Medical Scheme';
+
+  it('every finding for a Discovery claim is a warning (never a blocker)', () => {
+    // A claim that trips several rules: ALS billed with no ALS treatment, no member no.
+    const data: PrfData = {
+      assessment_level: 'ALS', billing_type: 'Med Aid', receiving_facility: 'Test Hosp',
+    };
+    const findings = validatePhase(6, data, ctx({ vitalsCount: 0 }), DISCOVERY);
+    expect(findings.length).toBeGreaterThan(0);
+    expect(findings.every(f => f.severity === 'warn')).toBe(true);
+    expect(blockers(findings)).toHaveLength(0);
+  });
+
+  it('warns when member number is missing on a med-aid claim', () => {
+    const findings = validatePhase(6, { billing_type: 'Med Aid' }, ctx(), DISCOVERY);
+    expect(findings.some(f => f.id === 'DISC-MEMBER-NUMBER')).toBe(true);
+  });
+
+  it('does NOT warn about member number when it is present', () => {
+    const findings = validatePhase(6, { billing_type: 'Med Aid', medical_aid_number: 'MA123' }, ctx(), DISCOVERY);
+    expect(findings.some(f => f.id === 'DISC-MEMBER-NUMBER')).toBe(false);
+  });
+
+  it('warns when an IFT over 100 km has no pre-auth number', () => {
+    const findings = validatePhase(6, { call_type: 'IFT' }, ctx({ patientCarryingKm: 140 }), DISCOVERY);
+    expect(findings.some(f => f.id === 'DISC-IFT-100KM-PREAUTH')).toBe(true);
+  });
+
+  it('does NOT warn about pre-auth when the IFT is under 100 km', () => {
+    const findings = validatePhase(6, { call_type: 'IFT' }, ctx({ patientCarryingKm: 40 }), DISCOVERY);
+    expect(findings.some(f => f.id === 'DISC-IFT-100KM-PREAUTH')).toBe(false);
+  });
+
+  it('warns when ALS is billed with no ALS treatment or motivation', () => {
+    const findings = validatePhase(3, { assessment_level: 'ALS' }, ctx(), DISCOVERY);
+    expect(findings.some(f => f.id === 'DISC-ALS-INDICATION')).toBe(true);
+  });
+
+  it('clears the ALS warning when an ALS drug is recorded', () => {
+    const findings = validatePhase(3, { assessment_level: 'ALS' }, ctx({ medTypesLower: 'morphine' }), DISCOVERY);
+    expect(findings.some(f => f.id === 'DISC-ALS-INDICATION')).toBe(false);
+  });
+
+  it('warns when scene time exceeds 20 minutes with no motivation', () => {
+    const findings = validatePhase(6, {}, ctx({ sceneMinutes: 35 }), DISCOVERY);
+    expect(findings.some(f => f.id === 'DISC-SCENE-TIME-20')).toBe(true);
+  });
+
+  it('clears the scene-time warning when a motivation is documented', () => {
+    const findings = validatePhase(6, { management_notes: 'Prolonged extrication by fire dept' }, ctx({ sceneMinutes: 35 }), DISCOVERY);
+    expect(findings.some(f => f.id === 'DISC-SCENE-TIME-20')).toBe(false);
+  });
+
+  it('warns when a transport has no documented clinical need', () => {
+    const findings = validatePhase(6, { receiving_facility: 'Test Hosp' }, ctx({ vitalsCount: 0, medCount: 0, ivCount: 0 }), DISCOVERY);
+    expect(findings.some(f => f.id === 'DISC-NO-CLINICAL-NEED')).toBe(true);
   });
 });

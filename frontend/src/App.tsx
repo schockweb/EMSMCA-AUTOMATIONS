@@ -198,7 +198,10 @@ export default function App() {
               doesn't collide with the editable /prf/:prfId route below. */}
           <Route path="/:providerSlug/crew/prf-view/:caseId" element={<PRFView />} />
           <Route path="/:providerSlug/crew/dashboard" element={<CrewDashboard />} />
-          <Route path="/:providerSlug/crew/prf/:prfId" element={<DigitalPRFForm />} />
+          {/* Dedicated boundary around the PRF form so a render error in this
+              large component shows a localized recovery screen instead of
+              white-screening the whole app mid-shift. */}
+          <Route path="/:providerSlug/crew/prf/:prfId" element={<ErrorBoundary><DigitalPRFForm /></ErrorBoundary>} />
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

@@ -38,6 +38,16 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
 
 
+async def verify_password_async(plain_password: str, hashed_password: str) -> bool:
+    """Non-blocking bcrypt verify — runs in a thread so the event loop (and DB
+    connections) aren't held hostage by the ~200 ms CPU-bound hash check."""
+    import asyncio
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        None, verify_password, plain_password, hashed_password
+    )
+
+
 # ── Password Complexity Validation ────────────────
 
 def validate_password_complexity(password: str) -> None:

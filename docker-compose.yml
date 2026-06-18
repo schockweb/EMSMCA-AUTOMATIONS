@@ -24,11 +24,14 @@ services:
       dockerfile: Dockerfile
     container_name: ems_backend
     restart: unless-stopped
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     env_file:
       - .env
       - ./backend/.env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres.pssxfjbstlznijbjgfdo:MichaelSchuttler924@aws-0-eu-west-1.pooler.supabase.com:5432/postgres?ssl=require
+      - DATABASE_URL=postgresql+asyncpg://postgres.pssxfjbstlznijbjgfdo:MichaelSchuttler924@aws-0-eu-west-1.pooler.supabase.com:6543/postgres?ssl=require&prepared_statement_cache_size=0
       - CELERY_BROKER_URL=amqp://${RABBITMQ_USER:-ems_rabbit}:${RABBITMQ_PASS:-rabbit_secure_2024}@rabbitmq:5672//
       - UPLOAD_DIR=/app/uploads
     ports:
@@ -47,11 +50,14 @@ services:
       dockerfile: Dockerfile
     container_name: ems_celery_worker
     restart: unless-stopped
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     env_file:
       - .env
       - ./backend/.env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres.pssxfjbstlznijbjgfdo:MichaelSchuttler924@aws-0-eu-west-1.pooler.supabase.com:5432/postgres?ssl=require
+      - DATABASE_URL=postgresql+asyncpg://postgres.pssxfjbstlznijbjgfdo:MichaelSchuttler924@aws-0-eu-west-1.pooler.supabase.com:6543/postgres?ssl=require&prepared_statement_cache_size=0
       - CELERY_BROKER_URL=amqp://${RABBITMQ_USER:-ems_rabbit}:${RABBITMQ_PASS:-rabbit_secure_2024}@rabbitmq:5672//
       - UPLOAD_DIR=/app/uploads
     volumes:

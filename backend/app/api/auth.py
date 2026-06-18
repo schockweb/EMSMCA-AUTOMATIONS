@@ -17,6 +17,7 @@ from app.schemas.auth import LoginRequest, TokenResponse, RefreshRequest, UserPr
 from app.models.user import ALL_PERMISSIONS
 from app.utils.security import (
     verify_password,
+    verify_password_async,
     create_access_token,
     create_refresh_token,
     decode_token,
@@ -94,7 +95,7 @@ async def login(
             user.locked_until = None
 
     # ── Validate credentials ──
-    if not user or not verify_password(form_data.password, user.hashed_password):
+    if not user or not await verify_password_async(form_data.password, user.hashed_password):
         # Record failed attempt
         if user:
             user.failed_login_attempts = (user.failed_login_attempts or 0) + 1

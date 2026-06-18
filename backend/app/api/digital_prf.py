@@ -46,6 +46,12 @@ class PRFCreateRequest(BaseModel):
 class PRFSaveRequest(BaseModel):
     """Auto-save payload — sent every 5 seconds from the mobile form."""
     form_data: dict | None = None
+    # Optimistic concurrency: the `updated_at` value the client last received
+    # from the server (via GET or a previous save). If another writer has since
+    # touched this row, the server rejects the save with 409 so the client can
+    # refetch and avoid silently clobbering newer data. Optional — when omitted
+    # the save proceeds (backward compatible).
+    client_base_updated_at: str | None = None
     # Real-time timestamp markers (ISO strings from frontend)
     time_call_received: str | None = None
     time_dispatched: str | None = None
@@ -124,6 +130,65 @@ def _generate_case_number(provider_slug: str, prf_number: int) -> str:
 
 
 # ═══════════════════════════════════════════════════════════
+# Access control helpers (multi-tenant isolation)
+# ═══════════════════════════════════════════════════════════
+# Every crew-facing endpoint must load a PRF through `_load_crew_prf` so that a
+# crew member can never read or mutate a PRF belonging to another provider
+# (another of the 105 client companies). Loading a PRF by id alone — without a
+# provider check — is a cross-tenant PHI leak.
+
+async def _load_crew_prf(
+    db: AsyncSession,
+    prf_id: str,
+    crew: CrewMember,
+    *,
+    require_owner: bool = True,
+    allow_crew2: bool = False,
+) -> DigitalPRF:
+    """Load a PRF and enforce tenant + ownership access control.
+
+    - 400 if `prf_id` is not a valid UUID.
+    - 404 if the PRF does not exist OR belongs to a different provider. We use
+      404 (not 403) for the cross-tenant case so the API never confirms the
+      existence of another company's PRF.
+    - If `require_owner`: 403 when the caller is not the PRF creator
+      (`crew_member_1_id`). When `allow_crew2` is True the second crew member on
+      the PRF is also permitted (e.g. read-only review).
+    """
+    try:
+        pid = uuid.UUID(prf_id)
+    except (ValueError, TypeError):
+        raise HTTPException(400, "Invalid PRF id")
+
+    result = await db.execute(select(DigitalPRF).where(DigitalPRF.id == pid))
+    prf = result.scalar_one_or_none()
+    if not prf or prf.provider_id != crew.provider_id:
+        raise HTTPException(404, "PRF not found")
+
+    if require_owner:
+        permitted = {prf.crew_member_1_id}
+        if allow_crew2:
+            permitted.add(prf.crew_member_2_id)
+        if crew.id not in permitted:
+            raise HTTPException(403, "PRF does not belong to this crew member")
+
+    return prf
+
+
+async def _assert_provider_owns(db: AsyncSession, model, obj_id, provider_id, label: str):
+    """Raise 400 unless `obj_id` exists and belongs to `provider_id`.
+
+    Used to stop a crew from attaching another company's vehicle or crew member
+    to their PRF (which would corrupt tenant isolation and billing attribution).
+    """
+    res = await db.execute(
+        select(model.id).where(model.id == obj_id, model.provider_id == provider_id)
+    )
+    if res.scalar_one_or_none() is None:
+        raise HTTPException(400, f"Invalid {label} for this provider")
+
+
+# ═══════════════════════════════════════════════════════════
 # ENDPOINTS
 # ═══════════════════════════════════════════════════════════
 
@@ -190,16 +255,31 @@ async def save_prf(
     db: AsyncSession = Depends(get_db),
 ):
     """Auto-save PRF draft. Called every 5 seconds from the mobile form."""
-    result = await db.execute(
-        select(DigitalPRF).where(DigitalPRF.id == uuid.UUID(prf_id))
-    )
-    prf = result.scalar_one_or_none()
-    if not prf:
-        raise HTTPException(404, "PRF not found")
-    if prf.status == PRFStatus.PROCESSED:
-        raise HTTPException(400, "PRF has already been processed")
-    if prf.crew_member_1_id != crew.id:
-        raise HTTPException(403, "PRF does not belong to this crew member")
+    prf = await _load_crew_prf(db, prf_id, crew)
+
+    # Only DRAFTs are editable. Once a PRF is SUBMITTED it is being read by the
+    # billing pipeline — a late autosave here would produce a torn read and bill
+    # off inconsistent data. PROCESSED PRFs are immutable billing records.
+    if prf.status != PRFStatus.DRAFT:
+        raise HTTPException(
+            409, f"Cannot edit a {prf.status.value} PRF — only drafts can be auto-saved."
+        )
+
+    # Optimistic concurrency — reject a save built on a stale view of the row so
+    # a second device (or an out-of-order request) can't silently clobber newer
+    # data. The client refetches on 409 and retries against the latest version.
+    if body.client_base_updated_at and prf.updated_at is not None:
+        base = _parse_iso(body.client_base_updated_at)
+        if base is not None:
+            current = prf.updated_at
+            if current.tzinfo is None:
+                current = current.replace(tzinfo=timezone.utc)
+            # 1s tolerance absorbs serialization/clock rounding.
+            if (current - base).total_seconds() > 1.0:
+                raise HTTPException(
+                    409,
+                    "PRF was modified elsewhere. Refetch the latest version before saving.",
+                )
 
     # Update form data. The crew app sends the full form_data blob every
     # 5 seconds, so a naive overwrite would clobber server-managed keys
@@ -249,16 +329,31 @@ async def save_prf(
         if val is not None:
             setattr(prf, sig_field, val)
 
-    # Update crew/vehicle assignments
+    # Update crew/vehicle assignments. Every assigned vehicle / crew member must
+    # belong to the caller's provider, and the primary crew member (the owner)
+    # may not be reassigned to someone else.
     if body.vehicle_id is not None:
-        prf.vehicle_id = uuid.UUID(body.vehicle_id) if body.vehicle_id else None
-    if body.crew_member_1_id is not None:
-        prf.crew_member_1_id = uuid.UUID(body.crew_member_1_id) if body.crew_member_1_id else None
+        new_vehicle_id = uuid.UUID(body.vehicle_id) if body.vehicle_id else None
+        if new_vehicle_id is not None:
+            await _assert_provider_owns(db, Vehicle, new_vehicle_id, crew.provider_id, "vehicle")
+        prf.vehicle_id = new_vehicle_id
     if body.crew_member_2_id is not None:
-        prf.crew_member_2_id = uuid.UUID(body.crew_member_2_id) if body.crew_member_2_id else None
+        new_c2 = uuid.UUID(body.crew_member_2_id) if body.crew_member_2_id else None
+        if new_c2 is not None:
+            await _assert_provider_owns(db, CrewMember, new_c2, crew.provider_id, "crew member")
+        prf.crew_member_2_id = new_c2
+    if body.crew_member_1_id is not None:
+        new_c1 = uuid.UUID(body.crew_member_1_id) if body.crew_member_1_id else None
+        if new_c1 is not None and new_c1 != crew.id:
+            raise HTTPException(403, "Cannot reassign the primary crew member of a PRF.")
 
     await db.commit()
-    return {"status": "saved", "prf_number": prf.prf_number}
+    await db.refresh(prf)
+    return {
+        "status": "saved",
+        "prf_number": prf.prf_number,
+        "updated_at": prf.updated_at.isoformat() if prf.updated_at else None,
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -546,14 +641,7 @@ async def scrub_phase(
           "scheme_matched": "GEMS" | "Discovery" | None,
         }
     """
-    result = await db.execute(
-        select(DigitalPRF).where(DigitalPRF.id == uuid.UUID(prf_id))
-    )
-    prf = result.scalar_one_or_none()
-    if not prf:
-        raise HTTPException(404, "PRF not found")
-    if prf.crew_member_1_id != crew.id:
-        raise HTTPException(403, "PRF does not belong to this crew member")
+    prf = await _load_crew_prf(db, prf_id, crew)
 
     # Go-live scope: digital PRF only, no adjudication. Scrub is intentionally
     # a no-op so missing rule data can never block phase advance. Re-enable by
@@ -638,19 +726,7 @@ async def delete_prf(
     Used by the dashboard "discard draft" button and by the end-shift
     sweep that fires when a crew taps "End Shift".
     """
-    try:
-        pid = uuid.UUID(prf_id)
-    except ValueError:
-        raise HTTPException(400, "Invalid PRF id")
-
-    result = await db.execute(select(DigitalPRF).where(DigitalPRF.id == pid))
-    prf = result.scalar_one_or_none()
-    if not prf:
-        raise HTTPException(404, "PRF not found")
-
-    # Only the creator can delete their own draft
-    if prf.crew_member_1_id != crew.id:
-        raise HTTPException(403, "You can only delete PRFs you created")
+    prf = await _load_crew_prf(db, prf_id, crew)
 
     # Submitted / processed PRFs are billing records — never deletable from crew app
     if prf.status != PRFStatus.DRAFT:
@@ -711,12 +787,11 @@ async def mark_timestamp(
     db: AsyncSession = Depends(get_db),
 ):
     """Mark a real-time timestamp. Crew taps a button → system captures exact time."""
-    result = await db.execute(
-        select(DigitalPRF).where(DigitalPRF.id == uuid.UUID(prf_id))
-    )
-    prf = result.scalar_one_or_none()
-    if not prf:
-        raise HTTPException(404, "PRF not found")
+    prf = await _load_crew_prf(db, prf_id, crew)
+    if prf.status != PRFStatus.DRAFT:
+        raise HTTPException(
+            409, f"Cannot mark times on a {prf.status.value} PRF — only drafts are editable."
+        )
 
     VALID_FIELDS = {
         "time_call_received", "time_dispatched", "time_mobile",
@@ -929,6 +1004,39 @@ def _adapt_prf_to_extracted_data(
     }
 
 
+def _validate_prf_for_submission(prf: DigitalPRF) -> list[str]:
+    """Server-side safety net run before a PRF is submitted to billing.
+
+    The mobile form does the detailed validation; this is a deliberately
+    conservative backend gate so a blank or structurally-incomplete PRF can
+    never reach the billing pipeline even if the client is bypassed, buggy, or
+    replaying an old payload. It intentionally does NOT re-implement every
+    clinical rule (that would risk blocking legitimate edge cases like an
+    unidentified trauma patient) — it blocks only on clearly-invalid records.
+    """
+    errors: list[str] = []
+    fd = prf.form_data or {}
+
+    if not fd:
+        errors.append("PRF has no data captured.")
+        return errors  # nothing else is meaningful on an empty form
+
+    call_type = (fd.get("call_type") or "").strip().upper()
+    if not call_type:
+        errors.append("Call type is required.")
+
+    if prf.crew_member_1_id is None:
+        errors.append("A primary crew member must be assigned.")
+
+    # Note: there is intentionally NO server-side vital-signs count check. The
+    # fewer-than-3-sets case (including zero) is handled entirely by the crew's
+    # Submit-time motivation prompt on the frontend — that is the single gate.
+    # A hard server rule here previously rejected motivated submissions with
+    # "At least one set of vital signs is required.", so it has been removed.
+
+    return errors
+
+
 @router.post("/{prf_id}/submit", status_code=202)
 async def submit_prf(
     prf_id: str,
@@ -944,12 +1052,7 @@ async def submit_prf(
 
     Idempotent: if the PRF was already processed, returns the existing result.
     """
-    result = await db.execute(
-        select(DigitalPRF).where(DigitalPRF.id == uuid.UUID(prf_id))
-    )
-    prf = result.scalar_one_or_none()
-    if not prf:
-        raise HTTPException(404, "PRF not found")
+    prf = await _load_crew_prf(db, prf_id, crew)
 
     # Idempotent retry: if already processed, return existing case/claim
     if prf.status == PRFStatus.PROCESSED and prf.case_id:
@@ -990,14 +1093,40 @@ async def submit_prf(
             "message": "PRF is being processed. Billing pipeline is running.",
         }
 
+    # Server-side safety net — block structurally-invalid PRFs from billing.
+    validation_errors = _validate_prf_for_submission(prf)
+    if validation_errors:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "PRF cannot be submitted — please complete the form.",
+                "errors": validation_errors,
+            },
+        )
+
     # Mark as SUBMITTED so the form can't be re-edited
     prf.status = PRFStatus.SUBMITTED
     prf.submitted_at = datetime.now(timezone.utc)
     await db.commit()
 
-    # Queue the heavy billing pipeline to Celery
+    # Queue the heavy billing pipeline to Celery. If the broker is unreachable
+    # the enqueue can raise — revert the status so the PRF stays an editable
+    # DRAFT and can be re-submitted, rather than being stranded in SUBMITTED
+    # with no task ever running.
     from app.tasks.prf_processing import process_prf_submission
-    task = process_prf_submission.delay(prf_id)
+    try:
+        task = process_prf_submission.delay(prf_id)
+    except Exception as enqueue_err:
+        logger.error(
+            "PRF #%d: failed to enqueue billing task: %s", prf.prf_number, enqueue_err
+        )
+        prf.status = PRFStatus.DRAFT
+        prf.submitted_at = None
+        await db.commit()
+        raise HTTPException(
+            status_code=503,
+            detail="Could not queue PRF for processing. Please try submitting again.",
+        )
 
     logger.info(
         "PRF #%d submitted by %s → queued task %s",
@@ -1072,12 +1201,7 @@ async def get_prf(
     db: AsyncSession = Depends(get_db),
 ):
     """Get full PRF data for editing or review."""
-    result = await db.execute(
-        select(DigitalPRF).where(DigitalPRF.id == uuid.UUID(prf_id))
-    )
-    prf = result.scalar_one_or_none()
-    if not prf:
-        raise HTTPException(404, "PRF not found")
+    prf = await _load_crew_prf(db, prf_id, crew, allow_crew2=True)
 
     async def _crew(crew_id):
         if not crew_id:
@@ -1135,6 +1259,8 @@ async def get_prf(
         # Meta
         "submitted_at": prf.submitted_at.isoformat() if prf.submitted_at else None,
         "created_at": prf.created_at.isoformat() if prf.created_at else None,
+        # Optimistic-concurrency token — the client echoes this back on save.
+        "updated_at": prf.updated_at.isoformat() if prf.updated_at else None,
     }
 
 

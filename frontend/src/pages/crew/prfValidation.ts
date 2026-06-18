@@ -41,12 +41,14 @@ export interface ValidationContext {
   vitalsCount: number;
   ivCount: number;
   medCount: number;
+  medTypesLower: string;             // '|'-joined lowercased medication types (live, from med rows)
   hasCrew2: boolean;
   hasPatientSig: boolean;
   hasCrewSig: boolean;
   hasHandoverSig: boolean;
-  totalCallMinutes: number | null;  // dispatch → handover
-  patientCarryingKm: number | null;
+  sceneMinutes: number | null;       // on-scene → depart-scene
+  totalCallMinutes: number | null;   // dispatch → arrival at facility
+  patientCarryingKm: number | null;  // loaded distance: on-scene km → arrival km
 }
 
 export interface ValidationFinding {
@@ -217,7 +219,11 @@ export const RULES: ValidationRule[] = [
     phases: [4, 5, 6],
     severity: 'block',
     field: 'vitals_sets',
-    check: (_d, ctx) => ctx.vitalsCount >= 3,
+    // The fewer-than-3-vitals case is handled exclusively by the Submit-time
+    // motivation prompt: once the crew records a shortfall motivation it
+    // justifies the lower count, so this rule is satisfied and never raises a
+    // separate blocking alert.
+    check: (d, ctx) => ctx.vitalsCount >= 3 || has(d, 'vitals_shortfall_motivation'),
     message:
       'At least 3 sets of vital signs must be recorded with timestamps. Use the floating "+ VITALS" button to add another set.',
     source: 'Netcare CMG §3.7 — A minimum of 3 (three) sets of vital signs must be submitted on the PRF',
@@ -243,6 +249,19 @@ export const RULES: ValidationRule[] = [
     check: (d) => has(d, 'chief_complaint'),
     message: 'Chief complaint / presenting problem is required.',
     source: 'Netcare CMG §3.7 — Patients medical/surgical history relevant to the chief complaint',
+  },
+  {
+    id: 'NTC-3.7-PRIMARY-DIAGNOSIS',
+    schemes: ['all'],
+    phases: [3, 6],
+    severity: 'block',
+    field: 'primary_diagnosis',
+    check: (d) => {
+      const v = String(d.primary_diagnosis || '').trim();
+      return v.length > 0 && v.endsWith('?');
+    },
+    message: 'Primary Diagnosis is required and must end with a question mark.',
+    source: 'Clinical protocol — Primary diagnosis must be documented with a question mark.',
   },
 
   // ── ILS IV-therapy gate (Netcare §3.7 — IV for ILS only valid in 4 cases) ──
@@ -499,6 +518,232 @@ export const RULES: ValidationRule[] = [
 ];
 
 // ────────────────────────────────────────────────────────────────────────────
+// RULES — Discovery Health General Ambulance Billing Guidelines (March 2023)
+//
+// Source: "General Ambulance Billing Guidelines" (Discovery Health, Mar 2023),
+// encoded from the EMSMCA Claim Rejection-Prevention Rules Matrix. Every rule is
+// severity 'warn' by deliberate product decision: a crew working a live call is
+// NEVER blocked by billing rules — they see an amber "Discovery may downgrade /
+// reject" nudge they can act on, but can always submit. Matrix IDs referenced in
+// each source string for traceability back to the spreadsheet.
+//
+// Fields not yet captured by the digital PRF (so not enforceable here yet):
+//   • Multiple patients on one ambulance (100%/75%/50%/none) — Matrix M1–M3
+//   • Return-leg km vs loaded km (20 km cap / tracking report) — Matrix D3/D4
+// Add these rules once the corresponding form fields exist.
+// ────────────────────────────────────────────────────────────────────────────
+
+const DISCOVERY_RULES: ValidationRule[] = [
+  // ── Inter-facility transfer: >100 km must be pre-authorised (Matrix IF2) ──
+  {
+    id: 'DISC-IFT-100KM-PREAUTH',
+    schemes: ['discovery'],
+    phases: [4, 5, 6],
+    severity: 'warn',
+    field: 'preauth_number',
+    check: (d, ctx) => {
+      if (!isIFT(d)) return true;
+      const km = ctx.patientCarryingKm;
+      if (km === null || km <= 100) return true;
+      return has(d, 'preauth_number');
+    },
+    message:
+      'Inter-facility transfer over 100 km must be pre-authorised by Discovery 911 (0860 999 911) — with exact km and reason — BEFORE transport, or the claim will be rejected. Capture the pre-auth number.',
+    source: 'Discovery Ambulance Guidelines (Mar 2023) — Inter-facility transfers: >100 km to be pre-authorised [Matrix IF2]',
+  },
+  // ── Inter-facility transfers default to BLS unless motivated (Matrix IF1) ──
+  {
+    id: 'DISC-IFT-BLS-DEFAULT',
+    schemes: ['discovery'],
+    phases: [3, 4, 6],
+    severity: 'warn',
+    field: 'assessment_level',
+    check: (d) => {
+      if (!isIFT(d)) return true;
+      const lvl = billingLevel(d);
+      if (lvl === '' || lvl === 'BLS') return true;
+      const notes = String(d.management_notes || d.events_hpi || '').toLowerCase();
+      const motivated =
+        !!String(d.referring_doctor || '').trim() ||
+        /icu|ventilat|infus|monitor|inotrop|sedat|unstable|deranged|clinical/.test(notes);
+      return motivated;
+    },
+    message:
+      'Inter-facility transfers default to BLS. To bill ILS/ALS, record the referring doctor’s motivation and practice number/name on the PRF — otherwise Discovery downgrades the claim to BLS.',
+    source: 'Discovery Ambulance Guidelines (Mar 2023) — Inter-facility transfers accepted at BLS unless motivated [Matrix IF1]',
+  },
+  // ── ILS IV must be clinically justified, else billed BLS (Matrix IV2/IV4) ──
+  {
+    id: 'DISC-ILS-IV-JUSTIFY',
+    schemes: ['discovery'],
+    phases: [3, 4, 6],
+    severity: 'warn',
+    field: 'iv_therapy',
+    check: (d, ctx) => {
+      if (billingLevel(d) !== 'ILS' || ctx.ivCount === 0) return true;
+      const meds = ctx.medTypesLower;
+      const notes = String(d.management_notes || d.events_hpi || '').toLowerCase();
+      const justified =
+        /dextrose/.test(meds) ||
+        /hypoglyc|hyperglyc|hypotension|dehydrat|burn|overdose|poison|haemodynam|hemodynam|unstable|deranged|fluctuat/.test(notes);
+      return justified;
+    },
+    message:
+      'ILS billed with an IV but no clinical justification documented. Discovery funds ILS-level IV only for clear hypotension/BP fluctuation, hyperglycaemia needing IV, burns, dehydration, or overdose/poisoning — otherwise it is downgraded to BLS. Document the indication in management notes.',
+    source: 'Discovery Ambulance Guidelines (Mar 2023) — IV line placement; prophylactic IV not funded [Matrix IV2/IV4]',
+  },
+  // ── TKVO IV line must be billed BLS (Matrix IV2) ──
+  {
+    id: 'DISC-TKVO-BLS',
+    schemes: ['discovery'],
+    phases: [3, 4, 6],
+    severity: 'warn',
+    field: 'assessment_level',
+    check: (d) => {
+      const notes = String(d.management_notes || d.events_hpi || '').toLowerCase();
+      const tkvo = notes.includes('tkvo') || notes.includes('to keep vein open');
+      if (!tkvo) return true;
+      return billingLevel(d) === 'BLS';
+    },
+    message:
+      'A TKVO (“to keep vein open”) IV line must be billed at BLS, not ILS, unless a clinical requirement is documented. Discovery will downgrade to BLS.',
+    source: 'Discovery Ambulance Guidelines (Mar 2023) — IV line TKVO billed as BLS [Matrix IV2]',
+  },
+  // ── ALS must show ALS-level treatment or motivation (Matrix A1/A3) ──
+  {
+    id: 'DISC-ALS-INDICATION',
+    schemes: ['discovery'],
+    phases: [3, 4, 6],
+    severity: 'warn',
+    field: 'assessment_level',
+    check: (d, ctx) => {
+      const lvl = billingLevel(d);
+      if (lvl !== 'ALS' && lvl !== 'ICU') return true;
+      const meds = ctx.medTypesLower;
+      const circ = Array.isArray(d.circulation_interventions) ? d.circulation_interventions : [];
+      const air = Array.isArray(d.airway_interventions) ? d.airway_interventions : [];
+      const notes = String(d.management_notes || d.events_hpi || '').toLowerCase();
+      const alsMed = /adrenaline|amiodarone|atropine|morphine|fentanyl|ketamine|midazolam|naloxone|adenosine|tranexamic/.test(meds);
+      const alsProc =
+        circ.includes('Cardio Version') || circ.includes('Pacing') ||
+        air.includes('Intubation') || air.includes('Surg. Airway');
+      const motivated =
+        !!String(d.referring_doctor || '').trim() ||
+        /interaction|half-life|infus|practice no|referr/.test(notes);
+      return alsMed || alsProc || motivated;
+    },
+    message:
+      'ALS billed but no ALS-level treatment is documented. Discovery downgrades to the lowest level of care needed unless an ALS drug/procedure is recorded, or the referring doctor’s motivation and practice number/name are on the PRF.',
+    source: 'Discovery Ambulance Guidelines (Mar 2023) — ALS treatment must be indicated/motivated [Matrix A1/A3]',
+  },
+  // ── Resuscitation (151) on-scene time capped at 20 min (Matrix RS1) ──
+  {
+    id: 'DISC-RESUS-151-SCENE',
+    schemes: ['discovery'],
+    phases: [4, 6],
+    severity: 'warn',
+    field: 'time_on_scene',
+    check: (d, ctx) => {
+      const isResus = d.call_type === 'RESUS' || !!d.med_aid_resus;
+      if (!isResus) return true;
+      if (ctx.sceneMinutes === null) return true;
+      return ctx.sceneMinutes <= 20;
+    },
+    message:
+      'On-scene time for a resuscitation (code 151) is limited to 20 minutes — time beyond that is cut. Document a clinical motivation in management notes if the extra time was unavoidable.',
+    source: 'Discovery Ambulance Guidelines (Mar 2023) — Resuscitation in progress; on-scene time limited to 20 min [Matrix RS1]',
+  },
+  // ── General scene time > 20 min must be motivated (Matrix T4) ──
+  {
+    id: 'DISC-SCENE-TIME-20',
+    schemes: ['discovery'],
+    phases: [4, 6],
+    severity: 'warn',
+    check: (d, ctx) => {
+      if (ctx.sceneMinutes === null || ctx.sceneMinutes <= 20) return true;
+      const notes = String(d.management_notes || d.events_hpi || '').toLowerCase();
+      return /motivat|extricat|analges|jaws|delay|reason|resus|difficult|entrap/.test(notes);
+    },
+    message:
+      'Scene time exceeds 20 minutes. Discovery caps scene time at 20 min unless a clinical motivation (e.g. extrication, analgesia onset, difficult access) is documented on the PRF — add it to management notes to avoid a time cut.',
+    source: 'Discovery Ambulance Guidelines (Mar 2023) — Scene time max 20 min; extended time must be motivated [Matrix T4/T7]',
+  },
+  // ── Transport with no documented clinical need is not funded (Matrix N1) ──
+  {
+    id: 'DISC-NO-CLINICAL-NEED',
+    schemes: ['discovery'],
+    phases: [5, 6],
+    severity: 'warn',
+    field: 'chief_complaint',
+    check: (d, ctx) => {
+      if (d.call_type === 'RHT' || d.med_aid_dec_death) return true;
+      const transported = !!d.receiving_facility;
+      if (!transported) return true;
+      const anyClinical =
+        ctx.vitalsCount > 0 || ctx.medCount > 0 || ctx.ivCount > 0 ||
+        (Array.isArray(d.circulation_interventions) && d.circulation_interventions.length > 0) ||
+        (Array.isArray(d.airway_interventions) && d.airway_interventions.length > 0) ||
+        !!String(d.management_notes || '').trim();
+      return anyClinical;
+    },
+    message:
+      'No clinical treatment is documented for this transport. Discovery does not fund transport without clinical need — record vitals, treatment given, or a clinical motivation on the PRF, or the claim will be reworked / recovered.',
+    source: 'Discovery Ambulance Guidelines (Mar 2023) — Transport with no clinical need is not paid [Matrix N1]',
+  },
+  // ── Member number required to bill a medical scheme (Matrix G1) ──
+  {
+    id: 'DISC-MEMBER-NUMBER',
+    schemes: ['discovery'],
+    phases: [5, 6],
+    severity: 'warn',
+    field: 'medical_aid_number',
+    check: (d) => {
+      const bt = String(d.billing_type || '').toUpperCase();
+      if (bt && !bt.includes('MED')) return true;
+      return has(d, 'medical_aid_number');
+    },
+    message:
+      'Member (medical aid) number is required to bill Discovery — a claim without it will be rejected.',
+    source: 'Discovery Ambulance Guidelines (Mar 2023) — Claim must comply with Regulation 5; member details required [Matrix G1]',
+  },
+  // ── BLS-only service needs a supervising independent practitioner (Matrix B1/B2) ──
+  {
+    id: 'DISC-BLS-SUPERVISION',
+    schemes: ['discovery'],
+    phases: [6],
+    severity: 'warn',
+    check: (d, ctx) => {
+      if (billingLevel(d) !== 'BLS') return true;
+      return ctx.hasCrew2;
+    },
+    message:
+      'BLS-level transport is only funded if a supervising independent practitioner is identified (name + HPCSA number on the PRF). Record a second / qualified crew member, or Discovery will not fund the transport.',
+    source: 'Discovery Ambulance Guidelines (Mar 2023) — Funding of BLS-only service; HPCSA supervision required [Matrix B1/B2]',
+  },
+  // ── Social / residence transfers are member-liable unless pre-authorised (Matrix S1) ──
+  {
+    id: 'DISC-SOCIAL-TRANSFER-PREAUTH',
+    schemes: ['discovery'],
+    phases: [2, 6],
+    severity: 'warn',
+    field: 'preauth_number',
+    check: (d) => {
+      const st = String(d.transfer_subtype || '').toLowerCase();
+      const social = st.includes('social') || st.includes('residence') || st.includes('home') || st.includes('psych');
+      if (!social) return true;
+      return has(d, 'preauth_number');
+    },
+    message:
+      'Social / residence transfers (e.g. to home, old-age home, follow-up, planned admission) are member-liable unless pre-authorised by Discovery 911 (0860 999 911). Confirm funding and capture the pre-auth number.',
+    source: 'Discovery Ambulance Guidelines (Mar 2023) — Social transfers; member liable unless pre-authorised [Matrix S1]',
+  },
+];
+
+// Register Discovery rules into the shared RULES table. The legacy Netcare/'all'
+// rules above remain in the table but are NOT surfaced to crew (see validatePhase).
+RULES.push(...DISCOVERY_RULES);
+
+// ────────────────────────────────────────────────────────────────────────────
 // Public API
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -509,33 +754,91 @@ export function buildContext(args: {
   sigs: Record<string, any>;
   crew2Id: string;
   prfMeta: any;
+  timestamps?: Record<string, any>;
+  kms?: Record<string, any>;
 }): ValidationContext {
+  const ts = args.timestamps || {};
+  const km = args.kms || {};
+  const mins = (a?: any, b?: any): number | null => {
+    if (!a || !b) return null;
+    const t1 = new Date(a).getTime(), t2 = new Date(b).getTime();
+    if (isNaN(t1) || isNaN(t2)) return null;
+    return (t2 - t1) / 60000;
+  };
+  const num = (v: any): number | null => {
+    if (v === undefined || v === null || v === '') return null;
+    const n = Number(String(v).replace(/\s/g, ''));
+    return isNaN(n) ? null : n;
+  };
+  const loadedKm = (() => {
+    const a = num(km.km_on_scene), b = num(km.km_at_destination);
+    return a !== null && b !== null && b >= a ? b - a : null;
+  })();
   return {
     vitalsCount: Array.isArray(args.vitals) ? args.vitals.filter(v => v && v.time).length : 0,
     ivCount: Array.isArray(args.ivRows) ? args.ivRows.filter(r => r && r.type).length : 0,
     medCount: Array.isArray(args.medRows) ? args.medRows.filter(r => r && r.type).length : 0,
+    medTypesLower: Array.isArray(args.medRows)
+      ? args.medRows.map((m: any) => (m?.type || '').toLowerCase()).filter(Boolean).join('|')
+      : '',
     hasPatientSig: !!args.sigs?.patient_signature,
     hasCrewSig: !!args.sigs?.crew_signature,
     hasHandoverSig: !!args.sigs?.handover_signature,
     hasCrew2: !!(args.crew2Id || args.prfMeta?.crew_member_2_id || args.prfMeta?.crew_member_2),
-    totalCallMinutes: null,
-    patientCarryingKm: null,
+    sceneMinutes: mins(ts.time_on_scene, ts.time_depart_scene),
+    totalCallMinutes: mins(ts.time_dispatched, ts.time_at_destination),
+    patientCarryingKm: loadedKm,
   };
 }
 
+/** Map a free-text scheme name (e.g. "Discovery Health Medical Scheme") to a SchemeId. */
+function normalizeScheme(s?: string): SchemeId | null {
+  const v = (s || '').toLowerCase();
+  if (!v) return null;
+  if (v.includes('discovery')) return 'discovery';
+  if (v.includes('netcare')) return 'netcare';
+  if (v.includes('gems')) return 'gems';
+  if (v.includes('er24') || v.includes('er 24')) return 'er24';
+  if (v.includes('bonitas')) return 'bonitas';
+  return null;
+}
+
 export function validatePhase(
-  _phase: Phase,
-  _data: PrfData,
-  _ctx: ValidationContext,
-  _schemeId?: string,
+  phase: Phase,
+  data: PrfData,
+  ctx: ValidationContext,
+  schemeId?: string,
 ): ValidationFinding[] {
-  // In-form rule prompts disabled for the live rollout: the crew must
-  // never be blocked or warned mid-call by client-side validation. The
-  // RULES table above is intentionally left in source so post-submit
-  // adjudication and tariff pricing (which import nothing from this
-  // function) keep working — this short-circuit only neutralises the
-  // crew-facing messages. Re-enable by restoring the original body.
-  return [];
+  // Crew-safety policy (June 2026): a crew working a live call is NEVER blocked
+  // or warned by the legacy scheme-agnostic ('all') rules — those stay
+  // suppressed. We surface ONLY Discovery-scoped guidance, and ONLY as
+  // non-blocking warnings, so a Discovery claim shows amber "may be downgraded /
+  // rejected" nudges the crew can act on but can always submit past. Post-submit
+  // adjudication and tariff pricing are unaffected (they don't call this).
+  const scheme = normalizeScheme(schemeId);
+  if (scheme !== 'discovery') return [];
+
+  const findings: ValidationFinding[] = [];
+  for (const r of RULES) {
+    if (!r.schemes.includes('discovery')) continue;   // Discovery-scoped rules only
+    if (!r.phases.includes(phase)) continue;
+    let passed = true;
+    try {
+      passed = r.check(data, ctx);
+    } catch {
+      passed = true;                                   // fail-open: never break the form
+    }
+    if (!passed) {
+      findings.push({
+        id: r.id,
+        severity: 'warn',                              // block nothing, ever
+        field: r.field,
+        message: r.message,
+        source: r.source,
+      });
+    }
+  }
+  return findings;
 }
 
 export function blockers(findings: ValidationFinding[]): ValidationFinding[] {

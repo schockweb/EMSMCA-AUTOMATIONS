@@ -1,0 +1,3 @@
+# Load-test tooling (install into the backend venv or a dedicated one)
+locust>=2.31,<3
+httpx>=0.27,<1

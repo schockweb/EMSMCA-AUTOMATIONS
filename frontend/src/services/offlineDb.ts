@@ -58,8 +58,13 @@ export async function queueSubmit(prfId: string, payload: any) {
 
 export async function getPending(): Promise<OfflineEntry[]> {
   const db = await initDb();
-  const all = await db.getAllFromIndex(STORE, 'by-status', 'pending');
-  return all.sort((a, b) => a.timestamp - b.timestamp);
+  // Include 'syncing' too — an entry orphaned mid-sync (page reload, tab close,
+  // or a network hiccup during upload) would otherwise never be retried and
+  // would show as "pending upload" forever, even when online.
+  const all = (await db.getAll(STORE)) as OfflineEntry[];
+  return all
+    .filter(e => e.status === 'pending' || e.status === 'syncing')
+    .sort((a, b) => a.timestamp - b.timestamp);
 }
 
 export async function markSyncing(key: string) {

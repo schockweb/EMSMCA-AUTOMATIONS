@@ -46,13 +46,33 @@ function anyValue(obj: Record<string, unknown> | null | undefined, keys: string[
 const EmptyMark = () => (
   <span style={{ color: DIM, fontStyle: 'italic', fontSize: '0.78rem', letterSpacing: '0.02em' }}>—</span>
 );
-const EmptySignature = ({ label = 'Not captured' }: { label?: string }) => (
+const EmptySignature = ({ label = 'Not captured', minHeight = 48 }: { label?: string; minHeight?: number }) => (
   <div style={{
-    minHeight: 48, background: SOFT_BG, border: `1px dashed #d1d5db`,
+    minHeight, width: '100%', boxSizing: 'border-box',
+    background: SOFT_BG, border: `1.4px dashed #94a3b8`,
     borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center',
-    fontSize: '0.68rem', color: DIM, fontStyle: 'italic',
+    fontSize: '0.85rem', color: MUT, fontStyle: 'italic', fontWeight: 800,
     letterSpacing: '0.04em',
   }}>{label}</div>
+);
+
+// Captured-signature block — a clearly bordered box so the signature area
+// reads as a visible block on the printed / exported PRF (the bare <img>
+// rendering used previously shrank to near-invisible once the page was
+// scaled onto the A4 sheet). The ink is drawn as large as the box allows.
+const SignatureBox = ({ src, minHeight = 56, label }: {
+  src?: string | null; minHeight?: number; label?: string;
+}) => (
+  src ? (
+    <div style={{
+      minHeight, width: '100%', boxSizing: 'border-box',
+      border: '1px solid #94a3b8', borderRadius: 4, background: '#fff',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 2,
+    }}>
+      <img src={src} alt="signature"
+           style={{ maxWidth: '100%', maxHeight: minHeight - 6, objectFit: 'contain' }} />
+    </div>
+  ) : <EmptySignature label={label} minHeight={minHeight} />
 );
 
 // Provider logo — the client brand mark shown top-left on the PDF / print
@@ -96,20 +116,20 @@ const ProviderLogo = ({ prov, height = 36 }: { prov: any; height?: number }) => 
 // Densities are deliberately tight: the whole form has to fit two A4
 // landscape pages with every captured field rendered, so vertical
 // padding is kept under 4 px and font sizes under 0.8 rem throughout.
-const FieldRow = ({ label, value, labelWidth = 95, valueMin = 16 }: {
+const FieldRow = ({ label, value, labelWidth = 95, valueMin = 13 }: {
   label: string; value?: string | null | React.ReactNode; labelWidth?: number; valueMin?: number;
 }) => {
   const blank = typeof value === 'string' ? value.trim() === '' : (value === null || value === undefined);
   return (
     <div style={{ display: 'flex', alignItems: 'stretch', borderTop: `1px solid ${LN}` }}>
       <div style={{
-        padding: '3px 6px', fontSize: '0.56rem', fontWeight: 800, color: INK,
+        padding: '2px 6px', fontSize: '0.56rem', fontWeight: 800, color: INK,
         textTransform: 'uppercase', letterSpacing: '0.04em',
         background: GREEN_TINT, minWidth: labelWidth, width: labelWidth,
         borderRight: `1px solid ${LN}`, display: 'flex', alignItems: 'center',
       }}>{label}</div>
       <div style={{
-        padding: '3px 7px', fontSize: '0.76rem', color: blank ? DIM : INK,
+        padding: '2px 7px', fontSize: '0.76rem', color: blank ? DIM : INK,
         fontFamily: 'ui-monospace, "SF Mono", monospace',
         flex: 1, minHeight: valueMin, display: 'flex', alignItems: 'center',
         wordBreak: 'break-word',
@@ -126,7 +146,7 @@ const SectionHead = ({ label, rightLabel, rightValue }: {
 }) => (
   <div style={{
     background: GREEN, color: '#fff',
-    fontSize: '0.62rem', fontWeight: 900, padding: '4px 8px',
+    fontSize: '0.62rem', fontWeight: 900, padding: '3px 8px',
     textTransform: 'uppercase', letterSpacing: '0.06em',
     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
   }}>
@@ -142,7 +162,7 @@ const SectionHead = ({ label, rightLabel, rightValue }: {
 
 const Chk = ({ label, checked, color }: { label: string; checked: boolean; color?: string }) => (
   <div style={{
-    display: 'flex', alignItems: 'center', gap: 6, padding: '3px 7px',
+    display: 'flex', alignItems: 'center', gap: 6, padding: '2px 7px',
     borderTop: `1px solid ${LN}`,
     fontSize: '0.66rem', fontWeight: 600, color: INK,
     background: checked && color ? color : checked ? 'rgba(47,143,74,0.08)' : '#fff',
@@ -297,29 +317,64 @@ export default function PRFView() {
       firstSheet = false;
     };
 
+    // Sheet aspect (height / width) the page layout must match to fill the
+    // printable area edge-to-edge.
+    const SHEET_RATIO = maxH / maxW;               // ≈ 0.697
+
     try {
       for (let i = 0; i < pages.length; i++) {
         const el = pages[i];
-        const canvas = await html2canvas(el, {
-          scale: 3,
-          useCORS: true,
-          backgroundColor: '#ffffff',
-          windowWidth: el.scrollWidth,
-          windowHeight: el.scrollHeight,
-        });
 
-        const cw = canvas.width;
-        const ch = canvas.height;
-        if (!cw || !ch) continue;                 // skip a zero-size snapshot
+        // ── Fill-the-sheet reflow ──
+        // A page whose natural layout is TALLER than the sheet aspect would
+        // otherwise be shrunk uniformly, leaving white gutters left/right.
+        // Instead, temporarily WIDEN the layout box — text re-wraps into the
+        // extra width and the page gets shorter — until the aspect matches
+        // the sheet. The snapshot then fills the full printable area with no
+        // distortion. Width is restored immediately after the snapshot.
+        const prevWidth = el.style.width;
+        const prevMinWidth = el.style.minWidth;
+        let canvas: HTMLCanvasElement | null = null;
+        try {
+          let w = el.offsetWidth || 1220;
+          let h = el.offsetHeight || 862;
+          for (let pass = 0; pass < 4 && h / w > SHEET_RATIO + 0.002; pass++) {
+            w = Math.min(Math.ceil(h / SHEET_RATIO), 2400);   // cap: sanity bound
+            el.style.width = `${w}px`;
+            el.style.minWidth = `${w}px`;
+            h = el.offsetHeight;                  // reflowed height
+            w = el.offsetWidth || w;
+          }
+          canvas = await html2canvas(el, {
+            // Drop the supersampling factor on widened pages so the canvas
+            // never balloons past tablet memory limits (~7000px wide).
+            scale: (el.offsetWidth || 1220) > 1700 ? 2 : 3,
+            useCORS: true,
+            backgroundColor: '#ffffff',
+            windowWidth: el.scrollWidth,
+            windowHeight: el.scrollHeight,
+          });
+        } finally {
+          el.style.width = prevWidth;
+          el.style.minWidth = prevMinWidth;
+        }
+
+        const cw = canvas?.width || 0;
+        const ch = canvas?.height || 0;
+        if (!canvas || !cw || !ch) continue;      // skip a zero-size snapshot
 
         const wScale = maxW / cw;                  // mm per source px at full width
         const fullH = ch * wScale;                 // page height in mm rendered full-width
 
         if (fullH <= maxH + 0.5) {
-          // Common case — the whole page fits one sheet at full width. Place
-          // it at the top, aspect preserved (no stretch → no row overlap).
+          // Common case — the whole page fits one sheet at full width. If it
+          // lands within 8% of the sheet height, stretch that last sliver so
+          // the form fills the page edge-to-edge (≤8% vertical stretch is
+          // imperceptible on a form and cannot overlap rows — it's a single
+          // raster image).
+          const drawH = fullH >= maxH * 0.92 ? maxH : fullH;
           newSheet();
-          pdf.addImage(canvas.toDataURL('image/png'), 'PNG', INSET_MM, INSET_MM, maxW, fullH, undefined, 'NONE');
+          pdf.addImage(canvas.toDataURL('image/png'), 'PNG', INSET_MM, INSET_MM, maxW, drawH, undefined, 'NONE');
         } else if (fullH <= SHRINK_LIMIT_MM) {
           // Modest overflow — shrink uniformly onto ONE clean sheet, centred.
           // Aspect ratio is preserved so fields can never smear or overlap.
@@ -359,17 +414,33 @@ export default function PRFView() {
     return pdf;
   };
 
-  const handleDownloadPdf = async () => {
-    const pdf = await buildPrfPdf();
-    if (!pdf) {
-      // buildPrfPdf only returns null on a real failure (e.g. a tainted
-      // canvas). Surface it on this explicit, user-initiated action rather
-      // than letting the button appear to do nothing.
-      window.alert('Could not generate the PDF just now. Please try again, and reload the page if it keeps failing.');
-      return;
+  // "Save as PDF" uses buildPrfPdf (jsPDF + html2canvas) — fully
+  // deterministic: exactly ONE A4-landscape sheet per .prf-page (PRF =
+  // 2 sheets; each attachment on its own sheet), full-width fill, and
+  // zero dependence on the browser print dialog's margin / background-
+  // graphics / scale settings. The native print pipeline (window.print)
+  // is kept only as a hard-copy path and as a fallback if the canvas
+  // snapshot fails (e.g. a CORS-tainted logo).
+  const [savingPdf, setSavingPdf] = useState(false);
+  const handleSavePdf = async () => {
+    if (savingPdf) return;                  // guard double-taps
+    setSavingPdf(true);
+    try {
+      const pdf = await buildPrfPdf();
+      if (pdf) {
+        pdf.save(`PRF_${prf?.prf_number || 'export'}.pdf`);
+      } else {
+        // Snapshot failed — fall back to the native print dialog so the
+        // crew can still produce a PDF rather than being dead-ended.
+        window.print();
+      }
+    } finally {
+      setSavingPdf(false);
     }
-    pdf.save(`PRF_${prf.prf_number || 'export'}.pdf`);
   };
+
+  // Hard-copy path (physical printer). Uses the @media print CSS below.
+  const handlePrint = () => window.print();
 
   // Native browser print (Ctrl/Cmd-P). The on-screen pages now grow to their
   // natural height (≥ one A4 sheet) and are wider than a sheet (1220px), so
@@ -379,18 +450,55 @@ export default function PRFView() {
   // restore on `afterprint`. The "Save as PDF" button uses buildPrfPdf and is
   // unaffected by this.
   useEffect(() => {
+    // Fit each page onto exactly one A4 landscape sheet. We use CSS transform
+    // (which Chrome's print engine honours, unlike `zoom`): measure the design
+    // page at its natural 1220px width, then scale it down so both width and
+    // height fit inside one sheet. The .prf-print-frame (fixed sheet size,
+    // overflow hidden) clips any rounding so nothing bleeds onto the next sheet.
     const PX_PER_MM = 96 / 25.4;
-    const frameW = 297 * PX_PER_MM;
-    const frameH = 210 * PX_PER_MM;
+    // Must stay ≤ the .prf-print-frame box (295×205mm) so the scaled page
+    // never overflows the frame and bleeds onto a second (blank) sheet.
+    const frameW = 293 * PX_PER_MM;   // 2mm under frame width (rounding safety)
+    const frameH = 203 * PX_PER_MM;   // 2mm under frame height
+    const SHEET_RATIO = frameH / frameW;   // sheet aspect the page must match
     const fit = () => {
       document.querySelectorAll<HTMLElement>('.prf-page').forEach(p => {
-        p.style.removeProperty('zoom');
-        const z = Math.min(frameW / p.scrollWidth, frameH / p.scrollHeight, 1);
-        p.style.setProperty('zoom', String(z > 0 ? z : 1));
+        p.style.transform = 'none';
+        // Remember the design width so afterprint can restore it exactly.
+        if (p.dataset.prfPrevWidth === undefined) {
+          p.dataset.prfPrevWidth = p.style.width || '';
+          p.dataset.prfPrevMinWidth = p.style.minWidth || '';
+        }
+        // ── Fill-the-sheet reflow (same trick as buildPrfPdf) ──
+        // A page taller than the sheet aspect would scale height-bound,
+        // landing narrower than the sheet with a white right gutter.
+        // Widen its layout box instead — text re-wraps, the page gets
+        // shorter — until the aspect matches, then scale by width so the
+        // form fills the sheet edge-to-edge.
+        let w = p.offsetWidth || 1220;
+        let h = p.offsetHeight || 862;
+        for (let pass = 0; pass < 4 && h / w > SHEET_RATIO + 0.002; pass++) {
+          w = Math.min(Math.ceil(h / SHEET_RATIO), 2400);
+          p.style.width = `${w}px`;
+          p.style.minWidth = `${w}px`;
+          h = p.offsetHeight;                 // reflowed height
+          w = p.offsetWidth || w;
+        }
+        const s = Math.min(frameW / w, frameH / h, 1);
+        p.style.transformOrigin = 'top left';
+        p.style.transform = `scale(${s > 0 ? s : 1})`;
       });
     };
     const reset = () => {
-      document.querySelectorAll<HTMLElement>('.prf-page').forEach(p => p.style.removeProperty('zoom'));
+      document.querySelectorAll<HTMLElement>('.prf-page').forEach(p => {
+        p.style.transform = '';
+        if (p.dataset.prfPrevWidth !== undefined) {
+          p.style.width = p.dataset.prfPrevWidth;
+          p.style.minWidth = p.dataset.prfPrevMinWidth || '';
+          delete p.dataset.prfPrevWidth;
+          delete p.dataset.prfPrevMinWidth;
+        }
+      });
     };
     window.addEventListener('beforeprint', fit);
     window.addEventListener('afterprint', reset);
@@ -580,14 +688,13 @@ export default function PRFView() {
     fd.return_depart_time
   );
 
-  // Channel Detail section — only render if at least one sub-block has data
+  // The payer-specific block now lives in the "Billing Information" column and
+  // is driven by billing_type. Channel Detail (right column) only carries the
+  // extras that aren't the primary payer: the requesting provider (IFT/IHT),
+  // a separate quote, and the return-trip times.
+  const billingType = (fd.billing_type || '').toString().toUpperCase();
   const anyChannelDetail = anyValue(fd, [
-    'compensation_reference', 'raf_accident_date', 'raf_police_case_number', 'raf_accident_location',
-    'wca_employer', 'wca_employee_number', 'wca_injury_date', 'wca_oar_number',
     'ems_provider_name', 'ems_provider_ref', 'ems_provider_bhf',
-    'pvt_payment_method', 'pvt_account_holder', 'pvt_account_holder_id', 'pvt_account_holder_phone', 'pvt_account_holder_address',
-    'event_name', 'event_organiser', 'event_date', 'event_booking_ref', 'event_contact_person',
-    'callout_requested_by', 'callout_authorisation', 'callout_standdown_reason',
     'quote_number', 'quote_amount', 'quote_authorised_by', 'quote_valid_until',
   ]) || returnTripHasContent;
 
@@ -598,9 +705,15 @@ export default function PRFView() {
     'debtor_phone_home', 'debtor_phone_cell',
   ];
   const patientHasData = anyValue(fd, ['patient_name', 'patient_surname', 'patient_id_number']);
-  const debtorSameAsPatient = !anyValue(fd, debtorKeys) && patientHasData;
+  // "Same as patient" is shown when the crew explicitly ticked the flag (even
+  // if stale debtor text lingers in the record) OR when no debtor data exists.
+  const debtorSameAsPatient =
+    (Array.isArray(fd.flags) && fd.flags.includes('debtor_same_as_patient')) ||
+    (!anyValue(fd, debtorKeys) && patientHasData);
   const valuablesEmpty = isBlank(fd.valuables_handed_to) && isBlank(fd.valuables_description);
-  const motivationNotes: string = fd.management_notes || fd.events_hpi || '';
+  // Page-1 "Motivation / Other Notes" is its own field now — NO fallback to
+  // management_notes (that made the Motivation and Management boxes identical).
+  const motivationNotes: string = fd.motivation_notes || '';
 
   const vitalsCols = Math.max(vitalsPage1.length, 5);
   const vitalsOverflowCols = Math.max(vitalsOverflow.length, 5);
@@ -685,12 +798,18 @@ export default function PRFView() {
             Send a copy to receiving facility
           </button>
         )}
-        <button onClick={handleDownloadPdf} style={{
+        <button onClick={handlePrint} style={{
+          padding: '9px 16px', border: `1px solid #cbd5e1`, marginRight: 10,
+          background: '#fff', color: INK,
+          fontSize: '0.84rem', fontWeight: 700, cursor: 'pointer', borderRadius: 6,
+          boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+        }}>Print</button>
+        <button onClick={handleSavePdf} disabled={savingPdf} style={{
           padding: '9px 20px', border: 'none',
-          background: `linear-gradient(135deg, ${GREEN}, ${GREEN_DK})`, color: '#fff',
-          fontSize: '0.84rem', fontWeight: 800, cursor: 'pointer', borderRadius: 6,
+          background: savingPdf ? '#94a3b8' : `linear-gradient(135deg, ${GREEN}, ${GREEN_DK})`, color: '#fff',
+          fontSize: '0.84rem', fontWeight: 800, cursor: savingPdf ? 'wait' : 'pointer', borderRadius: 6,
           boxShadow: `0 3px 10px rgba(47,143,74,0.3)`, letterSpacing: '0.02em',
-        }}>Save as PDF</button>
+        }}>{savingPdf ? 'Building PDF…' : 'Save as PDF'}</button>
       </div>
 
       <style>{`
@@ -733,9 +852,16 @@ export default function PRFView() {
             align-items: initial !important;
           }
           .prf-print-frame {
-            width: 297mm;
-            height: 210mm;
-            max-height: 210mm;
+            /* Each frame is one A4 landscape sheet and clips its contents.
+               The .prf-page inside is transform-scaled (in JS at beforeprint)
+               to fit within this box, so each page lands on a single sheet.
+               CRITICAL: both dimensions sit clearly UNDER the 297×210mm sheet.
+               At exactly 297mm wide / 208mm tall, sub-mm print rounding made
+               frames bleed a 1-2px sliver onto the next sheet; combined with
+               break-inside:avoid that pushed every following form page down a
+               sheet — producing the alternating-blank-page PDFs. */
+            width: 295mm;
+            height: 205mm;
             overflow: hidden;
             page-break-after: always;
             page-break-inside: avoid;
@@ -748,13 +874,26 @@ export default function PRFView() {
           .prf-print-frame:last-child { page-break-after: auto; }
           .prf-page {
             box-shadow: none !important;
-            margin: 0 auto !important;
+            margin: 0 !important;
             border: 2px solid ${LN} !important;
-            width: 1220px !important;
-            min-width: 1220px !important;
-            /* The fit-to-page zoom factor is computed in JS at beforeprint
-               and injected per-page so each PRF prints on exactly one A4
-               sheet regardless of how tall its vitals/meds tables are. */
+            /* Width is NOT forced here — the beforeprint fit() may widen a
+               too-tall page (fill-the-sheet reflow) and an !important rule
+               would override that inline width and reintroduce the white
+               right gutter on page 1. The inline style carries the 1220px
+               design width by default. */
+            /* Drop the on-screen 862px min-height in print. Transform only
+               shrinks the page VISUALLY — its layout box keeps this height, and
+               at 862px (~228mm) that box is taller than the 208mm sheet frame,
+               so a sliver bled onto a second (blank) sheet. min-height:0 lets
+               the layout box equal the real content height so nothing bleeds. */
+            min-height: 0 !important;
+            box-sizing: border-box !important;
+            transform-origin: top left !important;
+            /* transform: scale() is set per-page in JS at beforeprint so the
+               fixed-width design shrinks to fit one sheet. transform-origin is
+               top-left so the page anchors to the sheet's top-left corner (no
+               centring offset that would clip the right edge). border-box keeps
+               the 2px border inside the measured width. */
           }
         }
       `}</style>
@@ -833,7 +972,12 @@ export default function PRFView() {
             )}
             <FieldRow label="Date" value={fmtDate(ts.time_call_received || prf.submitted_at)} />
             <FieldRow label="Case No" value={prf.case_number} />
-            {/* Call-type checks — only the actually selected one renders. */}
+            {fd.rht_call_out_fee && <FieldRow label="Call-Out Fee" value={fd.rht_call_out_fee} />}
+            {/* Assessment level + Billing Type */}
+            <FieldRow label="Assessment"   value={fd.assessment_level} />
+            <FieldRow label="Billing Type" value={fd.billing_type} />
+            {/* Call type — moved to the bottom and stretched (flex:1) so it
+                fills the otherwise-empty space, with its label(s) centered. */}
             {(() => {
               const ct = (fd.call_type || '').toUpperCase();
               const cells: string[] = [];
@@ -842,46 +986,64 @@ export default function PRFView() {
                 cells.push('Transfer');
                 if (['IHT', 'IFT', 'RHT', 'COURTESY'].includes(ct)) cells.push(ct);
               }
-              if (cells.length === 0) return null;
               return (
-                <div style={{ display: 'flex', borderTop: `1px solid ${LN}` }}>
-                  {cells.map((label, i) => (
-                    <div key={label} style={{ flex: 1, borderRight: i < cells.length - 1 ? `1px solid ${LN}` : 'none' }}>
-                      <Chk label={label} checked />
+                <div style={{
+                  flex: 1, display: 'flex', borderTop: `1px solid ${LN}`,
+                  background: 'rgba(47,143,74,0.08)', minHeight: 40,
+                }}>
+                  {(cells.length ? cells : ['—']).map((label, i, arr) => (
+                    <div key={label} style={{
+                      flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      gap: 7, padding: '6px 8px',
+                      borderRight: i < arr.length - 1 ? `1px solid ${LN}` : 'none',
+                    }}>
+                      <span style={{
+                        width: 13, height: 13, border: `1.4px solid ${GREEN_DK}`,
+                        background: GREEN_DK, display: 'inline-flex', alignItems: 'center',
+                        justifyContent: 'center', color: '#fff', fontSize: '0.7rem',
+                        fontWeight: 900, flexShrink: 0,
+                      }}>✓</span>
+                      <span style={{
+                        fontSize: '0.78rem', fontWeight: 800, color: INK,
+                        textTransform: 'uppercase', letterSpacing: '0.06em',
+                      }}>{label}</span>
                     </div>
                   ))}
                 </div>
               );
             })()}
-            {fd.rht_call_out_fee && <FieldRow label="Call-Out Fee" value={fd.rht_call_out_fee} />}
-            <div style={{ flex: 1, borderTop: `1px solid ${LN}` }} />
           </div>
 
           {/* Call Information */}
           <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
             <SectionHead label="Call Information" />
             <FieldRow label="Incident Add"  value={fd.incident_location} />
-            <FieldRow label="Suburb / Ward" value={fd.suburb_ward} />
-            <FieldRow label="Referring Dr"  value={fd.referring_doctor} />
             <FieldRow label="Dest Facility" value={fd.receiving_facility} />
             <FieldRow label="Ward"          value={fd.ward} />
             <FieldRow label={fd.call_type === 'COURTESY' ? "Receiving Dr/Person" : "Receiving Dr"}  value={fd.receiving_doctor} />
-            <div style={{ flex: 1, borderTop: `1px solid ${LN}` }} />
+            <FieldRow label="Condition" value={fd.handover_notes} valueMin={24} />
+            <FieldRow label="Qualification" value={fd.handover_qualification} />
+            <FieldRow label="Receiving Facility Email" value={fd.handover_doctor_email} />
+            <div style={{ flex: 1, borderTop: `1px solid ${LN}`, background: GREEN_TINT }} />
           </div>
 
-          {/* Alpha Unit + Times/KM grid */}
-          <div>
+          {/* Ambulance Call sign + Times/KM grid. The column is a flex stack so
+              the time rows can GROW to fill the column's full height — this
+              pushes them down and closes the white gap that used to sit below
+              AVAILABLE, so the rows span the same vertical extent as the Call
+              Information column beside them. */}
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
             <SectionHead
-              label="Alpha Unit"
+              label="Ambulance Call sign"
               rightLabel={vehicle.callsign ? 'CALLSIGN' : undefined}
               rightValue={vehicle.callsign}
             />
             {vehicle.registration && (
               <div style={{
-                padding: '4px 8px', fontSize: '0.64rem', fontWeight: 700,
+                padding: '2px 8px', minHeight: 17, fontSize: '0.64rem', fontWeight: 700,
                 background: GREEN_TINT, borderBottom: `1px solid ${LN}`,
                 fontFamily: 'ui-monospace, monospace', letterSpacing: '0.04em', color: INK,
-                display: 'flex', justifyContent: 'space-between',
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
               }}>
                 <span>{vehicle.registration}</span>
                 {vehicle.vehicle_type && <span style={{ color: MUT, fontWeight: 600 }}>{vehicle.vehicle_type}</span>}
@@ -893,20 +1055,24 @@ export default function PRFView() {
               letterSpacing: '0.06em', background: GREEN_TINT,
               borderBottom: `1px solid ${LN}`, color: INK,
             }}>
-              <div style={{ padding: '3px 6px', borderRight: `1px solid ${LN}` }}>Event</div>
-              <div style={{ padding: '3px 6px', borderRight: `1px solid ${LN}` }}>Time</div>
-              <div style={{ padding: '3px 6px' }}>KM</div>
+              <div style={{ padding: '2px 6px', minHeight: 13, display: 'flex', alignItems: 'center', borderRight: `1px solid ${LN}` }}>Event</div>
+              <div style={{ padding: '2px 6px', minHeight: 13, display: 'flex', alignItems: 'center', borderRight: `1px solid ${LN}` }}>Time</div>
+              <div style={{ padding: '2px 6px', minHeight: 13, display: 'flex', alignItems: 'center' }}>KM</div>
             </div>
-            {timeRows.map(r => (
-              <div key={r.t} style={{
-                display: 'grid', gridTemplateColumns: '1.1fr 1fr 1fr',
-                borderTop: `1px solid ${LN}`, fontSize: '0.7rem',
-              }}>
-                <div style={{ padding: '3px 6px', fontWeight: 700, borderRight: `1px solid ${LN}`, background: GREEN_TINT, fontSize: '0.58rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{r.label}</div>
-                <div style={{ padding: '3px 6px', borderRight: `1px solid ${LN}`, fontFamily: 'ui-monospace, monospace' }}>{fmtTime(ts[r.t])}</div>
-                <div style={{ padding: '3px 6px', fontFamily: 'ui-monospace, monospace' }}>{km[r.k] || ''}</div>
-              </div>
-            ))}
+            {/* Time rows fill the remaining height, distributed evenly so the
+                last row (AVAILABLE) reaches the bottom of the band. */}
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+              {timeRows.map(r => (
+                <div key={r.t} style={{
+                  flex: 1, display: 'grid', gridTemplateColumns: '1.1fr 1fr 1fr',
+                  borderTop: `1px solid ${LN}`, fontSize: '0.76rem',
+                }}>
+                  <div style={{ padding: '2px 6px', display: 'flex', alignItems: 'center', fontWeight: 700, borderRight: `1px solid ${LN}`, background: GREEN_TINT, fontSize: '0.56rem', textTransform: 'uppercase', letterSpacing: '0.04em', color: INK }}>{r.label}</div>
+                  <div style={{ padding: '2px 6px', display: 'flex', alignItems: 'center', borderRight: `1px solid ${LN}`, fontFamily: 'ui-monospace, monospace' }}>{fmtTime(ts[r.t])}</div>
+                  <div style={{ padding: '2px 6px', display: 'flex', alignItems: 'center', fontFamily: 'ui-monospace, monospace' }}>{km[r.k] || ''}</div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -935,57 +1101,10 @@ export default function PRFView() {
               ['Tel (H)',       fd.patient_phone_home],
               ['Tel (W)',       fd.patient_phone_work],
               ['Cell',          fd.patient_phone_cell],
+              ['Accompanying',  fd.accompanying_persons_count],
             ] as Array<[string, any]>)
               .filter(([, v]) => !isBlank(v)))
               .map(([label, v]) => <FieldRow key={label} label={label} value={v} />)}
-            <div style={{ flex: 1, borderTop: `1px solid ${LN}` }} />
-          </div>
-
-          {/* Clinical Summary: Priority → Assessment/Monitoring → Billing → Mechanism */}
-          <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
-            <SectionHead label="Priority" />
-            {fd.priority ? (
-              <div style={{
-                padding: '8px 10px', textAlign: 'center',
-                background: priorityColors[fd.priority] || '#fff',
-                color: priorityColors[fd.priority] ? '#fff' : INK,
-                borderTop: `1px solid ${LN}`,
-                fontSize: '0.84rem', fontWeight: 900,
-                textTransform: 'uppercase', letterSpacing: '0.08em',
-              }}>{fd.priority}</div>
-            ) : (
-              <FieldRow label="Priority" value="" />
-            )}
-
-            <SectionHead label="Assessment / Monitoring" />
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
-              <div style={{ borderRight: `1px solid ${LN}` }}>
-                <div style={{
-                  padding: '3px 7px', background: GREEN_TINT, fontSize: '0.54rem',
-                  fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em',
-                  borderTop: `1px solid ${LN}`, borderBottom: `1px solid ${LN}`, color: INK,
-                }}>Assessment</div>
-                {fd.assessment_level
-                  ? <Chk label={fd.assessment_level} checked />
-                  : <FieldRow label="Level" value="" />}
-              </div>
-              <div>
-                <div style={{
-                  padding: '3px 7px', background: GREEN_TINT, fontSize: '0.54rem',
-                  fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em',
-                  borderTop: `1px solid ${LN}`, borderBottom: `1px solid ${LN}`, color: INK,
-                }}>Monitoring</div>
-                {fd.monitoring_level
-                  ? <Chk label={fd.monitoring_level} checked />
-                  : <FieldRow label="Level" value="" />}
-              </div>
-            </div>
-
-            <SectionHead label="Billing Type" />
-            {fd.billing_type
-              ? <Chk label={fd.billing_type} checked />
-              : <FieldRow label="Type" value="" />}
-
             <SectionHead label="Mechanism" />
             {(() => {
               const selected = Array.isArray(fd.mechanism)
@@ -997,107 +1116,10 @@ export default function PRFView() {
             {fd.mechanism_other && (
               <FieldRow label="Detail" value={fd.mechanism_other} valueMin={24} />
             )}
-
             <div style={{ flex: 1, borderTop: `1px solid ${LN}` }} />
           </div>
 
-          {/* Medical Aid + Declarations (resus / declaration-of-death / quoted) */}
-          <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
-            <SectionHead label="Medical Aid Information" />
-            <FieldRow label="Scheme"       value={fd.medical_scheme} />
-            <FieldRow label="Aid No"       value={fd.medical_aid_number} />
-            <FieldRow label="Pre-Auth No"  value={fd.preauth_number} />
-            <FieldRow label="Post-Auth No" value={fd.post_auth_number} />
-            <FieldRow label="Dependent"    value={fd.dependent_number} />
-            <FieldRow label="Main Member"  value={fd.main_member_id} />
-            <FieldRow label="Plan"         value={fd.scheme_option} />
-            {fd.med_aid_resus && (
-              <SubBlock title="Resus" rows={[
-                ['Level',   fd.med_aid_resus_level],
-                ['Fee (R)', fd.med_aid_resus_fee],
-              ]} />
-            )}
-            {fd.med_aid_dec_death && (
-              <SubBlock title="Declaration of Death" rows={[
-                ['Time',        fd.med_aid_dec_death_time],
-                ['Declared By', fd.med_aid_dec_death_declared_by],
-                ['HPCSA No',    fd.med_aid_dec_death_hpcsa],
-              ]} />
-            )}
-            {fd.med_aid_quoted && (
-              <SubBlock title="Quoted (Med-Aid Decline)" rows={[
-                ['Amount (R)', fd.med_aid_quoted_amount],
-              ]} />
-            )}
-            <div style={{ flex: 1, borderTop: `1px solid ${LN}` }} />
-          </div>
-
-          {/* Channel-specific + Return Trip (hidden entirely when no data) */}
-          {anyChannelDetail && (
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            <SectionHead label="Channel Detail" />
-            <SubBlock title="RAF" rows={[
-              ['Reference',     fd.compensation_reference],
-              ['Accident Date', fd.raf_accident_date],
-              ['SAPS / OB No',  fd.raf_police_case_number],
-              ['Accident Loc',  fd.raf_accident_location, 24],
-            ]} />
-            <SubBlock title="IOD / Compensation" rows={[
-              ['Reference',   fd.compensation_reference],
-              ['Employer',    fd.wca_employer],
-              ['Employee No', fd.wca_employee_number],
-              ['Injury Date', fd.wca_injury_date],
-              ['OAR No',      fd.wca_oar_number],
-            ]} />
-            <SubBlock title="Requesting Provider" rows={[
-              ['Provider',  fd.ems_provider_name],
-              ['Reference', fd.ems_provider_ref],
-              ['BHF No',    fd.ems_provider_bhf],
-            ]} />
-            <SubBlock title="Private / Account Holder" rows={[
-              ['Method',    fd.pvt_payment_method],
-              ['Holder',    fd.pvt_account_holder],
-              ['Holder ID', fd.pvt_account_holder_id],
-              ['Contact',   fd.pvt_account_holder_phone],
-              ['Address',   fd.pvt_account_holder_address, 24],
-            ]} />
-            <SubBlock title="Event Standby" rows={[
-              ['Event',        fd.event_name],
-              ['Organiser',    fd.event_organiser],
-              ['Event Date',   fd.event_date],
-              ['Booking Ref',  fd.event_booking_ref],
-              ['On-Site Cont', fd.event_contact_person],
-            ]} />
-            <SubBlock title="Call-Out / Stand-Down" rows={[
-              ['Requested By', fd.callout_requested_by],
-              ['Auth Ref',     fd.callout_authorisation],
-              ['Reason',       fd.callout_standdown_reason, 24],
-            ]} />
-            <SubBlock title="Quoted" rows={[
-              ['Quote No',      fd.quote_number],
-              ['Amount (R)',    fd.quote_amount],
-              ['Authorised By', fd.quote_authorised_by],
-              ['Valid Until',   fd.quote_valid_until],
-            ]} />
-            {returnTripHasContent && (
-              <>
-                <SectionHead label="Return Trip" />
-                <FieldRow label="Despatch"  value={fd.return_despatch_time} />
-                <FieldRow label="On Scene"  value={fd.return_on_scene_time} />
-                <FieldRow label="Depart"    value={fd.return_depart_scene_time} />
-                <FieldRow label="At Dest"   value={fd.return_at_destination_time} />
-                <FieldRow label="Handover"  value={fd.return_handover_time} />
-                <FieldRow label="Available" value={fd.return_available_time} />
-              </>
-            )}
-            <div style={{ flex: 1, borderTop: `1px solid ${LN}` }} />
-          </div>
-          )}
-        </div>
-
-        {/* ── BAND C — Debtor │ Handover+Sticker │ Valuables+Sigs │ Motivation+Terms ── */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1.7fr 1.5fr 2.1fr', borderTop: `2px solid ${LN}` }}>
-          {/* Debtor — same-as-patient tile OR full debtor rows (all populated). */}
+          {/* Debtor Information — grouped here alongside Patient + Medical Aid. */}
           <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
             <SectionHead label="Debtor Information" />
             {debtorSameAsPatient ? (
@@ -1141,50 +1163,85 @@ export default function PRFView() {
             )}
           </div>
 
-          {/* Handed Over To + Hospital Sticker */}
+          {/* Billing Information — content follows the selected billing type so
+              the section reflects the actual payer (Med Aid / IOD / RAF / PVT /
+              Event / Call-Out) rather than always showing medical-aid fields. */}
           <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
-            <SectionHead label="Handed Over To" />
-            <FieldRow label="Name"          value={fd.handover_name} />
-            <FieldRow label="Qualification" value={fd.handover_qualification} />
-            <FieldRow label="Doctor Email"  value={fd.handover_doctor_email} />
-            <div style={{ padding: '6px 8px', borderTop: `1px solid ${LN}` }}>
-              <div style={{
-                fontSize: '0.52rem', fontWeight: 800, color: MUT,
-                textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3,
-              }}>Handover Signature</div>
-              {prf.signatures?.handover_signature
-                ? <img src={prf.signatures.handover_signature} alt="handover" style={{ maxWidth: '100%', maxHeight: 36 }} />
-                : <EmptySignature />}
-            </div>
-            <FieldRow label="Condition" value={fd.handover_notes} valueMin={32} />
-            <SectionHead label="Patient Documents" />
-            <div style={{
-              borderTop: `1px solid ${LN}`, padding: 4,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>
-              <div style={{
-                width: '94%', minHeight: 38, maxHeight: 60,
-                border: `1.3px dashed ${MUT}`, borderRadius: 3,
-                background: SOFT_BG,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                padding: 3, overflow: 'hidden',
-              }}>
-                {fd.hospital_sticker || fd.admission_form_image || fd.id_document_image || fd.medical_aid_image || (Array.isArray(fd.nursing_notes) && fd.nursing_notes.length > 0) ? (
-                  <div style={{ fontSize: '0.66rem', fontWeight: 800, color: GREEN_DK, textTransform: 'uppercase', letterSpacing: '0.04em', textAlign: 'center', lineHeight: 1.4 }}>
-                    ✓ Documents Attached<br/>
-                    <span style={{fontSize:'0.54rem',color:MUT}}>See Attachments</span>
-                  </div>
-                ) : (
-                  <div style={{
-                    fontSize: '0.54rem', fontWeight: 700, color: MUT,
-                    textTransform: 'uppercase', letterSpacing: '0.06em', textAlign: 'center',
-                  }}>No documents attached</div>
-                )}
-              </div>
-            </div>
-            {/* Hospital Sticker — dedicated placeholder. Shows the captured
-                sticker inline when present, otherwise a reserved "affix here"
-                box so the slot is always visible on the printed/exported PRF. */}
+            <SectionHead label="Billing Information" />
+            {billingType === 'IOD' ? (
+              <>
+                <FieldRow label="Reference"   value={fd.compensation_reference} />
+                <FieldRow label="Employer"    value={fd.wca_employer} />
+                <FieldRow label="Employee No" value={fd.wca_employee_number} />
+                <FieldRow label="Injury Date" value={fd.wca_injury_date} />
+                <FieldRow label="OAR No"      value={fd.wca_oar_number} />
+              </>
+            ) : billingType === 'RAF' ? (
+              <>
+                <FieldRow label="Reference"     value={fd.compensation_reference} />
+                <FieldRow label="Accident Date" value={fd.raf_accident_date} />
+                <FieldRow label="SAPS / OB No"  value={fd.raf_police_case_number} />
+                <FieldRow label="Accident Loc"  value={fd.raf_accident_location} valueMin={24} />
+              </>
+            ) : billingType === 'PVT' ? (
+              <>
+                <FieldRow label="Method"    value={fd.pvt_payment_method} />
+                <FieldRow label="Holder"    value={fd.pvt_account_holder} />
+                <FieldRow label="Holder ID" value={fd.pvt_account_holder_id} />
+                <FieldRow label="Contact"   value={fd.pvt_account_holder_phone} />
+                <FieldRow label="Address"   value={fd.pvt_account_holder_address} valueMin={24} />
+              </>
+            ) : billingType === 'EVENT' ? (
+              <>
+                <FieldRow label="Event"        value={fd.event_name} />
+                <FieldRow label="Organiser"    value={fd.event_organiser} />
+                <FieldRow label="Event Date"   value={fd.event_date} />
+                <FieldRow label="Booking Ref"  value={fd.event_booking_ref} />
+                <FieldRow label="On-Site Cont" value={fd.event_contact_person} />
+              </>
+            ) : billingType === 'CALL OUT FEE' ? (
+              <>
+                <FieldRow label="Requested By" value={fd.callout_requested_by} />
+                <FieldRow label="Auth Ref"     value={fd.callout_authorisation} />
+                <FieldRow label="Reason"       value={fd.callout_standdown_reason} valueMin={24} />
+              </>
+            ) : (
+              <>
+                {/* Medical-aid rows only appear when actually captured — an
+                    empty medical-aid section shouldn't show a column of "—". */}
+                {!isBlank(fd.medical_scheme)    && <FieldRow label="Scheme"      value={fd.medical_scheme} />}
+                {!isBlank(fd.medical_aid_number) && <FieldRow label="Aid No"      value={fd.medical_aid_number} />}
+                {!isBlank(fd.dependent_number)  && <FieldRow label="Dependent"   value={fd.dependent_number} />}
+                {!isBlank(fd.main_member_id)    && <FieldRow label="Main Member" value={fd.main_member_id} />}
+                {!isBlank(fd.scheme_option)     && <FieldRow label="Plan"        value={fd.scheme_option} />}
+              </>
+            )}
+            {/* Pre-/Post-Auth are transfer authorisations relevant to any payer
+                (IFT/IHT) — render whenever captured, regardless of billing type. */}
+            {!isBlank(fd.preauth_number)   && <FieldRow label="Pre-Auth No"  value={fd.preauth_number} />}
+            {!isBlank(fd.post_auth_number) && <FieldRow label="Post-Auth No" value={fd.post_auth_number} />}
+            {fd.med_aid_resus && (
+              <SubBlock title="Resus" rows={[
+                ['Level',   fd.med_aid_resus_level],
+                ['Fee (R)', fd.med_aid_resus_fee],
+              ]} />
+            )}
+            {fd.med_aid_dec_death && (
+              <SubBlock title="Declaration of Death" rows={[
+                ['Time',        fd.med_aid_dec_death_time],
+                ['Declared By', fd.med_aid_dec_death_declared_by],
+                ['HPCSA No',    fd.med_aid_dec_death_hpcsa],
+              ]} />
+            )}
+            {fd.med_aid_quoted && (
+              <SubBlock title="Quoted (Med-Aid Decline)" rows={[
+                ['Amount (R)', fd.med_aid_quoted_amount],
+              ]} />
+            )}
+            {/* Hospital Sticker — dedicated placeholder, now positioned beneath
+                Medical Aid Information. Shows the captured sticker inline when
+                present, otherwise a reserved "affix here" box so the slot is
+                always visible on the printed / exported PRF. */}
             <SectionHead label="Hospital Sticker" />
             <div style={{
               borderTop: `1px solid ${LN}`, padding: 6,
@@ -1210,10 +1267,94 @@ export default function PRFView() {
                 )}
               </div>
             </div>
-            <div style={{ flex: 1 }} />
           </div>
 
-          {/* Valuables + Patient/Witness Signatures + RAF sketch (if any) */}
+          {/* Channel-specific + Return Trip (when present) + Terms & Conditions.
+              The T&C live in this right-hand column next to Medical Aid
+              Information, matching the JEMS paper form. This column always
+              renders so the T&C are on every PRF. */}
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            {anyChannelDetail && (
+              <>
+                <SectionHead label="Channel Detail" />
+                {/* Payer-specific blocks (RAF / IOD / PVT / Event / Call-Out)
+                    now live in the Billing Information column. Only the
+                    requesting provider, a separate quote, and the return trip
+                    remain here. */}
+                <SubBlock title="Requesting Provider" rows={[
+                  ['Provider',  fd.ems_provider_name],
+                  ['Reference', fd.ems_provider_ref],
+                  ['BHF No',    fd.ems_provider_bhf],
+                ]} />
+                <SubBlock title="Quoted" rows={[
+                  ['Quote No',      fd.quote_number],
+                  ['Amount (R)',    fd.quote_amount],
+                  ['Authorised By', fd.quote_authorised_by],
+                  ['Valid Until',   fd.quote_valid_until],
+                ]} />
+                {returnTripHasContent && (
+                  <>
+                    <SectionHead label="Return Trip" />
+                    <FieldRow label="Despatch"  value={fd.return_despatch_time} />
+                    <FieldRow label="On Scene"  value={fd.return_on_scene_time} />
+                    <FieldRow label="Depart"    value={fd.return_depart_scene_time} />
+                    <FieldRow label="At Dest"   value={fd.return_at_destination_time} />
+                    <FieldRow label="Handover"  value={fd.return_handover_time} />
+                    <FieldRow label="Available" value={fd.return_available_time} />
+                  </>
+                )}
+              </>
+            )}
+
+            {/* Terms & Conditions (page-1 right column, like the paper form) */}
+            <SectionHead label="Terms and Conditions" />
+            {(() => {
+              const company = prov?.name || 'the Service Provider';
+              const clauses: Array<[string, string]> = [
+                ['Acknowledgment of Treatment & Financial Responsibility',
+                  `I, the person whose name appears on this form as the patient, patient's parent, patient's guardian, or authorized representative, hereby acknowledge that the treatment and/or transportation noted on this document was received by the patient. I accept full responsibility for all payments associated with such treatment and/or transport as recorded on this document, irrespective of whether I am covered by a medical aid scheme or not.`],
+                ['Authorization for Data Disclosure & Debt Collection',
+                  `I hereby authorize ${company} to disclose any patient details in this document to third parties (for example, the Road Accident Fund, Compensation Commissioner, or collection agencies) and to trace any details not contained in this document to assist in the collection of any overdue or outstanding amounts due in respect of the treatment or transport provided to the patient by ${company}.`],
+                ['Assumption of Risk',
+                  `I hereby accept all risks associated with the emergency medical treatment and/or transportation provided or to be provided by ${company}.`],
+                ['Indemnity & Release of Liability',
+                  `I hereby release ${company} (including its directors, employees, agents, and representatives) from any liability, and indemnify and hold ${company} harmless against all loss, damages, or claims arising from or related to the emergency medical treatment and/or transportation provided or to be provided by ${company} as noted in this form.`],
+              ];
+              return (
+                <div style={{ padding: '5px 8px', borderTop: `1px solid ${LN}`, fontSize: '0.46rem', lineHeight: 1.3, color: INK }}>
+                  {clauses.map(([h, b], idx) => (
+                    <div key={idx} style={{ marginBottom: 5 }}>
+                      <div style={{ fontWeight: 800, color: GREEN_DK, marginBottom: 1 }}>{idx + 1}. {h}</div>
+                      <div>{b}</div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+            <SectionHead label="Signatures" />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', borderTop: `1px solid ${LN}` }}>
+              <div style={{ padding: '5px 7px', borderRight: `1px solid ${LN}` }}>
+                <div style={{ fontSize: '0.65rem', fontWeight: 900, color: MUT, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Patient / Rep.</div>
+                <SignatureBox src={fd.tc_patient_signature} minHeight={70} />
+              </div>
+              <div style={{ padding: '5px 7px', borderRight: `1px solid ${LN}` }}>
+                <div style={{ fontSize: '0.65rem', fontWeight: 900, color: MUT, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Witness</div>
+                <SignatureBox src={fd.tc_witness_signature} minHeight={70} />
+              </div>
+              <div style={{ padding: '5px 7px' }}>
+                <div style={{ fontSize: '0.65rem', fontWeight: 900, color: MUT, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Next of Kin</div>
+                <SignatureBox src={fd.next_of_kin_signature} minHeight={70} />
+              </div>
+            </div>
+            <div style={{ flex: 1, borderTop: `1px solid ${LN}` }} />
+          </div>
+        </div>
+
+        {/* ── BAND C — Closeout: Valuables + Handover sig │ Crew sign-off (×2) │
+              Motivation, all grouped in one band so nothing stretches across a
+              sparse full-width row. ── */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1.3fr 1.3fr 1.9fr', borderTop: `2px solid ${LN}` }}>
+          {/* Valuables + Handover Signature (+ RAF sketch if any) */}
           <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
             <SectionHead label="Valuables" />
             {valuablesEmpty ? (
@@ -1227,20 +1368,9 @@ export default function PRFView() {
                 <FieldRow label="Description" value={fd.valuables_description} valueMin={28} />
               </>
             )}
-            <SectionHead label="Signatures" />
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', borderTop: `1px solid ${LN}` }}>
-              <div style={{ padding: '6px 7px', borderRight: `1px solid ${LN}` }}>
-                <div style={{ fontSize: '0.52rem', fontWeight: 800, color: MUT, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>Patient</div>
-                {prf.signatures?.patient_signature
-                  ? <img src={prf.signatures.patient_signature} alt="patient" style={{ maxWidth: '100%', maxHeight: 42 }} />
-                  : <EmptySignature />}
-              </div>
-              <div style={{ padding: '6px 7px' }}>
-                <div style={{ fontSize: '0.52rem', fontWeight: 800, color: MUT, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>Witness</div>
-                {prf.signatures?.witness_signature
-                  ? <img src={prf.signatures.witness_signature} alt="witness" style={{ maxWidth: '100%', maxHeight: 42 }} />
-                  : <EmptySignature />}
-              </div>
+            <SectionHead label="Handover Signature" />
+            <div style={{ padding: '6px 8px', borderTop: `1px solid ${LN}` }}>
+              <SignatureBox src={prf.signatures?.handover_signature} minHeight={56} />
             </div>
             {fd.raf_sketch && (
               <>
@@ -1258,9 +1388,24 @@ export default function PRFView() {
             <div style={{ flex: 1, borderTop: `1px solid ${LN}` }} />
           </div>
 
-          {/* Motivation / Other Notes — single continuous block. The note
-              sits at the top of the column with flex:1 absorbing the rest
-              of the height, so the column reads as one clean card. */}
+          {/* Crew sign-off — one tidy column per crew member: details stacked
+              above a properly-sized signature box (no full-width stretch). */}
+          {([
+            { c: prf.crew_1, sig: fd.crew_signoff_sigs?.c1 || prf.signatures?.crew_signature,   fbName: fd.assessed_by, fbQual: fd.assessor_qualifications, role: 'Assessed By' },
+            { c: prf.crew_2, sig: fd.crew_signoff_sigs?.c2 || prf.signatures?.crew_2_signature, fbName: fd.managed_by,  fbQual: fd.manager_qualifications,  role: 'Managed By'  },
+          ]).map(({ c, sig, fbName, fbQual, role }, i) => (
+            <div key={i} style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
+              <SectionHead label={`Crew · ${role}`} />
+              <FieldRow label="Name"  value={c?.full_name || fbName} />
+              <FieldRow label="Qual"  value={c?.qualification || fbQual} />
+              <FieldRow label="HPCSA" value={c?.hpcsa_number} />
+              <div style={{ padding: '6px 8px', borderTop: `1px solid ${LN}`, flex: 1, display: 'flex', alignItems: 'center' }}>
+                <SignatureBox src={sig} minHeight={56} />
+              </div>
+            </div>
+          ))}
+
+          {/* Motivation / Other Notes */}
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             <SectionHead label="Motivation / Other Notes" />
             <div style={{
@@ -1277,57 +1422,6 @@ export default function PRFView() {
                 : <span style={{ fontStyle: 'italic', color: DIM }}>No motivation or additional notes recorded.</span>}
             </div>
           </div>
-        </div>
-
-        {/* ── BAND D — Crew Details (compact one-row strip; lives on page 1
-              so page 2 has room for the full clinical stack). Inline label
-              chips replace the column-header row to keep the band height
-              down — total ~28px so Band B (patient/clinical/medaid/channel)
-              keeps the vertical space it needs to render every populated
-              field without clipping. */}
-        <div style={{
-          borderTop: `2px solid ${LN}`,
-          display: 'grid', gridTemplateColumns: '1fr 1fr',
-          fontSize: '0.72rem', fontFamily: 'ui-monospace, monospace',
-          background: '#fff',
-        }}>
-          {([
-            { c: prf.crew_1, sig: prf.signatures?.crew_signature,   fbName: fd.assessed_by, fbQual: fd.assessor_qualifications, role: 'Assessed By' },
-            { c: prf.crew_2, sig: prf.signatures?.crew_2_signature, fbName: fd.managed_by,  fbQual: fd.manager_qualifications,  role: 'Managed By'  },
-          ]).map(({ c, sig, fbName, fbQual, role }, i) => (
-            <div key={i} style={{
-              display: 'flex', alignItems: 'center', gap: 10,
-              padding: '4px 10px',
-              borderRight: i === 0 ? `1px solid ${LN}` : 'none',
-              minHeight: 26,
-            }}>
-              <span style={{
-                fontSize: '0.5rem', fontWeight: 900, color: '#fff',
-                background: GREEN_DK, padding: '2px 6px', borderRadius: 3,
-                textTransform: 'uppercase', letterSpacing: '0.06em', flexShrink: 0,
-              }}>Crew · {role}</span>
-              {([
-                ['HPCSA', c?.hpcsa_number],
-                ['Qual',  c?.qualification || fbQual],
-                ['Name',  c?.full_name || fbName],
-              ] as Array<[string, any]>).map(([label, v]) => (
-                <span key={label} style={{ display: 'flex', alignItems: 'baseline', gap: 4, minWidth: 0 }}>
-                  <span style={{
-                    fontSize: '0.5rem', fontWeight: 800, color: MUT,
-                    textTransform: 'uppercase', letterSpacing: '0.06em', flexShrink: 0,
-                  }}>{label}</span>
-                  <span style={{
-                    color: INK, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                  }}>{isBlank(v) ? <EmptyMark /> : v}</span>
-                </span>
-              ))}
-              <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center' }}>
-                {sig
-                  ? <img src={sig} alt={`crew ${i + 1} signature`} style={{ maxHeight: 22, maxWidth: 110 }} />
-                  : <EmptySignature />}
-              </span>
-            </div>
-          ))}
         </div>
       </div>
 
@@ -1364,13 +1458,16 @@ export default function PRFView() {
           <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
             <SectionHead label="Oxygen Admin" />
             <FieldRow label="L / Min"    value={fd.o2_flow_rate} />
+            <FieldRow label="% Oxygen"   value={fd.o2_percent} />
             <FieldRow label="Device"     value={fd.o2_device} />
+            <FieldRow label="BVM"        value={fd.o2_bvm} />
             <FieldRow label="Start Time" value={fd.o2_start_time} />
             <FieldRow label="Stop Time"  value={fd.o2_stop_time} />
 
             {(() => {
               const airway = Array.isArray(fd.airway_interventions) ? fd.airway_interventions.filter(Boolean) : [];
               const subFields: Array<[string, any]> = [
+                ['OP Airway Size', fd.op_airway_size],
                 ['Intub. Att.', fd.intubation_attempts],
                 ['ETT Size',    fd.ett_size],
                 ['ETT Depth',   fd.ett_depth],
@@ -1438,6 +1535,7 @@ export default function PRFView() {
           <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
             <SectionHead label="History" />
             <FieldRow label="Complaint"      value={fd.chief_complaint}      valueMin={24} />
+            <FieldRow label="Primary Diagnosis" value={fd.primary_diagnosis} />
             <FieldRow label="Findings"       value={fd.findings_on_arrival}  valueMin={24} />
             <FieldRow label="Allergies"      value={fd.allergies} />
             <FieldRow label="Current Meds"   value={fd.current_medications}  valueMin={24} />
@@ -1446,72 +1544,8 @@ export default function PRFView() {
             <FieldRow label="Last Meal Time" value={fd.last_meal_time} />
             <FieldRow label="Events / HPI"   value={fd.events_hpi}           valueMin={48} />
 
-            {/* IV Therapy */}
-            <SectionHead label="Intravenous Therapy" />
-            <div style={{
-              display: 'grid', gridTemplateColumns: '2fr 1.4fr 1fr 1fr 0.8fr',
-              background: GREEN_TINT, fontSize: '0.54rem', fontWeight: 800,
-              textTransform: 'uppercase', letterSpacing: '0.06em',
-              borderBottom: `1px solid ${LN}`, color: INK,
-            }}>
-              <div style={{ padding: '3px 8px', borderRight: `1px solid ${LN}` }}>Type</div>
-              <div style={{ padding: '3px 8px', borderRight: `1px solid ${LN}` }}>Site</div>
-              <div style={{ padding: '3px 8px', borderRight: `1px solid ${LN}` }}>Vol Inf.</div>
-              <div style={{ padding: '3px 8px', borderRight: `1px solid ${LN}` }}>Time Up</div>
-              <div style={{ padding: '3px 8px' }}>Sign</div>
-            </div>
-            {(ivRows.length ? ivRows : [{}, {}]).map((row: any, i: number) => (
-              <div key={i} style={{
-                display: 'grid', gridTemplateColumns: '2fr 1.4fr 1fr 1fr 0.8fr',
-                borderTop: `1px solid ${LN}`, fontSize: '0.72rem',
-                fontFamily: 'ui-monospace, monospace',
-              }}>
-                <div style={{ padding: '3px 8px', borderRight: `1px solid ${LN}`, minHeight: 18 }}>
-                  {[row.type, row.jelco_size].filter(Boolean).join(' · ')}
-                </div>
-                <div style={{ padding: '3px 8px', borderRight: `1px solid ${LN}` }}>{row.site || ''}</div>
-                <div style={{ padding: '3px 8px', borderRight: `1px solid ${LN}` }}>{row.vol_infused || ''}</div>
-                <div style={{ padding: '3px 8px', borderRight: `1px solid ${LN}` }}>{row.time_up || ''}</div>
-                <div style={{ padding: '3px 8px', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700, display: 'flex', alignItems: 'center' }}>
-                  {typeof row.sign === 'string' && row.sign.startsWith('data:image/')
-                    ? <img src={row.sign} alt="Sign" style={{ maxHeight: 22, maxWidth: '100%', objectFit: 'contain' }} />
-                    : (row.sign || '')}
-                </div>
-              </div>
-            ))}
-
-            {/* Medication / Infusion */}
-            <SectionHead label="Medication / Infusion" />
-            <div style={{
-              display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 0.8fr',
-              background: GREEN_TINT, fontSize: '0.54rem', fontWeight: 800,
-              textTransform: 'uppercase', letterSpacing: '0.06em',
-              borderBottom: `1px solid ${LN}`, color: INK,
-            }}>
-              <div style={{ padding: '3px 8px', borderRight: `1px solid ${LN}` }}>Type</div>
-              <div style={{ padding: '3px 8px', borderRight: `1px solid ${LN}` }}>Route</div>
-              <div style={{ padding: '3px 8px', borderRight: `1px solid ${LN}` }}>Dose</div>
-              <div style={{ padding: '3px 8px', borderRight: `1px solid ${LN}` }}>Time</div>
-              <div style={{ padding: '3px 8px' }}>Sign</div>
-            </div>
-            {(medRows.length ? medRows : [{}, {}]).map((row: any, i: number) => (
-              <div key={i} style={{
-                display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 0.8fr',
-                borderTop: `1px solid ${LN}`, fontSize: '0.72rem',
-                fontFamily: 'ui-monospace, monospace',
-              }}>
-                <div style={{ padding: '3px 8px', borderRight: `1px solid ${LN}`, minHeight: 18 }}>{row.type || ''}</div>
-                <div style={{ padding: '3px 8px', borderRight: `1px solid ${LN}` }}>{row.route || ''}</div>
-                <div style={{ padding: '3px 8px', borderRight: `1px solid ${LN}` }}>{row.dose || ''}</div>
-                <div style={{ padding: '3px 8px', borderRight: `1px solid ${LN}` }}>{row.time || ''}</div>
-                <div style={{ padding: '3px 8px', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700, display: 'flex', alignItems: 'center' }}>
-                  {typeof row.sign === 'string' && row.sign.startsWith('data:image/')
-                    ? <img src={row.sign} alt="Sign" style={{ maxHeight: 22, maxWidth: '100%', objectFit: 'contain' }} />
-                    : (row.sign || '')}
-                </div>
-              </div>
-            ))}
-
+            {/* IV Therapy + Medication moved to a full-width band below the
+                clinical grid (see end of page 2) so their columns have room. */}
             <div style={{ flex: 1, borderTop: `1px solid ${LN}` }} />
           </div>
 
@@ -1580,6 +1614,22 @@ export default function PRFView() {
               ))}
             </div>
 
+            {/* Fewer-than-3-vitals motivation — shown directly under the vitals
+                table so the medical scheme can see the crew's justification for
+                the reduced number of recorded sets. */}
+            {!isBlank(fd.vitals_shortfall_motivation) && vitals.length < 3 && (
+              <>
+                <SectionHead label="Vitals Shortfall Motivation" />
+                <div style={{
+                  padding: '6px 9px', fontSize: '0.72rem', color: INK,
+                  whiteSpace: 'pre-wrap', lineHeight: 1.4,
+                  borderTop: `1px solid ${LN}`, background: SOFT_BG,
+                }}>
+                  {fd.vitals_shortfall_motivation}
+                </div>
+              </>
+            )}
+
             {/* IV Therapy + Medication / Infusion moved to column 2 (below
                 History) so this column can host the full vitals time-series
                 and let Management absorb any leftover height. */}
@@ -1598,6 +1648,82 @@ export default function PRFView() {
             </div>
           </div>
         </div>
+
+        {/* ── IV Therapy + Medication — full-width stacked tables. Full width
+              gives the Indication/Reason and Signature columns real room and
+              scales cleanly as more lines are added (rows just grow downward). ── */}
+
+        {/* Intravenous Therapy */}
+        <SectionHead label="Intravenous Therapy" />
+        <div style={{
+          display: 'grid', gridTemplateColumns: '2fr 1.3fr 1fr 1fr 3fr 2.4fr',
+          background: GREEN_TINT, fontSize: '0.58rem', fontWeight: 800,
+          textTransform: 'uppercase', letterSpacing: '0.06em',
+          borderTop: `2px solid ${LN}`, borderBottom: `1px solid ${LN}`, color: INK,
+        }}>
+          <div style={{ padding: '4px 8px', borderRight: `1px solid ${LN}` }}>Type / Fluid</div>
+          <div style={{ padding: '4px 8px', borderRight: `1px solid ${LN}` }}>Site</div>
+          <div style={{ padding: '4px 8px', borderRight: `1px solid ${LN}` }}>Vol Inf.</div>
+          <div style={{ padding: '4px 8px', borderRight: `1px solid ${LN}` }}>Time Up</div>
+          <div style={{ padding: '4px 8px', borderRight: `1px solid ${LN}` }}>Indication / Reason</div>
+          <div style={{ padding: '4px 8px' }}>Sign</div>
+        </div>
+        {(ivRows.length ? ivRows : [{}, {}]).map((row: any, i: number) => (
+          <div key={i} style={{
+            display: 'grid', gridTemplateColumns: '2fr 1.3fr 1fr 1fr 3fr 2.4fr',
+            borderBottom: `1px solid ${LN}`, fontSize: '0.74rem',
+            fontFamily: 'ui-monospace, monospace',
+          }}>
+            <div style={{ padding: '5px 8px', borderRight: `1px solid ${LN}`, minHeight: 32, display: 'flex', alignItems: 'center' }}>{[row.type, row.jelco_size].filter(Boolean).join(' · ')}</div>
+            <div style={{ padding: '5px 8px', borderRight: `1px solid ${LN}`, display: 'flex', alignItems: 'center' }}>{row.site || ''}</div>
+            <div style={{ padding: '5px 8px', borderRight: `1px solid ${LN}`, display: 'flex', alignItems: 'center' }}>{row.vol_infused || ''}</div>
+            <div style={{ padding: '5px 8px', borderRight: `1px solid ${LN}`, display: 'flex', alignItems: 'center' }}>{row.time_up || ''}</div>
+            <div style={{ padding: '5px 8px', borderRight: `1px solid ${LN}`, fontFamily: '"Segoe UI", sans-serif', display: 'flex', alignItems: 'center' }}>{row.indication || ''}</div>
+            <div style={{ padding: '4px 6px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div style={{ width: '94%', minHeight: 30, border: `1px solid #cbd5e1`, borderRadius: 4, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 2 }}>
+                {typeof row.sign === 'string' && row.sign.startsWith('data:image/')
+                  ? <img src={row.sign} alt="Sign" style={{ maxWidth: '100%', maxHeight: 28, objectFit: 'contain' }} />
+                  : <span style={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: row.sign ? INK : DIM }}>{row.sign || ''}</span>}
+              </div>
+            </div>
+          </div>
+        ))}
+
+        {/* Medication / Infusion */}
+        <SectionHead label="Medication / Infusion" />
+        <div style={{
+          display: 'grid', gridTemplateColumns: '2.5fr 1fr 1fr 1fr 3fr 2.4fr',
+          background: GREEN_TINT, fontSize: '0.58rem', fontWeight: 800,
+          textTransform: 'uppercase', letterSpacing: '0.06em',
+          borderBottom: `1px solid ${LN}`, color: INK,
+        }}>
+          <div style={{ padding: '4px 8px', borderRight: `1px solid ${LN}` }}>Drug / Type</div>
+          <div style={{ padding: '4px 8px', borderRight: `1px solid ${LN}` }}>Route</div>
+          <div style={{ padding: '4px 8px', borderRight: `1px solid ${LN}` }}>Dose</div>
+          <div style={{ padding: '4px 8px', borderRight: `1px solid ${LN}` }}>Time</div>
+          <div style={{ padding: '4px 8px', borderRight: `1px solid ${LN}` }}>Reason</div>
+          <div style={{ padding: '4px 8px' }}>Sign</div>
+        </div>
+        {(medRows.length ? medRows : [{}, {}]).map((row: any, i: number) => (
+          <div key={i} style={{
+            display: 'grid', gridTemplateColumns: '2.5fr 1fr 1fr 1fr 3fr 2.4fr',
+            borderBottom: `1px solid ${LN}`, fontSize: '0.74rem',
+            fontFamily: 'ui-monospace, monospace',
+          }}>
+            <div style={{ padding: '5px 8px', borderRight: `1px solid ${LN}`, minHeight: 32, display: 'flex', alignItems: 'center' }}>{row.type || ''}</div>
+            <div style={{ padding: '5px 8px', borderRight: `1px solid ${LN}`, display: 'flex', alignItems: 'center' }}>{row.route || ''}</div>
+            <div style={{ padding: '5px 8px', borderRight: `1px solid ${LN}`, display: 'flex', alignItems: 'center' }}>{row.dose || ''}</div>
+            <div style={{ padding: '5px 8px', borderRight: `1px solid ${LN}`, display: 'flex', alignItems: 'center' }}>{row.time || ''}</div>
+            <div style={{ padding: '5px 8px', borderRight: `1px solid ${LN}`, fontFamily: '"Segoe UI", sans-serif', display: 'flex', alignItems: 'center' }}>{row.reason || ''}</div>
+            <div style={{ padding: '4px 6px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div style={{ width: '94%', minHeight: 30, border: `1px solid #cbd5e1`, borderRadius: 4, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 2 }}>
+                {typeof row.sign === 'string' && row.sign.startsWith('data:image/')
+                  ? <img src={row.sign} alt="Sign" style={{ maxWidth: '100%', maxHeight: 28, objectFit: 'contain' }} />
+                  : <span style={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: row.sign ? INK : DIM }}>{row.sign || ''}</span>}
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
       </div>{/* /prf-print-frame (page 2) */}
 

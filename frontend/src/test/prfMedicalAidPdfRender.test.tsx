@@ -1,0 +1,381 @@
+/**
+ * prfMedicalAidPdfRender.test.tsx — PRF → PDF field-visibility verification
+ *
+ * Scenario: PRIMARY call, billing type MED AID (medical scheme submission).
+ *
+ * The "Save as PDF" / share pipelines snapshot the rendered `.prf-page` DOM,
+ * so whatever appears in that DOM is exactly what lands in the PDF sent to
+ * the medical scheme. This suite mounts PRFView with a FULLY-populated
+ * Primary + Medical-Aid PRF fixture (every field carries a unique sentinel
+ * value) and asserts each sentinel is present in the rendered pages — i.e.
+ * no captured field can silently drop off the scheme's PDF.
+ */
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import { MemoryRouter, Routes, Route } from 'react-router-dom';
+import axios from 'axios';
+import PRFView from '../pages/PRFView';
+
+// ── Mocks ─────────────────────────────────────────────────────────────────
+vi.mock('axios');
+
+// jsPDF / html2canvas are only used by the export pipelines (pre-warm effect
+// fires 400ms after load) — stub them so jsdom never tries to rasterise.
+vi.mock('jspdf', () => ({
+  jsPDF: vi.fn(() => ({
+    addPage: vi.fn(),
+    addImage: vi.fn(),
+    output: vi.fn(() => new Blob()),
+    save: vi.fn(),
+  })),
+}));
+vi.mock('html2canvas', () => ({
+  default: vi.fn(async () => {
+    const c = document.createElement('canvas');
+    c.width = 10; c.height = 10;
+    return c;
+  }),
+}));
+
+// 1×1 transparent PNG — used for every signature / attachment image
+const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+// Mirror PRFView's formatters so time/date expectations are TZ-safe
+const pad = (n: number) => String(n).padStart(2, '0');
+const expectTime = (iso: string) => {
+  const d = new Date(iso);
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
+// ── Fixture: every field a Primary + MED AID PRF can carry ────────────────
+const FD = {
+  // Call classification — the scenario under test
+  call_type: 'PRIMARY',
+  billing_type: 'MED AID',
+
+  // Call information
+  incident_location: '99 Sentinel Incident Road',
+  suburb_ward: 'Sentinel-Suburb',
+  referring_doctor: 'Dr Sentinel-Referrer',
+  receiving_facility: 'Sentinel Receiving Hospital',
+  ward: 'Sentinel-Ward-7',
+  receiving_doctor: 'Dr Sentinel-Receiver',
+
+  // Patient information (all 17 rendered fields)
+  gender: 'Male',
+  patient_name: 'Sipho-Sentinel',
+  patient_surname: 'Dlamini-Sentinel',
+  patient_id_number: '9001015800086',
+  patient_passport_number: 'PP-SENT-001',
+  age: '36-yrs-sent',
+  patient_dob: '1990-01-01-sent',
+  patient_address: '12 Sentinel Residence Ave',
+  patient_suburb: 'Sentinel-Res-Suburb',
+  patient_postal_code: '4001-sent',
+  patient_postal_address: 'PO Box Sentinel 55',
+  patient_postal_suburb: 'Sentinel-Postal-Suburb',
+  patient_postal_address_code: '4002-sent',
+  patient_phone_home: '031-555-0001',
+  patient_phone_work: '031-555-0002',
+  patient_phone_cell: '082-555-0003',
+  accompanying_persons_count: '2-accomp-sent',
+
+  // Debtor (different from patient so the full block renders)
+  debtor_gender: 'Female',
+  debtor_name: 'Debra-Sentinel',
+  debtor_surname: 'Debtor-Sentinel',
+  debtor_id_number: '8505055800087',
+  debtor_passport_number: 'PP-DEBT-002',
+  debtor_age: '41-yrs-debt',
+  debtor_dob: '1985-05-05-debt',
+  debtor_address: '34 Sentinel Debtor Street',
+  debtor_suburb: 'Sentinel-Debt-Suburb',
+  debtor_postal_code: '4003-debt',
+  debtor_phone_home: '031-555-0004',
+  debtor_phone_cell: '082-555-0005',
+
+  // Medical Aid — the scheme-billing block under test
+  medical_scheme: 'Sentinel-Med-Scheme',
+  medical_aid_number: 'MA-SENT-123456',
+  preauth_number: 'PRE-SENT-789',
+  post_auth_number: 'POST-SENT-790',
+  dependent_number: '03-dep-sent',
+  main_member_id: 'MM-SENT-456',
+  scheme_option: 'Sentinel-Plan-Comprehensive',
+
+  // Priority / assessment / mechanism
+  priority: 'RED',
+  assessment_level: 'BLS',
+  monitoring_level: 'BLS',
+  mechanism: ['FALL'],
+  mechanism_other: 'Fell off sentinel ladder',
+
+  // Receiving facility / handover
+  handover_name: 'Nurse Sentinel-Handover',
+  handover_qualification: 'RN-SENT',
+  handover_doctor_email: 'doctor@sentinel-hospital.test',
+  handover_notes: 'Stable on sentinel handover',
+
+  // Valuables + notes
+  valuables_handed_to: 'Sentinel Security Officer',
+  valuables_description: 'Sentinel wallet and keys',
+  management_notes: 'Sentinel management narrative for scheme audit',
+
+  // Oxygen / airway / circulation / immobilisation
+  o2_flow_rate: '8-lpm-sent',
+  o2_percent: '60%-sent',
+  o2_device: 'Sentinel-NRB-Mask',
+  o2_bvm: 'BVM-sent-yes',
+  o2_start_time: '09:41-o2s',
+  o2_stop_time: '10:05-o2e',
+  airway_interventions: ['SELF-MAINTAINED'],
+  op_airway_size: 'OPA-3-sent',
+  intubation_attempts: '1-int-sent',
+  ett_size: '7.5-ett-sent',
+  ett_depth: '21cm-ett-sent',
+  ng_tube_size: '14fr-ng-sent',
+  circulation_interventions: ['PERIPH. IV LINE'],
+  iv_attempts: '2-ivatt-sent',
+  defib_joules: '200J-sent',
+  immob_equipment: ['COLLAR'],
+  other_equipment: 'Sentinel vacuum splint',
+
+  // Surveys
+  survey_a: 'Airway-clear-sent',
+  survey_b: 'Breathing-equal-sent',
+  survey_c: 'Circulation-strong-sent',
+  survey_head_back: 'Head-nad-sent',
+  survey_neuro: 'Neuro-gcs15-sent',
+  survey_chest: 'Chest-clear-sent',
+  survey_abdo: 'Abdo-soft-sent',
+  survey_limbs: 'Limbs-intact-sent',
+  survey_back: 'Back-tender-sent',
+
+  // History
+  chief_complaint: 'Sentinel back pain after fall',
+  primary_diagnosis: 'Sentinel suspected L2 fracture',
+  findings_on_arrival: 'Sentinel patient supine on floor',
+  allergies: 'Sentinel-penicillin',
+  current_medications: 'Sentinel-statins',
+  past_medical_history: 'Sentinel previous back surgery',
+  last_meal: 'Sentinel sandwich',
+  last_meal_time: '08:15-meal-sent',
+  events_hpi: 'Sentinel HPI - fell from ladder height',
+
+  // IV therapy + medication rows
+  iv_therapy: [{
+    type: 'Ringers-sent', jelco_size: '18G-sent', site: 'L-cubital-sent',
+    vol_infused: '500ml-sent', time_up: '09:50-iv-sent',
+    indication: 'Sentinel volume support', sign: 'AI-sent',
+  }],
+  medications: [{
+    type: 'Morphine-sent', route: 'IV-med-sent', dose: '5mg-sent',
+    time: '09:55-med-sent', reason: 'Sentinel analgesia', sign: 'AN-sent',
+  }],
+
+  // Vitals — 3 sets (max before the continuation page)
+  vitals_sets: [
+    { time: '09:45', resp_rate: '18-v1', spo2: '97-v1', hr: '88-v1', bp: '130/85-v1', gcs_total: '15-v1', temp: '36.8-v1', pain: '7-v1' },
+    { time: '09:55', resp_rate: '17-v2', spo2: '98-v2', hr: '84-v2', bp: '128/84-v2', gcs_total: '15-v2', temp: '36.7-v2', pain: '5-v2' },
+    { time: '10:05', resp_rate: '16-v3', spo2: '99-v3', hr: '80-v3', bp: '126/82-v3', gcs_total: '15-v3', temp: '36.6-v3', pain: '3-v3' },
+  ],
+
+  // Signatures captured on-form + attachments
+  tc_patient_signature: PNG,
+  tc_witness_signature: PNG,
+  next_of_kin_signature: PNG,
+  hospital_sticker: PNG,
+  medical_aid_image: PNG,
+};
+
+const PRF_FIXTURE = {
+  prf_number: 'PRF-SENT-0001',
+  case_number: 'JEMS-2026-06-SENT',
+  submitted_at: '2026-06-11T09:30:00',
+  form_data: FD,
+  timestamps: {
+    time_call_received: '2026-06-11T09:30:00',
+    time_dispatched: '2026-06-11T09:36:00',
+    time_on_scene: '2026-06-11T09:36:00',
+    time_depart_scene: '2026-06-11T09:59:00',
+    time_at_destination: '2026-06-11T09:59:00',
+    time_available: '2026-06-11T10:01:00',
+  },
+  kms: {
+    km_dispatched: '23-km-a', km_on_scene: '24-km-b', km_depart_scene: '45-km-c',
+    km_at_destination: '45-km-d', km_available: '23-km-e',
+  },
+  provider: {
+    name: 'Sentinel EMS Provider', slug: 'sentinel-ems',
+    phone: '078-670-6945-sent', pr_number: '0890030746-sent',
+    pty_reg_number: '2017/438874/07-sent',
+    address: '59 Sentinel Road, Chatsworth', email: 'ops@sentinel-ems.test',
+  },
+  vehicle: { callsign: 'ALPHA-1-SENT', registration: 'ND-123-456-SENT', vehicle_type: 'Ambulance-sent' },
+  crew_1: { full_name: 'A.Ishwar-Sent', qualification: 'AEA-sent', hpcsa_number: 'ANA-0049530-sent' },
+  crew_2: { full_name: 'A.Naidu-Sent', qualification: 'ANT-sent', hpcsa_number: 'ANT-0012793-sent' },
+  signatures: {
+    patient_signature: PNG,
+    witness_signature: PNG,
+    handover_signature: PNG,
+    crew_signature: PNG,
+    crew_2_signature: PNG,
+  },
+};
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+function renderPrfView() {
+  return render(
+    <MemoryRouter initialEntries={['/cases/case-sent-1/prf']}>
+      <Routes>
+        <Route path="/cases/:caseId/prf" element={<PRFView />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
+/** Assert the sentinel appears at least once anywhere in the rendered PRF. */
+function expectVisible(sentinel: string) {
+  const matches = screen.queryAllByText(
+    (content) => content.includes(sentinel),
+    { exact: false },
+  );
+  expect(matches.length, `Field value "${sentinel}" missing from rendered PRF`).toBeGreaterThan(0);
+}
+
+beforeEach(() => {
+  vi.mocked(axios.get).mockResolvedValue({ data: PRF_FIXTURE });
+});
+
+// ── Tests ─────────────────────────────────────────────────────────────────
+describe('PRF PDF render — PRIMARY call, MED AID billing', () => {
+  it('renders the 2 form pages plus one page per attachment', async () => {
+    const { container } = renderPrfView();
+    await screen.findByText(/Sipho-Sentinel/);
+    // 2 PRF pages + 2 attachments (hospital sticker, medical aid card)
+    expect(container.querySelectorAll('.prf-page')).toHaveLength(4);
+    expect(container.querySelectorAll('.prf-print-frame')).toHaveLength(4);
+  });
+
+  it('shows the PRIMARY call-type and MED AID billing checks', async () => {
+    renderPrfView();
+    await screen.findByText(/Sipho-Sentinel/);
+    expect(screen.getByText('Primary')).toBeInTheDocument();
+    expect(screen.getByText('MED AID')).toBeInTheDocument();
+    expect(screen.getByText('RED')).toBeInTheDocument();
+  });
+
+  it('renders every Medical Aid (scheme billing) field', async () => {
+    renderPrfView();
+    await screen.findByText(/Sipho-Sentinel/);
+    [
+      FD.medical_scheme, FD.medical_aid_number, FD.preauth_number,
+      FD.post_auth_number, FD.dependent_number, FD.main_member_id,
+      FD.scheme_option,
+    ].forEach(expectVisible);
+  });
+
+  it('renders every patient + debtor field', async () => {
+    renderPrfView();
+    await screen.findByText(/Sipho-Sentinel/);
+    [
+      FD.patient_name, FD.patient_surname, FD.patient_id_number,
+      FD.patient_passport_number, FD.age, FD.patient_dob, FD.patient_address,
+      FD.patient_suburb, FD.patient_postal_code, FD.patient_postal_address,
+      FD.patient_postal_suburb, FD.patient_postal_address_code,
+      FD.patient_phone_home, FD.patient_phone_work, FD.patient_phone_cell,
+      FD.accompanying_persons_count,
+      FD.debtor_name, FD.debtor_surname, FD.debtor_id_number,
+      FD.debtor_passport_number, FD.debtor_age, FD.debtor_dob,
+      FD.debtor_address, FD.debtor_suburb, FD.debtor_postal_code,
+      FD.debtor_phone_home, FD.debtor_phone_cell,
+    ].forEach(expectVisible);
+  });
+
+  it('renders call information, times, kms, vehicle and provider branding', async () => {
+    renderPrfView();
+    await screen.findByText(/Sipho-Sentinel/);
+    [
+      // referring_doctor removed from the rendered PRF (still captured).
+      FD.incident_location, FD.suburb_ward,
+      FD.receiving_facility, FD.ward, FD.receiving_doctor,
+      PRF_FIXTURE.case_number, PRF_FIXTURE.vehicle.callsign,
+      PRF_FIXTURE.vehicle.registration,
+      PRF_FIXTURE.provider.name, PRF_FIXTURE.provider.phone,
+      PRF_FIXTURE.provider.pr_number, PRF_FIXTURE.provider.address,
+      ...Object.values(PRF_FIXTURE.kms),
+    ].forEach(expectVisible);
+    // Times render as HH:MM in local time
+    expectVisible(expectTime(PRF_FIXTURE.timestamps.time_dispatched));
+    expectVisible(expectTime(PRF_FIXTURE.timestamps.time_available));
+  });
+
+  it('renders the full clinical page (oxygen, airway, surveys, history, IV, meds)', async () => {
+    renderPrfView();
+    await screen.findByText(/Sipho-Sentinel/);
+    [
+      FD.o2_flow_rate, FD.o2_percent, FD.o2_device, FD.o2_bvm,
+      FD.o2_start_time, FD.o2_stop_time,
+      'SELF-MAINTAINED', FD.op_airway_size, FD.intubation_attempts,
+      FD.ett_size, FD.ett_depth, FD.ng_tube_size,
+      'PERIPH. IV LINE', FD.iv_attempts, FD.defib_joules,
+      'COLLAR', FD.other_equipment,
+      FD.survey_a, FD.survey_b, FD.survey_c,
+      FD.survey_head_back, FD.survey_neuro, FD.survey_chest,
+      FD.survey_abdo, FD.survey_limbs, FD.survey_back,
+      FD.chief_complaint, FD.primary_diagnosis, FD.findings_on_arrival,
+      FD.allergies, FD.current_medications, FD.past_medical_history,
+      FD.last_meal, FD.last_meal_time, FD.events_hpi,
+      FD.iv_therapy[0].site, FD.iv_therapy[0].vol_infused,
+      FD.iv_therapy[0].indication,
+      FD.medications[0].type, FD.medications[0].dose,
+      FD.medications[0].reason,
+      FD.management_notes,
+    ].forEach(expectVisible);
+  });
+
+  it('renders all 3 vitals sets without a continuation page', async () => {
+    const { container } = renderPrfView();
+    await screen.findByText(/Sipho-Sentinel/);
+    FD.vitals_sets.forEach(set => {
+      [set.resp_rate, set.spo2, set.hr, set.bp, set.gcs_total, set.temp, set.pain]
+        .forEach(expectVisible);
+    });
+    expect(screen.queryByText(/Vitals — Continuation/)).not.toBeInTheDocument();
+    expect(container.querySelectorAll('.prf-page')).toHaveLength(4);
+  });
+
+  it('renders every signature block as a visible captured signature', async () => {
+    const { container } = renderPrfView();
+    await screen.findByText(/Sipho-Sentinel/);
+    // 3 T&C + handover + 2 crew = 6 captured signatures (the patient/witness
+    // pair under Valuables was removed — those live under the T&Cs).
+    const sigs = container.querySelectorAll('img[alt="signature"]');
+    expect(sigs.length).toBe(6);
+    // No "Not captured" placeholders should remain on a fully-signed PRF
+    expect(screen.queryAllByText('Not captured')).toHaveLength(0);
+  });
+
+  it('renders mechanism, handover, valuables and motivation for the scheme', async () => {
+    renderPrfView();
+    await screen.findByText(/Sipho-Sentinel/);
+    [
+      'FALL', FD.mechanism_other,
+      // handover_name removed from the rendered PRF (still captured).
+      FD.handover_qualification, FD.handover_doctor_email,
+      FD.handover_notes,
+      FD.valuables_handed_to, FD.valuables_description,
+      FD.management_notes,
+      PRF_FIXTURE.crew_1.full_name, PRF_FIXTURE.crew_1.hpcsa_number,
+      PRF_FIXTURE.crew_2.full_name, PRF_FIXTURE.crew_2.hpcsa_number,
+    ].forEach(expectVisible);
+  });
+
+  it('marks attachments and renders each on its own page', async () => {
+    renderPrfView();
+    await screen.findByText(/Sipho-Sentinel/);
+    expect(screen.getByText(/Documents Attached/i)).toBeInTheDocument();
+    expect(screen.getByText(/Attachments\) - Hospital Sticker/)).toBeInTheDocument();
+    expect(screen.getByText(/Attachments\) - Medical Aid Card/)).toBeInTheDocument();
+  });
+});

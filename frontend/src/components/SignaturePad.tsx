@@ -28,8 +28,8 @@ export default function SignaturePad({ label, value, onChange, height = 140 }: S
     const ctx = canvas.getContext('2d');
     if (ctx) {
       ctx.scale(2, 2);
-      ctx.strokeStyle = '#0f172a';
-      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 3.5;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
     }

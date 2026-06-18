@@ -1,0 +1,124 @@
+Method,Name,Error,Occurrences
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""a2efdf34-f1f7-4691-ab1a-18cff851b3ae""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""0cc6c977-41fb-4f84-9ebb-eb876dba2369""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""fd486592-06ac-44ce-9468-cd76e16ed979""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""70d36e21-4ba8-4335-ba45-5d8e7896e383""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""0c534e87-9536-4a22-8380-ac5925072f5d""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""4f4acece-bf78-463a-9c87-b431576ded87""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""86523544-c059-4be5-b629-f19935caaec1""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""4d07c144-f575-48c6-b9b9-014dc6a54ecb""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""54f388c5-6b5f-48ea-aaa4-333e565e5673""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""ebc31a29-d6f8-4355-8cba-2573eb8169ff""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""bcaabfb2-0162-4365-9ce2-4e9db20cf600""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""846a55fb-247c-4448-926f-6c15677355a3""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""ceee19a9-2327-4f4e-9db8-64261a6ba7f7""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""c73038e5-c8d4-41ca-a090-216e386bc4e8""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""a3aa87c3-1c5e-4545-b26d-0c242293c44c""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""fabe708a-456a-411d-b60d-f6e0fe481cde""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""8ebed21e-41e6-4f97-a69c-91a32870e40c""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""f36c0d84-4cbb-40b9-9a7e-edabbb6421e0""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""8b12b11b-46e9-4984-aece-57284ac0c366""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""95e91648-3e56-4834-968c-4559117af4a5""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""71157f4f-9bf6-400d-9699-d76814089304""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""7b4acd9b-424b-4dc4-a2c7-1e2ec701ad8a""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""20f89e1a-b999-46fc-834e-6d5ed90d6d8c""}')",1
+GET,GET /api/digital-prf/[id],CatchResponseError('refetch failed: 500'),1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""de48a436-f8a4-4fdb-a707-4bdf809c2547""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""a25ae50b-79f3-4d42-b659-319e26fc4bee""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""f1e0430d-db6b-4aa6-a45a-a58967b3c3bc""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""87f31cdf-bd03-42db-a0ae-b930e5205b08""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""0bd44cae-7eb7-42a3-80b6-106420209f9f""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""cd11ec5e-094a-4e45-b6c6-d4321e3bb29f""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""f6fdcd90-5b55-4eb9-80b5-abb1a9390521""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""39ac8139-4c3d-4e42-9689-b6b6e8793547""}')",1
+POST,POST /api/digital-prf/[id]/mark-time,"CatchResponseError('mark-time failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""a9df0158-7d60-4dcd-900e-34556c23b3db""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""ba146386-142d-4bf3-a5cf-0d993f3380a8""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""42ea6da0-9613-4689-8d94-7a22e1230e35""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""1b49f8d2-7dd4-4187-980a-2ef284e9e841""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""9b477515-236d-4bc9-a04b-5b60c4c5c255""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""8adafcca-8ed8-452f-bfbd-7474199d202b""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""c1c07e88-49a8-4276-b89b-836d9ff77a9d""}')",1
+PATCH,PATCH /api/digital-prf/[id] (autosave),"CatchResponseError('autosave failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""f4d48e76-c535-4689-aa1b-3058ff042d91""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""f156f650-6680-4c64-b655-c8bc5596f7e3""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""c1d651f8-4494-4702-9a40-070f110ef672""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""565a8283-f33a-4c76-b369-0cbe7bdfd6e7""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""4a67ffd8-6544-492a-988b-52b04adb90ac""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""cf1fc25e-0b14-462d-b42f-0144c3668727""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""e9ad6b7c-cc7f-4540-bd20-f8bcafe23e67""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""78227e03-c917-4910-ada0-688b370b774d""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""ea1da97a-d3f0-4875-aab9-786ee88099fe""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""78d2beac-5f92-41a9-a4b0-8cd0cb08ce6e""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""4d8d2d51-d947-462c-9f86-98fbd47e45f9""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""e25404dd-bf13-4bc6-98cd-e0801e610243""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""8b0dd200-f56d-4e07-aad1-6f1a29bcbebc""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""70b3b293-8f8a-4b6c-a7c4-c4c1aeaf5ca3""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""e94007a7-61d3-4016-822e-a3bb14a1c86f""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""66224520-808b-4c1d-86fe-34970b0263c5""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""d5712a72-6146-46e3-9800-1c1199192d20""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""e9453bec-938e-4baa-b72f-ceb4deec8a42""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""a1c57906-42d3-4fd2-ba03-f9c92c32cd3d""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""fe2a9ad2-0637-42b0-9978-09001a94e945""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""ba3ab479-ab05-484c-a31d-a2d227fe6c93""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""473dbd09-bcd5-4c5b-912b-0ce9ce31ac10""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""0554ac3c-e9eb-4d6c-958e-e943b1b8082d""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""3f53aaff-c6e2-4349-91f8-5fe671899db9""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""b4005453-2c20-476f-a549-21d11b34bcb3""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""0c5171c0-42be-41c4-bc60-6bfabef565e9""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""9eb9e10a-0cbe-4421-a02f-6657ad885639""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""6610e5f1-6ac8-4b2f-b549-d98cece8ed9a""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""1811810f-e3f1-4979-95ca-b8f6ba11d762""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""c28017c7-4e28-4e59-b906-23e306e3b198""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""d87884e7-d1a6-4e08-bbea-31244da248c1""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""63b64122-7da2-4b22-a944-4ee8a2894d34""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""6311bc2d-6347-4210-ab9f-9071a2df766d""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""88f9577c-21bd-4e41-861a-c43ca28592b3""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""c0e0dd75-a89c-4532-93f6-4888ef05027b""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""14cf14a0-342b-4142-85d6-c09ece0c0606""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""d8a3ce8d-e947-48fd-bf56-f5a726a7cca1""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""f976aa40-5c8c-4256-a997-0f4cf09d72f9""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""9ad8189a-23e1-4267-8159-3a1bacacc9a4""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""ba58b100-b95f-46ec-94ef-ff97ee86be5f""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""e51076ff-11c5-43fc-988e-8275d5b0334e""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""a91b2269-580a-43f4-ae6b-e1a315e1f9ab""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""acead447-8dc7-42ca-9c7c-fdb3e62dedef""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""8daac6ce-9c65-472f-9978-db63a4170ddd""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""566e7101-096f-48d1-983e-9b73a019be2a""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""838cbfa3-f281-4a60-a54e-a5edf7689847""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""99eb64b5-a00d-4cd9-9098-4fe6c4bf4095""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""8f95db08-a09f-4a1e-8cb3-a28b9d856bdc""}')",1
+GET,GET /api/digital-prf/[id],CatchResponseError('get failed: 500'),4
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""ce7efb63-cc0c-4aa6-82fe-2481b389a9f2""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""e2017c88-3d40-422f-b5f7-3dc8f7e2ecb7""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""7e627977-1380-4d43-ae15-1f9e1727a164""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""3d2a45d2-8fdd-49ae-a650-2bc248dac85f""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""5eaa803f-9235-45ce-8704-9d396fc3ec31""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""9eaa01af-e819-4d95-b684-1cbb00cf3b0d""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""0110ca99-229e-4611-ad6e-7da6316a5c8a""}')",1
+PATCH,PATCH /api/digital-prf/[id] (autosave),"CatchResponseError('autosave failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""7081a076-f836-4792-ab6d-dd69b113e484""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""3e8ad31c-d7ce-4d09-9845-e80a04f5fc30""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""7230efa5-1a2d-4727-990a-eeb0519815b5""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""91dcc532-4e07-437d-abe1-926e09602afe""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""25d9d58e-b383-4022-8f1b-9c061bc2e312""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""36504605-97f0-4423-b27c-6b2b8ecf1007""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""c005c045-a6e9-4a1c-b76e-56974c46ca86""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""19457ad0-7dd7-4cae-ab54-1c84a1de7462""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""6999ed71-55fb-4c57-9787-98c008fdba39""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""ade8a5f3-5fff-4577-a84a-34b09690e488""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""d31b0a10-5b32-4345-abda-df639b3c15ed""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""ab96d9f5-42b8-404f-93d8-24532fe92c34""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""db28d89a-ed13-4d81-b35a-5934bc2cec04""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""5003f353-0b83-456e-ac66-90ebed29fad3""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""685f46d4-a5da-4273-bc39-99c524f5d937""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""f44448cf-46c4-4c3f-b510-0ec9960e862b""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""751ea224-0fe5-4b52-8ca6-aa38674a7ef2""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""28f12338-0278-4944-b601-31dbaac01f2a""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""3da67ed9-680e-467e-883f-096cd0c97ab1""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""4bb0c162-8fbe-4ce3-85e4-9584b442d379""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""08781be6-b39b-4693-a87b-d3f16932b8c0""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""993da0fc-39a1-475d-b548-9a671d479d5d""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""a51f50bd-2a25-46a5-9cf9-83d2888b5910""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""69485faa-abca-4322-bcbc-0a55ae397489""}')",1
+POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""2083a580-756c-4969-bf08-686ed8946ad3""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""3683f799-918b-4113-89ea-fe4894b30dc6""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""398b80ff-ba65-456a-8f41-734aa40246ff""}')",1
+POST,POST /api/crew/login,"CatchResponseError('login failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""996f4517-10de-4bf5-a3c6-35c233176bf9""}')",1
