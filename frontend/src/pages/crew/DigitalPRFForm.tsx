@@ -3132,7 +3132,7 @@ const EnRouteOverlay = ({ dispatchedAt, onDoubleTap }: { dispatchedAt: string; o
       <div style={{ fontSize: '1rem', fontWeight: 700, color: '#94a3b8', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 20 }}>
         En Route to Scene
       </div>
-      <div style={{ fontSize: '5rem', fontWeight: 900, fontVariantNumeric: 'tabular-nums', tracking: '-0.02em', textShadow: '0 0 40px rgba(91,141,239,0.3)', color: '#5b8def' }}>
+      <div style={{ fontSize: '5rem', fontWeight: 900, fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.02em', textShadow: '0 0 40px rgba(91,141,239,0.3)', color: '#5b8def' }}>
         {String(mins).padStart(2, '0')}:{String(secs).padStart(2, '0')}
       </div>
       <div style={{ marginTop: 40, padding: '16px 24px', background: 'rgba(255,255,255,0.05)', borderRadius: 100, backdropFilter: 'blur(10px)', color: '#94a3b8', fontSize: '0.9rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 10, animation: 'pulse 2s infinite' }}>
@@ -7893,7 +7893,7 @@ export default function DigitalPRFForm() {
                 onChange={e => handleKmChange('km_dispatched', e.target.value.replace(/[^0-9.]/g, ''))}
                 onFocus={onF}
                 onBlur={e => {
-                  onB();
+                  onB(e);
                   handleKmCommit('km_dispatched', e.target.value.replace(/[^0-9.]/g, ''));
                 }}
                 placeholder="e.g. 14250"
@@ -7953,7 +7953,7 @@ export default function DigitalPRFForm() {
                 onChange={e => handleKmChange('km_on_scene', e.target.value.replace(/[^0-9.]/g, ''))}
                 onFocus={onF}
                 onBlur={e => {
-                  onB();
+                  onB(e);
                   handleKmCommit('km_on_scene', e.target.value.replace(/[^0-9.]/g, ''));
                 }}
                 placeholder="e.g. 14265"
@@ -8016,7 +8016,7 @@ export default function DigitalPRFForm() {
                 onChange={e => handleKmChange('km_depart_scene', e.target.value.replace(/[^0-9.]/g, ''))}
                 onFocus={onF}
                 onBlur={e => {
-                  onB();
+                  onB(e);
                   handleKmCommit('km_depart_scene', e.target.value.replace(/[^0-9.]/g, ''));
                 }}
                 placeholder="e.g. 14270"
@@ -8082,7 +8082,7 @@ export default function DigitalPRFForm() {
                 onChange={e => handleKmChange('km_at_destination', e.target.value.replace(/[^0-9.]/g, ''))}
                 onFocus={onF}
                 onBlur={e => {
-                  onB();
+                  onB(e);
                   handleKmCommit('km_at_destination', e.target.value.replace(/[^0-9.]/g, ''));
                 }}
                 placeholder="e.g. 14285"
