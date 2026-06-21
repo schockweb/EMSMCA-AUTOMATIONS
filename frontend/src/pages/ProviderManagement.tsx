@@ -184,7 +184,7 @@ export default function ProviderManagement() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
           <div>
             <h1 style={{ fontSize: '1.5rem', fontWeight: 800, margin: 0, color: 'var(--text)' }}>
-              🏥 Service Providers
+              🏥 Clients
             </h1>
             <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', margin: '4px 0 0' }}>
               Manage EMS companies, crew members, and vehicles
