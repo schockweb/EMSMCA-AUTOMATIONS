@@ -8,7 +8,9 @@ import logging
 import re
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+import os
+import shutil
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +27,9 @@ from app.models.user import User
 logger = logging.getLogger("ems.providers")
 
 router = APIRouter(prefix="/api/providers", tags=["Service Providers"])
+
+UPLOAD_DIR = "/app/uploads/logos"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
 # ── Dual auth: accept admin OR crew-admin tokens ──────────
@@ -79,6 +84,12 @@ class ProviderCreate(BaseModel):
     phone: str | None = None
     email: str | None = None
     address: str | None = None
+    
+    # New Client Onboarding fields
+    portal_login_email: str | None = None
+    portal_login_password: str | None = None
+    admin_email: str | None = None
+    admin_password: str | None = None
 
 class ProviderUpdate(BaseModel):
     name: str | None = None
@@ -294,6 +305,15 @@ async def create_provider(
     if existing.scalar_one_or_none():
         raise HTTPException(400, f"Slug '{slug}' is already taken")
 
+    # Check portal login uniqueness if provided
+    if body.portal_login_email:
+        portal_email = body.portal_login_email.strip().lower()
+        existing_portal = await db.execute(select(ServiceProvider).where(ServiceProvider.portal_login_email == portal_email))
+        if existing_portal.scalar_one_or_none():
+            raise HTTPException(400, f"Portal Login Email '{portal_email}' is already in use by another client.")
+    else:
+        portal_email = None
+
     provider = ServiceProvider(
         name=body.name,
         slug=slug,
@@ -302,12 +322,60 @@ async def create_provider(
         phone=body.phone,
         email=body.email,
         address=body.address,
+        portal_login_email=portal_email,
+        portal_login_password_hash=hash_password(body.portal_login_password) if body.portal_login_password else None,
     )
     db.add(provider)
+    await db.flush()  # To get provider.id for the crew member
+
+    # Optionally create an admin crew member
+    if body.admin_email and body.admin_password:
+        admin_email = body.admin_email.strip().lower()
+        existing_crew_email = await db.execute(select(CrewMember).where(CrewMember.email == admin_email))
+        if existing_crew_email.scalar_one_or_none():
+            raise HTTPException(400, f"Admin email '{admin_email}' is already registered as a crew member.")
+        
+        admin_crew = CrewMember(
+            provider_id=provider.id,
+            email=admin_email,
+            hashed_password=hash_password(body.admin_password),
+            full_name=f"{body.name} Admin",
+            initials="AD",
+            qualification="ILS", # Default valid category
+            role="admin",
+            is_active=True,
+        )
+        db.add(admin_crew)
+
     await db.commit()
     await db.refresh(provider)
     logger.info("Created provider: %s (%s)", provider.name, provider.slug)
     return {"id": str(provider.id), "name": provider.name, "slug": provider.slug}
+
+
+@router.post("/{provider_id}/logo")
+async def upload_provider_logo(
+    provider_id: str,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Upload a logo for a service provider."""
+    result = await db.execute(select(ServiceProvider).where(ServiceProvider.id == uuid.UUID(provider_id)))
+    provider = result.scalar_one_or_none()
+    if not provider:
+        raise HTTPException(404, "Provider not found")
+        
+    file_ext = os.path.splitext(file.filename)[1] if file.filename else ".png"
+    safe_filename = f"{provider.slug}_logo{file_ext}"
+    file_path = os.path.join(UPLOAD_DIR, safe_filename)
+    
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+        
+    provider.logo_url = f"/uploads/logos/{safe_filename}"
+    await db.commit()
+    return {"logo_url": provider.logo_url}
 
 
 @router.get("/{provider_id}")

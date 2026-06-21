@@ -61,9 +61,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     });
 
+    if (res.data.client_redirect) {
+      return res.data;
+    }
+
     localStorage.setItem('access_token', res.data.access_token);
     localStorage.setItem('refresh_token', res.data.refresh_token);
     await fetchUser();
+    return res.data;
   };
 
   const logout = async () => {

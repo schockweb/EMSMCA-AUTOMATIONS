@@ -72,8 +72,23 @@ async def login(
     client_ip = _get_client_ip(request)
     logger.info("Login attempt for user=%s from ip=%s", form_data.username, client_ip)
 
+    from app.models.service_provider import ServiceProvider
+    from fastapi.responses import JSONResponse
+
     result = await db.execute(select(User).where(User.email == form_data.username))
     user = result.scalar_one_or_none()
+
+    # ── Check if this is a Client Portal Redirect ──
+    if not user:
+        provider_res = await db.execute(
+            select(ServiceProvider).where(ServiceProvider.portal_login_email == form_data.username)
+        )
+        provider = provider_res.scalar_one_or_none()
+        
+        if provider and provider.portal_login_password_hash:
+            if await verify_password_async(form_data.password, provider.portal_login_password_hash):
+                # Valid client redirect! Return custom response bypassing TokenResponse
+                return JSONResponse(content={"client_redirect": True, "slug": provider.slug})
 
     # ── Check if account is locked ──
     if user and user.locked_until:

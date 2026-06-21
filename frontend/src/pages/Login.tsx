@@ -30,16 +30,15 @@ export default function Login() {
     e.preventDefault();
     setError('');
 
-    if (email.trim().toUpperCase() === 'JEMS@EMSMCA' && password.trim() === 'JEMS') {
-      navigate('/jems/login');
-      return;
-    }
-
     setLoading(true);
 
     try {
-      await login(email.trim(), password.trim());
-      navigate('/');
+      const result = await login(email.trim(), password.trim());
+      if (result && result.client_redirect) {
+        navigate(`/${result.slug}/login`);
+      } else {
+        navigate('/');
+      }
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Login failed. Please try again.');
     } finally {

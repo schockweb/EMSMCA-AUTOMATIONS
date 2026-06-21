@@ -58,7 +58,8 @@ export default function ProviderManagement() {
   const [crewLoading, setCrewLoading] = useState(false);
 
   // Add forms
-  const [newProvider, setNewProvider] = useState({ name: '', pr_number: '', phone: '', email: '', address: '' });
+  const [newProvider, setNewProvider] = useState({ name: '', clientEmail: '', clientPassword: '', adminEmail: '', adminPassword: '' });
+  const [logoFile, setLogoFile] = useState<File | null>(null);
   const [newCrew, setNewCrew] = useState({ full_name: '', email: '', initials: '', hpcsa_number: '', qualification: 'ILS', phone: '' });
   const [newVehicle, setNewVehicle] = useState({ callsign: '', registration: '', vehicle_type: 'Ambulance' });
   const [showAddCrew, setShowAddCrew] = useState(false);
@@ -91,13 +92,36 @@ export default function ProviderManagement() {
   };
 
   const handleAddProvider = async () => {
+    if (!newProvider.name.trim()) {
+      alert('Company Name is required');
+      return;
+    }
     try {
-      await api.post('/api/providers', newProvider);
+      const payload = {
+        name: newProvider.name,
+        portal_login_email: newProvider.clientEmail || undefined,
+        portal_login_password: newProvider.clientPassword || undefined,
+        admin_email: newProvider.adminEmail || undefined,
+        admin_password: newProvider.adminPassword || undefined,
+      };
+      const res = await api.post('/api/providers', payload);
+      const providerId = res.data.id;
+
+      // Upload logo if selected
+      if (logoFile && providerId) {
+        const formData = new FormData();
+        formData.append('file', logoFile);
+        await api.post(`/api/providers/${providerId}/logo`, formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+      }
+
       setShowAddProvider(false);
-      setNewProvider({ name: '', pr_number: '', phone: '', email: '', address: '' });
+      setNewProvider({ name: '', clientEmail: '', clientPassword: '', adminEmail: '', adminPassword: '' });
+      setLogoFile(null);
       fetchProviders();
     } catch (e: any) {
-      alert(e.response?.data?.detail || 'Failed to create provider');
+      alert(e.response?.data?.detail || 'Failed to create client');
     }
   };
 
@@ -195,18 +219,43 @@ export default function ProviderManagement() {
 
         {/* Add Provider Modal */}
         {showAddProvider && (
-          <div style={cardStyle}>
-            <h3 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: 12, color: teal }}>New Service Provider</h3>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <div><label style={labelStyle}>Company Name *</label><input style={inputStyle} placeholder="e.g. JEMS Medical Services" value={newProvider.name} onChange={e => setNewProvider({ ...newProvider, name: e.target.value })} /></div>
-              <div><label style={labelStyle}>PR Number</label><input style={inputStyle} placeholder="e.g. 009 003 074661" value={newProvider.pr_number} onChange={e => setNewProvider({ ...newProvider, pr_number: e.target.value })} /></div>
-              <div><label style={labelStyle}>Phone</label><input style={inputStyle} placeholder="e.g. 078 670 6945" value={newProvider.phone} onChange={e => setNewProvider({ ...newProvider, phone: e.target.value })} /></div>
-              <div><label style={labelStyle}>Email</label><input style={inputStyle} placeholder="e.g. admin@jems.co.za" value={newProvider.email} onChange={e => setNewProvider({ ...newProvider, email: e.target.value })} /></div>
-            </div>
-            <div style={{ marginTop: 8 }}><label style={labelStyle}>Address</label><input style={inputStyle} placeholder="Full address" value={newProvider.address} onChange={e => setNewProvider({ ...newProvider, address: e.target.value })} /></div>
-            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-              <button style={btnPrimary} onClick={handleAddProvider}>Create Provider</button>
-              <button style={{ ...btnPrimary, background: 'var(--surface-200)', color: 'var(--text)' }} onClick={() => setShowAddProvider(false)}>Cancel</button>
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+            <div style={{ ...cardStyle, maxWidth: 600, width: '90%', padding: 32, maxHeight: '85vh', overflowY: 'auto', position: 'relative' }}>
+              <button onClick={() => setShowAddProvider(false)} style={{ position: 'absolute', top: 12, right: 16, background: 'none', border: 'none', fontSize: '1.3rem', cursor: 'pointer', color: 'var(--text-muted)' }}>&times;</button>
+              <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 16, color: teal }}>Add New Client</h3>
+              
+              <div style={{ display: 'grid', gap: 16 }}>
+                <div>
+                  <label style={labelStyle}>Company Name *</label>
+                  <input style={inputStyle} placeholder="e.g. JEMS Medical Services" value={newProvider.name} onChange={e => setNewProvider({ ...newProvider, name: e.target.value })} />
+                </div>
+                
+                <div>
+                  <label style={labelStyle}>Company Logo</label>
+                  <input type="file" style={{ ...inputStyle, padding: '8px' }} accept="image/*" onChange={e => setLogoFile(e.target.files?.[0] || null)} />
+                </div>
+
+                <div style={{ background: 'var(--surface-50)', padding: 16, borderRadius: 8, border: '1px solid var(--surface-100)' }}>
+                  <h4 style={{ fontSize: '0.9rem', fontWeight: 600, marginBottom: 12, color: 'var(--text)' }}>EMSMCA Client Login</h4>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <div><label style={labelStyle}>Username</label><input style={inputStyle} placeholder="" value={newProvider.clientEmail} onChange={e => setNewProvider({ ...newProvider, clientEmail: e.target.value })} /></div>
+                    <div><label style={labelStyle}>Password</label><input style={inputStyle} type="password" placeholder="" value={newProvider.clientPassword} onChange={e => setNewProvider({ ...newProvider, clientPassword: e.target.value })} /></div>
+                  </div>
+                </div>
+
+                <div style={{ background: 'var(--surface-50)', padding: 16, borderRadius: 8, border: '1px solid var(--surface-100)' }}>
+                  <h4 style={{ fontSize: '0.9rem', fontWeight: 600, marginBottom: 12, color: 'var(--text)' }}>Client Admin Login (Provider Portal)</h4>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <div><label style={labelStyle}>Email</label><input style={inputStyle} type="email" placeholder="admin@client.co.za" value={newProvider.adminEmail} onChange={e => setNewProvider({ ...newProvider, adminEmail: e.target.value })} /></div>
+                    <div><label style={labelStyle}>Password</label><input style={inputStyle} type="password" placeholder="Password" value={newProvider.adminPassword} onChange={e => setNewProvider({ ...newProvider, adminPassword: e.target.value })} /></div>
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: 8, marginTop: 24, justifyContent: 'flex-end' }}>
+                <button style={{ ...btnPrimary, background: 'var(--surface-200)', color: 'var(--text)' }} onClick={() => setShowAddProvider(false)}>Cancel</button>
+                <button style={btnPrimary} onClick={handleAddProvider}>Create Client</button>
+              </div>
             </div>
           </div>
         )}

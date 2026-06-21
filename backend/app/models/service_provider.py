@@ -38,6 +38,13 @@ class ServiceProvider(Base):
     address: Mapped[Union[str, None]] = mapped_column(Text, nullable=True)
     logo_url: Mapped[Union[str, None]] = mapped_column(String(500), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    
+    # Generic portal login credentials
+    portal_login_email: Mapped[Union[str, None]] = mapped_column(
+        String(255), unique=True, nullable=True, index=True,
+        comment="Email used on main EMSMCA login page to redirect to this provider's portal"
+    )
+    portal_login_password_hash: Mapped[Union[str, None]] = mapped_column(String(255), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
