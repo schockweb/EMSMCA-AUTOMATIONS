@@ -1,7 +1,7 @@
 # ═══════════════════════════════════════════════════════════
 # EMS Claims Portal — Backend Production Dockerfile
 # Multi-stage build: builder (venv + deps) → runtime (slim)
-# Target: Hetzner CX32 / CX42, Ubuntu 22.04, amd64
+# Target: Azure VM (ems-portal-vm)
 # ═══════════════════════════════════════════════════════════
 
 # ── Stage 1: Builder ────────────────────────────────────────

@@ -1,12 +1,12 @@
 # ═══════════════════════════════════════════════════════════
 # EMS Claims Portal — Worker Server Compose
 # ═══════════════════════════════════════════════════════════
-# Deploys to: Hetzner CX42 x1 (Johannesburg)
+# Deploys to: Azure VM (ems-portal-vm) — same VM as app services
 # Services:  RabbitMQ, Celery workers, Flower monitoring
 #
-# This runs on a dedicated worker server. The app servers
-# (docker-compose.prod.yml) connect to RabbitMQ here via the
-# CELERY_BROKER_URL in .env.prod.
+# ems_shared_net bridges the worker and app compose files so the
+# backend can reach RabbitMQ by container name (ems_rabbitmq)
+# instead of relying on the docker0 bridge IP.
 #
 # Usage:
 #   docker compose -f docker-compose.worker.yml up -d --build
@@ -44,6 +44,7 @@ services:
       retries: 5
     networks:
       - ems_worker_net
+      - ems_shared_net
 
   # ── Celery Worker ───────────────────────────────────────
   # Processes async tasks: OCR parsing, claims adjudication,
@@ -75,6 +76,7 @@ services:
       -Q default,ocr,adjudication,notifications
     networks:
       - ems_worker_net
+      - ems_shared_net
 
   # ── Flower — Celery Monitoring Dashboard ────────────────
   # Web UI for monitoring task queues, workers, and task history.
@@ -112,8 +114,11 @@ volumes:
     driver: local
 
 # ── Networks ──────────────────────────────────────────────
-# Internal bridge for worker-server containers.
-# RabbitMQ port 5672 is also exposed to the host for app servers.
+# ems_worker_net:  Internal bridge for RabbitMQ ↔ Workers.
+# ems_shared_net:  Shared with docker-compose.prod.yml (external).
+#                  Created by the prod compose; worker compose joins it.
 networks:
   ems_worker_net:
     driver: bridge
+  ems_shared_net:
+    external: true

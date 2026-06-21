@@ -1,12 +1,11 @@
 # ═══════════════════════════════════════════════════════════
-# EMS Claims Portal — App Server Compose (App-1 / App-2)
+# EMS Claims Portal — App Server Compose
 # ═══════════════════════════════════════════════════════════
-# Deploys to: Hetzner CX32 x2 (Johannesburg)
-# Services:  FastAPI backend, Nginx reverse proxy, Certbot
+# Deploys to: Azure VM (ems-portal-vm)
+# Services:  FastAPI backend, Nginx reverse proxy + SPA, Certbot
 #
-# Database and RabbitMQ are NOT included here — they run on
-# dedicated servers (see docker-compose.db.yml and
-# docker-compose.worker.yml).
+# Database: Azure Database for PostgreSQL (Flexible Server)
+# RabbitMQ + Workers: docker-compose.worker.yml (same VM)
 #
 # Usage:
 #   docker compose -f docker-compose.prod.yml up -d --build
@@ -15,7 +14,7 @@
 
 services:
   # ── FastAPI Backend ──────────────────────────────────────
-  # Gunicorn + Uvicorn workers, 4 workers per CX32 (4 vCPU).
+  # Gunicorn + Uvicorn workers.
   # No ports exposed — Nginx reverse-proxies to this container.
   ems_backend:
     build:
@@ -36,6 +35,7 @@ services:
       retries: 3
     networks:
       - ems_app_net
+      - ems_shared_net
 
   # ── Nginx Reverse Proxy + Static Frontend ───────────────
   # Serves the React SPA (built into the image) and proxies
@@ -54,9 +54,12 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      # Main Nginx config (reverse proxy + SSL termination)
-      - ./nginx/nginx.conf:/etc/nginx/conf.d/reverse-proxy.conf:ro
-      - ./nginx/security-headers.conf:/etc/nginx/conf.d/security-headers.conf:ro
+      # Unified Nginx config — overrides the baked-in default.conf from
+      # the frontend Dockerfile so there's exactly ONE server block.
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      # Security headers snippet — loaded via 'include' from the server
+      # block, NOT placed in conf.d/ (which Nginx auto-loads as top-level).
+      - ./nginx/security-headers.conf:/etc/nginx/snippets/security-headers.conf:ro
       # SSL certificates (managed by Certbot)
       - certbot_certs:/etc/letsencrypt:ro
       - certbot_webroot:/var/www/certbot:ro
@@ -98,8 +101,13 @@ volumes:
     driver: local
 
 # ── Networks ──────────────────────────────────────────────
-# Internal bridge network for app-server containers.
-# Backend is only reachable from Nginx within this network.
+# ems_app_net:    Internal bridge for Nginx ↔ Backend.
+# ems_shared_net: Shared with docker-compose.worker.yml so the
+#                 backend can reach RabbitMQ directly by container
+#                 name instead of relying on the docker0 bridge IP.
 networks:
   ems_app_net:
+    driver: bridge
+  ems_shared_net:
+    name: ems_shared_net
     driver: bridge
