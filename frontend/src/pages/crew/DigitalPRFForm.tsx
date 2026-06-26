@@ -3412,7 +3412,55 @@ export default function DigitalPRFForm() {
   //  ticker out of this component prevents form re-renders mid-keystroke,
   //  which on mobile dismisses the IME / on-screen keyboard.)
 
+  // ── Local Draft Persistence (Hybrid Save) ───────────────────────────────
+  // Form data is saved to localStorage on every change (instant, zero network).
+  // The server is only contacted on phase changes, visibility change (phone
+  // locked), periodic backup (5 min), and submit.
+  const LOCAL_DRAFT_KEY = `prf-draft:${prfId}`;
+
+  const saveToLocal = () => {
+    if (!prfId) return;
+    try {
+      const draft = {
+        fd, vitals, ivRows, medRows, timestamps, kms, sigs, geos,
+        vehicle, crew2Id, phase,
+        savedAt: Date.now(),
+      };
+      localStorage.setItem(LOCAL_DRAFT_KEY, JSON.stringify(draft));
+    } catch { /* localStorage full or unavailable — non-fatal */ }
+  };
+
+  const loadFromLocal = (): boolean => {
+    if (!prfId) return false;
+    try {
+      const raw = localStorage.getItem(LOCAL_DRAFT_KEY);
+      if (!raw) return false;
+      const draft = JSON.parse(raw);
+      if (!draft || !draft.fd) return false;
+      setFd(draft.fd);
+      setVitals(draft.vitals || []);
+      setIvRows(draft.ivRows || []);
+      setMedRows(draft.medRows || []);
+      setTs(draft.timestamps || {});
+      setKms(draft.kms || {});
+      setSigs(draft.sigs || { patient_signature: null, witness_signature: null, handover_signature: null, crew_signature: null });
+      setGeos(draft.geos || {});
+      setVehicle(draft.vehicle || '');
+      setCrew2Id(draft.crew2Id || '');
+      if (typeof draft.phase === 'number') setPhase(draft.phase);
+      return true;
+    } catch { return false; }
+  };
+
+  const clearLocalDraft = () => {
+    try { localStorage.removeItem(LOCAL_DRAFT_KEY); } catch { /* ignore */ }
+  };
+
   // ── Load ─────────────────────────────────────────────────────────────────
+  // Hybrid load: try localStorage first for instant display, then background-
+  // fetch from server to get any server-side updates (e.g. PRF metadata,
+  // crew member details). If no local draft exists, fetch from server as before.
+  //
   // Robust loader for mobile/flaky networks:
   //   • AbortController cancels duplicate in-flight requests on React 18
   //     StrictMode double-mount, preventing two stacked error dialogs.
@@ -3495,6 +3543,16 @@ export default function DigitalPRFForm() {
     const MAX_RETRIES = 1;          // 1 initial attempt + 1 retry = 2 tries total
     const RETRY_DELAY_MS = 700;
     setLoadError(null);
+
+    // ── Hybrid: try loading from localStorage first ──
+    // If we have a local draft, hydrate from it immediately so the form is
+    // instantly visible (no spinner). Then continue to fetch from server in
+    // the background for metadata (crew details, PRF status, OCC token).
+    const hadLocal = loadFromLocal();
+    if (hadLocal) {
+      setLoading(false);
+    }
+
     let lastErr: any = null;
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       if (signal?.aborted) return;
@@ -3503,6 +3561,11 @@ export default function DigitalPRFForm() {
         setLoadError(null);
         setLoading(false);
         setRetrying(false);
+        // After a successful server fetch, persist the fresh data locally
+        // so it's available on next open even if the server is unreachable.
+        // (saveToLocal reads from state which was just set by fetchPrfOnce.)
+        // Use a microtask to ensure React has flushed the state updates.
+        setTimeout(() => saveToLocal(), 0);
         return;
       } catch (err: any) {
         if (signal?.aborted || err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') {
@@ -3522,6 +3585,12 @@ export default function DigitalPRFForm() {
     if (signal?.aborted) return;
     if (lastErr?.response?.status === 401) {
       navigate(`/${providerSlug}/login`, { replace: true });
+      return;
+    }
+    // If we already loaded from local, don't show an error — the crew can
+    // continue working offline and the next doSave/submit will sync.
+    if (hadLocal) {
+      setRetrying(false);
       return;
     }
     const isNetwork = !lastErr?.response;
@@ -3557,22 +3626,51 @@ export default function DigitalPRFForm() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, fd.treating_practitioner_category, dismissedTreating]);
 
-  // ── Auto-save on change (debounced) ─────────────────────────────────────
-  // The form saves automatically as the crew types — every keystroke
-  // schedules a save ~400ms after the last change, so a burst of typing
-  // collapses into a single PATCH instead of one-per-letter. This avoids
-  // the out-of-order request hazard you'd get firing a network call on
-  // every keypress, while still feeling instantaneous to the user.
+  // ── Auto-save on change — LOCAL ONLY (Hybrid Save) ─────────────────────
+  // Every keystroke saves to localStorage (instant, zero network). The server
+  // is only contacted on phase changes, visibility change, periodic backup,
+  // and submit. This reduces server load from ~100 req/s (500 users auto-
+  // saving every 400ms) to ~1-2 req/s (phase changes + periodic backups).
   const initialLoadRef = useRef(true);
   useEffect(() => {
     // Skip the initial render — the form data was just hydrated from the
-    // server, no need to save it straight back.
+    // server or localStorage, no need to save it straight back.
     if (initialLoadRef.current) { initialLoadRef.current = false; return; }
     if (!prfId) return;
-    const t = setTimeout(() => { doSave(); dirtyRef.current = false; }, 400);
+    const t = setTimeout(() => { saveToLocal(); dirtyRef.current = true; }, 400);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fd, vitals, ivRows, medRows, timestamps, kms, sigs, vehicle, crew2Id, prfId]);
+
+  // ── Server backup on visibility change ─────────────────────────────────
+  // When the crew locks their phone or switches apps, push a server backup
+  // so the data is safe even if the device is lost. This is a lightweight
+  // safety net — at most 1 PATCH per app-switch.
+  useEffect(() => {
+    const onVisChange = () => {
+      if (document.visibilityState === 'hidden' && prfId && dirtyRef.current) {
+        doSaveRef.current();
+        dirtyRef.current = false;
+      }
+    };
+    document.addEventListener('visibilitychange', onVisChange);
+    return () => document.removeEventListener('visibilitychange', onVisChange);
+  }, [prfId]);
+
+  // ── Periodic server backup (every 5 minutes) ──────────────────────────
+  // Safety net: even if the crew never changes phases or locks their phone,
+  // the server gets a backup every 5 minutes. This means the maximum data
+  // exposure from a lost/broken device is 5 minutes of work.
+  useEffect(() => {
+    if (!prfId) return;
+    const interval = setInterval(() => {
+      if (dirtyRef.current) {
+        doSaveRef.current();
+        dirtyRef.current = false;
+      }
+    }, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [prfId]);
 
   // ── Auto-fill age & DOB from SA ID ──────────────────────────────────────
   // First 6 digits of the SA ID are YYMMDD. As soon as enough digits are
@@ -4299,6 +4397,7 @@ export default function DigitalPRFForm() {
       return;
     }
     setSubmit(true);
+    saveToLocal();  // Persist locally before server attempt
     await doSave();
     try {
       const r = await api().post(`/api/digital-prf/${prfId}/submit`);
@@ -4316,12 +4415,15 @@ export default function DigitalPRFForm() {
         const hasEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawEmail);
 
         if (newCaseId && hasEmail) {
+          clearLocalDraft();
           navigate(`/${providerSlug}/crew/prf-view/${newCaseId}?send=1`);
         } else {
+          clearLocalDraft();
           alert('PRF submitted successfully.');
           navigate(`/${providerSlug}/crew/dashboard`);
         }
       } else {
+        clearLocalDraft();
         alert('PRF submitted successfully.');
         navigate(`/${providerSlug}/crew/dashboard`);
       }

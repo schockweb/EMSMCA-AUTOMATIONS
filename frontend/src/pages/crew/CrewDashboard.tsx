@@ -119,6 +119,22 @@ export default function CrewDashboard() {
   const navigate = useNavigate();
   const { providerSlug } = useParams<{ providerSlug: string }>();
 
+  // ── Clear stale session from a different provider ──
+  // If crew logged into JEMS, then navigates to Michael's portal via
+  // "Start Shift", the old JEMS token and profile are still in localStorage.
+  // We must clear them BEFORE initializing React state so Michael's dashboard
+  // doesn't accidentally show JEMS crew/vehicles.
+  const _rawProfile = (() => { try { return JSON.parse(localStorage.getItem('crew_profile') || '{}'); } catch { return {}; } })();
+  if (_rawProfile.provider_slug && _rawProfile.provider_slug !== providerSlug) {
+    localStorage.removeItem('crew_token');
+    localStorage.removeItem('crew_profile');
+    localStorage.removeItem('crew2_profile');
+    localStorage.removeItem('extra_crew_profiles');
+    localStorage.removeItem('active_vehicle');
+    localStorage.removeItem('last_prf_id');
+    localStorage.removeItem('shift_supervisor');
+  }
+
   const token = localStorage.getItem('crew_token');
   const profile = (() => { try { return JSON.parse(localStorage.getItem('crew_profile') || '{}'); } catch { return {}; } })();
   const savedVehicle = (() => { try { return JSON.parse(localStorage.getItem('active_vehicle') || 'null'); } catch { return null; } })();
@@ -335,6 +351,16 @@ export default function CrewDashboard() {
         console.warn('Shift cleanup failed (continuing logout):', err?.message);
       }
     }
+
+    // Clear all local PRF drafts (POPIA: don't leave patient data on device)
+    try {
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key?.startsWith('prf-draft:')) keysToRemove.push(key);
+      }
+      keysToRemove.forEach(k => localStorage.removeItem(k));
+    } catch { /* localStorage unavailable — non-fatal */ }
 
     localStorage.removeItem('crew_token');
     localStorage.removeItem('crew_profile');
