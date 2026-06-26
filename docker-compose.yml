@@ -31,7 +31,7 @@ services:
       - .env
       - ./backend/.env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres.pssxfjbstlznijbjgfdo:MichaelSchuttler924@aws-0-eu-west-1.pooler.supabase.com:6543/postgres?ssl=require&prepared_statement_cache_size=0
+      - DATABASE_URL=postgresql+asyncpg://postgres.pssxfjbstlznijbjgfdo:MichaelSchuttler924@aws-0-eu-west-1.pooler.supabase.com:5432/postgres?ssl=require
       - CELERY_BROKER_URL=amqp://${RABBITMQ_USER:-ems_rabbit}:${RABBITMQ_PASS:-rabbit_secure_2024}@rabbitmq:5672//
       - UPLOAD_DIR=/app/uploads
     ports:
@@ -57,7 +57,7 @@ services:
       - .env
       - ./backend/.env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres.pssxfjbstlznijbjgfdo:MichaelSchuttler924@aws-0-eu-west-1.pooler.supabase.com:6543/postgres?ssl=require&prepared_statement_cache_size=0
+      - DATABASE_URL=postgresql+asyncpg://postgres.pssxfjbstlznijbjgfdo:MichaelSchuttler924@aws-0-eu-west-1.pooler.supabase.com:5432/postgres?ssl=require
       - CELERY_BROKER_URL=amqp://${RABBITMQ_USER:-ems_rabbit}:${RABBITMQ_PASS:-rabbit_secure_2024}@rabbitmq:5672//
       - UPLOAD_DIR=/app/uploads
     volumes:

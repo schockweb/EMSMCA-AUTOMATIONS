@@ -80,8 +80,9 @@ async def login(
 
     # ── Check if this is a Client Portal Redirect ──
     if not user:
+        from sqlalchemy import func
         provider_res = await db.execute(
-            select(ServiceProvider).where(ServiceProvider.portal_login_email == form_data.username)
+            select(ServiceProvider).where(func.lower(ServiceProvider.portal_login_email) == form_data.username.lower())
         )
         provider = provider_res.scalar_one_or_none()
         
