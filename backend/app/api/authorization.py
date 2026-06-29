@@ -16,6 +16,7 @@ from app.models.user import User
 from app.models.auth_request import SchemeAuthRequest, AuthRequestStatus
 from app.models.system_settings import SystemSettings
 from app.schemas.authorization import AuthRequestResponse, AuthHistoryResponse, AuthRequestCreate
+from pydantic import BaseModel
 from app.services.scheme_auth import (
     resolve_scheme_credentials,
     get_adapter_for_scheme,
@@ -200,6 +201,37 @@ async def get_authorization_status(
     if not auth_req:
         raise HTTPException(status_code=404, detail="No authorization requests found for this case")
     return _auth_to_response(auth_req)
+
+
+class BatchAuthRequest(BaseModel):
+    case_ids: list[str]
+
+@router.post("/status/batch")
+async def get_authorization_status_batch(
+    body: BatchAuthRequest,
+    db: AsyncSession = Depends(get_db),
+    _current: User = Depends(get_current_user),
+):
+    """Get the latest authorization request status for multiple cases in one query (solves N+1)."""
+    if not body.case_ids:
+        return {}
+        
+    case_uuids = [uuid.UUID(cid) for cid in body.case_ids]
+    
+    result = await db.execute(
+        select(SchemeAuthRequest)
+        .where(SchemeAuthRequest.case_id.in_(case_uuids))
+        .order_by(SchemeAuthRequest.requested_at.desc())
+    )
+    auth_reqs = result.scalars().all()
+    
+    res = {}
+    for req in auth_reqs:
+        cid = str(req.case_id)
+        if cid not in res:
+            res[cid] = _auth_to_response(req)
+            
+    return res
 
 
 @router.get("/history/{case_id}", response_model=AuthHistoryResponse)

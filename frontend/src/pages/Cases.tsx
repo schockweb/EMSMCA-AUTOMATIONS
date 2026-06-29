@@ -140,18 +140,16 @@ export default function Cases() {
   // Load auth status for pending cases (fire in background after cases load)
   const loadAuthStatuses = async (caseList: Case[]) => {
     const pending = caseList.filter(c => !c.preauth_number && c.medical_scheme_name);
-    const results: Record<string, any> = {};
-    await Promise.allSettled(
-      pending.map(async c => {
-        try {
-          const res = await api.get(`/api/authorization/status/${c.id}`);
-          results[c.id] = res.data;
-        } catch {
-          // 404 means no auth request yet — leave undefined
-        }
-      })
-    );
-    setAuthStatuses(prev => ({ ...prev, ...results }));
+    if (pending.length === 0) return;
+    
+    try {
+      const res = await api.post(`/api/authorization/status/batch`, { 
+        case_ids: pending.map(c => c.id) 
+      });
+      setAuthStatuses(prev => ({ ...prev, ...res.data }));
+    } catch {
+      // Ignore if batch endpoint fails
+    }
   };
 
   useEffect(() => {
