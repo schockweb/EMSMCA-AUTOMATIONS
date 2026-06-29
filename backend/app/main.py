@@ -16,6 +16,7 @@ from app.database import create_tables, AsyncSessionLocal, get_db
 from app.models.user import User, UserRole
 from app.utils.security import hash_password
 from app.middleware import RateLimitMiddleware, XSSProtectionMiddleware, CrashHandlerMiddleware, setup_logging, get_logger
+from app.core.response_cache import ResponseCacheMiddleware
 
 # Import routers
 from app.api.auth import router as auth_router
@@ -225,8 +226,13 @@ app.add_middleware(
 # 3. XSS Protection — query param scanning + security headers
 app.add_middleware(XSSProtectionMiddleware)
 
-# 4. Global Crash Handler — catches exceptions outside the router (e.g. middleware)
+# 4. Global Crash Handler
 app.add_middleware(CrashHandlerMiddleware)
+
+# 5. Response Cache — eliminates repeat Supabase round-trips (SA→Ireland)
+#    Serves cached GET responses for 20-300s depending on endpoint.
+#    Cache key includes auth token so users get isolated entries.
+app.add_middleware(ResponseCacheMiddleware)
 
 # 5. Global Exception Handler — catches unhandled exceptions inside FastAPI routes
 from fastapi import Request
