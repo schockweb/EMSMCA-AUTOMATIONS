@@ -201,11 +201,14 @@ async def delete_all_cases(
     if not case_ids:
         return
 
-    # Delete physical files
-    docs_result = await db.execute(select(Document).where(Document.case_id.in_(case_ids)))
-    docs = docs_result.scalars().all()
-    for doc in docs:
-        for uri in [doc.storage_uri, doc.processed_uri]:
+    # Delete physical files (chunked to avoid parameter limit)
+    chunk_size = 500
+    for i in range(0, len(case_ids), chunk_size):
+        chunk = case_ids[i:i + chunk_size]
+        docs_result = await db.execute(select(Document).where(Document.case_id.in_(chunk)))
+        docs = docs_result.scalars().all()
+        for doc in docs:
+            for uri in [doc.storage_uri, doc.processed_uri]:
             if uri:
                 full_path = get_full_path(uri)
                 if os.path.exists(full_path):
@@ -215,20 +218,27 @@ async def delete_all_cases(
                         pass
 
     # Wipe tables (order matters for FKs) scoped to these case IDs
-    # Get all claim IDs tied to these cases
-    claims_result = await db.execute(select(Claim.id).where(Claim.case_id.in_(case_ids)))
-    claim_ids = claims_result.scalars().all()
+    # Process in chunks of 500 to avoid PostgreSQL's 32,767 parameter limit (TooManyParametersError)
+    chunk_size = 500
+    for i in range(0, len(case_ids), chunk_size):
+        chunk_cases = case_ids[i:i + chunk_size]
+        
+        # Get all claim IDs tied to these chunked cases
+        claims_result = await db.execute(select(Claim.id).where(Claim.case_id.in_(chunk_cases)))
+        chunk_claims = claims_result.scalars().all()
 
-    if claim_ids:
-        await db.execute(delete(RFI).where(RFI.claim_id.in_(claim_ids)))
-        await db.execute(delete(SchemeAuthRequest).where(SchemeAuthRequest.claim_id.in_(claim_ids)))
-        await db.execute(delete(ClaimLine).where(ClaimLine.claim_id.in_(claim_ids)))
-        await db.execute(delete(Claim).where(Claim.id.in_(claim_ids)))
+        if chunk_claims:
+            for j in range(0, len(chunk_claims), chunk_size):
+                sub_claims = chunk_claims[j:j + chunk_size]
+                await db.execute(delete(RFI).where(RFI.claim_id.in_(sub_claims)))
+                await db.execute(delete(SchemeAuthRequest).where(SchemeAuthRequest.claim_id.in_(sub_claims)))
+                await db.execute(delete(ClaimLine).where(ClaimLine.claim_id.in_(sub_claims)))
+                await db.execute(delete(Claim).where(Claim.id.in_(sub_claims)))
 
-    # Scheme Auth requests can also be tied to case directly
-    await db.execute(delete(SchemeAuthRequest).where(SchemeAuthRequest.case_id.in_(case_ids)))
-    await db.execute(delete(Document).where(Document.case_id.in_(case_ids)))
-    await db.execute(delete(Case).where(Case.id.in_(case_ids)))
+        # Scheme Auth requests can also be tied to case directly
+        await db.execute(delete(SchemeAuthRequest).where(SchemeAuthRequest.case_id.in_(chunk_cases)))
+        await db.execute(delete(Document).where(Document.case_id.in_(chunk_cases)))
+        await db.execute(delete(Case).where(Case.id.in_(chunk_cases)))
     
     await db.commit()
 
