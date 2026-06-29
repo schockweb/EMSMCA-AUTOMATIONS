@@ -426,49 +426,25 @@ async def get_stats():
     from app.models.edi_submission import EDISubmission, SubmissionStatus
 
     async with AsyncSessionLocal() as session:
-        docs_total = await session.execute(select(func.count(Document.id)))
-        docs_pending = await session.execute(
+        query = select(
+            select(func.count(Document.id)).scalar_subquery().label("docs_total"),
             select(func.count(Document.id)).where(
                 Document.ocr_status.in_([OCRStatus.PENDING, OCRStatus.PREPROCESSING, OCRStatus.EXTRACTING])
-            )
-        )
-        docs_completed = await session.execute(
-            select(func.count(Document.id)).where(Document.ocr_status == OCRStatus.COMPLETED)
-        )
-        # Must match the AdminQueue's default filter (exclude_accepted=true) so
-        # the banner count only shows documents the reviewer can actually open
-        # from /verify. Documents already linked to a Case are hidden there, so
-        # counting them here produces a phantom "1 document" banner with an
-        # empty queue on click.
-        docs_review = await session.execute(
+            ).scalar_subquery().label("docs_pending"),
+            select(func.count(Document.id)).where(Document.ocr_status == OCRStatus.COMPLETED).scalar_subquery().label("docs_completed"),
             select(func.count(Document.id)).where(
                 Document.needs_hitl_review == True,
                 Document.case_id.is_(None),
-            )
-        )
-        claims_total = await session.execute(select(func.count(Claim.id)))
-        claims_clean = await session.execute(
-            select(func.count(Claim.id)).where(Claim.adjudication_status == AdjudicationStatus.CLEAN)
-        )
-        cases_total = await session.execute(select(func.count(Case.id)))
-
-        # ── Pipeline stage counts (cumulative throughput) ──
-        # Preprocessing = docs currently being processed (active queue only)
-        docs_preprocessing = await session.execute(
+            ).scalar_subquery().label("docs_review"),
+            select(func.count(Claim.id)).scalar_subquery().label("claims_total"),
+            select(func.count(Claim.id)).where(Claim.adjudication_status == AdjudicationStatus.CLEAN).scalar_subquery().label("claims_clean"),
+            select(func.count(Case.id)).scalar_subquery().label("cases_total"),
             select(func.count(Document.id)).where(
                 Document.ocr_status.in_([OCRStatus.PREPROCESSING, OCRStatus.EXTRACTING])
-            )
-        )
-
-        # Adjudication = all claims that have been adjudicated (any status except pending)
-        claims_adjudicated = await session.execute(
+            ).scalar_subquery().label("docs_preprocessing"),
             select(func.count(Claim.id)).where(
                 Claim.adjudication_status != AdjudicationStatus.PENDING
-            )
-        )
-
-        # EDI submitted = all EDI submissions that have been submitted or beyond
-        edi_submitted = await session.execute(
+            ).scalar_subquery().label("claims_adjudicated"),
             select(func.count(EDISubmission.id)).where(
                 EDISubmission.submission_status.in_([
                     SubmissionStatus.SUBMITTED,
@@ -476,20 +452,22 @@ async def get_stats():
                     SubmissionStatus.ACCEPTED,
                     SubmissionStatus.PARTIAL,
                 ])
-            )
+            ).scalar_subquery().label("edi_submitted")
         )
 
-        # Extract scalars into variables (can only call .scalar() once per result)
-        total_val = docs_total.scalar() or 0
-        pending_val = docs_pending.scalar() or 0
-        completed_val = docs_completed.scalar() or 0
-        review_val = docs_review.scalar() or 0
-        claims_total_val = claims_total.scalar() or 0
-        claims_clean_val = claims_clean.scalar() or 0
-        cases_total_val = cases_total.scalar() or 0
-        preprocessed_val = docs_preprocessing.scalar() or 0
-        adjudicated_val = claims_adjudicated.scalar() or 0
-        edi_submitted_val = edi_submitted.scalar() or 0
+        result = await session.execute(query)
+        row = result.fetchone()
+
+        total_val = row.docs_total or 0
+        pending_val = row.docs_pending or 0
+        completed_val = row.docs_completed or 0
+        review_val = row.docs_review or 0
+        claims_total_val = row.claims_total or 0
+        claims_clean_val = row.claims_clean or 0
+        cases_total_val = row.cases_total or 0
+        preprocessed_val = row.docs_preprocessing or 0
+        adjudicated_val = row.claims_adjudicated or 0
+        edi_submitted_val = row.edi_submitted or 0
 
         return {
             "documents": {
