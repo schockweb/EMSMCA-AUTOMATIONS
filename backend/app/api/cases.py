@@ -209,13 +209,13 @@ async def delete_all_cases(
         docs = docs_result.scalars().all()
         for doc in docs:
             for uri in [doc.storage_uri, doc.processed_uri]:
-            if uri:
-                full_path = get_full_path(uri)
-                if os.path.exists(full_path):
-                    try:
-                        os.remove(full_path)
-                    except OSError:
-                        pass
+                if uri:
+                    full_path = get_full_path(uri)
+                    if os.path.exists(full_path):
+                        try:
+                            os.remove(full_path)
+                        except OSError:
+                            pass
 
     # Wipe tables (order matters for FKs) scoped to these case IDs
     # Process in chunks of 500 to avoid PostgreSQL's 32,767 parameter limit (TooManyParametersError)
