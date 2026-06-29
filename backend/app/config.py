@@ -26,10 +26,22 @@ class Settings(BaseSettings):
     DB_POOL_SIZE: int = 20
     DB_MAX_OVERFLOW: int = 30
     DB_POOL_TIMEOUT: int = 30
-    DB_POOL_RECYCLE: int = 1800
+    DB_POOL_RECYCLE: int = 120  # Keeps connections alive through Azure's 4-minute NAT timeout
 
     # ── RabbitMQ / Celery ──
     CELERY_BROKER_URL: str = "amqp://ems_rabbit:rabbit_secure_2024@localhost:5672//"
+
+    # ── Redis Cache ──
+    # Used for caching PRF detail responses, crew rosters, and provider configs.
+    # Set to empty string to disable caching (falls back to direct DB reads).
+    REDIS_URL: str = "redis://redis:6379/0"
+    CACHE_TTL_PRF_DRAFT_SECONDS:      int = 60    # 1 min   — draft PRFs change often
+    CACHE_TTL_PRF_SUBMITTED_SECONDS:  int = 3600  # 1 hour  — submitted PRFs rarely change
+    CACHE_TTL_PROVIDER_SECONDS:       int = 3600  # 1 hour  — provider config is stable
+    CACHE_TTL_CREW_SECONDS:           int = 300   # 5 min   — crew rosters change per shift
+
+    # ── Mistral AI ──
+    MISTRAL_API_KEY: str = ""
 
     # ── JWT Auth (SECRET_KEY MUST be set via environment — no default) ──
     SECRET_KEY: str
