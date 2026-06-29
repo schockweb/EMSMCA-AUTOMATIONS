@@ -1,4 +1,4 @@
-﻿# ── Secrets & env files ──
+# ── Secrets & env files ──
 .env
 .env.prod
 .env.dev
@@ -21,6 +21,7 @@ dist/
 build/
 .venv/
 venv/
+.loadtest-venv/
 
 # ── Node ──
 node_modules/
