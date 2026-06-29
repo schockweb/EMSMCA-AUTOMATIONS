@@ -43,6 +43,14 @@ interface Vehicle {
 const teal = '#088395';
 const rose = '#C2185B';
 
+// ── Gear / Settings SVG Icon ──
+const GearIcon = ({ size = 16 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="3" />
+    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+  </svg>
+);
+
 export default function ProviderManagement() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [loading, setLoading] = useState(true);
@@ -51,6 +59,11 @@ export default function ProviderManagement() {
   const [showAddProvider, setShowAddProvider] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState<Provider | null>(null);
   const [activeTab, setActiveTab] = useState<'crew' | 'vehicles'>('crew');
+
+  // Edit client modal state
+  const [showEditClient, setShowEditClient] = useState(false);
+  const [editForm, setEditForm] = useState({ name: '', pr_number: '', phone: '', email: '', address: '', is_active: true });
+  const [editSaving, setEditSaving] = useState(false);
 
   // Crew/Vehicle lists for selected provider
   const [crew, setCrew] = useState<CrewMember[]>([]);
@@ -89,6 +102,43 @@ export default function ProviderManagement() {
       setVehicles(vehicleRes.data);
     } catch { /* ignore */ }
     setCrewLoading(false);
+  };
+
+  const openEditClient = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!selectedProvider) return;
+    setEditForm({
+      name: selectedProvider.name || '',
+      pr_number: selectedProvider.pr_number || '',
+      phone: selectedProvider.phone || '',
+      email: selectedProvider.email || '',
+      address: selectedProvider.address || '',
+      is_active: selectedProvider.is_active,
+    });
+    setShowEditClient(true);
+  };
+
+  const handleSaveClient = async () => {
+    if (!selectedProvider) return;
+    setEditSaving(true);
+    try {
+      await api.patch(`/api/providers/${selectedProvider.id}`, {
+        name: editForm.name || undefined,
+        pr_number: editForm.pr_number || undefined,
+        phone: editForm.phone || undefined,
+        email: editForm.email || undefined,
+        address: editForm.address || undefined,
+        is_active: editForm.is_active,
+      });
+      // Update local state immediately
+      const updated = { ...selectedProvider, ...editForm };
+      setSelectedProvider(updated);
+      setShowEditClient(false);
+      fetchProviders(); // refresh provider list in background
+    } catch (e: any) {
+      alert(e.response?.data?.detail || 'Failed to update client');
+    }
+    setEditSaving(false);
   };
 
   const handleAddProvider = async () => {
@@ -189,6 +239,7 @@ export default function ProviderManagement() {
     background: 'var(--bg)',
     color: 'var(--text)',
     marginBottom: 8,
+    boxSizing: 'border-box',
   };
 
   const labelStyle: React.CSSProperties = {
@@ -304,11 +355,97 @@ export default function ProviderManagement() {
   // ── Provider Detail View (Crew + Vehicles) ──
   return (
     <div style={{ maxWidth: 900, margin: '0 auto' }}>
+      {/* Edit Client Modal */}
+      {showEditClient && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+          <div style={{ ...cardStyle, maxWidth: 560, width: '90%', padding: 32, maxHeight: '85vh', overflowY: 'auto', position: 'relative' }}>
+            <button onClick={() => setShowEditClient(false)} style={{ position: 'absolute', top: 12, right: 16, background: 'none', border: 'none', fontSize: '1.4rem', cursor: 'pointer', color: 'var(--text-muted)' }}>&times;</button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+              <div style={{ width: 36, height: 36, borderRadius: 8, background: `rgba(8,131,149,0.1)`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: teal }}>
+                <GearIcon size={18} />
+              </div>
+              <div>
+                <h3 style={{ fontSize: '1rem', fontWeight: 700, margin: 0, color: 'var(--text)' }}>Edit Client Settings</h3>
+                <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', margin: 0 }}>{selectedProvider.name}</p>
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gap: 14 }}>
+              <div>
+                <label style={labelStyle}>Company Name *</label>
+                <input style={inputStyle} value={editForm.name} onChange={e => setEditForm({ ...editForm, name: e.target.value })} placeholder="Company Name" />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <label style={labelStyle}>PR Number</label>
+                  <input style={inputStyle} value={editForm.pr_number} onChange={e => setEditForm({ ...editForm, pr_number: e.target.value })} placeholder="e.g. PR-1234" />
+                </div>
+                <div>
+                  <label style={labelStyle}>Phone</label>
+                  <input style={inputStyle} value={editForm.phone} onChange={e => setEditForm({ ...editForm, phone: e.target.value })} placeholder="e.g. 011 123 4567" />
+                </div>
+              </div>
+              <div>
+                <label style={labelStyle}>Email</label>
+                <input style={inputStyle} type="email" value={editForm.email} onChange={e => setEditForm({ ...editForm, email: e.target.value })} placeholder="billing@company.co.za" />
+              </div>
+              <div>
+                <label style={labelStyle}>Physical Address</label>
+                <input style={inputStyle} value={editForm.address} onChange={e => setEditForm({ ...editForm, address: e.target.value })} placeholder="123 Main Rd, Johannesburg" />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 8, background: 'var(--surface-100)', border: '1px solid var(--surface-200)' }}>
+                <input
+                  id="edit-is-active"
+                  type="checkbox"
+                  checked={editForm.is_active}
+                  onChange={e => setEditForm({ ...editForm, is_active: e.target.checked })}
+                  style={{ width: 16, height: 16, cursor: 'pointer', accentColor: teal }}
+                />
+                <label htmlFor="edit-is-active" style={{ fontSize: '0.83rem', fontWeight: 600, color: 'var(--text)', cursor: 'pointer', margin: 0 }}>
+                  Client is Active
+                </label>
+                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginLeft: 4 }}>(Inactive clients cannot log in to the portal)</span>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, marginTop: 24, justifyContent: 'flex-end' }}>
+              <button style={{ ...btnPrimary, background: 'var(--surface-200)', color: 'var(--text)' }} onClick={() => setShowEditClient(false)}>Cancel</button>
+              <button style={{ ...btnPrimary, opacity: editSaving ? 0.6 : 1 }} onClick={handleSaveClient} disabled={editSaving}>
+                {editSaving ? 'Saving…' : 'Save Changes'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
         <button onClick={() => { setSelectedProvider(null); fetchProviders(); }} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.2rem', color: teal }}>←</button>
-        <div>
-          <h1 style={{ fontSize: '1.3rem', fontWeight: 800, margin: 0, color: 'var(--text)' }}>{selectedProvider.name}</h1>
+        <div style={{ flex: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <h1 style={{ fontSize: '1.3rem', fontWeight: 800, margin: 0, color: 'var(--text)' }}>{selectedProvider.name}</h1>
+            <button
+              id="edit-client-settings-btn"
+              onClick={openEditClient}
+              title="Edit client settings"
+              style={{
+                background: 'none',
+                border: '1px solid var(--surface-200)',
+                borderRadius: 6,
+                cursor: 'pointer',
+                color: 'var(--text-muted)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '4px 6px',
+                transition: 'all 0.15s',
+              }}
+              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = teal; (e.currentTarget as HTMLButtonElement).style.borderColor = teal; (e.currentTarget as HTMLButtonElement).style.background = 'rgba(8,131,149,0.06)'; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-muted)'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--surface-200)'; (e.currentTarget as HTMLButtonElement).style.background = 'none'; }}
+            >
+              <GearIcon size={14} />
+            </button>
+          </div>
           <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0 }}>
             /{selectedProvider.slug}/crew • PR: {selectedProvider.pr_number || '—'} • {selectedProvider.phone || '—'}
           </p>
