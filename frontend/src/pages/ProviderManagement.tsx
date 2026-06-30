@@ -348,18 +348,18 @@ export default function ProviderManagement() {
                 </div>
 
                 <div style={{ background: 'var(--surface-50)', padding: 16, borderRadius: 8, border: '1px solid var(--surface-100)' }}>
-                  <h4 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: 4, color: 'var(--text)' }}>🔑 EMSMCA Client Login</h4>
-                  <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', margin: '0 0 12px' }}>Shared credentials ALL staff use to access <code style={{ background: 'var(--surface-100)', padding: '1px 5px', borderRadius: 4 }}>/{'{slug}'}/login</code> e.g. Username: <em>JEMS@EMSMCA</em> · Password: <em>JEMS!2026</em></p>
+                  <h4 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: 4, color: 'var(--text)' }}>EMSMCA Client Login</h4>
+                  <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', margin: '0 0 12px' }}>Shared credentials ALL staff use to access <code style={{ background: 'var(--surface-100)', padding: '1px 5px', borderRadius: 4 }}>/{'{slug}'}/login</code></p>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                     <div>
                       <label style={labelStyle}>Username *</label>
-                      <input style={inputStyle} placeholder="e.g. JEMS@EMSMCA" value={newProvider.clientEmail}
+                      <input style={inputStyle} value={newProvider.clientEmail}
                         onChange={e => setNewProvider({ ...newProvider, clientEmail: e.target.value })}
                         autoComplete="off" data-lpignore="true" data-form-type="other" />
                     </div>
                     <div>
                       <label style={labelStyle}>Password *</label>
-                      <input style={inputStyle} type="password" placeholder="e.g. JEMS!2026" value={newProvider.clientPassword}
+                      <input style={inputStyle} type="password" value={newProvider.clientPassword}
                         onChange={e => setNewProvider({ ...newProvider, clientPassword: e.target.value })}
                         autoComplete="new-password" data-lpignore="true" data-form-type="other" />
                     </div>
@@ -367,18 +367,18 @@ export default function ProviderManagement() {
                 </div>
 
                 <div style={{ background: 'var(--surface-50)', padding: 16, borderRadius: 8, border: '1px solid var(--surface-100)' }}>
-                  <h4 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: 4, color: 'var(--text)' }}>👤 Portal Admin Login</h4>
+                  <h4 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: 4, color: 'var(--text)' }}>Portal Admin Login</h4>
                   <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', margin: '0 0 12px' }}>The admin's personal login credentials for the provider dashboard (optional — can be added later).</p>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                     <div>
                       <label style={labelStyle}>Admin Email</label>
-                      <input style={inputStyle} type="email" placeholder="admin@client.co.za" value={newProvider.adminEmail}
+                      <input style={inputStyle} type="email" value={newProvider.adminEmail}
                         onChange={e => setNewProvider({ ...newProvider, adminEmail: e.target.value })}
                         autoComplete="off" data-lpignore="true" data-form-type="other" />
                     </div>
                     <div>
                       <label style={labelStyle}>Admin Password</label>
-                      <input style={inputStyle} type="password" placeholder="Admin password" value={newProvider.adminPassword}
+                      <input style={inputStyle} type="password" value={newProvider.adminPassword}
                         onChange={e => setNewProvider({ ...newProvider, adminPassword: e.target.value })}
                         autoComplete="new-password" data-lpignore="true" data-form-type="other" />
                     </div>
@@ -534,14 +534,13 @@ export default function ProviderManagement() {
 
               {/* ── EMSMCA Client Login ── */}
               <div style={{ background: 'var(--surface-50)', padding: '14px 16px', borderRadius: 10, border: '1px solid var(--surface-200)' }}>
-                <div style={{ fontSize: '0.7rem', fontWeight: 800, color: teal, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>🔑 EMSMCA Client Login</div>
+                <div style={{ fontSize: '0.7rem', fontWeight: 800, color: teal, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>EMSMCA Client Login</div>
                 <p style={{ fontSize: '0.71rem', color: 'var(--text-muted)', margin: '0 0 10px' }}>Shared credentials ALL staff use to access the portal. Leave blank to keep existing.</p>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                   <div>
                     <label style={labelStyle}>Username</label>
                     <input
                       style={inputStyle}
-                      placeholder="e.g. JEMS@EMSMCA"
                       value={editForm.portal_username}
                       onChange={e => setEditForm({ ...editForm, portal_username: e.target.value })}
                       autoComplete="off" data-lpignore="true" data-form-type="other"
@@ -552,7 +551,6 @@ export default function ProviderManagement() {
                     <input
                       style={inputStyle}
                       type="password"
-                      placeholder="New password (leave blank to keep)"
                       value={editForm.portal_password}
                       onChange={e => setEditForm({ ...editForm, portal_password: e.target.value })}
                       autoComplete="new-password" data-lpignore="true" data-form-type="other"
@@ -563,7 +561,7 @@ export default function ProviderManagement() {
 
               {/* ── Portal Admin Login ── */}
               <div style={{ background: 'var(--surface-50)', padding: '14px 16px', borderRadius: 10, border: '1px solid var(--surface-200)' }}>
-                <div style={{ fontSize: '0.7rem', fontWeight: 800, color: '#2563eb', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>👤 Portal Admin Login</div>
+                <div style={{ fontSize: '0.7rem', fontWeight: 800, color: '#2563eb', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>Portal Admin Login</div>
                 <p style={{ fontSize: '0.71rem', color: 'var(--text-muted)', margin: '0 0 10px' }}>Admin's personal login credentials. Leave blank to keep existing.</p>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                   <div>
@@ -571,7 +569,6 @@ export default function ProviderManagement() {
                     <input
                       style={inputStyle}
                       type="email"
-                      placeholder="admin@client.co.za"
                       value={editForm.admin_email}
                       onChange={e => setEditForm({ ...editForm, admin_email: e.target.value })}
                       autoComplete="off" data-lpignore="true" data-form-type="other"
@@ -582,7 +579,6 @@ export default function ProviderManagement() {
                     <input
                       style={inputStyle}
                       type="password"
-                      placeholder="New password (leave blank to keep)"
                       value={editForm.admin_password}
                       onChange={e => setEditForm({ ...editForm, admin_password: e.target.value })}
                       autoComplete="new-password" data-lpignore="true" data-form-type="other"
