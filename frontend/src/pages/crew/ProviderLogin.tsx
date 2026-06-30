@@ -82,7 +82,7 @@ export default function ProviderLogin() {
       .catch(() => {});
   }, [providerSlug]);
 
-  // ── Step 2a: Admin Login ──
+  // ── Admin Login ──
   const handleAdminLogin = async (e: FormEvent) => {
     e.preventDefault();
     setAdminError('');
@@ -92,8 +92,19 @@ export default function ProviderLogin() {
         email: adminEmail.trim(),
         password: adminPassword,
       });
-      localStorage.setItem('access_token', res.data.access_token);
-      // crew token might be different if needed, but the old dashboard reads access_token
+      const data = res.data;
+      // Store as crew_token + crew_profile — ProviderAdminDashboard reads these keys
+      localStorage.setItem('crew_token', data.access_token);
+      localStorage.setItem('crew_profile', JSON.stringify({
+        id: data.crew_id,
+        name: data.crew_name,
+        provider_id: data.provider_id,
+        provider_name: data.provider_name,
+        provider_slug: data.provider_slug,
+        qualification: data.qualification,
+        hpcsa_number: data.hpcsa_number,
+        role: data.role,
+      }));
       navigate(`/${providerSlug}/admin/dashboard`);
     } catch (err: any) {
       setAdminError(err.response?.data?.detail || 'Invalid admin credentials');
