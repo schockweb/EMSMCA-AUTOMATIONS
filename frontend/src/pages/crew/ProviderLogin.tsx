@@ -152,8 +152,46 @@ export default function ProviderLogin() {
   };
 
   return (
-    <div className="login-page" style={{ overflowY: 'auto' }}>
-      <div className="login-card" style={{ margin: '40px 0', minWidth: '400px' }}>
+    <div className="login-page" style={{ overflowY: 'auto', position: 'relative' }}>
+      
+      {/* ── BACK BUTTON ── */}
+      <button
+        onClick={() => navigate('/login')}
+        style={{
+          position: 'absolute',
+          top: '24px',
+          left: '24px',
+          background: 'rgba(255, 255, 255, 0.8)',
+          backdropFilter: 'blur(10px)',
+          border: '1px solid var(--glass-border)',
+          borderRadius: '8px',
+          padding: '8px 16px',
+          color: 'var(--text-secondary)',
+          fontSize: '0.85rem',
+          fontWeight: 600,
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          boxShadow: '0 2px 10px rgba(0,0,0,0.05)',
+          transition: 'all 0.2s ease',
+          zIndex: 10
+        }}
+        onMouseEnter={e => {
+          e.currentTarget.style.background = '#ffffff';
+          e.currentTarget.style.color = 'var(--text-primary)';
+          e.currentTarget.style.boxShadow = '0 4px 15px rgba(0,0,0,0.1)';
+        }}
+        onMouseLeave={e => {
+          e.currentTarget.style.background = 'rgba(255, 255, 255, 0.8)';
+          e.currentTarget.style.color = 'var(--text-secondary)';
+          e.currentTarget.style.boxShadow = '0 2px 10px rgba(0,0,0,0.05)';
+        }}
+      >
+        <span>←</span> Back
+      </button>
+
+      <div className="login-card" style={{ margin: '80px 0 40px 0', minWidth: '400px' }}>
         
         {/* Provider Logo Header */}
         <div className="login-logo" style={{ marginBottom: '24px' }}>
