@@ -18,6 +18,26 @@ services:
       timeout: 10s
       retries: 5
 
+  # ── Redis Cache ──────────────────────────────────────────────────────────────
+  # Used to cache PRF detail responses, crew rosters, and provider config.
+  # 256 MB max-memory with LRU eviction — never starves the DB connection pool.
+  redis:
+    image: redis:7.2-alpine
+    container_name: ems_redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   backend:
     build:
       context: ./backend
@@ -33,6 +53,8 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://postgres.pssxfjbstlznijbjgfdo:MichaelSchuttler924@aws-0-eu-west-1.pooler.supabase.com:5432/postgres?ssl=require
       - CELERY_BROKER_URL=amqp://${RABBITMQ_USER:-ems_rabbit}:${RABBITMQ_PASS:-rabbit_secure_2024}@rabbitmq:5672//
+      - REDIS_URL=redis://redis:6379/0
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
       - UPLOAD_DIR=/app/uploads
     ports:
       - "8001:8000"
@@ -42,7 +64,15 @@ services:
     depends_on:
       rabbitmq:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
 
   celery_worker:
     build:
@@ -59,6 +89,8 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://postgres.pssxfjbstlznijbjgfdo:MichaelSchuttler924@aws-0-eu-west-1.pooler.supabase.com:5432/postgres?ssl=require
       - CELERY_BROKER_URL=amqp://${RABBITMQ_USER:-ems_rabbit}:${RABBITMQ_PASS:-rabbit_secure_2024}@rabbitmq:5672//
+      - REDIS_URL=redis://redis:6379/0
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
       - UPLOAD_DIR=/app/uploads
     volumes:
       - ./backend:/app
@@ -68,7 +100,11 @@ services:
         condition: service_healthy
     healthcheck:
       disable: true
-    command: celery -A app.tasks.celery_app worker --loglevel=info --pool=solo
+    command: >
+      celery -A app.tasks.celery_app worker
+      --queues=ems_critical,ems_default,ems_batch
+      --loglevel=info
+      --pool=solo
 
   frontend:
     build:
@@ -79,13 +115,46 @@ services:
     ports:
       - "5173:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:80/"]
       interval: 30s
       timeout: 5s
       retries: 3
 
+  # ── Celery Beat — Off-peak scheduler ────────────────────────────────────────
+  # Runs the nightly PRF sweep at 22:30 SAST (20:30 UTC). Uses the same
+  # backend image as celery_worker but runs celery beat instead of celery worker.
+  # Only one Beat instance should ever run (it's a scheduler, not a worker).
+  celery_beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ems_celery_beat
+    restart: unless-stopped
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    env_file:
+      - .env
+      - ./backend/.env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres.pssxfjbstlznijbjgfdo:MichaelSchuttler924@aws-0-eu-west-1.pooler.supabase.com:5432/postgres?ssl=require
+      - CELERY_BROKER_URL=amqp://${RABBITMQ_USER:-ems_rabbit}:${RABBITMQ_PASS:-rabbit_secure_2024}@rabbitmq:5672//
+    volumes:
+      - ./backend:/app
+      - celerybeat_data:/tmp
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    # Beat scheduler: triggers tasks on the cron schedule in celery_app.py
+    command: celery -A app.tasks.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule
+
 volumes:
   rabbitmq_data:
   upload_data:
+  celerybeat_data:
+  redis_data:
