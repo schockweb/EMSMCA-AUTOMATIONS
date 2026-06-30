@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select, text
 
 from app.config import get_settings
@@ -216,9 +217,11 @@ from fastapi.middleware.gzip import GZipMiddleware
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # 2. Rate Limiting — per-IP sliding window
+# auth_limit: 30 login attempts/min per IP (was 10 — too aggressive for dev/shift-change bursts)
+# Local Docker IPs (172.x, 192.168.x) bypass rate limiting entirely — see rate_limit.py
 app.add_middleware(
     RateLimitMiddleware,
-    auth_limit=10,     # 10 login attempts per minute per IP
+    auth_limit=30,     # 30 login attempts per minute per IP
     api_limit=300,     # 300 API calls per minute per IP
     window=60,
 )
@@ -280,6 +283,9 @@ app.include_router(failed_prfs_router)
 app.include_router(metrics_router)
 app.include_router(tariff_lines_router)
 
+# ── Static file serving — uploaded logos and assets ──────────
+os.makedirs("/app/uploads", exist_ok=True)
+app.mount("/uploads", StaticFiles(directory="/app/uploads"), name="uploads")
 
 # ═══════════════════════════════════════════════════════════
 # HEALTH CHECK ENDPOINTS — for container orchestration
