@@ -335,8 +335,33 @@ export default function ProviderManagement() {
                 <div style={{ background: 'var(--surface-50)', padding: 16, borderRadius: 8, border: '1px solid var(--surface-100)' }}>
                   <h4 style={{ fontSize: '0.9rem', fontWeight: 600, marginBottom: 12, color: 'var(--text)' }}>EMSMCA Client Login</h4>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                    <div><label style={labelStyle}>Username</label><input style={inputStyle} placeholder="" value={newProvider.clientEmail} onChange={e => setNewProvider({ ...newProvider, clientEmail: e.target.value })} /></div>
-                    <div><label style={labelStyle}>Password</label><input style={inputStyle} type="password" placeholder="" value={newProvider.clientPassword} onChange={e => setNewProvider({ ...newProvider, clientPassword: e.target.value })} /></div>
+                    <div>
+                      <label style={labelStyle}>Username</label>
+                      <input
+                        style={inputStyle}
+                        placeholder="e.g. clientname"
+                        value={newProvider.clientEmail}
+                        onChange={e => setNewProvider({ ...newProvider, clientEmail: e.target.value })}
+                        autoComplete="off"
+                        data-lpignore="true"
+                        data-form-type="other"
+                        name={`username-${Math.random()}`}
+                      />
+                    </div>
+                    <div>
+                      <label style={labelStyle}>Password</label>
+                      <input
+                        style={inputStyle}
+                        type="password"
+                        placeholder="Set a password"
+                        value={newProvider.clientPassword}
+                        onChange={e => setNewProvider({ ...newProvider, clientPassword: e.target.value })}
+                        autoComplete="new-password"
+                        data-lpignore="true"
+                        data-form-type="other"
+                        name={`password-${Math.random()}`}
+                      />
+                    </div>
                   </div>
                 </div>
 
