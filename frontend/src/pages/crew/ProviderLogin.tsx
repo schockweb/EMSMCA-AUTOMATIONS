@@ -117,14 +117,12 @@ export default function ProviderLogin() {
     setAdminError('');
     setAdminLoading(true);
     try {
-      const formData = new URLSearchParams();
-      formData.append('username', adminEmail.trim());
-      formData.append('password', adminPassword);
-      const res = await axios.post('/api/auth/login', formData, {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      const res = await axios.post('/api/crew/login', {
+        email: adminEmail.trim(),
+        password: adminPassword,
       });
       localStorage.setItem('access_token', res.data.access_token);
-      localStorage.setItem('refresh_token', res.data.refresh_token);
+      // crew token might be different if needed, but the old dashboard reads access_token
       navigate(`/${providerSlug}/admin/dashboard`);
     } catch (err: any) {
       setAdminError(err.response?.data?.detail || 'Invalid admin credentials');
