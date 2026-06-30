@@ -64,6 +64,9 @@ export default function ProviderManagement() {
   const [showEditClient, setShowEditClient] = useState(false);
   const [editForm, setEditForm] = useState({ name: '', pr_number: '', phone: '', email: '', address: '', is_active: true });
   const [editSaving, setEditSaving] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   // Crew/Vehicle lists for selected provider
   const [crew, setCrew] = useState<CrewMember[]>([]);
@@ -116,6 +119,7 @@ export default function ProviderManagement() {
       is_active: selectedProvider.is_active,
     });
     setShowEditClient(true);
+    setShowDeleteConfirm(false);
   };
 
   const handleSaveClient = async () => {
@@ -139,6 +143,25 @@ export default function ProviderManagement() {
       alert(e.response?.data?.detail || 'Failed to update client');
     }
     setEditSaving(false);
+  };
+
+  const handleDeleteClient = async () => {
+    if (!selectedProvider) return;
+    if (deleteConfirmText !== selectedProvider.name) {
+      alert('Client name does not match. Deletion cancelled.');
+      return;
+    }
+    setDeleting(true);
+    try {
+      await api.delete(`/api/providers/${selectedProvider.id}`);
+      setShowEditClient(false);
+      setShowDeleteConfirm(false);
+      setSelectedProvider(null);
+      fetchProviders();
+    } catch (e: any) {
+      alert(e.response?.data?.detail || 'Failed to delete client');
+    }
+    setDeleting(false);
   };
 
   const handleAddProvider = async () => {
@@ -408,12 +431,46 @@ export default function ProviderManagement() {
               </div>
             </div>
 
-            <div style={{ display: 'flex', gap: 8, marginTop: 24, justifyContent: 'flex-end' }}>
-              <button style={{ ...btnPrimary, background: 'var(--surface-200)', color: 'var(--text)' }} onClick={() => setShowEditClient(false)}>Cancel</button>
-              <button style={{ ...btnPrimary, opacity: editSaving ? 0.6 : 1 }} onClick={handleSaveClient} disabled={editSaving}>
-                {editSaving ? 'Saving…' : 'Save Changes'}
-              </button>
+            <div style={{ marginTop: 24 }}>
+              {!showDeleteConfirm ? (
+                <div style={{ display: 'flex', gap: 8, justifyContent: 'space-between', alignItems: 'center' }}>
+                  <button
+                    onClick={() => { setShowDeleteConfirm(true); setDeleteConfirmText(''); }}
+                    style={{ background: 'none', border: '1px solid #e53e3e', borderRadius: 8, color: '#e53e3e', padding: '8px 14px', fontSize: '0.78rem', fontWeight: 700, cursor: 'pointer' }}
+                  >
+                    🗑 Delete Client
+                  </button>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button style={{ ...btnPrimary, background: 'var(--surface-200)', color: 'var(--text)' }} onClick={() => setShowEditClient(false)}>Cancel</button>
+                    <button style={{ ...btnPrimary, opacity: editSaving ? 0.6 : 1 }} onClick={handleSaveClient} disabled={editSaving}>
+                      {editSaving ? 'Saving…' : 'Save Changes'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ background: 'rgba(229,62,62,0.06)', border: '1px solid rgba(229,62,62,0.3)', borderRadius: 10, padding: '16px' }}>
+                  <p style={{ fontSize: '0.82rem', fontWeight: 700, color: '#e53e3e', margin: '0 0 4px' }}>⚠️ This will permanently delete this client and ALL their crew, vehicles, and PRFs.</p>
+                  <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: '0 0 12px' }}>Type <strong>{selectedProvider?.name}</strong> to confirm:</p>
+                  <input
+                    style={{ ...inputStyle, marginBottom: 12, borderColor: 'rgba(229,62,62,0.4)' }}
+                    placeholder={selectedProvider?.name}
+                    value={deleteConfirmText}
+                    onChange={e => setDeleteConfirmText(e.target.value)}
+                  />
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button
+                      onClick={handleDeleteClient}
+                      disabled={deleteConfirmText !== selectedProvider?.name || deleting}
+                      style={{ ...btnPrimary, background: deleteConfirmText === selectedProvider?.name ? '#e53e3e' : 'var(--surface-200)', color: deleteConfirmText === selectedProvider?.name ? '#fff' : 'var(--text-muted)', opacity: deleting ? 0.6 : 1 }}
+                    >
+                      {deleting ? 'Deleting…' : 'Permanently Delete'}
+                    </button>
+                    <button style={{ ...btnPrimary, background: 'var(--surface-200)', color: 'var(--text)' }} onClick={() => setShowDeleteConfirm(false)}>Cancel</button>
+                  </div>
+                </div>
+              )}
             </div>
+
           </div>
         </div>
       )}

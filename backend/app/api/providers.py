@@ -426,6 +426,46 @@ async def update_provider(
     return {"message": "Provider updated", "id": str(provider.id)}
 
 
+@router.delete("/{provider_id}", status_code=204)
+async def delete_provider(
+    provider_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Hard-delete a provider and ALL related data (crew, vehicles, PRFs, logos)."""
+    from sqlalchemy import delete as sql_delete
+    from app.models.digital_prf import DigitalPRF
+
+    pid = uuid.UUID(provider_id)
+
+    result = await db.execute(select(ServiceProvider).where(ServiceProvider.id == pid))
+    provider = result.scalar_one_or_none()
+    if not provider:
+        raise HTTPException(404, "Provider not found")
+
+    # Delete logo file from disk if present
+    if provider.logo_url:
+        logo_path = os.path.join("/app", provider.logo_url.lstrip("/"))
+        if os.path.exists(logo_path):
+            try:
+                os.remove(logo_path)
+            except OSError:
+                pass
+
+    # Cascade delete in FK-safe order:
+    # 1. PRFs linked to this provider
+    await db.execute(sql_delete(DigitalPRF).where(DigitalPRF.provider_id == pid))
+    # 2. Vehicles
+    await db.execute(sql_delete(Vehicle).where(Vehicle.provider_id == pid))
+    # 3. Crew members
+    await db.execute(sql_delete(CrewMember).where(CrewMember.provider_id == pid))
+    # 4. Provider itself
+    await db.execute(sql_delete(ServiceProvider).where(ServiceProvider.id == pid))
+
+    await db.commit()
+    logger.info("Deleted provider %s (%s) and all related data", provider.name, provider_id)
+
+
 # ═══════════════════════════════════════════════════════════
 # CREW MEMBER ENDPOINTS
 # ═══════════════════════════════════════════════════════════
