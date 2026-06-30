@@ -341,12 +341,6 @@ export default function ProviderManagement() {
                   <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: '-4px 0 0' }}>This logo will appear on the client's login portal and on all PRF PDFs.</p>
                 </div>
 
-                <div style={{ background: 'rgba(8,131,149,0.06)', border: '1px solid rgba(8,131,149,0.2)', borderRadius: 10, padding: '12px 14px', fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.6 }}>
-                  💡 <strong style={{ color: 'var(--text)' }}>Two-step access:</strong><br />
-                  1. All staff enter the <strong style={{ color: 'var(--text)' }}>EMSMCA Client Login</strong> credentials to reach the company portal.<br />
-                  2. On the portal: the <strong style={{ color: 'var(--text)' }}>admin logs in</strong> with their email/password, or <strong style={{ color: 'var(--text)' }}>crew members pick their name</strong> to start a shift.
-                </div>
-
                 <div style={{ background: 'var(--surface-50)', padding: 16, borderRadius: 8, border: '1px solid var(--surface-100)' }}>
                   <h4 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: 4, color: 'var(--text)' }}>EMSMCA Client Login</h4>
                   <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', margin: '0 0 12px' }}>Shared credentials ALL staff use to access <code style={{ background: 'var(--surface-100)', padding: '1px 5px', borderRadius: 4 }}>/{'{slug}'}/login</code></p>
