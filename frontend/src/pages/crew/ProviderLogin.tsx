@@ -21,12 +21,16 @@ export default function ProviderLogin() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [providerName, setProviderName] = useState('');
+  const [providerLogo, setProviderLogo] = useState<string | null>(null);
 
   useEffect(() => {
     axios.get('/api/providers/public')
       .then(res => {
         const p = res.data.find((p: any) => p.slug === providerSlug);
-        if (p) setProviderName(p.name);
+        if (p) {
+          setProviderName(p.name);
+          setProviderLogo(p.logo_url || null);
+        }
       }).catch(() => {});
   }, [providerSlug]);
 
@@ -88,8 +92,8 @@ export default function ProviderLogin() {
       </button>
 
       {/* Logo / Name */}
-      {providerSlug?.toLowerCase() === 'jems' ? (
-        <img src="/jems_logo.png" alt="JEMS Medical Services" style={{ width: 240, height: 'auto', marginBottom: 28 }} />
+      {providerLogo ? (
+        <img src={providerLogo} alt={providerName || providerSlug || 'Provider'} style={{ maxWidth: 240, maxHeight: 100, width: 'auto', height: 'auto', objectFit: 'contain', marginBottom: 28 }} />
       ) : (
         <>
           <div style={{

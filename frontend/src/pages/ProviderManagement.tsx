@@ -18,6 +18,7 @@ interface Provider {
   vehicle_count: number;
   prf_count: number;
   created_at: string | null;
+  logo_url?: string | null;
 }
 
 interface CrewMember {
@@ -67,6 +68,8 @@ export default function ProviderManagement() {
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [logoPreview, setLogoPreview] = useState<string | null>(null);
+  const [logoUploading, setLogoUploading] = useState(false);
 
   // Crew/Vehicle lists for selected provider
   const [crew, setCrew] = useState<CrewMember[]>([]);
@@ -118,6 +121,7 @@ export default function ProviderManagement() {
       address: selectedProvider.address || '',
       is_active: selectedProvider.is_active,
     });
+    setLogoPreview(selectedProvider.logo_url || null);
     setShowEditClient(true);
     setShowDeleteConfirm(false);
   };
@@ -134,11 +138,10 @@ export default function ProviderManagement() {
         address: editForm.address || undefined,
         is_active: editForm.is_active,
       });
-      // Update local state immediately
       const updated = { ...selectedProvider, ...editForm };
       setSelectedProvider(updated);
       setShowEditClient(false);
-      fetchProviders(); // refresh provider list in background
+      fetchProviders();
     } catch (e: any) {
       alert(e.response?.data?.detail || 'Failed to update client');
     }
@@ -164,6 +167,26 @@ export default function ProviderManagement() {
     setDeleting(false);
   };
 
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!selectedProvider || !e.target.files?.[0]) return;
+    const file = e.target.files[0];
+    setLogoUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await api.post(`/api/providers/${selectedProvider.id}/logo`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      const newLogoUrl = res.data.logo_url;
+      setLogoPreview(newLogoUrl);
+      setSelectedProvider({ ...selectedProvider, logo_url: newLogoUrl });
+      fetchProviders();
+    } catch (err: any) {
+      alert(err.response?.data?.detail || 'Failed to upload logo');
+    }
+    setLogoUploading(false);
+  };
+
   const handleAddProvider = async () => {
     if (!newProvider.name.trim()) {
       alert('Company Name is required');
@@ -180,7 +203,6 @@ export default function ProviderManagement() {
       const res = await api.post('/api/providers', payload);
       const providerId = res.data.id;
 
-      // Upload logo if selected
       if (logoFile && providerId) {
         const formData = new FormData();
         formData.append('file', logoFile);
@@ -307,6 +329,7 @@ export default function ProviderManagement() {
                 <div>
                   <label style={labelStyle}>Company Logo</label>
                   <input type="file" style={{ ...inputStyle, padding: '8px' }} accept="image/*" onChange={e => setLogoFile(e.target.files?.[0] || null)} />
+                  <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: '-4px 0 0' }}>This logo will appear on the client's login portal and on all PRF PDFs.</p>
                 </div>
 
                 <div style={{ background: 'var(--surface-50)', padding: 16, borderRadius: 8, border: '1px solid var(--surface-100)' }}>
@@ -348,10 +371,19 @@ export default function ProviderManagement() {
                 onMouseEnter={e => (e.currentTarget.style.borderColor = teal)}
                 onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--surface-100)')}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div>
-                    <div style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--text)' }}>{p.name}</div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>
-                      /{p.slug}/crew • PR: {p.pr_number || '—'} • {p.phone || '—'}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    {p.logo_url ? (
+                      <img src={p.logo_url} alt={p.name} style={{ width: 36, height: 36, objectFit: 'contain', borderRadius: 6, border: '1px solid var(--surface-100)', background: '#fff', padding: 2 }} />
+                    ) : (
+                      <div style={{ width: 36, height: 36, borderRadius: 6, background: `rgba(8,131,149,0.1)`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1rem', fontWeight: 800, color: teal }}>
+                        {p.name[0]?.toUpperCase()}
+                      </div>
+                    )}
+                    <div>
+                      <div style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--text)' }}>{p.name}</div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>
+                        /{p.slug}/crew • PR: {p.pr_number || '—'} • {p.phone || '—'}
+                      </div>
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
@@ -381,7 +413,7 @@ export default function ProviderManagement() {
       {/* Edit Client Modal */}
       {showEditClient && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
-          <div style={{ ...cardStyle, maxWidth: 560, width: '90%', padding: 32, maxHeight: '85vh', overflowY: 'auto', position: 'relative' }}>
+          <div style={{ ...cardStyle, maxWidth: 560, width: '90%', padding: 32, maxHeight: '90vh', overflowY: 'auto', position: 'relative' }}>
             <button onClick={() => setShowEditClient(false)} style={{ position: 'absolute', top: 12, right: 16, background: 'none', border: 'none', fontSize: '1.4rem', cursor: 'pointer', color: 'var(--text-muted)' }}>&times;</button>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
               <div style={{ width: 36, height: 36, borderRadius: 8, background: `rgba(8,131,149,0.1)`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: teal }}>
@@ -394,6 +426,39 @@ export default function ProviderManagement() {
             </div>
 
             <div style={{ display: 'grid', gap: 14 }}>
+              {/* ── Logo Upload Section ── */}
+              <div style={{ padding: '14px 16px', borderRadius: 10, background: 'var(--surface-100)', border: '1px solid var(--surface-200)' }}>
+                <label style={labelStyle}>Company Logo</label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 6 }}>
+                  {/* Preview */}
+                  <div style={{ width: 64, height: 64, borderRadius: 10, border: '1.5px dashed var(--surface-300)', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, overflow: 'hidden' }}>
+                    {logoPreview ? (
+                      <img src={logoPreview} alt="logo preview" style={{ width: '100%', height: '100%', objectFit: 'contain', padding: 4 }} />
+                    ) : (
+                      <span style={{ fontSize: '1.6rem' }}>🏥</span>
+                    )}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: '0 0 8px' }}>
+                      Shown on the client's login portal and on all PRF PDFs sent to schemes.
+                    </p>
+                    <label style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 6,
+                      padding: '7px 14px', borderRadius: 7,
+                      background: logoUploading ? 'var(--surface-200)' : `linear-gradient(135deg, ${teal}, #0a9396)`,
+                      color: logoUploading ? 'var(--text-muted)' : '#fff',
+                      fontSize: '0.78rem', fontWeight: 700, cursor: logoUploading ? 'wait' : 'pointer',
+                    }}>
+                      {logoUploading ? '⏳ Uploading…' : '📤 Upload Logo'}
+                      <input type="file" accept="image/png,image/jpeg,image/svg+xml,image/webp" style={{ display: 'none' }} onChange={handleLogoUpload} disabled={logoUploading} />
+                    </label>
+                    {logoPreview && (
+                      <p style={{ fontSize: '0.68rem', color: '#4caf50', margin: '6px 0 0', fontWeight: 600 }}>✓ Logo uploaded</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
               <div>
                 <label style={labelStyle}>Company Name *</label>
                 <input style={inputStyle} value={editForm.name} onChange={e => setEditForm({ ...editForm, name: e.target.value })} placeholder="Company Name" />
@@ -470,7 +535,6 @@ export default function ProviderManagement() {
                 </div>
               )}
             </div>
-
           </div>
         </div>
       )}
@@ -546,6 +610,10 @@ export default function ProviderManagement() {
                     <option value="BLS">BLS</option>
                     <option value="ILS">ILS</option>
                     <option value="ALS">ALS</option>
+                    <option value="AEA">AEA</option>
+                    <option value="BAA">BAA</option>
+                    <option value="ECP">ECP</option>
+                    <option value="ART">ART</option>
                   </select>
                 </div>
                 <div><label style={labelStyle}>Phone</label><input style={inputStyle} placeholder="082 123 4567" value={newCrew.phone} onChange={e => setNewCrew({ ...newCrew, phone: e.target.value })} /></div>
