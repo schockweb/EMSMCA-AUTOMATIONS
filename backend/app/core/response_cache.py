@@ -65,15 +65,18 @@ class ResponseCacheMiddleware(BaseHTTPMiddleware):
         return hashlib.md5(raw.encode()).hexdigest()
 
     def _invalidate_prefix(self, path: str) -> None:
-        """On write operations, drop all cached entries for the same prefix."""
+        """On write operations, drop all cached entries whose stored path shares
+        the same API prefix. Cache keys are MD5 hashes so we cannot match on
+        the key itself — we match on the 'path' field stored in each entry."""
         for prefix in CACHE_RULES:
             if path.startswith(prefix):
                 before = len(self._store)
-                self._store = {k: v for k, v in self._store.items()
-                               if not k.startswith(prefix)}
+                self._store = {
+                    k: v for k, v in self._store.items()
+                    if not v.get("path", "").startswith(prefix)
+                }
                 dropped = before - len(self._store)
-                if dropped:
-                    logger.debug(f"Cache: invalidated {dropped} entries for {prefix}")
+                logger.debug(f"Cache: invalidated {dropped} entries for prefix '{prefix}' (triggered by {path})")
                 return
 
     def _get_cached(self, key: str):
@@ -85,11 +88,12 @@ class ResponseCacheMiddleware(BaseHTTPMiddleware):
             return None
         return entry
 
-    def _set_cached(self, key: str, body: bytes, headers: list, ttl: int) -> None:
+    def _set_cached(self, key: str, body: bytes, headers: list, ttl: int, path: str = "") -> None:
         self._store[key] = {
             "body": body,
             "headers": headers,
             "expires": time.monotonic() + ttl,
+            "path": path,   # stored so invalidation can match by prefix
         }
 
     # ── request handling ─────────────────────────────────────────────────────
@@ -136,7 +140,7 @@ class ResponseCacheMiddleware(BaseHTTPMiddleware):
                 (k, v) for k, v in response.headers.items()
                 if k.lower() not in ("content-length",)
             ]
-            self._set_cached(key, body, headers, ttl)
+            self._set_cached(key, body, headers, ttl, path=path)
             logger.debug(f"Cache MISS {path} — cached for {ttl}s")
 
             return Response(
