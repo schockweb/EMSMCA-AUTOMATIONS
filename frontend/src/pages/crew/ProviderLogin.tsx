@@ -40,20 +40,14 @@ export default function ProviderLogin() {
   const navigate = useNavigate();
 
   // Step management
-  const [step, setStep] = useState<Step>('company-login');
+  const [step, setStep] = useState<'login' | 'crew-shift'>('login');
   const [providerInfo, setProviderInfo] = useState<ProviderInfo | null>(null);
 
-  // Company login fields
-  const [companyUsername, setCompanyUsername] = useState('');
-  const [companyPassword, setCompanyPassword] = useState('');
-  const [companyError, setCompanyError] = useState('');
-  const [companyLoading, setCompanyLoading] = useState(false);
-
-  // Admin login fields
-  const [adminEmail, setAdminEmail] = useState('');
-  const [adminPassword, setAdminPassword] = useState('');
-  const [adminError, setAdminError] = useState('');
-  const [adminLoading, setAdminLoading] = useState(false);
+  // Single Login fields
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
   // Crew shift start
   const [crewList, setCrewList] = useState<CrewOption[]>([]);
@@ -61,9 +55,8 @@ export default function ProviderLogin() {
   const [selectedPartnerId, setSelectedPartnerId] = useState('');
   const [shiftLoading, setShiftLoading] = useState(false);
   const [shiftError, setShiftError] = useState('');
-  const [showShiftPanel, setShowShiftPanel] = useState(false);
 
-  // On mount — pre-load provider logo/name for step 1 branding
+  // On mount — pre-load provider logo/name for branding
   useEffect(() => {
     axios.get('/api/providers/public')
       .then(res => {
@@ -72,43 +65,33 @@ export default function ProviderLogin() {
       }).catch(() => {});
   }, [providerSlug]);
 
-  // Load crew list when portal step opens
+  // Load crew list when reaching the crew-shift step
   useEffect(() => {
-    if (step !== 'portal' || !providerSlug) return;
+    if (step !== 'crew-shift' || !providerSlug) return;
     axios.get(`/api/providers/${providerSlug}/public-crew`)
       .then(res => setCrewList(res.data))
       .catch(() => {});
   }, [step, providerSlug]);
 
-  // ── Step 1: Company Login ──────────────────────────────────
-  const handleCompanyLogin = async (e: React.FormEvent) => {
+  // ── Unified Login Handler ──────────────────────────────────
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    setCompanyError('');
-    setCompanyLoading(true);
-    try {
-      const res = await axios.post(`/api/providers/${providerSlug}/portal-login`, {
-        username: companyUsername.trim(),
-        password: companyPassword,
-      });
-      setProviderInfo(res.data);
-      setStep('portal');
-    } catch (err: any) {
-      setCompanyError(err.response?.data?.detail || 'Invalid username or password');
-    }
-    setCompanyLoading(false);
-  };
+    setError('');
+    setLoading(true);
 
-  // ── Step 2a: Admin Login ───────────────────────────────────
-  const handleAdminLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setAdminError('');
-    setAdminLoading(true);
+    // Attempt 1: Try Admin Login first
     try {
       const res = await axios.post('/api/crew/login', {
-        email: adminEmail.trim().toLowerCase(),
-        password: adminPassword,
+        email: username.trim().toLowerCase(),
+        password: password,
       });
       const data = res.data;
+      
+      // If it's an admin login, ensure they are logging into the correct portal
+      if (data.provider_slug !== providerSlug) {
+        throw new Error('Invalid provider');
+      }
+
       localStorage.setItem('crew_token', data.access_token);
       localStorage.setItem('crew_profile', JSON.stringify({
         id: data.crew_id,
@@ -120,18 +103,37 @@ export default function ProviderLogin() {
         hpcsa_number: data.hpcsa_number,
         role: data.role,
       }));
+
       if (data.role === 'admin') {
         navigate(`/${data.provider_slug}/admin/dashboard`);
       } else {
         navigate(`/${data.provider_slug}/crew/dashboard`);
       }
+      return; // Success, we are done!
     } catch (err: any) {
-      setAdminError(err.response?.data?.detail || 'Login failed. Check your credentials.');
+      // If it's a hard server error, stop. If it's a 401 or invalid provider, fall through to try company login.
+      if (err.response?.status && err.response.status !== 401 && err.message !== 'Invalid provider') {
+        setError('Server error. Please try again later.');
+        setLoading(false);
+        return;
+      }
     }
-    setAdminLoading(false);
+
+    // Attempt 2: Try Company Shared Login
+    try {
+      const res = await axios.post(`/api/providers/${providerSlug}/portal-login`, {
+        username: username.trim(),
+        password: password,
+      });
+      setProviderInfo(res.data);
+      setStep('crew-shift');
+    } catch (err: any) {
+      setError('Invalid username or password');
+    }
+    setLoading(false);
   };
 
-  // ── Step 2b: Crew Shift Start ──────────────────────────────
+  // ── Crew Shift Start ──────────────────────────────
   const handleStartShift = async () => {
     if (!selectedCrewId) { setShiftError('Please select your name.'); return; }
     setShiftError('');
@@ -197,175 +199,113 @@ export default function ProviderLogin() {
     </div>
   );
 
-  // ═══════════════════════════════════════════════════════════
-  // STEP 1 — Company Login
-  // ═══════════════════════════════════════════════════════════
-  if (step === 'company-login') {
-    return (
-      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#f8fafc', padding: '24px 20px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
-        <button onClick={() => navigate('/login')} style={{ position: 'absolute', top: 20, left: 20, background: '#f1f5f9', border: `1px solid ${B}`, borderRadius: 8, padding: '7px 14px', color: M, fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer' }}>
+  return (
+    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#f8fafc', padding: '24px 20px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
+      
+      {step === 'crew-shift' && (
+        <button onClick={() => setStep('login')} style={{ position: 'absolute', top: 20, left: 20, background: '#f1f5f9', border: `1px solid ${B}`, borderRadius: 8, padding: '7px 14px', color: M, fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer' }}>
           ← Back
         </button>
-
-        <LogoBlock />
-
-        <p style={{ color: M, fontSize: '0.8rem', margin: '0 0 28px', textAlign: 'center', fontWeight: 500, letterSpacing: '0.02em' }}>
-          Enter your company access credentials
-        </p>
-
-        <div style={{ width: '100%', maxWidth: 360, background: '#fff', border: `1px solid ${B}`, borderRadius: 18, padding: '32px 28px', boxShadow: '0 4px 24px rgba(0,0,0,0.05)' }}>
-          {companyError && (
-            <div style={{ padding: '11px 14px', borderRadius: 8, marginBottom: 16, background: '#fef2f2', border: '1px solid #fecaca', color: RED, fontSize: '0.83rem', fontWeight: 600 }}>
-              {companyError}
-            </div>
-          )}
-          <form onSubmit={handleCompanyLogin} autoComplete="off">
-            <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: 700, color: M, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 7 }}>
-              Username
-            </label>
-            <input
-              type="text" inputMode="email" value={companyUsername}
-              onChange={e => setCompanyUsername(e.target.value)}
-              placeholder="e.g. JEMS@EMSMCA"
-              required autoComplete="off" data-lpignore="true" data-form-type="other"
-              autoFocus spellCheck={false}
-              style={fieldStyle} onFocus={onFocus} onBlur={onBlur}
-            />
-            <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: 700, color: M, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 7 }}>
-              Password
-            </label>
-            <input
-              type="password" value={companyPassword}
-              onChange={e => setCompanyPassword(e.target.value)}
-              placeholder="••••••••" required autoComplete="new-password"
-              data-lpignore="true" data-form-type="other"
-              style={{ ...fieldStyle, marginBottom: 24 }} onFocus={onFocus} onBlur={onBlur}
-            />
-            <button type="submit" disabled={companyLoading} style={{ width: '100%', padding: '13px', background: companyLoading ? '#94a3b8' : `linear-gradient(135deg, ${G}, ${GD})`, color: '#fff', border: 'none', borderRadius: 10, fontSize: '0.95rem', fontWeight: 700, cursor: companyLoading ? 'wait' : 'pointer', transition: 'all 0.2s' }}>
-              {companyLoading ? 'Verifying…' : 'Access Portal →'}
-            </button>
-          </form>
-        </div>
-
-        <p style={{ color: '#94a3b8', fontSize: '0.72rem', marginTop: 32, textAlign: 'center', fontWeight: 500 }}>
-          EMS Claims Portal • Secure Access
-        </p>
-      </div>
-    );
-  }
-
-  // ═══════════════════════════════════════════════════════════
-  // STEP 2 — Provider Portal (Admin Login + Crew Start Shift)
-  // ═══════════════════════════════════════════════════════════
-  return (
-    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#f8fafc', padding: '32px 20px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
-      <button onClick={() => setStep('company-login')} style={{ position: 'absolute', top: 20, left: 20, background: '#f1f5f9', border: `1px solid ${B}`, borderRadius: 8, padding: '7px 14px', color: M, fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer' }}>
-        ← Back
-      </button>
+      )}
 
       <LogoBlock />
 
-      <p style={{ color: M, fontSize: '0.8rem', margin: '0 0 28px', textAlign: 'center', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-        Administration Portal
-      </p>
+      {step === 'login' && (
+        <>
+          <p style={{ color: M, fontSize: '0.8rem', margin: '0 0 28px', textAlign: 'center', fontWeight: 500, letterSpacing: '0.02em' }}>
+            Enter your company access credentials
+          </p>
 
-      <div style={{ width: '100%', maxWidth: 400 }}>
-        {/* ── Admin Login Card ── */}
-        <div style={{ background: '#fff', border: `1px solid ${B}`, borderRadius: 18, padding: '28px 26px', boxShadow: '0 4px 24px rgba(0,0,0,0.05)', marginBottom: 16 }}>
-          <div style={{ fontSize: '0.7rem', fontWeight: 800, color: G, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 16 }}>🔐 Admin Login</div>
-          {adminError && (
-            <div style={{ padding: '10px 13px', borderRadius: 8, marginBottom: 14, background: '#fef2f2', border: '1px solid #fecaca', color: RED, fontSize: '0.82rem', fontWeight: 600 }}>
-              {adminError}
-            </div>
-          )}
-          <form onSubmit={handleAdminLogin} autoComplete="off">
-            <input
-              type="email" value={adminEmail} onChange={e => setAdminEmail(e.target.value)}
-              placeholder="Admin email address"
-              required autoComplete="off" data-lpignore="true" data-form-type="other"
-              style={fieldStyle} onFocus={onFocus} onBlur={onBlur}
-            />
-            <input
-              type="password" value={adminPassword} onChange={e => setAdminPassword(e.target.value)}
-              placeholder="••••••••" required autoComplete="new-password"
-              data-lpignore="true" data-form-type="other"
-              style={{ ...fieldStyle, marginBottom: 20 }} onFocus={onFocus} onBlur={onBlur}
-            />
-            <button type="submit" disabled={adminLoading} style={{ width: '100%', padding: '12px', background: adminLoading ? '#94a3b8' : `linear-gradient(135deg, ${G}, ${GD})`, color: '#fff', border: 'none', borderRadius: 10, fontSize: '0.92rem', fontWeight: 700, cursor: adminLoading ? 'wait' : 'pointer', transition: 'all 0.2s' }}>
-              {adminLoading ? 'Signing In…' : 'Sign In as Admin'}
-            </button>
-          </form>
-        </div>
-
-        {/* ── Divider ── */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '4px 0' }}>
-          <div style={{ flex: 1, height: 1, background: B }} />
-          <span style={{ fontSize: '0.68rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Crew Access</span>
-          <div style={{ flex: 1, height: 1, background: B }} />
-        </div>
-
-        {/* ── Start Shift Panel ── */}
-        <div style={{ background: '#fff', border: `1px solid ${B}`, borderRadius: 18, padding: '22px 26px', boxShadow: '0 4px 24px rgba(0,0,0,0.05)', marginTop: 16 }}>
-          <div style={{ fontSize: '0.7rem', fontWeight: 800, color: '#2563eb', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 14 }}>🚑 Start Shift</div>
-
-          {!showShiftPanel ? (
-            <button
-              onClick={() => setShowShiftPanel(true)}
-              style={{ width: '100%', padding: '13px', background: '#f8fafc', border: `1px solid ${B}`, borderRadius: 10, color: GD, fontSize: '0.92rem', fontWeight: 700, cursor: 'pointer', letterSpacing: '0.02em', transition: 'all 0.2s' }}
-              onMouseEnter={e => { e.currentTarget.style.borderColor = G; e.currentTarget.style.background = '#f0fdf4'; }}
-              onMouseLeave={e => { e.currentTarget.style.borderColor = B; e.currentTarget.style.background = '#f8fafc'; }}
-            >
-              Start New Shift →
-            </button>
-          ) : (
-            <>
-              {shiftError && (
-                <div style={{ padding: '10px 13px', borderRadius: 8, marginBottom: 12, background: '#fef2f2', border: '1px solid #fecaca', color: RED, fontSize: '0.82rem', fontWeight: 600 }}>
-                  {shiftError}
-                </div>
-              )}
-
+          <div style={{ width: '100%', maxWidth: 360, background: '#fff', border: `1px solid ${B}`, borderRadius: 18, padding: '32px 28px', boxShadow: '0 4px 24px rgba(0,0,0,0.05)' }}>
+            {error && (
+              <div style={{ padding: '11px 14px', borderRadius: 8, marginBottom: 16, background: '#fef2f2', border: '1px solid #fecaca', color: RED, fontSize: '0.83rem', fontWeight: 600 }}>
+                {error}
+              </div>
+            )}
+            <form onSubmit={handleLogin} autoComplete="off">
               <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: 700, color: M, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 7 }}>
-                Your Name *
+                Username / Admin Email
               </label>
-              <select
-                value={selectedCrewId}
-                onChange={e => setSelectedCrewId(e.target.value)}
-                style={{ ...fieldStyle, marginBottom: 14 }}
-                onFocus={onFocus} onBlur={onBlur}
-              >
-                <option value="">— Select your name —</option>
-                {crewList.map(c => (
-                  <option key={c.id} value={c.id}>{c.full_name} ({c.qualification})</option>
-                ))}
-              </select>
-
+              <input
+                type="text" value={username}
+                onChange={e => setUsername(e.target.value)}
+                placeholder="e.g. JEMS@EMSMCA"
+                required autoComplete="off" data-lpignore="true" data-form-type="other"
+                autoFocus spellCheck={false}
+                style={fieldStyle} onFocus={onFocus} onBlur={onBlur}
+              />
               <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: 700, color: M, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 7 }}>
-                Person Assisting (Partner)
+                Password
               </label>
-              <select
-                value={selectedPartnerId}
-                onChange={e => setSelectedPartnerId(e.target.value)}
-                style={{ ...fieldStyle, marginBottom: 20 }}
-                onFocus={onFocus} onBlur={onBlur}
-              >
-                <option value="">— Select partner (optional) —</option>
-                {crewList.filter(c => c.id !== selectedCrewId).map(c => (
-                  <option key={c.id} value={c.id}>{c.full_name} ({c.qualification})</option>
-                ))}
-              </select>
-
-              <button
-                onClick={handleStartShift}
-                disabled={shiftLoading || !selectedCrewId}
-                style={{ width: '100%', padding: '13px', background: (!selectedCrewId || shiftLoading) ? '#94a3b8' : 'linear-gradient(135deg, #2563eb, #1d4ed8)', color: '#fff', border: 'none', borderRadius: 10, fontSize: '0.92rem', fontWeight: 700, cursor: (!selectedCrewId || shiftLoading) ? 'not-allowed' : 'pointer', transition: 'all 0.2s', boxShadow: selectedCrewId ? '0 3px 10px rgba(37,99,235,0.3)' : 'none' }}
-              >
-                {shiftLoading ? 'Starting Shift…' : '🚑 Start Shift'}
+              <input
+                type="password" value={password}
+                onChange={e => setPassword(e.target.value)}
+                placeholder="••••••••" required autoComplete="new-password"
+                data-lpignore="true" data-form-type="other"
+                style={{ ...fieldStyle, marginBottom: 24 }} onFocus={onFocus} onBlur={onBlur}
+              />
+              <button type="submit" disabled={loading} style={{ width: '100%', padding: '13px', background: loading ? '#94a3b8' : `linear-gradient(135deg, ${G}, ${GD})`, color: '#fff', border: 'none', borderRadius: 10, fontSize: '0.95rem', fontWeight: 700, cursor: loading ? 'wait' : 'pointer', transition: 'all 0.2s' }}>
+                {loading ? 'Verifying…' : 'Access Portal →'}
               </button>
-            </>
-          )}
-        </div>
-      </div>
+            </form>
+          </div>
+        </>
+      )}
+
+      {step === 'crew-shift' && (
+        <>
+          <p style={{ color: M, fontSize: '0.8rem', margin: '0 0 28px', textAlign: 'center', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+            Crew Shift Registration
+          </p>
+          <div style={{ width: '100%', maxWidth: 400, background: '#fff', border: `1px solid ${B}`, borderRadius: 18, padding: '28px 26px', boxShadow: '0 4px 24px rgba(0,0,0,0.05)' }}>
+            <div style={{ fontSize: '0.7rem', fontWeight: 800, color: '#2563eb', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 16 }}>🚑 Start Shift</div>
+            
+            {shiftError && (
+              <div style={{ padding: '10px 13px', borderRadius: 8, marginBottom: 12, background: '#fef2f2', border: '1px solid #fecaca', color: RED, fontSize: '0.82rem', fontWeight: 600 }}>
+                {shiftError}
+              </div>
+            )}
+
+            <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: 700, color: M, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 7 }}>
+              Your Name *
+            </label>
+            <select
+              value={selectedCrewId}
+              onChange={e => setSelectedCrewId(e.target.value)}
+              style={{ ...fieldStyle, marginBottom: 14 }}
+              onFocus={onFocus} onBlur={onBlur}
+            >
+              <option value="">— Select your name —</option>
+              {crewList.map(c => (
+                <option key={c.id} value={c.id}>{c.full_name} ({c.qualification})</option>
+              ))}
+            </select>
+
+            <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: 700, color: M, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 7 }}>
+              Person Assisting (Partner)
+            </label>
+            <select
+              value={selectedPartnerId}
+              onChange={e => setSelectedPartnerId(e.target.value)}
+              style={{ ...fieldStyle, marginBottom: 20 }}
+              onFocus={onFocus} onBlur={onBlur}
+            >
+              <option value="">— Select partner (optional) —</option>
+              {crewList.filter(c => c.id !== selectedCrewId).map(c => (
+                <option key={c.id} value={c.id}>{c.full_name} ({c.qualification})</option>
+              ))}
+            </select>
+
+            <button
+              onClick={handleStartShift}
+              disabled={shiftLoading || !selectedCrewId}
+              style={{ width: '100%', padding: '13px', background: (!selectedCrewId || shiftLoading) ? '#94a3b8' : 'linear-gradient(135deg, #2563eb, #1d4ed8)', color: '#fff', border: 'none', borderRadius: 10, fontSize: '0.92rem', fontWeight: 700, cursor: (!selectedCrewId || shiftLoading) ? 'not-allowed' : 'pointer', transition: 'all 0.2s', boxShadow: selectedCrewId ? '0 3px 10px rgba(37,99,235,0.3)' : 'none' }}
+            >
+              {shiftLoading ? 'Starting Shift…' : 'Start Digital Shift'}
+            </button>
+          </div>
+        </>
+      )}
 
       <p style={{ color: '#94a3b8', fontSize: '0.72rem', marginTop: 32, textAlign: 'center', fontWeight: 500 }}>
         EMS Claims Portal • Secure Access
