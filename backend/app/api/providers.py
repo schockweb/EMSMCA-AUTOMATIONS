@@ -20,7 +20,7 @@ from app.models.service_provider import ServiceProvider
 from app.models.crew_member import CrewMember
 from app.models.vehicle import Vehicle
 from app.models.digital_prf import DigitalPRF, PRFStatus
-from app.utils.security import get_current_user, hash_password
+from app.utils.security import get_current_user, hash_password, verify_password, verify_password_async
 from app.utils.hpcsa import HPCSA_CATEGORIES, DEFAULT_CATEGORY, normalise_category
 from app.models.user import User
 
@@ -176,6 +176,44 @@ async def list_providers_public(db: AsyncSession = Depends(get_db)):
         {"name": p.name, "slug": p.slug, "logo_url": p.logo_url}
         for p in result.scalars().all()
     ]
+
+
+class PortalLoginRequest(BaseModel):
+    username: str   # portal_login_email
+    password: str   # portal_login_password
+
+@router.post("/{slug}/portal-login")
+async def portal_login(slug: str, body: PortalLoginRequest, db: AsyncSession = Depends(get_db)):
+    """Verify company-wide portal credentials (portal_login_email / portal_login_password).
+    These are set in the EMSMCA Client Login section when creating a provider and allow
+    ALL staff (admin + crew) of that company to access their login portal.
+    Returns provider info on success so the frontend can render the branded portal.
+    """
+    result = await db.execute(
+        select(ServiceProvider).where(
+            ServiceProvider.slug == slug.strip().lower(),
+            ServiceProvider.is_active == True,
+        )
+    )
+    provider = result.scalar_one_or_none()
+    if not provider:
+        raise HTTPException(status_code=404, detail="Provider not found")
+    if not provider.portal_login_password_hash:
+        raise HTTPException(status_code=403, detail="No portal credentials configured for this provider")
+    # Case-insensitive username match
+    stored_username = (provider.portal_login_email or "").strip().lower()
+    submitted_username = body.username.strip().lower()
+    if stored_username != submitted_username:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    if not await verify_password_async(body.password, provider.portal_login_password_hash):
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    return {
+        "valid": True,
+        "provider_name": provider.name,
+        "provider_slug": provider.slug,
+        "logo_url": provider.logo_url,
+        "pr_number": provider.pr_number,
+    }
 
 
 @router.get("/{slug}/public-vehicles")

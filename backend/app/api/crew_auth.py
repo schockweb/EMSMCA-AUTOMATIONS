@@ -273,3 +273,85 @@ async def crew_lookup_by_hpcsa(body: ShiftLookupRequest, db: AsyncSession = Depe
         shift_started_at=now.isoformat(),
     )
 
+
+class ShiftStartByIdRequest(BaseModel):
+    crew_id: str
+    provider_slug: str
+    partner_name: str | None = None   # Name of the assisting crew member
+
+class ShiftStartByIdResponse(BaseModel):
+    crew_id: str
+    full_name: str
+    qualification: str
+    provider_id: str
+    provider_name: str
+    provider_slug: str
+    hpcsa_number: str | None = None
+    access_token: str
+    token_type: str = "bearer"
+    role: str = "crew"
+    partner_name: str | None = None
+    shift_started_at: str
+
+@router.post("/shift-start-by-id", response_model=ShiftStartByIdResponse)
+async def shift_start_by_id(body: ShiftStartByIdRequest, db: AsyncSession = Depends(get_db)):
+    """Start a shift for a crew member selected by name from a dropdown.
+    No password required — the company-wide portal login already authenticated the user.
+    The partner_name (assisting crew) is stored in the token so the PRF form can pre-fill it.
+    """
+    provider_result = await db.execute(
+        select(ServiceProvider).where(
+            ServiceProvider.slug == body.provider_slug.strip().lower(),
+            ServiceProvider.is_active == True,
+        )
+    )
+    provider = provider_result.scalar_one_or_none()
+    if not provider:
+        raise HTTPException(status_code=404, detail="Provider not found")
+
+    crew_result = await db.execute(
+        select(CrewMember).where(
+            CrewMember.id == body.crew_id,
+            CrewMember.provider_id == provider.id,
+            CrewMember.is_active == True,
+        )
+    )
+    crew = crew_result.scalar_one_or_none()
+    if not crew:
+        raise HTTPException(status_code=404, detail="Crew member not found")
+
+    now = datetime.now(timezone.utc)
+    crew.last_login = now
+    await db.commit()
+
+    token = create_access_token(
+        {
+            "sub": str(crew.id),
+            "crew_id": str(crew.id),
+            "provider_id": str(provider.id),
+            "provider_slug": provider.slug,
+            "role": crew.role,
+            "token_scope": "crew",
+            "partner_name": body.partner_name or "",
+        },
+        expires_delta=timedelta(hours=CREW_SHIFT_TOKEN_HOURS),
+    )
+
+    logger.info(
+        "Shift start (by ID): %s for provider %s | partner: %s",
+        crew.full_name, provider.name, body.partner_name or "—"
+    )
+
+    return ShiftStartByIdResponse(
+        crew_id=str(crew.id),
+        full_name=crew.full_name,
+        qualification=crew.qualification,
+        provider_id=str(provider.id),
+        provider_name=provider.name,
+        provider_slug=provider.slug,
+        hpcsa_number=crew.hpcsa_number,
+        access_token=token,
+        role=crew.role,
+        partner_name=body.partner_name,
+        shift_started_at=now.isoformat(),
+    )
