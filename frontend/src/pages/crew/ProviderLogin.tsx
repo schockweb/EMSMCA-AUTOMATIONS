@@ -4,10 +4,8 @@
  */
 import { useState, useEffect } from 'react';
 import type { FormEvent } from 'react';
-import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
-
-type Step = 'company-login' | 'portal';
 
 interface ProviderInfo {
   name: string;
@@ -32,17 +30,8 @@ interface VehicleOption {
 export default function ProviderLogin() {
   const { providerSlug } = useParams<{ providerSlug: string }>();
   const navigate = useNavigate();
-  const location = useLocation();
 
-  // Step management
-  const [step, setStep] = useState<Step>(location.state?.bypassedStep1 ? 'portal' : 'company-login');
-  const [providerInfo, setProviderInfo] = useState<ProviderInfo | null>(location.state?.providerInfo || null);
-
-  // Company login fields
-  const [companyUsername, setCompanyUsername] = useState('');
-  const [companyPassword, setCompanyPassword] = useState('');
-  const [companyError, setCompanyError] = useState('');
-  const [companyLoading, setCompanyLoading] = useState(false);
+  const [providerInfo, setProviderInfo] = useState<ProviderInfo | null>(null);
 
   // Admin login fields
   const [adminEmail, setAdminEmail] = useState('');
@@ -71,7 +60,7 @@ export default function ProviderLogin() {
     };
   }, []);
 
-  // Pre-load provider logo/name for step 1 branding
+  // Pre-load provider logo/name
   useEffect(() => {
     if (!providerInfo && providerSlug) {
       axios.get('/api/providers/public')
@@ -82,34 +71,16 @@ export default function ProviderLogin() {
     }
   }, [providerSlug, providerInfo]);
 
-  // Load crew and vehicle list when portal step opens
+  // Load crew and vehicle list
   useEffect(() => {
-    if (step !== 'portal' || !providerSlug) return;
+    if (!providerSlug) return;
     axios.get(`/api/providers/${providerSlug}/public-crew`)
       .then(res => setCrewList(res.data))
       .catch(() => {});
     axios.get(`/api/providers/${providerSlug}/public-vehicles`)
       .then(res => setVehicleList(res.data))
       .catch(() => {});
-  }, [step, providerSlug]);
-
-  // ── Step 1: Company Login ──
-  const handleCompanyLogin = async (e: FormEvent) => {
-    e.preventDefault();
-    setCompanyError('');
-    setCompanyLoading(true);
-    try {
-      const res = await axios.post(`/api/providers/${providerSlug}/portal-login`, {
-        username: companyUsername.trim(),
-        password: companyPassword,
-      });
-      setProviderInfo(res.data);
-      setStep('portal');
-    } catch (err: any) {
-      setCompanyError(err.response?.data?.detail || 'Invalid username or password');
-    }
-    setCompanyLoading(false);
-  };
+  }, [providerSlug]);
 
   // ── Step 2a: Admin Login ──
   const handleAdminLogin = async (e: FormEvent) => {
@@ -174,52 +145,19 @@ export default function ProviderLogin() {
       <div className="login-card" style={{ margin: '40px 0', minWidth: '400px' }}>
         
         {/* Provider Logo Header */}
-        <div className="login-logo" style={{ marginBottom: step === 'portal' ? '24px' : '36px' }}>
+        <div className="login-logo" style={{ marginBottom: '24px' }}>
           {providerInfo?.logo_url ? (
             <img src={providerInfo.logo_url} alt={providerInfo.name} style={{ height: 80, objectFit: 'contain', marginBottom: 16 }} />
           ) : (
             <h1 style={{ marginBottom: 16 }}>{providerInfo?.name || 'Company Portal'}</h1>
           )}
           <p style={{ textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, fontSize: '0.8rem', color: '#088395' }}>
-            {step === 'company-login' ? 'Client Access Login' : 'Administration Portal'}
+            Administration Portal
           </p>
         </div>
 
-        {/* ── STEP 1: COMPANY LOGIN ── */}
-        {step === 'company-login' && (
-          <>
-            {companyError && <div className="login-error">{companyError}</div>}
-            <form onSubmit={handleCompanyLogin}>
-              <div className="input-group">
-                <label className="input-label">Company Email</label>
-                <input
-                  type="email"
-                  className="input"
-                  value={companyUsername}
-                  onChange={e => setCompanyUsername(e.target.value)}
-                  required
-                />
-              </div>
-              <div className="input-group">
-                <label className="input-label">Company Password</label>
-                <input
-                  type="password"
-                  className="input"
-                  value={companyPassword}
-                  onChange={e => setCompanyPassword(e.target.value)}
-                  required
-                />
-              </div>
-              <button type="submit" className="btn btn-primary btn-lg" style={{ width: '100%', marginTop: 8 }} disabled={companyLoading}>
-                {companyLoading ? 'Accessing Portal...' : 'Access Portal'}
-              </button>
-            </form>
-          </>
-        )}
-
-        {/* ── STEP 2: ADMIN LOGIN + SHIFT START ── */}
-        {step === 'portal' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
+        {/* ── ADMIN LOGIN + SHIFT START ── */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
             
             {/* Admin Login Section */}
             <div>
@@ -305,7 +243,6 @@ export default function ProviderLogin() {
             </div>
 
           </div>
-        )}
 
       </div>
     </div>
