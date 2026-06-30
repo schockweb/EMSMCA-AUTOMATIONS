@@ -100,6 +100,12 @@ class ProviderUpdate(BaseModel):
     address: str | None = None
     logo_url: str | None = None
     is_active: bool | None = None
+    # Portal credentials (EMSMCA Client Login — shared by all staff)
+    portal_login_username: str | None = None
+    portal_login_password: str | None = None
+    # Admin crew credentials
+    admin_email: str | None = None
+    admin_password: str | None = None
 
 class CrewMemberCreate(BaseModel):
     full_name: str
@@ -451,15 +457,57 @@ async def update_provider(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Update provider details."""
+    """Update provider details, portal credentials, and admin crew credentials."""
     result = await db.execute(
         select(ServiceProvider).where(ServiceProvider.id == uuid.UUID(provider_id))
     )
     provider = result.scalar_one_or_none()
     if not provider:
         raise HTTPException(404, "Provider not found")
+
+    # Standard fields — set directly on the model
+    standard_fields = {"name", "pr_number", "pty_reg_number", "phone", "email", "address", "logo_url", "is_active"}
     for key, val in body.model_dump(exclude_unset=True).items():
-        setattr(provider, key, val)
+        if key in standard_fields:
+            setattr(provider, key, val)
+
+    # EMSMCA Client Login (portal_login_email / portal_login_password_hash on ServiceProvider)
+    if body.portal_login_username is not None:
+        provider.portal_login_email = body.portal_login_username.strip().lower() or None
+    if body.portal_login_password is not None and body.portal_login_password.strip():
+        provider.portal_login_password_hash = hash_password(body.portal_login_password)
+
+    # Admin crew member credentials
+    if body.admin_email or body.admin_password:
+        admin_result = await db.execute(
+            select(CrewMember).where(
+                CrewMember.provider_id == uuid.UUID(provider_id),
+                CrewMember.role == "admin",
+            )
+        )
+        admin = admin_result.scalar_one_or_none()
+
+        if admin:
+            # Update existing admin
+            if body.admin_email:
+                admin.email = body.admin_email.strip().lower()
+            if body.admin_password and body.admin_password.strip():
+                admin.hashed_password = hash_password(body.admin_password)
+        else:
+            # Create new admin crew member
+            if body.admin_email and body.admin_password:
+                admin = CrewMember(
+                    provider_id=uuid.UUID(provider_id),
+                    email=body.admin_email.strip().lower(),
+                    hashed_password=hash_password(body.admin_password),
+                    full_name=f"{provider.name} Admin",
+                    initials="AD",
+                    qualification="ILS",
+                    role="admin",
+                    is_active=True,
+                )
+                db.add(admin)
+
     await db.commit()
     return {"message": "Provider updated", "id": str(provider.id)}
 

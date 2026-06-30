@@ -63,7 +63,7 @@ export default function ProviderManagement() {
 
   // Edit client modal state
   const [showEditClient, setShowEditClient] = useState(false);
-  const [editForm, setEditForm] = useState({ name: '', pr_number: '', phone: '', email: '', address: '', is_active: true });
+  const [editForm, setEditForm] = useState({ name: '', pr_number: '', phone: '', email: '', address: '', is_active: true, portal_username: '', portal_password: '', admin_email: '', admin_password: '' });
   const [editSaving, setEditSaving] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -120,6 +120,10 @@ export default function ProviderManagement() {
       email: selectedProvider.email || '',
       address: selectedProvider.address || '',
       is_active: selectedProvider.is_active,
+      portal_username: '',  // never pre-fill passwords
+      portal_password: '',
+      admin_email: '',
+      admin_password: '',
     });
     setLogoPreview(selectedProvider.logo_url || null);
     setShowEditClient(true);
@@ -137,6 +141,11 @@ export default function ProviderManagement() {
         email: editForm.email || undefined,
         address: editForm.address || undefined,
         is_active: editForm.is_active,
+        // Credential fields — only send if user typed something
+        portal_login_username: editForm.portal_username.trim() || undefined,
+        portal_login_password: editForm.portal_password.trim() || undefined,
+        admin_email: editForm.admin_email.trim() || undefined,
+        admin_password: editForm.admin_password.trim() || undefined,
       });
       const updated = { ...selectedProvider, ...editForm };
       setSelectedProvider(updated);
@@ -521,6 +530,65 @@ export default function ProviderManagement() {
                   Client is Active
                 </label>
                 <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginLeft: 4 }}>(Inactive clients cannot log in to the portal)</span>
+              </div>
+
+              {/* ── EMSMCA Client Login ── */}
+              <div style={{ background: 'var(--surface-50)', padding: '14px 16px', borderRadius: 10, border: '1px solid var(--surface-200)' }}>
+                <div style={{ fontSize: '0.7rem', fontWeight: 800, color: teal, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>🔑 EMSMCA Client Login</div>
+                <p style={{ fontSize: '0.71rem', color: 'var(--text-muted)', margin: '0 0 10px' }}>Shared credentials ALL staff use to access the portal. Leave blank to keep existing.</p>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <div>
+                    <label style={labelStyle}>Username</label>
+                    <input
+                      style={inputStyle}
+                      placeholder="e.g. JEMS@EMSMCA"
+                      value={editForm.portal_username}
+                      onChange={e => setEditForm({ ...editForm, portal_username: e.target.value })}
+                      autoComplete="off" data-lpignore="true" data-form-type="other"
+                    />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Password</label>
+                    <input
+                      style={inputStyle}
+                      type="password"
+                      placeholder="New password (leave blank to keep)"
+                      value={editForm.portal_password}
+                      onChange={e => setEditForm({ ...editForm, portal_password: e.target.value })}
+                      autoComplete="new-password" data-lpignore="true" data-form-type="other"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* ── Portal Admin Login ── */}
+              <div style={{ background: 'var(--surface-50)', padding: '14px 16px', borderRadius: 10, border: '1px solid var(--surface-200)' }}>
+                <div style={{ fontSize: '0.7rem', fontWeight: 800, color: '#2563eb', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>👤 Portal Admin Login</div>
+                <p style={{ fontSize: '0.71rem', color: 'var(--text-muted)', margin: '0 0 10px' }}>Admin's personal login credentials. Leave blank to keep existing.</p>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <div>
+                    <label style={labelStyle}>Admin Email</label>
+                    <input
+                      style={inputStyle}
+                      type="email"
+                      placeholder="admin@client.co.za"
+                      value={editForm.admin_email}
+                      onChange={e => setEditForm({ ...editForm, admin_email: e.target.value })}
+                      autoComplete="off" data-lpignore="true" data-form-type="other"
+                    />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Admin Password</label>
+                    <input
+                      style={inputStyle}
+                      type="password"
+                      placeholder="New password (leave blank to keep)"
+                      value={editForm.admin_password}
+                      onChange={e => setEditForm({ ...editForm, admin_password: e.target.value })}
+                      autoComplete="new-password" data-lpignore="true" data-form-type="other"
+                    />
+                  </div>
+                </div>
               </div>
             </div>
 
