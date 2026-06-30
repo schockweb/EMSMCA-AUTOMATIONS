@@ -35,7 +35,17 @@ export default function Login() {
     try {
       const result = await login(email.trim(), password.trim());
       if (result && result.client_redirect) {
-        navigate(`/${result.slug}/login`);
+        navigate(`/${result.slug}/login`, { 
+          state: { 
+            bypassedStep1: true,
+            providerInfo: {
+              name: result.provider_name,
+              slug: result.slug,
+              logo_url: result.logo_url,
+              pr_number: result.pr_number
+            }
+          } 
+        });
       } else {
         navigate('/');
       }

@@ -89,7 +89,13 @@ async def login(
         if provider and provider.portal_login_password_hash:
             if await verify_password_async(form_data.password, provider.portal_login_password_hash):
                 # Valid client redirect! Return custom response bypassing TokenResponse
-                return JSONResponse(content={"client_redirect": True, "slug": provider.slug})
+                return JSONResponse(content={
+                    "client_redirect": True, 
+                    "slug": provider.slug,
+                    "provider_name": provider.name,
+                    "logo_url": provider.logo_url,
+                    "pr_number": provider.pr_number,
+                })
 
     # ── Check if account is locked ──
     if user and user.locked_until:

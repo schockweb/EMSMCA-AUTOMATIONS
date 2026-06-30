@@ -9,7 +9,7 @@
  *            b) Start Shift  → crew picks their name + partner → /{slug}/crew/dashboard
  */
 import { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 
 const G   = '#10b981';
@@ -44,10 +44,11 @@ interface VehicleOption {
 export default function ProviderLogin() {
   const { providerSlug } = useParams<{ providerSlug: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
 
   // Step management
-  const [step, setStep] = useState<Step>('company-login');
-  const [providerInfo, setProviderInfo] = useState<ProviderInfo | null>(null);
+  const [step, setStep] = useState<Step>(location.state?.bypassedStep1 ? 'portal' : 'company-login');
+  const [providerInfo, setProviderInfo] = useState<ProviderInfo | null>(location.state?.providerInfo || null);
 
   // Company login fields
   const [companyUsername, setCompanyUsername] = useState('');
