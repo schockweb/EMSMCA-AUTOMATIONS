@@ -332,44 +332,40 @@ export default function ProviderManagement() {
                   <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: '-4px 0 0' }}>This logo will appear on the client's login portal and on all PRF PDFs.</p>
                 </div>
 
-                <div style={{ background: 'var(--surface-50)', padding: 16, borderRadius: 8, border: '1px solid var(--surface-100)' }}>
-                  <h4 style={{ fontSize: '0.9rem', fontWeight: 600, marginBottom: 12, color: 'var(--text)' }}>EMSMCA Client Login</h4>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                    <div>
-                      <label style={labelStyle}>Username</label>
-                      <input
-                        style={inputStyle}
-                        placeholder="e.g. clientname"
-                        value={newProvider.clientEmail}
-                        onChange={e => setNewProvider({ ...newProvider, clientEmail: e.target.value })}
-                        autoComplete="off"
-                        data-lpignore="true"
-                        data-form-type="other"
-                        name={`username-${Math.random()}`}
-                      />
-                    </div>
-                    <div>
-                      <label style={labelStyle}>Password</label>
-                      <input
-                        style={inputStyle}
-                        type="password"
-                        placeholder="Set a password"
-                        value={newProvider.clientPassword}
-                        onChange={e => setNewProvider({ ...newProvider, clientPassword: e.target.value })}
-                        autoComplete="new-password"
-                        data-lpignore="true"
-                        data-form-type="other"
-                        name={`password-${Math.random()}`}
-                      />
-                    </div>
-                  </div>
+                <div style={{ background: 'rgba(8,131,149,0.06)', border: '1px solid rgba(8,131,149,0.2)', borderRadius: 10, padding: '12px 14px', fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                  💡 <strong style={{ color: 'var(--text)' }}>How the login portal works:</strong> Once created, the client can log in at <code style={{ background: 'var(--surface-100)', padding: '1px 5px', borderRadius: 4 }}>localhost/{'{'}slug{'}'}/login</code> using the credentials you set below.
                 </div>
 
                 <div style={{ background: 'var(--surface-50)', padding: 16, borderRadius: 8, border: '1px solid var(--surface-100)' }}>
-                  <h4 style={{ fontSize: '0.9rem', fontWeight: 600, marginBottom: 12, color: 'var(--text)' }}>Client Admin Login (Provider Portal)</h4>
+                  <h4 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: 4, color: 'var(--text)' }}>Portal Admin Login</h4>
+                  <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', margin: '0 0 12px' }}>The client uses these credentials to access their provider portal at <code style={{ background: 'var(--surface-100)', padding: '1px 5px', borderRadius: 4 }}>/{'{'}slug{'}'}/login</code></p>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                    <div><label style={labelStyle}>Email</label><input style={inputStyle} type="email" placeholder="admin@client.co.za" value={newProvider.adminEmail} onChange={e => setNewProvider({ ...newProvider, adminEmail: e.target.value })} /></div>
-                    <div><label style={labelStyle}>Password</label><input style={inputStyle} type="password" placeholder="Password" value={newProvider.adminPassword} onChange={e => setNewProvider({ ...newProvider, adminPassword: e.target.value })} /></div>
+                    <div>
+                      <label style={labelStyle}>Email *</label>
+                      <input
+                        style={inputStyle}
+                        type="email"
+                        placeholder="admin@client.co.za"
+                        value={newProvider.adminEmail}
+                        onChange={e => setNewProvider({ ...newProvider, adminEmail: e.target.value })}
+                        autoComplete="off"
+                        data-lpignore="true"
+                        data-form-type="other"
+                      />
+                    </div>
+                    <div>
+                      <label style={labelStyle}>Password *</label>
+                      <input
+                        style={inputStyle}
+                        type="password"
+                        placeholder="Set a strong password"
+                        value={newProvider.adminPassword}
+                        onChange={e => setNewProvider({ ...newProvider, adminPassword: e.target.value })}
+                        autoComplete="new-password"
+                        data-lpignore="true"
+                        data-form-type="other"
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
