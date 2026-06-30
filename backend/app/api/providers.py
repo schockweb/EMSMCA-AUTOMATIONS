@@ -315,6 +315,16 @@ async def list_providers(
         prf_count = await db.execute(
             select(func.count(DigitalPRF.id)).where(DigitalPRF.provider_id == p.id)
         )
+        
+        # Get Admin Email
+        admin_crew = await db.execute(
+            select(CrewMember.email).where(
+                CrewMember.provider_id == p.id,
+                CrewMember.role == "admin"
+            ).limit(1)
+        )
+        admin_email = admin_crew.scalar_one_or_none()
+
         items.append({
             "id": str(p.id),
             "name": p.name,
@@ -326,6 +336,8 @@ async def list_providers(
             "address": p.address,
             "logo_url": p.logo_url,
             "is_active": p.is_active,
+            "portal_login_username": p.portal_login_email,
+            "admin_email": admin_email,
             "crew_count": crew_count.scalar() or 0,
             "vehicle_count": vehicle_count.scalar() or 0,
             "prf_count": prf_count.scalar() or 0,

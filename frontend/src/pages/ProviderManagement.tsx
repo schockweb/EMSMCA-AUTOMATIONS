@@ -19,6 +19,8 @@ interface Provider {
   prf_count: number;
   created_at: string | null;
   logo_url?: string | null;
+  portal_login_username?: string | null;
+  admin_email?: string | null;
 }
 
 interface CrewMember {
@@ -120,9 +122,9 @@ export default function ProviderManagement() {
       email: selectedProvider.email || '',
       address: selectedProvider.address || '',
       is_active: selectedProvider.is_active,
-      portal_username: '',  // never pre-fill passwords
-      portal_password: '',
-      admin_email: '',
+      portal_username: selectedProvider.portal_login_username || '',
+      portal_password: '',  // never pre-fill passwords
+      admin_email: selectedProvider.admin_email || '',
       admin_password: '',
     });
     setLogoPreview(selectedProvider.logo_url || null);
