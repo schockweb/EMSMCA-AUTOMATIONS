@@ -153,7 +153,7 @@ export default function ProviderLogin() {
   };
 
   return (
-    <div className="login-page" style={{ overflowY: 'auto', overflowX: 'hidden', position: 'relative' }}>
+    <div className="login-page" style={{ overflowY: 'auto' }}>
       
       {/* ── BACK BUTTON ── */}
       <button
