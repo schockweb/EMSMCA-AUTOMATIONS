@@ -1274,21 +1274,6 @@ export default function PRFView() {
                 )}
               </div>
             </div>
-            <SectionHead label="Signatures" />
-            <div style={{ display: 'flex', flexDirection: 'column', borderTop: `1px solid ${LN}`, flex: 1 }}>
-              <div style={{ padding: '5px 7px', borderBottom: `1px solid ${LN}` }}>
-                <div style={{ fontSize: '0.65rem', fontWeight: 900, color: MUT, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Patient / Rep.</div>
-                <SignatureBox src={fd.tc_patient_signature || prf.signatures?.patient_signature} minHeight={75} />
-              </div>
-              <div style={{ padding: '5px 7px', borderBottom: `1px solid ${LN}` }}>
-                <div style={{ fontSize: '0.65rem', fontWeight: 900, color: MUT, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Witness</div>
-                <SignatureBox src={fd.tc_witness_signature || prf.signatures?.witness_signature} minHeight={75} />
-              </div>
-              <div style={{ padding: '5px 7px' }}>
-                <div style={{ fontSize: '0.65rem', fontWeight: 900, color: MUT, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Next of Kin</div>
-                <SignatureBox src={fd.next_of_kin_signature || prf.signatures?.next_of_kin_signature} minHeight={55} />
-              </div>
-            </div>
           </div>
 
           {/* Channel-specific + Return Trip (when present) + Terms & Conditions.
@@ -1336,6 +1321,31 @@ export default function PRFView() {
               );
             })()}
             <div style={{ flex: 1, borderTop: `1px solid ${LN}` }} />
+          </div>
+        </div>
+
+        {/* ── BAND B.5 — Signatures (Full Width) ── */}
+        <div style={{ borderTop: `2px solid ${LN}` }}>
+          <SectionHead label="Signatures" />
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', borderTop: `1px solid ${LN}` }}>
+            <div style={{ padding: '5px 7px', borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
+              <div style={{ fontSize: '0.65rem', fontWeight: 900, color: MUT, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Patient / Rep.</div>
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center' }}>
+                <SignatureBox src={fd.tc_patient_signature || prf.signatures?.patient_signature} minHeight={80} />
+              </div>
+            </div>
+            <div style={{ padding: '5px 7px', borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
+              <div style={{ fontSize: '0.65rem', fontWeight: 900, color: MUT, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Witness</div>
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center' }}>
+                <SignatureBox src={fd.tc_witness_signature || prf.signatures?.witness_signature} minHeight={80} />
+              </div>
+            </div>
+            <div style={{ padding: '5px 7px', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ fontSize: '0.65rem', fontWeight: 900, color: MUT, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Next of Kin</div>
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center' }}>
+                <SignatureBox src={fd.next_of_kin_signature || prf.signatures?.next_of_kin_signature} minHeight={80} />
+              </div>
+            </div>
           </div>
         </div>
 
