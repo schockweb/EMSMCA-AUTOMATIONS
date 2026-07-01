@@ -249,73 +249,104 @@ export default function ProviderLogin() {
               <div style={{ flex: 1, height: 1, background: 'var(--glass-border)' }} />
             </div>
 
-            {/* Start Shift Button / Expandable Section */}
+            {/* Start Shift Button */}
             <div>
-              {!showShiftForm ? (
-                <button
-                  type="button"
-                  onClick={() => setShowShiftForm(true)}
-                  className="btn btn-accent btn-lg"
-                  style={{ width: '100%' }}
-                >
-                  Start Shift
-                </button>
-              ) : (
-                <>
-                  <div style={{ fontSize: '0.85rem', fontWeight: 800, color: '#1f2937', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '16px' }}>
-                    Start Shift
-                  </div>
-                  {shiftError && <div className="login-error">{shiftError}</div>}
-                  <form onSubmit={handleStartShift}>
-                    <div className="input-group" style={{ marginBottom: '12px' }}>
-                      <label className="input-label" style={{ fontSize: '0.75rem' }}>Your Name *</label>
-                      <select className="input" value={selectedCrewId} onChange={e => setSelectedCrewId(e.target.value)} required>
-                        <option value="">— Select your name —</option>
-                        {crewList.map(c => (
-                          <option key={c.id} value={c.id}>{c.full_name} ({c.qualification})</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div className="input-group" style={{ marginBottom: '12px' }}>
-                      <label className="input-label" style={{ fontSize: '0.75rem' }}>Person Assisting (Partner)</label>
-                      <select className="input" value={selectedPartnerId} onChange={e => setSelectedPartnerId(e.target.value)}>
-                        <option value="">— Select partner (optional) —</option>
-                        {crewList.filter(c => c.id !== selectedCrewId).map(c => (
-                          <option key={c.id} value={c.id}>{c.full_name} ({c.qualification})</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div className="input-group" style={{ marginBottom: '16px' }}>
-                      <label className="input-label" style={{ fontSize: '0.75rem' }}>Ambulance *</label>
-                      <select className="input" value={selectedVehicleId} onChange={e => setSelectedVehicleId(e.target.value)} required>
-                        <option value="">— Select ambulance —</option>
-                        {vehicleList.map(v => (
-                          <option key={v.id} value={v.id}>{v.callsign} ({v.registration_number})</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div style={{ display: 'flex', gap: '10px' }}>
-                      <button
-                        type="button"
-                        onClick={() => setShowShiftForm(false)}
-                        className="btn btn-lg"
-                        style={{ flex: '0 0 auto', padding: '12px 20px', background: '#f3f4f6', color: '#374151', border: '1px solid #d1d5db' }}
-                      >
-                        Cancel
-                      </button>
-                      <button type="submit" className="btn btn-accent btn-lg" style={{ flex: 1 }} disabled={shiftLoading || !selectedCrewId || !selectedVehicleId}>
-                        {shiftLoading ? 'Starting Shift...' : 'Start New Shift →'}
-                      </button>
-                    </div>
-                  </form>
-                </>
-              )}
+              <button
+                type="button"
+                onClick={() => setShowShiftForm(true)}
+                className="btn btn-accent btn-lg"
+                style={{ width: '100%' }}
+              >
+                Start Shift
+              </button>
             </div>
 
           </div>
+
+      </div>
+
+      {/* ── START SHIFT MODAL ── */}
+      {showShiftForm && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 100,
+          background: 'rgba(10,10,10,0.5)', backdropFilter: 'blur(4px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: 16,
+        }}>
+          <div style={{
+            background: '#ffffff',
+            borderRadius: '12px',
+            width: '100%',
+            maxWidth: '440px',
+            boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
+            overflow: 'hidden',
+            animation: 'fadeInUp 0.3s ease-out'
+          }}>
+            <div style={{
+              padding: '20px 24px', borderBottom: '1px solid #e5e7eb',
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            }}>
+              <div style={{ fontSize: '0.95rem', fontWeight: 800, color: '#1f2937', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Start New Shift
+              </div>
+              <button onClick={() => setShowShiftForm(false)} aria-label="Close" style={{
+                width: 28, height: 28, background: '#f3f4f6', border: 'none',
+                color: '#4b5563', cursor: 'pointer', fontSize: '1.2rem', lineHeight: 1,
+                borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                padding: 0,
+              }}>×</button>
+            </div>
+            <div style={{ padding: '24px' }}>
+              {shiftError && <div className="login-error" style={{ marginBottom: '16px' }}>{shiftError}</div>}
+              <form onSubmit={handleStartShift}>
+                <div className="input-group" style={{ marginBottom: '16px' }}>
+                  <label className="input-label" style={{ fontSize: '0.75rem' }}>Your Name *</label>
+                  <select className="input" value={selectedCrewId} onChange={e => setSelectedCrewId(e.target.value)} required style={{ background: '#f9fafb' }}>
+                    <option value="">— Select your name —</option>
+                    {crewList.map(c => (
+                      <option key={c.id} value={c.id}>{c.full_name} ({c.qualification})</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="input-group" style={{ marginBottom: '16px' }}>
+                  <label className="input-label" style={{ fontSize: '0.75rem' }}>Person Assisting (Partner)</label>
+                  <select className="input" value={selectedPartnerId} onChange={e => setSelectedPartnerId(e.target.value)} style={{ background: '#f9fafb' }}>
+                    <option value="">— Select partner (optional) —</option>
+                    {crewList.filter(c => c.id !== selectedCrewId).map(c => (
+                      <option key={c.id} value={c.id}>{c.full_name} ({c.qualification})</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="input-group" style={{ marginBottom: '24px' }}>
+                  <label className="input-label" style={{ fontSize: '0.75rem' }}>Ambulance *</label>
+                  <select className="input" value={selectedVehicleId} onChange={e => setSelectedVehicleId(e.target.value)} required style={{ background: '#f9fafb' }}>
+                    <option value="">— Select ambulance —</option>
+                    {vehicleList.map(v => (
+                      <option key={v.id} value={v.id}>{v.callsign} ({v.registration_number})</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div style={{ display: 'flex', gap: '12px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setShowShiftForm(false)}
+                    className="btn btn-lg"
+                    style={{ flex: '0 0 auto', padding: '12px 24px', background: '#f3f4f6', color: '#374151', border: '1px solid #d1d5db' }}
+                  >
+                    Cancel
+                  </button>
+                  <button type="submit" className="btn btn-accent btn-lg" style={{ flex: 1 }} disabled={shiftLoading || !selectedCrewId || !selectedVehicleId}>
+                    {shiftLoading ? 'Starting Shift...' : 'Start Shift →'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
 
       </div>
     </div>
