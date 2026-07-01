@@ -121,26 +121,39 @@ export default function SignaturePad({ label, value, onChange, height = 140 }: S
           </button>
         )}
       </div>
-      <canvas
-        ref={canvasRef}
-        style={{
-          width: '100%',
-          height,
-          borderRadius: 10,
-          border: '1.5px solid #cbd5e1',
-          background: '#f8fafc',
-          touchAction: 'none',
-          cursor: 'crosshair',
-          display: 'block',
-        }}
-        onMouseDown={startDraw}
-        onMouseMove={draw}
-        onMouseUp={endDraw}
-        onMouseLeave={endDraw}
-        onTouchStart={startDraw}
-        onTouchMove={draw}
-        onTouchEnd={endDraw}
-      />
+      <div style={{
+        position: 'relative',
+        width: '100%',
+        height,
+        borderRadius: 10,
+        border: '1.5px solid #cbd5e1',
+        background: '#f8fafc',
+        overflow: 'hidden',
+      }}>
+        <div style={{
+          position: 'absolute', bottom: '25%', left: '10%', right: '10%',
+          borderBottom: '2px dotted #cbd5e1', zIndex: 0, pointerEvents: 'none'
+        }} />
+        <canvas
+          ref={canvasRef}
+          style={{
+            width: '100%',
+            height: '100%',
+            touchAction: 'none',
+            cursor: 'crosshair',
+            display: 'block',
+            position: 'relative',
+            zIndex: 1,
+          }}
+          onMouseDown={startDraw}
+          onMouseMove={draw}
+          onMouseUp={endDraw}
+          onMouseLeave={endDraw}
+          onTouchStart={startDraw}
+          onTouchMove={draw}
+          onTouchEnd={endDraw}
+        />
+      </div>
       {!hasContent && (
         <div style={{ textAlign: 'center', fontSize: '0.7rem', color: '#94a3b8', marginTop: 4 }}>
           Sign here with your finger

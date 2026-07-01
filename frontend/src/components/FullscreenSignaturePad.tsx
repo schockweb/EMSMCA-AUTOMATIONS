@@ -320,9 +320,13 @@ export function FullscreenCanvas({ label, initial, onCancel, onSave }: CanvasPro
       </div>
 
       <div ref={wrapRef} style={{ flex: 1, position: 'relative', background: '#fff', margin: 12, borderRadius: 12, overflow: 'hidden' }}>
+        <div style={{
+          position: 'absolute', bottom: '25%', left: '10%', right: '10%',
+          borderBottom: '2px dotted #cbd5e1', zIndex: 0, pointerEvents: 'none'
+        }} />
         <canvas
           ref={canvasRef}
-          style={{ display: 'block', width: '100%', height: '100%', cursor: 'crosshair' }}
+          style={{ display: 'block', width: '100%', height: '100%', cursor: 'crosshair', position: 'relative', zIndex: 1 }}
           onMouseDown={startDraw}
           onMouseMove={draw}
           onMouseUp={endDraw}

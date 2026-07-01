@@ -254,7 +254,7 @@ async def save_prf(
     crew: CrewMember = Depends(get_current_crew),
     db: AsyncSession = Depends(get_db),
 ):
-    """Auto-save PRF draft. Called every 5 seconds from the mobile form."""
+    """Auto-save PRF draft. Called every 10 minutes (periodic backup) from the mobile form."""
     prf = await _load_crew_prf(db, prf_id, crew)
 
     # Only DRAFTs are editable. Once a PRF is SUBMITTED it is being read by the
@@ -349,6 +349,12 @@ async def save_prf(
 
     await db.commit()
     await db.refresh(prf)
+
+    # Invalidate the Redis cache for this PRF on every save.
+    # The next GET will rebuild from the DB and re-cache.
+    from app.cache import invalidate_prf as _invalidate_prf
+    await _invalidate_prf(prf_id)
+
     return {
         "status": "saved",
         "prf_number": prf.prf_number,
@@ -1109,13 +1115,28 @@ async def submit_prf(
     prf.submitted_at = datetime.now(timezone.utc)
     await db.commit()
 
+    # Determine queue priority from PRF data.
+    # P1 calls and resuscitations go to ems_critical (highest priority).
+    # Everything else goes to ems_default for routine processing.
+    fd = prf.form_data or {}
+    call_priority = (fd.get("priority") or "").upper()
+    is_resus = any(
+        k in (fd.get("management_notes") or "").lower()
+        for k in ("cpr", "resuscitat", "defib", "rosc")
+    )
+    queue_priority = "critical" if (call_priority == "P1" or is_resus) else "normal"
+
     # Queue the heavy billing pipeline to Celery. If the broker is unreachable
     # the enqueue can raise — revert the status so the PRF stays an editable
     # DRAFT and can be re-submitted, rather than being stranded in SUBMITTED
     # with no task ever running.
+    # Enqueue the real Celery task (`process_prf_submission`) onto the queue the
+    # worker actually consumes (--queues=ems_critical,ems_default,ems_batch).
+    # P1 / resus → ems_critical; everything else → ems_default.
     from app.tasks.prf_processing import process_prf_submission
+    target_queue = "ems_critical" if queue_priority == "critical" else "ems_default"
     try:
-        task = process_prf_submission.delay(prf_id)
+        process_prf_submission.apply_async(args=[str(prf.id)], queue=target_queue)
     except Exception as enqueue_err:
         logger.error(
             "PRF #%d: failed to enqueue billing task: %s", prf.prf_number, enqueue_err
@@ -1128,16 +1149,21 @@ async def submit_prf(
             detail="Could not queue PRF for processing. Please try submitting again.",
         )
 
+    # Invalidate cache so the status change (DRAFT → SUBMITTED) is immediately
+    # visible on any admin page that may have cached the DRAFT response.
+    from app.cache import invalidate_prf as _invalidate_prf
+    await _invalidate_prf(str(prf.id))
+
     logger.info(
-        "PRF #%d submitted by %s → queued task %s",
-        prf.prf_number, crew.full_name, task.id,
+        "PRF #%d submitted by %s → %s queue",
+        prf.prf_number, crew.full_name, queue_priority,
     )
 
     return {
         "status": "submitted",
         "prf_number": prf.prf_number,
         "case_number": prf.case_number,
-        "task_id": task.id,
+        "queue": queue_priority,
         "message": "PRF submitted successfully. Billing is being processed.",
     }
 
@@ -1200,7 +1226,18 @@ async def get_prf(
     crew: CrewMember = Depends(get_current_crew),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get full PRF data for editing or review."""
+    """Get full PRF data for editing or review. Results are Redis-cached."""
+    from app.cache import get_cache, set_cache
+    from app.config import get_settings
+
+    settings = get_settings()
+    cache_key = f"prf:detail:{prf_id}:crew:{crew.id}"
+
+    # Check cache first — fast path (no DB round-trip on cache hit)
+    cached = await get_cache(cache_key)
+    if cached is not None:
+        return cached
+
     prf = await _load_crew_prf(db, prf_id, crew, allow_crew2=True)
 
     async def _crew(crew_id):
@@ -1217,7 +1254,7 @@ async def get_prf(
             "qualification": c.qualification,
         }
 
-    return {
+    result = {
         "id": str(prf.id),
         "prf_number": prf.prf_number,
         "case_number": prf.case_number,
@@ -1262,6 +1299,17 @@ async def get_prf(
         # Optimistic-concurrency token — the client echoes this back on save.
         "updated_at": prf.updated_at.isoformat() if prf.updated_at else None,
     }
+
+    # Cache with TTL based on status:
+    # - DRAFT:     60s  — crew is actively editing, don't serve stale data
+    # - SUBMITTED: 1hr  — processing pipeline runs, no crew edits
+    # - PROCESSED: 1hr  — immutable billing record
+    ttl = settings.CACHE_TTL_PRF_DRAFT_SECONDS
+    if prf.status.value in ("submitted", "processed"):
+        ttl = settings.CACHE_TTL_PRF_SUBMITTED_SECONDS
+    await set_cache(cache_key, result, ttl=ttl)
+
+    return result
 
 
 # ── Admin: fetch full PRF + branding for scheme-facing rendering ─────────────
@@ -1487,3 +1535,159 @@ def _public_app_url() -> str:
 # live rollout. The PRF is no longer shared as a link the doctor edits —
 # instead, a Celery task renders the final PRF view to a PDF on submit and
 # emails it to the Receiving Facility Email (see app/tasks/prf_email.py).
+
+
+# ── OCR Hospital Sticker ────────────────────────────────────────────────────
+# When the crew photographs a hospital sticker, send it to Mistral Vision to
+# extract patient/medical-scheme fields. The crew then verifies the result in
+# a confirmation modal before the fields are written to their PRF.
+# This eliminates manual typing of sticker data and reduces transcription errors.
+
+class OcrStickerRequest(BaseModel):
+    """Base64-encoded JPEG/PNG image of a hospital sticker or medical document."""
+    image_data: str  # data URL: "data:image/jpeg;base64,..." or raw base64
+
+
+class OcrStickerResponse(BaseModel):
+    """Extracted fields from the sticker OCR. All fields are optional — Mistral
+    returns only what it can confidently read from the image."""
+    patient_name:       str | None = None
+    patient_id_number:  str | None = None
+    patient_dob:        str | None = None
+    medical_scheme:     str | None = None
+    medical_aid_number: str | None = None
+    plan_name:          str | None = None
+    dependent_number:   str | None = None
+    preauth_number:     str | None = None
+    raw_text:           str | None = None   # full OCR text (for debugging)
+    confidence:         str        = "low"  # "high" | "medium" | "low"
+
+
+@router.post("/ocr-sticker", response_model=OcrStickerResponse)
+async def ocr_hospital_sticker(
+    body: OcrStickerRequest,
+    crew: CrewMember = Depends(get_current_crew),
+):
+    """OCR a hospital sticker photo using Mistral Vision.
+
+    The crew photographs the hospital sticker → frontend sends the base64 image
+    here → Mistral reads it → we return structured fields → crew verifies in a
+    modal → confirmed fields auto-populate the PRF form.
+
+    Returns OcrStickerResponse with whatever fields could be extracted.
+    On failure (Mistral unavailable, unreadable image), returns all-None fields
+    so the crew falls back to manual entry without blocking the workflow.
+    """
+    from app.config import get_settings
+
+    settings = get_settings()
+    if not settings.MISTRAL_API_KEY:
+        logger.warning("OCR sticker called but MISTRAL_API_KEY is not configured")
+        raise HTTPException(503, "OCR service not configured — enter details manually")
+
+    # Strip the data URL prefix if present (data:image/jpeg;base64,...)
+    raw = body.image_data
+    if "," in raw:
+        raw = raw.split(",", 1)[1]
+
+    # Validate it's a plausible base64 image (not empty / not text)
+    if len(raw) < 100:
+        raise HTTPException(400, "Image data too short — please retake the photo")
+
+    prompt = """You are reading a South African hospital patient identifier sticker
+or medical aid card. Extract the following fields exactly as printed.
+Return ONLY a JSON object with these keys (use null for missing fields):
+
+{
+  "patient_name": "...",        // Full name as printed
+  "patient_id_number": "...",   // SA ID number (13 digits) or passport
+  "patient_dob": "...",         // Date of birth in YYYY-MM-DD format if visible
+  "medical_scheme": "...",      // Medical aid scheme name (e.g. "Discovery Health")
+  "medical_aid_number": "...",  // Member/medical aid number
+  "plan_name": "...",           // Plan/option name (e.g. "Executive Plan")
+  "dependent_number": "...",    // Dependent code (usually 2 digits)
+  "preauth_number": "...",      // Pre-authorisation number if visible
+  "raw_text": "...",            // All readable text from the sticker/card
+  "confidence": "high"          // "high" if clearly readable, "medium" if partially, "low" if mostly unreadable
+}
+
+Return ONLY the JSON object. No explanation, no markdown fences."""
+
+    try:
+        import httpx, json as _json
+        headers = {
+            "Authorization": f"Bearer {settings.MISTRAL_API_KEY}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": "pixtral-12b-2409",   # Mistral's vision model
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": f"data:image/jpeg;base64,{raw}",
+                        },
+                        {"type": "text", "text": prompt},
+                    ],
+                }
+            ],
+            "max_tokens": 512,
+            "temperature": 0.0,   # Deterministic — no creative guessing on IDs
+        }
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                "https://api.mistral.ai/v1/chat/completions",
+                headers=headers,
+                json=payload,
+            )
+
+        if resp.status_code != 200:
+            logger.error(
+                "Mistral OCR failed for crew %s: HTTP %d — %s",
+                crew.full_name, resp.status_code, resp.text[:200],
+            )
+            raise HTTPException(502, "OCR service returned an error — please enter details manually")
+
+        content = resp.json()["choices"][0]["message"]["content"].strip()
+
+        # Strip markdown fences if Mistral wrapped the JSON
+        if content.startswith("```"):
+            content = content.split("```")[1]
+            if content.startswith("json"):
+                content = content[4:]
+            content = content.strip()
+
+        extracted = _json.loads(content)
+
+        logger.info(
+            "OCR sticker: crew=%s confidence=%s scheme=%s member=%s",
+            crew.full_name,
+            extracted.get("confidence", "unknown"),
+            extracted.get("medical_scheme", "—"),
+            extracted.get("medical_aid_number", "—"),
+        )
+
+        return OcrStickerResponse(
+            patient_name       = extracted.get("patient_name"),
+            patient_id_number  = extracted.get("patient_id_number"),
+            patient_dob        = extracted.get("patient_dob"),
+            medical_scheme     = extracted.get("medical_scheme"),
+            medical_aid_number = extracted.get("medical_aid_number"),
+            plan_name          = extracted.get("plan_name"),
+            dependent_number   = extracted.get("dependent_number"),
+            preauth_number     = extracted.get("preauth_number"),
+            raw_text           = extracted.get("raw_text"),
+            confidence         = extracted.get("confidence", "low"),
+        )
+
+    except HTTPException:
+        raise
+    except _json.JSONDecodeError as je:
+        logger.warning("OCR sticker: Mistral returned non-JSON for crew %s: %s", crew.full_name, je)
+        raise HTTPException(502, "OCR could not parse the sticker — please enter details manually")
+    except Exception as exc:
+        logger.error("OCR sticker unexpected error for crew %s: %s", crew.full_name, exc, exc_info=True)
+        raise HTTPException(502, "OCR service unavailable — please enter details manually")

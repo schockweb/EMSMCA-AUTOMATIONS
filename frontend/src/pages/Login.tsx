@@ -69,17 +69,17 @@ export default function Login() {
 
         <form onSubmit={handleSubmit}>
           <div className="input-group">
-            <label className="input-label" htmlFor="email">Email Address</label>
+            <label className="input-label" htmlFor="username">Username</label>
             <input
-              id="email"
+              id="username"
               name="username"
-              type="email"
+              type="text"
               className="input"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
               autoFocus
-              autoComplete="username"
+              autoComplete="off"
             />
           </div>
 

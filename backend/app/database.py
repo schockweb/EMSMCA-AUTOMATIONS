@@ -20,28 +20,27 @@ if settings.DATABASE_URL.startswith("sqlite"):
         echo=False,
     )
 else:
+    # Detect Supabase (PgBouncer) — disable prepared statement cache because
+    # PgBouncer reassigns backend connections and breaks server-side state.
+    # For local Postgres, prepared statements give a significant perf boost.
+    _is_supabase = "supabase" in settings.DATABASE_URL or "ssl=require" in settings.DATABASE_URL
+    _connect_args: dict = {}
+    if _is_supabase:
+        _connect_args = {
+            "prepared_statement_cache_size": 0,
+            "statement_cache_size": 0,
+        }
+
     engine = create_async_engine(
         settings.DATABASE_URL,
         echo=False,
-        # ── Connection Pool (replaces NullPool) ──────────────────
-        # AsyncAdaptedQueuePool is the default for async engines.
-        # pool_size:       Persistent connections kept open (per worker process).
-        # max_overflow:    Extra connections allowed during bursts (temporary).
-        # pool_timeout:    Seconds to wait for a connection before raising.
-        # pool_recycle:    Seconds before a connection is recycled (avoids stale TCP).
-        # pool_pre_ping:   Test connection liveness before use (detects dead sockets).
+        # ── Connection Pool ──────────────────────────────────────
         pool_size=settings.DB_POOL_SIZE,
         max_overflow=settings.DB_MAX_OVERFLOW,
         pool_timeout=settings.DB_POOL_TIMEOUT,
         pool_recycle=settings.DB_POOL_RECYCLE,
         pool_pre_ping=True,
-        # Disable asyncpg prepared statement cache for Supabase transaction-mode
-        # pooler (PgBouncer). Prepared statements are per-connection server-side
-        # state and break when PgBouncer reassigns the backend connection.
-        connect_args={
-            "prepared_statement_cache_size": 0,
-            "statement_cache_size": 0,
-        },
+        connect_args=_connect_args,
     )
 
 

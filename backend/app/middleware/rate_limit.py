@@ -58,7 +58,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     def __init__(
         self,
         app,
-        auth_limit: int = 60,
+        auth_limit: int = 100,        # 100 login attempts per window (was 60)
         api_limit: int = 600,
         window: int = 60,
         max_body_bytes: int = 15 * 1024 * 1024,  # 15 MB — allows photo/sticker captures
@@ -104,8 +104,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         path = request.url.path
 
-        # Skip rate limiting for health checks and docs
+        # Skip rate limiting for health checks, docs, and local dev
         if path in ("/", "/health", "/docs", "/openapi.json") or path.startswith("/static"):
+            return await call_next(request)
+
+        # Skip rate limiting entirely for localhost / loopback — these are internal
+        # docker-compose health checks, dev logins, and CI requests, not remote attackers.
+        client_ip = self._get_client_ip(request)
+        if client_ip in ("127.0.0.1", "::1", "localhost") or client_ip.startswith("172.") or client_ip.startswith("192.168."):
             return await call_next(request)
 
         # ── Request body size cap (cheap header check; stops oversized uploads) ──

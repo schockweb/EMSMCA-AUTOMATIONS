@@ -23,6 +23,7 @@
  * Storage shape on form_data: an array of { data_url, captured_at, size? }.
  */
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { compressDataUrl, compressFile as compressFileUtil, DOCUMENT_MAX_DIM, DOCUMENT_JPEG_QUAL } from '../utils/imageUtils';
 
 export interface CapturedDocument {
   data_url: string;
@@ -42,46 +43,11 @@ const S700 = '#334155';
 const S200 = '#e2e8f0';
 const W    = '#ffffff';
 
-// Cap each captured image at a 1600px long edge — keeps the PRF payload
-// well under a few MB even with a half-dozen documents attached.
-const MAX_DIM       = 1600;
-const JPEG_QUALITY  = 0.85;
-const MAX_FILE_SIZE = 12 * 1024 * 1024;
-
-function downsizeDataUrl(srcDataUrl: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => {
-      const scale = Math.min(1, MAX_DIM / Math.max(img.width, img.height));
-      const w = Math.max(1, Math.round(img.width  * scale));
-      const h = Math.max(1, Math.round(img.height * scale));
-      const canvas = document.createElement('canvas');
-      canvas.width  = w;
-      canvas.height = h;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return reject(new Error('Canvas unavailable.'));
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = 'high';
-      ctx.drawImage(img, 0, 0, w, h);
-      resolve(canvas.toDataURL('image/jpeg', JPEG_QUALITY));
-    };
-    img.onerror = () => reject(new Error('Failed to decode image.'));
-    img.src = srcDataUrl;
-  });
-}
-
-async function compressFile(file: File): Promise<string> {
-  if (file.size > MAX_FILE_SIZE) {
-    throw new Error(`"${file.name}" exceeds 12 MB.`);
-  }
-  const dataUrl = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload  = () => resolve(String(reader.result));
-    reader.onerror = () => reject(new Error('Failed to read file.'));
-    reader.readAsDataURL(file);
-  });
-  return downsizeDataUrl(dataUrl);
-}
+// Image compression — use shared utility (1200px / quality 0.75).
+// This reduces a 3 MB phone photo to ~200 KB before it's stored in
+// form_data, cutting PRF payload size by ~90% vs. raw camera output.
+const downsizeDataUrl = (src: string) => compressDataUrl(src, DOCUMENT_MAX_DIM, DOCUMENT_JPEG_QUAL);
+const compressFile    = (f: File)     => compressFileUtil(f, DOCUMENT_MAX_DIM, DOCUMENT_JPEG_QUAL);
 
 export default function DocumentsCapture({ value, onChange, buttonLabel }: Props) {
   const docs = Array.isArray(value) ? value : [];
@@ -356,6 +322,8 @@ function MultiCaptureOverlay({ onCancel, onDone }: OverlayProps) {
     const fctx = fullCanvas.getContext('2d');
     if (!fctx) { setBusy(false); return; }
     fctx.drawImage(bitmap, 0, 0, bw, bh);
+    // Use DOCUMENT profile (1200px / 0.75) — same as compressFile.
+    // Grab an intermediate at original resolution, then downsize.
     const raw = fullCanvas.toDataURL('image/jpeg', 0.95);
 
     try {

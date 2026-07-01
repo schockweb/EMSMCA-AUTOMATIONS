@@ -1,5 +1,26 @@
 services:
 
+  # ── Local PostgreSQL ────────────────────────────────────────────────────────
+  # Replaces the remote Supabase instance for local development.
+  # Queries drop from ~2000ms to <5ms by eliminating the SA→Ireland round-trip.
+  postgres:
+    image: postgres:16-alpine
+    container_name: ems_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ems_admin
+      POSTGRES_PASSWORD: ems_secure_2024
+      POSTGRES_DB: ems_claims
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ems_admin -d ems_claims"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
     container_name: ems_rabbitmq
@@ -51,7 +72,7 @@ services:
       - .env
       - ./backend/.env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres.pssxfjbstlznijbjgfdo:MichaelSchuttler924@aws-0-eu-west-1.pooler.supabase.com:5432/postgres?ssl=require
+      - DATABASE_URL=postgresql+asyncpg://ems_admin:ems_secure_2024@postgres:5432/ems_claims
       - CELERY_BROKER_URL=amqp://${RABBITMQ_USER:-ems_rabbit}:${RABBITMQ_PASS:-rabbit_secure_2024}@rabbitmq:5672//
       - REDIS_URL=redis://redis:6379/0
       - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
@@ -62,6 +83,8 @@ services:
       - ./backend:/app
       - upload_data:/app/uploads
     depends_on:
+      postgres:
+        condition: service_healthy
       rabbitmq:
         condition: service_healthy
       redis:
@@ -87,7 +110,7 @@ services:
       - .env
       - ./backend/.env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres.pssxfjbstlznijbjgfdo:MichaelSchuttler924@aws-0-eu-west-1.pooler.supabase.com:5432/postgres?ssl=require
+      - DATABASE_URL=postgresql+asyncpg://ems_admin:ems_secure_2024@postgres:5432/ems_claims
       - CELERY_BROKER_URL=amqp://${RABBITMQ_USER:-ems_rabbit}:${RABBITMQ_PASS:-rabbit_secure_2024}@rabbitmq:5672//
       - REDIS_URL=redis://redis:6379/0
       - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
@@ -97,6 +120,8 @@ services:
       - upload_data:/app/uploads
     depends_on:
       rabbitmq:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     healthcheck:
       disable: true
@@ -118,9 +143,10 @@ services:
       backend:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:80/"]
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:80/"]
       interval: 30s
       timeout: 5s
+      start_period: 10s
       retries: 3
 
   # ── Celery Beat — Off-peak scheduler ────────────────────────────────────────
@@ -140,7 +166,7 @@ services:
       - .env
       - ./backend/.env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres.pssxfjbstlznijbjgfdo:MichaelSchuttler924@aws-0-eu-west-1.pooler.supabase.com:5432/postgres?ssl=require
+      - DATABASE_URL=postgresql+asyncpg://ems_admin:ems_secure_2024@postgres:5432/ems_claims
       - CELERY_BROKER_URL=amqp://${RABBITMQ_USER:-ems_rabbit}:${RABBITMQ_PASS:-rabbit_secure_2024}@rabbitmq:5672//
     volumes:
       - ./backend:/app
@@ -148,12 +174,15 @@ services:
     depends_on:
       rabbitmq:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
     healthcheck:
       disable: true
     # Beat scheduler: triggers tasks on the cron schedule in celery_app.py
     command: celery -A app.tasks.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule
 
 volumes:
+  postgres_data:
   rabbitmq_data:
   upload_data:
   celerybeat_data:

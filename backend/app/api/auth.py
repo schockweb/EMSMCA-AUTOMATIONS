@@ -200,6 +200,14 @@ async def refresh_token(
 
     user_id = payload.get("sub")
 
+    # Ensure user still exists in the database (prevents infinite loop after a DB wipe)
+    user = await db.scalar(select(User).where(User.id == user_id))
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User no longer exists",
+        )
+
     # Blacklist the old refresh token so it can't be reused
     if old_jti:
         exp = datetime.fromtimestamp(payload.get("exp", 0), tz=timezone.utc)

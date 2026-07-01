@@ -278,6 +278,8 @@ class ShiftStartByIdRequest(BaseModel):
     crew_id: str
     provider_slug: str
     partner_name: str | None = None   # Name of the assisting crew member
+    vehicle_id: str | None = None
+    vehicle_callsign: str | None = None
 
 class ShiftStartByIdResponse(BaseModel):
     crew_id: str
@@ -291,6 +293,8 @@ class ShiftStartByIdResponse(BaseModel):
     token_type: str = "bearer"
     role: str = "crew"
     partner_name: str | None = None
+    vehicle_id: str | None = None
+    vehicle_callsign: str | None = None
     shift_started_at: str
 
 @router.post("/shift-start-by-id", response_model=ShiftStartByIdResponse)
@@ -333,13 +337,15 @@ async def shift_start_by_id(body: ShiftStartByIdRequest, db: AsyncSession = Depe
             "role": crew.role,
             "token_scope": "crew",
             "partner_name": body.partner_name or "",
+            "vehicle_id": body.vehicle_id or "",
+            "vehicle_callsign": body.vehicle_callsign or "",
         },
         expires_delta=timedelta(hours=CREW_SHIFT_TOKEN_HOURS),
     )
 
     logger.info(
-        "Shift start (by ID): %s for provider %s | partner: %s",
-        crew.full_name, provider.name, body.partner_name or "—"
+        "Shift start (by ID): %s for provider %s | partner: %s | vehicle: %s",
+        crew.full_name, provider.name, body.partner_name or "—", body.vehicle_callsign or "—"
     )
 
     return ShiftStartByIdResponse(
@@ -353,5 +359,7 @@ async def shift_start_by_id(body: ShiftStartByIdRequest, db: AsyncSession = Depe
         access_token=token,
         role=crew.role,
         partner_name=body.partner_name,
+        vehicle_id=body.vehicle_id,
+        vehicle_callsign=body.vehicle_callsign,
         shift_started_at=now.isoformat(),
     )
