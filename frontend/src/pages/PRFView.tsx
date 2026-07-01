@@ -1413,34 +1413,7 @@ export default function PRFView() {
             </div>
           </div>
 
-          {/* Scheme / Billing Compliance - evidence for the scheme */}
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            <SectionHead label="Scheme / Billing Compliance" />
-            {(() => {
-              const flags: string[] = [];
-              if (fd.closest_facility_bypassed) flags.push('Closest facility bypassed');
-              if (fd.direct_admission) flags.push('Direct admission');
-              if (fd.emed_notified) flags.push('EMED notified');
-              if (fd.lifesaving_intervention_required) flags.push('Lifesaving intervention');
-              if (fd.cardiac_incident) flags.push('Cardiac incident');
-              if (fd.has_ecg_attached) flags.push('ECG attached');
-              if (fd.resuscitation_attempted) flags.push('Resus attempted');
-              if (fd.rosc_achieved) flags.push('ROSC achieved');
-              if (fd.perfusing_rhythm_on_handover) flags.push('Perfusing @ handover');
-              if (fd.second_vehicle_present) flags.push('2nd vehicle present');
-              if (fd.patient_refused_transport) flags.push('Refused transport');
-              if (fd.vehicle_tracking_report) flags.push('Tracking report');
-              if (fd.is_multi_patient) flags.push(`Multi-patient (${fd.patient_index_of_total || '?'})`);
-              return (
-                <>
-                  <FieldRow label="Flags" value={flags.length ? flags.join(', ') : '-'} />
-                  <FieldRow label="External cause" value={fd.icd10_external_cause || '-'} />
-                  <FieldRow label="Supervising PR" value={fd.supervising_practitioner_pr || '-'} />
-                  <FieldRow label="Sig-refused" value={fd.signature_refused_reason || '-'} />
-                </>
-              );
-            })()}
-          </div>
+
         </div>
       </div>
 
