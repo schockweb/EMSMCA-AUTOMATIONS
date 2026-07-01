@@ -49,11 +49,20 @@ const EmptyMark = () => (
 const EmptySignature = ({ label = 'Not captured', minHeight = 48 }: { label?: string; minHeight?: number }) => (
   <div style={{
     minHeight, width: '100%', boxSizing: 'border-box',
-    background: SOFT_BG, border: `1.4px dashed #94a3b8`,
+    background: SOFT_BG, border: `2px dashed #475569`,
     borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center',
-    fontSize: '0.85rem', color: MUT, fontStyle: 'italic', fontWeight: 800,
-    letterSpacing: '0.04em',
-  }}>{label}</div>
+    position: 'relative',
+  }}>
+    <div style={{
+      position: 'absolute', bottom: '25%', left: '10%', right: '10%',
+      borderBottom: '2px dotted #94a3b8', zIndex: 0
+    }} />
+    <div style={{
+      fontSize: '0.85rem', color: MUT, fontStyle: 'italic', fontWeight: 800,
+      letterSpacing: '0.04em', position: 'relative', zIndex: 1,
+      background: SOFT_BG, padding: '0 8px'
+    }}>{label}</div>
+  </div>
 );
 
 // Captured-signature block — a clearly bordered box so the signature area
@@ -66,11 +75,16 @@ const SignatureBox = ({ src, minHeight = 56, label }: {
   src ? (
     <div style={{
       minHeight, width: '100%', boxSizing: 'border-box',
-      border: '1px solid #94a3b8', borderRadius: 4, background: '#fff',
+      border: '2px solid #475569', borderRadius: 4, background: '#fff',
       display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 2,
+      position: 'relative',
     }}>
+      <div style={{
+        position: 'absolute', bottom: '25%', left: '10%', right: '10%',
+        borderBottom: '2px dotted #cbd5e1', zIndex: 0
+      }} />
       <img src={src} alt="signature"
-           style={{ maxWidth: '100%', maxHeight: minHeight - 6, objectFit: 'contain' }} />
+           style={{ maxWidth: '100%', maxHeight: minHeight - 6, objectFit: 'contain', position: 'relative', zIndex: 1 }} />
     </div>
   ) : <EmptySignature label={label} minHeight={minHeight} />
 );
@@ -688,15 +702,9 @@ export default function PRFView() {
     fd.return_depart_time
   );
 
-  // The payer-specific block now lives in the "Billing Information" column and
-  // is driven by billing_type. Channel Detail (right column) only carries the
-  // extras that aren't the primary payer: the requesting provider (IFT/IHT),
-  // a separate quote, and the return-trip times.
+  // The payer-specific block lives in the "Billing Information" column and is
+  // driven by billing_type. (The separate "Channel Detail" block was removed.)
   const billingType = (fd.billing_type || '').toString().toUpperCase();
-  const anyChannelDetail = anyValue(fd, [
-    'ems_provider_name', 'ems_provider_ref', 'ems_provider_bhf',
-    'quote_number', 'quote_amount', 'quote_authorised_by', 'quote_valid_until',
-  ]) || returnTripHasContent;
 
   // ── Empty-section detection ──
   const debtorKeys = [
@@ -1274,35 +1282,17 @@ export default function PRFView() {
               Information, matching the JEMS paper form. This column always
               renders so the T&C are on every PRF. */}
           <div style={{ display: 'flex', flexDirection: 'column' }}>
-            {anyChannelDetail && (
+            {/* "Channel Detail" section removed per request. The return-trip
+                times are retained below for inter-facility transfers. */}
+            {returnTripHasContent && (
               <>
-                <SectionHead label="Channel Detail" />
-                {/* Payer-specific blocks (RAF / IOD / PVT / Event / Call-Out)
-                    now live in the Billing Information column. Only the
-                    requesting provider, a separate quote, and the return trip
-                    remain here. */}
-                <SubBlock title="Requesting Provider" rows={[
-                  ['Provider',  fd.ems_provider_name],
-                  ['Reference', fd.ems_provider_ref],
-                  ['BHF No',    fd.ems_provider_bhf],
-                ]} />
-                <SubBlock title="Quoted" rows={[
-                  ['Quote No',      fd.quote_number],
-                  ['Amount (R)',    fd.quote_amount],
-                  ['Authorised By', fd.quote_authorised_by],
-                  ['Valid Until',   fd.quote_valid_until],
-                ]} />
-                {returnTripHasContent && (
-                  <>
-                    <SectionHead label="Return Trip" />
-                    <FieldRow label="Despatch"  value={fd.return_despatch_time} />
-                    <FieldRow label="On Scene"  value={fd.return_on_scene_time} />
-                    <FieldRow label="Depart"    value={fd.return_depart_scene_time} />
-                    <FieldRow label="At Dest"   value={fd.return_at_destination_time} />
-                    <FieldRow label="Handover"  value={fd.return_handover_time} />
-                    <FieldRow label="Available" value={fd.return_available_time} />
-                  </>
-                )}
+                <SectionHead label="Return Trip" />
+                <FieldRow label="Despatch"  value={fd.return_despatch_time} />
+                <FieldRow label="On Scene"  value={fd.return_on_scene_time} />
+                <FieldRow label="Depart"    value={fd.return_depart_scene_time} />
+                <FieldRow label="At Dest"   value={fd.return_at_destination_time} />
+                <FieldRow label="Handover"  value={fd.return_handover_time} />
+                <FieldRow label="Available" value={fd.return_available_time} />
               </>
             )}
 
@@ -1335,11 +1325,11 @@ export default function PRFView() {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', borderTop: `1px solid ${LN}` }}>
               <div style={{ padding: '5px 7px', borderRight: `1px solid ${LN}` }}>
                 <div style={{ fontSize: '0.65rem', fontWeight: 900, color: MUT, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Patient / Rep.</div>
-                <SignatureBox src={fd.tc_patient_signature} minHeight={70} />
+                <SignatureBox src={fd.tc_patient_signature} minHeight={110} />
               </div>
               <div style={{ padding: '5px 7px', borderRight: `1px solid ${LN}` }}>
                 <div style={{ fontSize: '0.65rem', fontWeight: 900, color: MUT, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Witness</div>
-                <SignatureBox src={fd.tc_witness_signature} minHeight={70} />
+                <SignatureBox src={fd.tc_witness_signature} minHeight={110} />
               </div>
               <div style={{ padding: '5px 7px' }}>
                 <div style={{ fontSize: '0.65rem', fontWeight: 900, color: MUT, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Next of Kin</div>
@@ -1370,7 +1360,7 @@ export default function PRFView() {
             )}
             <SectionHead label="Handover Signature" />
             <div style={{ padding: '6px 8px', borderTop: `1px solid ${LN}` }}>
-              <SignatureBox src={prf.signatures?.handover_signature} minHeight={56} />
+              <SignatureBox src={prf.signatures?.handover_signature} minHeight={80} />
             </div>
             {fd.raf_sketch && (
               <>
@@ -1400,7 +1390,7 @@ export default function PRFView() {
               <FieldRow label="Qual"  value={c?.qualification || fbQual} />
               <FieldRow label="HPCSA" value={c?.hpcsa_number} />
               <div style={{ padding: '6px 8px', borderTop: `1px solid ${LN}`, flex: 1, display: 'flex', alignItems: 'center' }}>
-                <SignatureBox src={sig} minHeight={56} />
+                <SignatureBox src={sig} minHeight={80} />
               </div>
             </div>
           ))}
@@ -1421,6 +1411,35 @@ export default function PRFView() {
                 ? motivationNotes
                 : <span style={{ fontStyle: 'italic', color: DIM }}>No motivation or additional notes recorded.</span>}
             </div>
+          </div>
+
+          {/* Scheme / Billing Compliance - evidence for the scheme */}
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <SectionHead label="Scheme / Billing Compliance" />
+            {(() => {
+              const flags: string[] = [];
+              if (fd.closest_facility_bypassed) flags.push('Closest facility bypassed');
+              if (fd.direct_admission) flags.push('Direct admission');
+              if (fd.emed_notified) flags.push('EMED notified');
+              if (fd.lifesaving_intervention_required) flags.push('Lifesaving intervention');
+              if (fd.cardiac_incident) flags.push('Cardiac incident');
+              if (fd.has_ecg_attached) flags.push('ECG attached');
+              if (fd.resuscitation_attempted) flags.push('Resus attempted');
+              if (fd.rosc_achieved) flags.push('ROSC achieved');
+              if (fd.perfusing_rhythm_on_handover) flags.push('Perfusing @ handover');
+              if (fd.second_vehicle_present) flags.push('2nd vehicle present');
+              if (fd.patient_refused_transport) flags.push('Refused transport');
+              if (fd.vehicle_tracking_report) flags.push('Tracking report');
+              if (fd.is_multi_patient) flags.push(`Multi-patient (${fd.patient_index_of_total || '?'})`);
+              return (
+                <>
+                  <FieldRow label="Flags" value={flags.length ? flags.join(', ') : '-'} />
+                  <FieldRow label="External cause" value={fd.icd10_external_cause || '-'} />
+                  <FieldRow label="Supervising PR" value={fd.supervising_practitioner_pr || '-'} />
+                  <FieldRow label="Sig-refused" value={fd.signature_refused_reason || '-'} />
+                </>
+              );
+            })()}
           </div>
         </div>
       </div>
