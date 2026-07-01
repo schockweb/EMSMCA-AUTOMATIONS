@@ -1902,6 +1902,4 @@ label:has(+ .pulsate-red),
    top navbar globally so it never bleeds into print output. Page-specific
    layout resets live in the relevant component's <style> block. */
 @media print {
-  .navbar { display: none !important; }
-  .no-print { display: none !important; }
-}
+  .navbar { display
