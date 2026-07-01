@@ -6907,12 +6907,12 @@ export default function DigitalPRFForm() {
                 <FullscreenSignaturePad
                   label="Patient / Representative Signature"
                   value={fd.tc_patient_signature}
-                  onChange={v => { sf('tc_patient_signature', v); }}
+                  onChange={v => { sf('tc_patient_signature', v); setSigs(p => ({ ...p, patient_signature: v })); }}
                 />
                 <FullscreenSignaturePad
                   label="Witness Signature"
                   value={fd.tc_witness_signature}
-                  onChange={v => { sf('tc_witness_signature', v); }}
+                  onChange={v => { sf('tc_witness_signature', v); setSigs(p => ({ ...p, witness_signature: v })); }}
                 />
                 <FullscreenSignaturePad
                   label="Next of Kin Signature"
@@ -6967,60 +6967,98 @@ export default function DigitalPRFForm() {
         )}
 
         {/* Crew sign-off — every crew member signs before the PRF is submitted. */}
-        {crewSignOffOpen && (
-          <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(15,23,42,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-            <div style={{ background: W, borderRadius: 16, padding: '22px 20px', maxWidth: 460, width: '100%', maxHeight: '85vh', overflowY: 'auto', boxShadow: '0 12px 40px rgba(0,0,0,0.25)' }}>
-              <div style={{ fontSize: '1.05rem', fontWeight: 900, color: S900, marginBottom: 6 }}>Crew Sign-Off</div>
-              <div style={{ fontSize: '0.84rem', color: S600, lineHeight: 1.5, marginBottom: 8 }}>
-                Each crew member must sign to submit this PRF. Tap the pencil next to your name.
-              </div>
-              {getCrewSignList().map(c => {
-                const cs = fd.crew_signoff_sigs || {};
-                return (
-                  <div key={c.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '10px 0', borderTop: `1px solid ${S100}` }}>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontWeight: 700, color: S900, fontSize: '0.9rem' }}>{c.name}</div>
-                      {c.sub ? <div style={{ fontSize: '0.74rem', color: S500 }}>{c.sub}</div> : null}
+        {crewSignOffOpen && (() => {
+          const signList = getCrewSignList();
+          const cs = fd.crew_signoff_sigs || {};
+          const signedCount = signList.filter(c => !!(cs[c.key] && String(cs[c.key]).trim())).length;
+          const totalCount = signList.length;
+          const allSigned = signedCount === totalCount;
+          return (
+            <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(15,23,42,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+              <div style={{ background: W, borderRadius: 16, padding: '22px 20px', maxWidth: 460, width: '100%', maxHeight: '85vh', overflowY: 'auto', boxShadow: '0 12px 40px rgba(0,0,0,0.25)' }}>
+                <div style={{ fontSize: '1.05rem', fontWeight: 900, color: S900, marginBottom: 6 }}>Crew Sign-Off</div>
+                <div style={{ fontSize: '0.84rem', color: S600, lineHeight: 1.5, marginBottom: 4 }}>
+                  Each crew member must sign before the PRF can be submitted.
+                </div>
+                {/* Progress indicator */}
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px',
+                  background: allSigned ? 'rgba(22,163,74,0.08)' : 'rgba(245,158,11,0.08)',
+                  border: `1px solid ${allSigned ? '#86efac' : '#fcd34d'}`,
+                  borderRadius: 8, marginBottom: 14,
+                }}>
+                  <span style={{ fontSize: '1rem' }}>{allSigned ? '✅' : '✍️'}</span>
+                  <span style={{ fontSize: '0.8rem', fontWeight: 700, color: allSigned ? '#15803d' : '#92400e' }}>
+                    {allSigned
+                      ? 'All crew members have signed — ready to submit!'
+                      : `${signedCount} of ${totalCount} signed — tap the pencil icon to sign`}
+                  </span>
+                </div>
+                {signList.map(c => {
+                  const isSigned = !!(cs[c.key] && String(cs[c.key]).trim());
+                  return (
+                    <div key={c.key} style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+                      padding: '12px 10px', borderTop: `1px solid ${S100}`,
+                      background: !isSigned ? 'rgba(245,158,11,0.04)' : 'transparent',
+                      borderRadius: 6,
+                    }}>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <div style={{ fontWeight: 700, color: S900, fontSize: '0.9rem' }}>{c.name}</div>
+                          {/* Signed / Unsigned badge */}
+                          <span style={{
+                            fontSize: '0.65rem', fontWeight: 800, padding: '1px 7px', borderRadius: 99,
+                            background: isSigned ? 'rgba(22,163,74,0.12)' : 'rgba(245,158,11,0.15)',
+                            color: isSigned ? '#15803d' : '#92400e',
+                            textTransform: 'uppercase', letterSpacing: '0.05em',
+                          }}>
+                            {isSigned ? '✓ Signed' : 'Awaiting signature'}
+                          </span>
+                        </div>
+                        {c.sub ? <div style={{ fontSize: '0.74rem', color: S500 }}>{c.sub}</div> : null}
+                      </div>
+                      <FullscreenSignaturePad
+                        compact
+                        label={`${c.name} Signature`}
+                        value={cs[c.key] || null}
+                        onChange={v => {
+                          sf('crew_signoff_sigs', { ...(fd.crew_signoff_sigs || {}), [c.key]: v });
+                          // Mirror crew 1 to the dedicated crew_signature column so it
+                          // shows in the existing PDF crew strip.
+                          if (c.key === 'c1') setSigs(p => ({ ...p, crew_signature: v }));
+                          dirtyRef.current = true;
+                        }}
+                      />
                     </div>
-                    <FullscreenSignaturePad
-                      compact
-                      label={`${c.name} Signature`}
-                      value={cs[c.key] || null}
-                      onChange={v => {
-                        sf('crew_signoff_sigs', { ...(fd.crew_signoff_sigs || {}), [c.key]: v });
-                        // Mirror crew 1 to the dedicated crew_signature column so it
-                        // shows in the existing PDF crew strip.
-                        if (c.key === 'c1') setSigs(p => ({ ...p, crew_signature: v }));
-                        dirtyRef.current = true;
-                      }}
-                    />
-                  </div>
-                );
-              })}
-              <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
-                <button
-                  type="button"
-                  onClick={() => { setCrewSignOffOpen(false); submitInFlightRef.current = false; }}
-                  style={{ flex: 1, padding: '12px 0', borderRadius: 10, fontWeight: 700, border: `2px solid ${S200}`, background: W, color: S600, cursor: 'pointer' }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  disabled={!allCrewSigned()}
-                  onClick={() => { setCrewSignOffOpen(false); submitInFlightRef.current = false; void handleSubmit(); }}
-                  style={{
-                    flex: 2, padding: '12px 0', borderRadius: 10, fontWeight: 800, border: 'none', color: W,
-                    background: allCrewSigned() ? `linear-gradient(135deg,${ROSE},#be123c)` : S400,
-                    cursor: allCrewSigned() ? 'pointer' : 'not-allowed',
-                  }}
-                >
-                  Confirm & Submit
-                </button>
+                  );
+                })}
+                <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+                  <button
+                    type="button"
+                    onClick={() => { setCrewSignOffOpen(false); submitInFlightRef.current = false; }}
+                    style={{ flex: 1, padding: '12px 0', borderRadius: 10, fontWeight: 700, border: `2px solid ${S200}`, background: W, color: S600, cursor: 'pointer' }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!allSigned}
+                    onClick={() => { setCrewSignOffOpen(false); submitInFlightRef.current = false; void handleSubmit(); }}
+                    style={{
+                      flex: 2, padding: '12px 0', borderRadius: 10, fontWeight: 800, border: 'none', color: W,
+                      background: allSigned ? `linear-gradient(135deg,${ROSE},#be123c)` : S400,
+                      cursor: allSigned ? 'pointer' : 'not-allowed',
+                      transition: 'background 0.2s',
+                    }}
+                  >
+                    {allSigned ? 'Confirm & Submit' : `${signedCount} / ${totalCount} Signed`}
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
       </>
     );
   };

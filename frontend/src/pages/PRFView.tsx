@@ -1325,15 +1325,15 @@ export default function PRFView() {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', borderTop: `1px solid ${LN}` }}>
               <div style={{ padding: '5px 7px', borderRight: `1px solid ${LN}` }}>
                 <div style={{ fontSize: '0.65rem', fontWeight: 900, color: MUT, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Patient / Rep.</div>
-                <SignatureBox src={fd.tc_patient_signature} minHeight={110} />
+                <SignatureBox src={fd.tc_patient_signature || prf.signatures?.patient_signature} minHeight={110} />
               </div>
               <div style={{ padding: '5px 7px', borderRight: `1px solid ${LN}` }}>
                 <div style={{ fontSize: '0.65rem', fontWeight: 900, color: MUT, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Witness</div>
-                <SignatureBox src={fd.tc_witness_signature} minHeight={110} />
+                <SignatureBox src={fd.tc_witness_signature || prf.signatures?.witness_signature} minHeight={110} />
               </div>
               <div style={{ padding: '5px 7px' }}>
                 <div style={{ fontSize: '0.65rem', fontWeight: 900, color: MUT, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Next of Kin</div>
-                <SignatureBox src={fd.next_of_kin_signature} minHeight={70} />
+                <SignatureBox src={fd.next_of_kin_signature || prf.signatures?.next_of_kin_signature} minHeight={70} />
               </div>
             </div>
             <div style={{ flex: 1, borderTop: `1px solid ${LN}` }} />
