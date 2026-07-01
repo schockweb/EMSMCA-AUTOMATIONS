@@ -531,6 +531,115 @@ export const RULES: ValidationRule[] = [
       'Total call time exceeds the standard limit (45 min BLS/ILS, 60 min ALS/ICU). Add a motivation to the Motivation / Other Notes box to avoid downgrade.',
     source: 'Netcare CMG §5.2.1.1 — Total call time limits before motivation required',
   },
+  {
+    id: 'NTC-RESPONSE-TIME-RATIO',
+    schemes: ['netcare'],
+    phases: [4, 6],
+    severity: 'warn',
+    field: 'time_on_scene',
+    check: (d, ctx) => {
+      if (ctx.responseMinutes == null || ctx.responseKm == null || ctx.responseKm <= 0) return true;
+      if (ctx.responseMinutes <= ctx.responseKm) return true;
+      return /motivat|traffic|divert|access|scene safety|delay reason/.test(motivationText(d));
+    },
+    message:
+      'Response time exceeds the Netcare ratio of 1 minute per kilometre (60 km/h). Document a motivation in the Motivation / Other Notes box.',
+    source: 'Netcare CMG 5.2 - dispatch-to-scene max 1 min/km',
+  },
+  {
+    id: 'NTC-TRANSFER-TIME-RATIO',
+    schemes: ['netcare'],
+    phases: [5, 6],
+    severity: 'warn',
+    field: 'time_at_destination',
+    check: (d, ctx) => {
+      if (ctx.transferMinutes == null || ctx.transferKm == null || ctx.transferKm <= 0) return true;
+      if (ctx.transferMinutes <= ctx.transferKm * 1.5) return true;
+      return /motivat|traffic|clinical|unstable|divert|road/.test(motivationText(d));
+    },
+    message:
+      'Scene-to-hospital transfer time exceeds the Netcare ratio of 1.5 minutes per kilometre (40 km/h). Document a motivation in the Motivation / Other Notes box.',
+    source: 'Netcare CMG 5.2 - scene-to-hospital max 1.5 min/km',
+  },
+  {
+    id: 'NTC-HANDOVER-TIME',
+    schemes: ['netcare'],
+    phases: [5, 6],
+    severity: 'warn',
+    field: 'time_handover',
+    check: (d, ctx) => {
+      if (ctx.handoverMinutes == null) return true;
+      const lvl = billingLevel(d);
+      const limit = (lvl === 'ALS' || lvl === 'ICU') ? 20 : 10;
+      if (ctx.handoverMinutes <= limit) return true;
+      return /motivat|clinical|unstable|ongoing treatment/.test(motivationText(d));
+    },
+    message:
+      'Hospital handover time exceeds the Netcare cap (10 min BLS/ILS, 20 min ALS/ICU). Record a motivation for the extended handover.',
+    source: 'Netcare CMG - handover 10 min BLS/ILS, 20 min ALS/ICU',
+  },
+  {
+    id: 'NTC-MULTI-ALS-P1-CAP',
+    schemes: ['netcare'],
+    phases: [2, 6],
+    severity: 'warn',
+    field: 'patient_count',
+    check: (d) => {
+      const isP1 = /priority\s*1|^p1$|\bp1\b/i.test(String(d.priority || ''));
+      return !(isP1 && Number(d.patient_count || 1) > 1);
+    },
+    message:
+      'Only one Priority 1 patient may be transported per ALS practitioner at any time. Confirm the patient count / crewing for this critical patient.',
+    source: 'Netcare CMG - max one P1 patient per ALS practitioner',
+  },
+  {
+    id: 'NTC-JLOOP-BLS',
+    schemes: ['netcare'],
+    phases: [3, 6],
+    severity: 'warn',
+    field: 'assessment_level',
+    check: (d) => {
+      const lvl = billingLevel(d);
+      if (lvl !== 'ILS' && lvl !== 'ALS' && lvl !== 'ICU') return true;
+      const notes = motivationText(d);
+      const shortLine = /j-loop|j loop|short line|no active fluid|tkvo|to keep vein open/.test(notes);
+      if (!shortLine) return true;
+      return /\binfus|\bbolus|fluid running|fluids up|running fluid|fluid administered|ml given|drip up/.test(notes);
+    },
+    message:
+      'A short line / J-loop with no active fluid administration requires only BLS monitoring and must be billed as BLS. Document active fluid administration, or bill BLS.',
+    source: 'Netcare CMG - short line / J-loop with no active fluid billed as BLS',
+  },
+  {
+    id: 'NTC-RESUS-TRANSPORT-COMBO',
+    schemes: ['netcare'],
+    phases: [4, 5, 6],
+    severity: 'warn',
+    field: 'perfusing_rhythm_on_handover',
+    check: (d) => {
+      if (!d.resuscitation_attempted) return true;
+      const transported = !!d.receiving_facility || has(d, 'time_at_destination');
+      if (!transported) return true;
+      return !!d.perfusing_rhythm_on_handover;
+    },
+    message:
+      'A resuscitation fee and a transport fee can only be charged together when the patient is handed over with a perfusing ECG rhythm. Confirm perfusing-rhythm-at-handover, or only the resuscitation fee applies.',
+    source: 'Netcare CMG - resus + transport fee requires perfusing rhythm at handover',
+  },
+  {
+    id: 'NTC-CLOSEST-FACILITY',
+    schemes: ['netcare'],
+    phases: [4, 5, 6],
+    severity: 'warn',
+    field: 'closest_facility_bypassed',
+    check: (d) => {
+      if (!d.closest_facility_bypassed) return true;
+      return /motivat|nearest unable|no capacity|specialis|cath lab|trauma unit|not appropriate/.test(motivationText(d));
+    },
+    message:
+      'Closest most appropriate facility bypassed. Netcare deducts the distance difference unless a motivation is documented - add the reason to the Motivation / Other Notes box.',
+    source: 'Netcare CMG - transport to closest appropriate facility; bypass requires motivation',
+  },
 ];
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -1289,7 +1398,7 @@ const GEMS_RULES: ValidationRule[] = [
       const notes = motivationText(d);
       const tkvo = /tkvo|to keep vein open|no active fluid|short line|j-loop|j loop|prophylactic/.test(notes);
       if (!tkvo) return true;
-      return /active fluid|infus|fluid running|fluids up|bolus/.test(notes);
+      return /\binfus|\bbolus|fluid running|fluids up|running fluid|fluid administered|ml given|drip up/.test(notes);
     },
     message:
       'Peripheral IV with no active fluid administration (TKVO / short line / J-loop) on an IFT is billed at BLS by GEMS, not ILS. Document active fluid administration, or bill BLS.',
