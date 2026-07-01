@@ -296,69 +296,70 @@ export default function ProviderLogin() {
       {showShiftForm && (
         <div style={{
           position: 'fixed', inset: 0, zIndex: 100,
-          background: 'rgba(10,10,10,0.5)', backdropFilter: 'blur(4px)',
+          background: 'rgba(0,0,0,0.35)', backdropFilter: 'blur(8px)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           padding: 16,
         }}>
           <div style={{
-            background: '#ffffff',
-            borderRadius: '12px',
+            background: '#fff',
+            borderRadius: '16px',
             width: '100%',
-            maxWidth: '500px',
-            boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
+            maxWidth: '460px',
+            boxShadow: '0 24px 48px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.08)',
             overflow: 'hidden',
-            animation: 'fadeInUp 0.3s ease-out',
+            animation: 'fadeInUp 0.25s ease-out',
             display: 'flex', flexDirection: 'column',
-            maxHeight: '90vh'
+            maxHeight: '85vh'
           }}>
             {/* Header */}
             <div style={{
-              padding: '20px 24px', borderBottom: '1px solid #e5e7eb',
+              padding: '20px 24px 16px', borderBottom: '1px solid #f0f0f0',
               display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              background: '#f9fafb'
             }}>
               <div>
-                <div style={{ fontSize: '1rem', fontWeight: 800, color: '#1f2937', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  {shiftStep === 1 ? 'Step 1: Select Ambulance' : 'Step 2: Select Crew Members'}
+                <div style={{ fontSize: '0.95rem', fontWeight: 600, color: '#111827', letterSpacing: '-0.01em' }}>
+                  {shiftStep === 1 ? 'Select Ambulance' : 'Select Crew'}
                 </div>
-                <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: 4 }}>
-                  {shiftStep === 1 ? 'Which vehicle are you operating today?' : 'Select everyone working on this vehicle.'}
+                <div style={{ fontSize: '0.78rem', color: '#9ca3af', marginTop: 2, fontWeight: 400 }}>
+                  {shiftStep === 1 ? 'Choose the vehicle for this shift' : 'Tap to select crew on this vehicle'}
                 </div>
               </div>
               <button onClick={() => { setShowShiftForm(false); setShiftStep(1); setSelectedVehicleId(''); setSelectedCrewIds([]); }} aria-label="Close" style={{
-                width: 32, height: 32, background: '#e5e7eb', border: 'none',
-                color: '#4b5563', cursor: 'pointer', fontSize: '1.4rem', lineHeight: 1,
+                width: 30, height: 30, background: 'transparent', border: '1px solid #e5e7eb',
+                color: '#9ca3af', cursor: 'pointer', fontSize: '1.1rem', lineHeight: 1,
                 borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                padding: 0,
+                padding: 0, transition: 'all 0.15s',
               }}>×</button>
             </div>
             
             {/* Body */}
-            <div style={{ padding: '24px', overflowY: 'auto' }}>
-              {shiftError && <div className="login-error" style={{ marginBottom: '16px' }}>{shiftError}</div>}
+            <div style={{ padding: '20px 24px', overflowY: 'auto' }}>
+              {shiftError && <div className="login-error" style={{ marginBottom: '14px', fontSize: '0.8rem' }}>{shiftError}</div>}
               
               {shiftStep === 1 && (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   {vehicleList.map(v => (
                     <button
                       key={v.id}
                       type="button"
                       onClick={() => { setSelectedVehicleId(v.id); setShiftStep(2); }}
                       style={{
-                        padding: '16px', borderRadius: '8px', border: '2px solid',
-                        borderColor: selectedVehicleId === v.id ? 'var(--brand-teal)' : '#e5e7eb',
-                        background: selectedVehicleId === v.id ? '#f0fdfa' : '#ffffff',
-                        textAlign: 'left', cursor: 'pointer', transition: 'all 0.2s',
-                        display: 'flex', flexDirection: 'column', gap: 4
+                        padding: '14px 16px', borderRadius: '10px', border: '1px solid #e5e7eb',
+                        background: '#fff',
+                        textAlign: 'left', cursor: 'pointer', transition: 'all 0.15s',
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                       }}
                     >
-                      <span style={{ fontWeight: 800, color: '#1f2937' }}>{v.callsign}</span>
-                      <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>{v.registration_number}</span>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: '0.88rem', color: '#1f2937' }}>{v.callsign}</div>
+                        <div style={{ fontSize: '0.72rem', color: '#9ca3af', marginTop: 1 }}>{v.registration_number}</div>
+                      </div>
+                      <span style={{ color: '#d1d5db', fontSize: '1rem' }}>›</span>
                     </button>
                   ))}
                   {vehicleList.length === 0 && (
-                    <div style={{ gridColumn: 'span 2', textAlign: 'center', padding: '24px', color: '#6b7280' }}>
-                      No vehicles available.
+                    <div style={{ textAlign: 'center', padding: '32px 16px', color: '#9ca3af', fontSize: '0.85rem' }}>
+                      No vehicles available
                     </div>
                   )}
                 </div>
@@ -366,7 +367,7 @@ export default function ProviderLogin() {
 
               {shiftStep === 2 && (
                 <form onSubmit={handleStartShift}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '24px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '20px' }}>
                     {crewList.map(c => {
                       const isSelected = selectedCrewIds.includes(c.id);
                       const isPrimary = selectedCrewIds[0] === c.id;
@@ -376,28 +377,34 @@ export default function ProviderLogin() {
                           type="button"
                           onClick={() => toggleCrewSelection(c.id)}
                           style={{
-                            padding: '12px 16px', borderRadius: '8px', border: '1px solid',
+                            padding: '12px 14px', borderRadius: '10px',
+                            border: '1px solid',
                             borderColor: isSelected ? 'var(--brand-teal)' : '#e5e7eb',
-                            background: isSelected ? '#f0fdfa' : '#ffffff',
-                            textAlign: 'left', cursor: 'pointer', transition: 'all 0.2s',
-                            display: 'flex', alignItems: 'center', gap: 12
+                            background: isSelected ? 'rgba(20,184,166,0.06)' : '#fff',
+                            textAlign: 'left', cursor: 'pointer', transition: 'all 0.15s',
+                            display: 'flex', alignItems: 'center', gap: 10,
                           }}
                         >
                           <div style={{
-                            width: 20, height: 20, borderRadius: '4px', border: '2px solid',
+                            width: 18, height: 18, borderRadius: '4px', border: '1.5px solid',
                             borderColor: isSelected ? 'var(--brand-teal)' : '#d1d5db',
                             background: isSelected ? 'var(--brand-teal)' : '#fff',
-                            display: 'flex', alignItems: 'center', justifyContent: 'center'
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            flexShrink: 0, transition: 'all 0.15s',
                           }}>
-                            {isSelected && <span style={{ color: '#fff', fontSize: '14px', lineHeight: 1 }}>✓</span>}
+                            {isSelected && <span style={{ color: '#fff', fontSize: '12px', lineHeight: 1 }}>✓</span>}
                           </div>
-                          <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                            <span style={{ fontWeight: 600, color: '#1f2937' }}>{c.full_name}</span>
-                            <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>{c.qualification}</span>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontWeight: 500, fontSize: '0.85rem', color: '#1f2937' }}>{c.full_name}</div>
+                            <div style={{ fontSize: '0.7rem', color: '#9ca3af', marginTop: 1 }}>{c.qualification}</div>
                           </div>
                           {isPrimary && (
-                            <span style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--brand-teal)', background: '#ccfbf1', padding: '2px 8px', borderRadius: '12px' }}>
-                              PRIMARY
+                            <span style={{
+                              fontSize: '0.65rem', fontWeight: 600, color: 'var(--brand-teal)',
+                              background: 'rgba(20,184,166,0.1)', padding: '2px 8px', borderRadius: '10px',
+                              letterSpacing: '0.03em', flexShrink: 0
+                            }}>
+                              Primary
                             </span>
                           )}
                         </button>
@@ -405,17 +412,21 @@ export default function ProviderLogin() {
                     })}
                   </div>
 
-                  <div style={{ display: 'flex', gap: '12px', borderTop: '1px solid #e5e7eb', paddingTop: '20px' }}>
+                  <div style={{ display: 'flex', gap: '10px', borderTop: '1px solid #f0f0f0', paddingTop: '16px' }}>
                     <button
                       type="button"
                       onClick={() => setShiftStep(1)}
                       className="btn btn-lg"
-                      style={{ flex: '0 0 auto', padding: '12px 24px', background: '#f3f4f6', color: '#374151', border: '1px solid #d1d5db' }}
+                      style={{
+                        flex: '0 0 auto', padding: '10px 20px',
+                        background: '#fff', color: '#6b7280', border: '1px solid #e5e7eb',
+                        fontSize: '0.82rem', fontWeight: 500,
+                      }}
                     >
-                      ← Back
+                      Back
                     </button>
-                    <button type="submit" className="btn btn-accent btn-lg" style={{ flex: 1 }} disabled={shiftLoading || selectedCrewIds.length === 0}>
-                      {shiftLoading ? 'Starting Shift...' : `Start Shift (${selectedCrewIds.length}) →`}
+                    <button type="submit" className="btn btn-accent btn-lg" style={{ flex: 1, fontSize: '0.82rem', fontWeight: 600 }} disabled={shiftLoading || selectedCrewIds.length === 0}>
+                      {shiftLoading ? 'Starting...' : `Start Shift · ${selectedCrewIds.length} selected`}
                     </button>
                   </div>
                 </form>
