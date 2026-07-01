@@ -1029,8 +1029,8 @@ export default function PRFView() {
             <FieldRow label="Dest Facility" value={fd.receiving_facility} />
             <FieldRow label="Ward"          value={fd.ward} />
             <FieldRow label={fd.call_type === 'COURTESY' ? "Receiving Dr/Person" : "Receiving Dr"}  value={fd.receiving_doctor} />
-            <FieldRow label="Condition" value={fd.handover_notes} valueMin={24} />
             <FieldRow label="Qualification" value={fd.handover_qualification} />
+            <FieldRow label="Condition" value={fd.handover_notes} valueMin={24} />
             <FieldRow label="Receiving Facility Email" value={fd.handover_doctor_email} />
             <div style={{ flex: 1, borderTop: `1px solid ${LN}`, background: GREEN_TINT }} />
           </div>
