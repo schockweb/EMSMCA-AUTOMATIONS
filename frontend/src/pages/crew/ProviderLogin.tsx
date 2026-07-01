@@ -42,9 +42,9 @@ export default function ProviderLogin() {
   // Crew shift start
   const [crewList, setCrewList] = useState<CrewOption[]>([]);
   const [vehicleList, setVehicleList] = useState<VehicleOption[]>([]);
-  const [selectedCrewId, setSelectedCrewId] = useState('');
-  const [selectedPartnerId, setSelectedPartnerId] = useState('');
+  const [shiftStep, setShiftStep] = useState<1 | 2>(1);
   const [selectedVehicleId, setSelectedVehicleId] = useState('');
+  const [selectedCrewIds, setSelectedCrewIds] = useState<string[]>([]);
   const [shiftLoading, setShiftLoading] = useState(false);
   const [shiftError, setShiftError] = useState('');
   const [showShiftForm, setShowShiftForm] = useState(false);
@@ -116,15 +116,19 @@ export default function ProviderLogin() {
   // ── Step 2b: Crew Shift Start ──
   const handleStartShift = async (e: FormEvent) => {
     e.preventDefault();
-    if (!selectedCrewId) { setShiftError('Please select your name.'); return; }
-    if (!selectedVehicleId) { setShiftError('Please select an ambulance.'); return; }
+    if (selectedCrewIds.length === 0) { setShiftError('Please select at least one crew member.'); return; }
+    
+    const primaryCrewId = selectedCrewIds[0];
+    const assistingCrewIds = selectedCrewIds.slice(1);
+    const partnerId = assistingCrewIds.length > 0 ? assistingCrewIds[0] : null;
+    const partnerName = partnerId ? (crewList.find(c => c.id === partnerId)?.full_name || '') : '';
+    const vehicleCallsign = vehicleList.find(v => v.id === selectedVehicleId)?.callsign || '';
+
     setShiftError('');
     setShiftLoading(true);
     try {
-      const partnerName = crewList.find(c => c.id === selectedPartnerId)?.full_name || '';
-      const vehicleCallsign = vehicleList.find(v => v.id === selectedVehicleId)?.callsign || '';
       const res = await axios.post('/api/crew/shift-start-by-id', {
-        crew_id: selectedCrewId,
+        crew_id: primaryCrewId,
         provider_slug: providerSlug,
         partner_name: partnerName || undefined,
         vehicle_id: selectedVehicleId,
@@ -145,11 +149,34 @@ export default function ProviderLogin() {
         vehicle_id: data.vehicle_id || '',
         vehicle_callsign: data.vehicle_callsign || '',
       }));
+
+      // Store partner profile for Digital PRF
+      if (partnerId) {
+         const p = crewList.find(c => c.id === partnerId);
+         if (p) localStorage.setItem('crew2_profile', JSON.stringify(p));
+      } else {
+         localStorage.removeItem('crew2_profile');
+      }
+      
+      // Store any 3rd, 4th, etc. extra crew members
+      const extraCrew = assistingCrewIds.slice(1).map(id => crewList.find(c => c.id === id)).filter(Boolean);
+      if (extraCrew.length > 0) {
+         localStorage.setItem('extra_crew_profiles', JSON.stringify(extraCrew));
+      } else {
+         localStorage.removeItem('extra_crew_profiles');
+      }
+
       navigate(`/${providerSlug}/crew/dashboard`);
     } catch (err: any) {
       setShiftError(err.response?.data?.detail || 'Failed to start shift. Try again.');
     }
     setShiftLoading(false);
+  };
+
+  const toggleCrewSelection = (id: string) => {
+    setSelectedCrewIds(prev => 
+      prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]
+    );
   };
 
   return (
@@ -265,7 +292,7 @@ export default function ProviderLogin() {
 
       </div>
 
-      {/* ── START SHIFT MODAL ── */}
+      {/* ── START SHIFT WIZARD MODAL ── */}
       {showShiftForm && (
         <div style={{
           position: 'fixed', inset: 0, zIndex: 100,
@@ -277,72 +304,122 @@ export default function ProviderLogin() {
             background: '#ffffff',
             borderRadius: '12px',
             width: '100%',
-            maxWidth: '440px',
+            maxWidth: '500px',
             boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
             overflow: 'hidden',
-            animation: 'fadeInUp 0.3s ease-out'
+            animation: 'fadeInUp 0.3s ease-out',
+            display: 'flex', flexDirection: 'column',
+            maxHeight: '90vh'
           }}>
+            {/* Header */}
             <div style={{
               padding: '20px 24px', borderBottom: '1px solid #e5e7eb',
               display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              background: '#f9fafb'
             }}>
-              <div style={{ fontSize: '0.95rem', fontWeight: 800, color: '#1f2937', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                Start New Shift
+              <div>
+                <div style={{ fontSize: '1rem', fontWeight: 800, color: '#1f2937', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  {shiftStep === 1 ? 'Step 1: Select Ambulance' : 'Step 2: Select Crew Members'}
+                </div>
+                <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: 4 }}>
+                  {shiftStep === 1 ? 'Which vehicle are you operating today?' : 'Select everyone working on this vehicle.'}
+                </div>
               </div>
-              <button onClick={() => setShowShiftForm(false)} aria-label="Close" style={{
-                width: 28, height: 28, background: '#f3f4f6', border: 'none',
-                color: '#4b5563', cursor: 'pointer', fontSize: '1.2rem', lineHeight: 1,
-                borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              <button onClick={() => { setShowShiftForm(false); setShiftStep(1); setSelectedVehicleId(''); setSelectedCrewIds([]); }} aria-label="Close" style={{
+                width: 32, height: 32, background: '#e5e7eb', border: 'none',
+                color: '#4b5563', cursor: 'pointer', fontSize: '1.4rem', lineHeight: 1,
+                borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center',
                 padding: 0,
               }}>×</button>
             </div>
-            <div style={{ padding: '24px' }}>
+            
+            {/* Body */}
+            <div style={{ padding: '24px', overflowY: 'auto' }}>
               {shiftError && <div className="login-error" style={{ marginBottom: '16px' }}>{shiftError}</div>}
-              <form onSubmit={handleStartShift}>
-                <div className="input-group" style={{ marginBottom: '16px' }}>
-                  <label className="input-label" style={{ fontSize: '0.75rem' }}>Your Name *</label>
-                  <select className="input" value={selectedCrewId} onChange={e => setSelectedCrewId(e.target.value)} required style={{ background: '#f9fafb' }}>
-                    <option value="">— Select your name —</option>
-                    {crewList.map(c => (
-                      <option key={c.id} value={c.id}>{c.full_name} ({c.qualification})</option>
-                    ))}
-                  </select>
+              
+              {shiftStep === 1 && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                  {vehicleList.map(v => (
+                    <button
+                      key={v.id}
+                      type="button"
+                      onClick={() => { setSelectedVehicleId(v.id); setShiftStep(2); }}
+                      style={{
+                        padding: '16px', borderRadius: '8px', border: '2px solid',
+                        borderColor: selectedVehicleId === v.id ? 'var(--brand-teal)' : '#e5e7eb',
+                        background: selectedVehicleId === v.id ? '#f0fdfa' : '#ffffff',
+                        textAlign: 'left', cursor: 'pointer', transition: 'all 0.2s',
+                        display: 'flex', flexDirection: 'column', gap: 4
+                      }}
+                    >
+                      <span style={{ fontWeight: 800, color: '#1f2937' }}>{v.callsign}</span>
+                      <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>{v.registration_number}</span>
+                    </button>
+                  ))}
+                  {vehicleList.length === 0 && (
+                    <div style={{ gridColumn: 'span 2', textAlign: 'center', padding: '24px', color: '#6b7280' }}>
+                      No vehicles available.
+                    </div>
+                  )}
                 </div>
+              )}
 
-                <div className="input-group" style={{ marginBottom: '16px' }}>
-                  <label className="input-label" style={{ fontSize: '0.75rem' }}>Person Assisting (Partner)</label>
-                  <select className="input" value={selectedPartnerId} onChange={e => setSelectedPartnerId(e.target.value)} style={{ background: '#f9fafb' }}>
-                    <option value="">— Select partner (optional) —</option>
-                    {crewList.filter(c => c.id !== selectedCrewId).map(c => (
-                      <option key={c.id} value={c.id}>{c.full_name} ({c.qualification})</option>
-                    ))}
-                  </select>
-                </div>
+              {shiftStep === 2 && (
+                <form onSubmit={handleStartShift}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '24px' }}>
+                    {crewList.map(c => {
+                      const isSelected = selectedCrewIds.includes(c.id);
+                      const isPrimary = selectedCrewIds[0] === c.id;
+                      return (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => toggleCrewSelection(c.id)}
+                          style={{
+                            padding: '12px 16px', borderRadius: '8px', border: '1px solid',
+                            borderColor: isSelected ? 'var(--brand-teal)' : '#e5e7eb',
+                            background: isSelected ? '#f0fdfa' : '#ffffff',
+                            textAlign: 'left', cursor: 'pointer', transition: 'all 0.2s',
+                            display: 'flex', alignItems: 'center', gap: 12
+                          }}
+                        >
+                          <div style={{
+                            width: 20, height: 20, borderRadius: '4px', border: '2px solid',
+                            borderColor: isSelected ? 'var(--brand-teal)' : '#d1d5db',
+                            background: isSelected ? 'var(--brand-teal)' : '#fff',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center'
+                          }}>
+                            {isSelected && <span style={{ color: '#fff', fontSize: '14px', lineHeight: 1 }}>✓</span>}
+                          </div>
+                          <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                            <span style={{ fontWeight: 600, color: '#1f2937' }}>{c.full_name}</span>
+                            <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>{c.qualification}</span>
+                          </div>
+                          {isPrimary && (
+                            <span style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--brand-teal)', background: '#ccfbf1', padding: '2px 8px', borderRadius: '12px' }}>
+                              PRIMARY
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
 
-                <div className="input-group" style={{ marginBottom: '24px' }}>
-                  <label className="input-label" style={{ fontSize: '0.75rem' }}>Ambulance *</label>
-                  <select className="input" value={selectedVehicleId} onChange={e => setSelectedVehicleId(e.target.value)} required style={{ background: '#f9fafb' }}>
-                    <option value="">— Select ambulance —</option>
-                    {vehicleList.map(v => (
-                      <option key={v.id} value={v.id}>{v.callsign} ({v.registration_number})</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div style={{ display: 'flex', gap: '12px' }}>
-                  <button
-                    type="button"
-                    onClick={() => setShowShiftForm(false)}
-                    className="btn btn-lg"
-                    style={{ flex: '0 0 auto', padding: '12px 24px', background: '#f3f4f6', color: '#374151', border: '1px solid #d1d5db' }}
-                  >
-                    Cancel
-                  </button>
-                  <button type="submit" className="btn btn-accent btn-lg" style={{ flex: 1 }} disabled={shiftLoading || !selectedCrewId || !selectedVehicleId}>
-                    {shiftLoading ? 'Starting Shift...' : 'Start Shift →'}
-                  </button>
-                </div>
-              </form>
+                  <div style={{ display: 'flex', gap: '12px', borderTop: '1px solid #e5e7eb', paddingTop: '20px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setShiftStep(1)}
+                      className="btn btn-lg"
+                      style={{ flex: '0 0 auto', padding: '12px 24px', background: '#f3f4f6', color: '#374151', border: '1px solid #d1d5db' }}
+                    >
+                      ← Back
+                    </button>
+                    <button type="submit" className="btn btn-accent btn-lg" style={{ flex: 1 }} disabled={shiftLoading || selectedCrewIds.length === 0}>
+                      {shiftLoading ? 'Starting Shift...' : `Start Shift (${selectedCrewIds.length}) →`}
+                    </button>
+                  </div>
+                </form>
+              )}
             </div>
           </div>
         </div>
