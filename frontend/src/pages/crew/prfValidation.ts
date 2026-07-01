@@ -1321,7 +1321,7 @@ const ER24_RULES: ValidationRule[] = [
       const notes = motivationText(d);
       return (
         /dextrose/.test(meds) ||
-        /fluid replac|iv medication|iv drug|during transport|rapidly deterior|rapid deterior|abnormal vital|unstable|deranged/.test(notes)
+        /fluid replac|iv medication|iv drug|during transport|rapidly deterior|rapid deterior|abnormal vital|unstable|deranged|hypotens|hyperglyc|burn|dehydrat|overdose|poison/.test(notes)
       );
     },
     message:
@@ -1465,6 +1465,242 @@ const ER24_RULES: ValidationRule[] = [
     message:
       'Every ER24 PRF must carry a patient / legal-guardian signature. If the patient refuses, capture a witness signature and note the refusal.',
     source: 'ER24 Case Management Rules - all PRFs should have a patient / legal-guardian signature',
+  },
+
+  // ── Non-emergency presentation may be repudiated (patient liable) ──
+  {
+    id: 'ER24-NON-EMERGENCY-REJECT',
+    schemes: ['er24'],
+    phases: [3, 6],
+    severity: 'warn',
+    field: 'chief_complaint',
+    check: (d) => {
+      const cc = String(d.chief_complaint || '').toLowerCase();
+      const nonEmerg = /routine transport|alternative transport|general weakness|common sprain|superficial cut|painful urination|normal pregnancy|flu without fever/.test(cc);
+      if (!nonEmerg) return true;
+      const notes = motivationText(d);
+      return notes.length > 40 || /emergenc|acute|unstable|abnormal|hypotens|tachycard|justif|severe/.test(notes);
+    },
+    message:
+      'This presentation may be assessed by ER24 as non-emergency (scheme repudiates, patient liable). Document the clinical justification for emergency ambulance transport.',
+    source: 'ER24/Mediclinic Billing - non-emergency call-outs repudiated for scheme funding',
+  },
+  // ── Refusal with only BLS / first-aid -> bill privately ──
+  {
+    id: 'ER24-RHT-BLS-PRIVATE',
+    schemes: ['er24'],
+    phases: [5, 6],
+    severity: 'warn',
+    field: 'billing_type',
+    check: (d) => {
+      const refused = String(d.call_type || '').toUpperCase() === 'RHT' || !!d.patient_refused_transport;
+      if (!refused) return true;
+      const lvl = billingLevel(d);
+      return lvl === 'ILS' || lvl === 'ALS' || lvl === 'ICU';
+    },
+    message:
+      'Patient refused transport with only first-aid / BLS care (oxygen, bandage, vitals). This cannot be billed to the scheme - bill the patient privately as a call-out fee.',
+    source: 'ER24/Mediclinic Billing - RHT with BLS-only care is member-liable (private)',
+  },
+  // ── Refusal after ILS+ stabilisation -> code 125 ──
+  {
+    id: 'ER24-RHT-ILS-BILLABLE',
+    schemes: ['er24'],
+    phases: [5, 6],
+    severity: 'warn',
+    field: 'assessment_level',
+    check: (d) => {
+      const refused = String(d.call_type || '').toUpperCase() === 'RHT' || !!d.patient_refused_transport;
+      if (!refused) return true;
+      const lvl = billingLevel(d);
+      return !(lvl === 'ILS' || lvl === 'ALS' || lvl === 'ICU');
+    },
+    message:
+      'Billing tip: patient refused transport after successful ILS/ALS stabilisation (e.g. Dextrose, nebulisation) - bill code 125 (treatment on scene) for up to 45 minutes.',
+    source: 'ER24/Mediclinic Billing - RHT after ILS+ stabilisation bills code 125 up to 45 min',
+  },
+  // ── Response time 1 min/km ──
+  {
+    id: 'ER24-RESPONSE-TIME-RATIO',
+    schemes: ['er24'],
+    phases: [4, 6],
+    severity: 'warn',
+    field: 'time_on_scene',
+    check: (d, ctx) => {
+      if (ctx.responseMinutes == null || ctx.responseKm == null || ctx.responseKm <= 0) return true;
+      if (ctx.responseMinutes <= ctx.responseKm) return true;
+      return /motivat|traffic|divert|access|scene safety|delay reason/.test(motivationText(d));
+    },
+    message:
+      'Response time exceeds the ER24 ratio of 1 minute per kilometre (60 km/h). Document a motivation in the Motivation / Other Notes box or the extra time is cut on audit.',
+    source: 'ER24/Mediclinic Billing - dispatch-to-scene max 1 min/km',
+  },
+  // ── Transfer time 1.5 min/km ──
+  {
+    id: 'ER24-TRANSFER-TIME-RATIO',
+    schemes: ['er24'],
+    phases: [5, 6],
+    severity: 'warn',
+    field: 'time_at_destination',
+    check: (d, ctx) => {
+      if (ctx.transferMinutes == null || ctx.transferKm == null || ctx.transferKm <= 0) return true;
+      if (ctx.transferMinutes <= ctx.transferKm * 1.5) return true;
+      return /motivat|traffic|clinical|unstable|divert|road/.test(motivationText(d));
+    },
+    message:
+      'Scene-to-hospital time exceeds the ER24 ratio of 1.5 minutes per kilometre (40 km/h). Document a motivation in the Motivation / Other Notes box.',
+    source: 'ER24/Mediclinic Billing - scene-to-hospital max 1.5 min/km',
+  },
+  // ── Handover time 10 min BLS/ILS, 20 min ALS ──
+  {
+    id: 'ER24-HANDOVER-TIME',
+    schemes: ['er24'],
+    phases: [5, 6],
+    severity: 'warn',
+    field: 'time_handover',
+    check: (d, ctx) => {
+      if (ctx.handoverMinutes == null) return true;
+      const lvl = billingLevel(d);
+      const limit = (lvl === 'ALS' || lvl === 'ICU') ? 20 : 10;
+      if (ctx.handoverMinutes <= limit) return true;
+      return /motivat|clinical|unstable|ongoing treatment/.test(motivationText(d));
+    },
+    message:
+      'Hospital handover time exceeds the ER24 cap (10 min BLS/ILS, 20 min ALS). Record a motivation or the time is cut.',
+    source: 'ER24/Mediclinic Billing - handover 10 min BLS/ILS, 20 min ALS',
+  },
+  // ── Return distance cap 20 km unless tracking report ──
+  {
+    id: 'ER24-RETURN-DISTANCE-CAP',
+    schemes: ['er24'],
+    phases: [6],
+    severity: 'warn',
+    field: 'transfer_subtype',
+    check: (d, ctx) => {
+      const st = String(d.transfer_subtype || '').toLowerCase();
+      if (!st.includes('return')) return true;
+      if (d.vehicle_tracking_report) return true;
+      if (ctx.returnKm == null || ctx.patientCarryingKm == null) return true;
+      return ctx.returnKm <= ctx.patientCarryingKm + 20;
+    },
+    message:
+      'Return-to-base distance (codes 9112 / 9130 / 9142) exceeds the patient-carrying distance by more than 20 km. Attach a vehicle tracking report to claim the extra kilometres.',
+    source: 'ER24/Mediclinic Billing - return distance max 20 km beyond loaded unless tracking report',
+  },
+  // ── Invalid (non-clinical) delay motivations ──
+  {
+    id: 'ER24-INVALID-DELAY',
+    schemes: ['er24'],
+    phases: [4, 5, 6],
+    severity: 'warn',
+    field: 'management_notes',
+    check: (d) => {
+      const notes = motivationText(d);
+      return !/waiting for (a )?(hospital )?bed|awaiting bed|no beds|paperwork|waiting for papers|police|tow truck|tow-truck|towing/.test(notes);
+    },
+    message:
+      'Delay motivations citing waiting for a hospital bed, police, paperwork or a tow truck are invalid for ER24 and cause rejection. Replace with a clinical reason or remove it.',
+    source: 'ER24/Mediclinic Billing - non-clinical delay motivations invalid',
+  },
+  // ── IFT over 100 km needs pre-authorisation ──
+  {
+    id: 'ER24-IFT-PREAUTH-100KM',
+    schemes: ['er24'],
+    phases: [4, 6],
+    severity: 'warn',
+    field: 'preauth_number',
+    check: (d, ctx) => {
+      if (!isIFT(d)) return true;
+      const km = ctx.patientCarryingKm;
+      if (km === null || km <= 100) return true;
+      return has(d, 'preauth_number');
+    },
+    message:
+      'Inter-facility transfers over 100 km must be pre-authorised by the ER24 / Mediclinic Contact Centre before the trip. Capture the pre-authorisation number.',
+    source: 'ER24/Mediclinic Billing - IFT over 100 km requires prior pre-authorisation',
+  },
+  // ── IFT defaults to BLS unless higher need documented ──
+  {
+    id: 'ER24-IFT-DEFAULT-BLS',
+    schemes: ['er24'],
+    phases: [3, 4, 6],
+    severity: 'warn',
+    field: 'assessment_level',
+    check: (d) => {
+      if (!isIFT(d)) return true;
+      const lvl = billingLevel(d);
+      if (lvl === '' || lvl === 'BLS') return true;
+      const notes = motivationText(d);
+      return !!String(d.referring_doctor || '').trim() || /icu|ventilat|infus|monitor|inotrop|sedat|unstable|deranged|clinical|referr/.test(notes);
+    },
+    message:
+      'Inter-facility transfers default to BLS billing. To bill ILS/ALS, document the referring doctor and the higher clinical need on the PRF, or ER24 downgrades to BLS.',
+    source: 'ER24/Mediclinic Billing - IFT defaults to BLS unless higher need documented',
+  },
+  // ── Social transfer member-liable unless pre-authorised ──
+  {
+    id: 'ER24-SOCIAL-TRANSFER-LIABILITY',
+    schemes: ['er24'],
+    phases: [2, 6],
+    severity: 'warn',
+    field: 'preauth_number',
+    check: (d) => {
+      const st = String(d.transfer_subtype || '').toLowerCase();
+      const social = st.includes('social') || st.includes('residence') || st.includes('home') || st.includes('old age') || st.includes('psych');
+      if (!social) return true;
+      return has(d, 'preauth_number');
+    },
+    message:
+      'Social transfers (e.g. to home or an old-age home) are generally not covered - the patient is liable unless pre-authorised. Confirm funding and capture the pre-auth number.',
+    source: 'ER24/Mediclinic Billing - social transfers member-liable unless pre-authorised',
+  },
+  // ── BLS supervision: two BAAs need a supervising practitioner ──
+  {
+    id: 'ER24-BLS-SUPERVISION',
+    schemes: ['er24'],
+    phases: [6],
+    severity: 'warn',
+    check: (d, ctx) => {
+      if (billingLevel(d) !== 'BLS') return true;
+      return ctx.hasCrew2 || has(d, 'supervising_practitioner_pr') || has(d, 'supervising_practitioner_name');
+    },
+    message:
+      'Two Basic Ambulance Assistants are not independent practitioners. A BLS claim must include the supervising practitioner name, signature and HPCSA number on the PRF.',
+    source: 'ER24/Mediclinic Billing - BLS by two BAAs requires a supervising practitioner',
+  },
+  // ── Prophylactic ALS downgraded ──
+  {
+    id: 'ER24-ALS-PROPHYLACTIC',
+    schemes: ['er24'],
+    phases: [3, 6],
+    severity: 'warn',
+    field: 'assessment_level',
+    check: (d) => {
+      const lvl = billingLevel(d);
+      if (lvl !== 'ALS' && lvl !== 'ICU') return true;
+      const meds = medListLower(d);
+      const circ = Array.isArray(d.circulation_interventions) ? d.circulation_interventions : [];
+      const air = Array.isArray(d.airway_interventions) ? d.airway_interventions : [];
+      const alsMed = /adrenaline|amiodarone|atropine|morphine|fentanyl|ketamine|midazolam|naloxone|adenosine|tranexamic/.test(meds);
+      const alsProc = circ.includes('Cardio Version') || circ.includes('Pacing') || air.includes('Intubation') || air.includes('Surg. Airway');
+      const motivated = !!String(d.referring_doctor || '').trim() || /indication|interaction|active nausea|referr/.test(motivationText(d));
+      return alsMed || alsProc || motivated;
+    },
+    message:
+      'ALS billed but only prophylactic / monitoring interventions are documented (e.g. 12-lead for monitoring, anti-emetic without active nausea). ER24 downgrades unless an ALS drug/procedure or clinical indication is recorded.',
+    source: 'ER24/Mediclinic Billing - prophylactic ALS downgraded to a lower level of care',
+  },
+  // ── 4th (or further) patient not billable ──
+  {
+    id: 'ER24-MULTI-PATIENT-4TH-PLUS',
+    schemes: ['er24'],
+    phases: [2, 6],
+    severity: 'warn',
+    field: 'patient_count',
+    check: (d) => Number(d.patient_count || 1) < 4,
+    message:
+      'A fourth (or further) patient transported in the same ambulance cannot be billed to ER24 (0%). Confirm the patient count and vehicle allocation.',
+    source: 'ER24/Mediclinic Billing - multi-patient 100/75/50/0%; 4th+ not billable',
   },
 ];
 
