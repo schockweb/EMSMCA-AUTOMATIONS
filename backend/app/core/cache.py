@@ -87,7 +87,7 @@ class TTLCache:
                 safe_kwargs = {
                     k: v for k, v in kwargs.items()
                     if not isinstance(v, AsyncSession)
-                ]
+                }
                 try:
                     raw = json.dumps({"a": safe_args, "k": safe_kwargs}, default=str, sort_keys=True)
                 except Exception:

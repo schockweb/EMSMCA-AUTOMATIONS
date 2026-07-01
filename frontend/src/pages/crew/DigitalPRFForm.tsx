@@ -35,7 +35,7 @@ import {
 // then through the Vite proxy to the backend. Hard-coding 'http://localhost:8000'
 // here breaks mobile because the phone's own localhost has no backend running.
 // Override with VITE_API_URL only when the API is on a genuinely different host.
-const API = import.meta.env.VITE_API_URL || '';
+const API = '';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const G = '#5b8def'; const GDK = '#3b6fde'; const GBG = 'rgba(91,141,239,0.09)';
@@ -829,7 +829,7 @@ const Inp = ({ fk, type = 'text', onBlur }: { fk: string; ph?: string; type?: st
   // re-offering the last value you typed) are never useful and are turned off.
   // The Ward field is deliberately left untouched per request.
   const nf = useNoAutofill(fk);
-  return <input type={type} value={fd[fk] ?? ''} onChange={e => sf(fk, e.target.value)} onFocus={onF} onBlur={e => { onB(e); if (onBlur) onBlur(e); }} placeholder="" {...nf} style={{ ...base, marginBottom: 14, borderColor: '#e2e8f0' }} />
+  return <input id={`prf-field-${fk}`} type={type} value={fd[fk] ?? ''} onChange={e => sf(fk, e.target.value)} onFocus={onF} onBlur={e => { onB(e); if (onBlur) onBlur(e); }} placeholder="" {...nf} style={{ ...base, marginBottom: 14, borderColor: '#e2e8f0' }} />
 };
 
 // ── Address autocomplete (forward-search via Nominatim) ─────────────────────
@@ -1685,6 +1685,7 @@ const ComboInp = ({ fk, opts, listId }: { fk: string; ph?: string; opts: string[
     return (
       <div ref={wrapRef} style={{ position: 'relative', marginBottom: 14 }}>
         <input
+          id={`prf-field-${fk}`}
           type="text"
           value={current}
           onChange={e => { sf(fk, e.target.value); setOpen(true); }}
@@ -1731,6 +1732,7 @@ const ComboInp = ({ fk, opts, listId }: { fk: string; ph?: string; opts: string[
   return (
     <>
       <input
+        id={`prf-field-${fk}`}
         type="text"
         list={listId}
         value={current}
@@ -1753,7 +1755,7 @@ const ComboInp = ({ fk, opts, listId }: { fk: string; ph?: string; opts: string[
 
 const Txt = ({ fk, rows = 3 }: { fk: string; ph?: string; rows?: number }) => {
   const { fd, sf } = useContext(FormContext);
-  return <textarea value={fd[fk] ?? ''} onChange={e => sf(fk, e.target.value)} onFocus={onF} onBlur={onB} placeholder="" rows={rows} style={{ ...base, resize: 'vertical', marginBottom: 14, fontFamily: 'inherit' }} />
+  return <textarea id={`prf-field-${fk}`} value={fd[fk] ?? ''} onChange={e => sf(fk, e.target.value)} onFocus={onF} onBlur={onB} placeholder="" rows={rows} style={{ ...base, resize: 'vertical', marginBottom: 14, fontFamily: 'inherit' }} />
 };
 
 // VoiceTxt — textarea with an overlaid mic-icon trigger that dictates into
@@ -1840,6 +1842,7 @@ const VoiceTxt = ({ fk, rows = 3 }: { fk: string; ph?: string; rows?: number }) 
   return (
     <div style={{ position: 'relative', marginBottom: 14 }}>
       <textarea
+        id={`prf-field-${fk}`}
         value={fd[fk] ?? ''}
         onChange={e => sf(fk, e.target.value)}
         onFocus={onF}
@@ -3540,8 +3543,11 @@ export default function DigitalPRFForm() {
   // (no HTTP response) and only up to MAX_RETRIES times. After that, the
   // error UI is shown — never an infinite "Reconnecting…" spin.
   const loadPrf = useCallback(async (signal?: AbortSignal): Promise<void> => {
-    const MAX_RETRIES = 1;          // 1 initial attempt + 1 retry = 2 tries total
-    const RETRY_DELAY_MS = 700;
+    // Initial attempt + up to 3 retries with backoff. Transient failures
+    // (a network blip, a 5xx, or a brief race when opening a just-created
+    // PRF) are absorbed here so the crew never has to hit "Try Again".
+    const MAX_RETRIES = 3;
+    const RETRY_DELAYS_MS = [400, 900, 1600];
     setLoadError(null);
 
     // ── Hybrid: try loading from localStorage first ──
@@ -3572,12 +3578,15 @@ export default function DigitalPRFForm() {
           return; // Expected — StrictMode double-mount cleanup
         }
         lastErr = err;
-        // 401 / 404 / 403 etc. — don't retry, surface immediately
-        if (err?.response) break;
-        // Network error — retry if we still have attempts left
+        // Definitive, non-transient failures surface immediately (no retry):
+        // 401 (handled below -> re-login), 403 (not this crew's PRF), 400
+        // (bad id). Everything else -- a network error, a 5xx, or a 404 in the
+        // brief window right after create+navigate -- is transient: retry it.
+        const status = err?.response?.status;
+        if (status === 401 || status === 403 || status === 400) break;
         if (attempt < MAX_RETRIES) {
           setRetrying(true);
-          await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+          await new Promise(r => setTimeout(r, RETRY_DELAYS_MS[attempt] ?? 1600));
         }
       }
     }
@@ -4136,6 +4145,72 @@ export default function DigitalPRFForm() {
     return { ok: blocking.length === 0, findings: all };
   };
 
+  // ── Tap-to-jump: tapping a banner finding takes the crew straight to the
+  //    field that needs attention (scroll + amber flash). When the field is not
+  //    on screen we navigate to its phase first. Robust to the embedded clinical
+  //    phase (P3 renders inside Dispatch) via a small candidate-phase sweep.
+  const FIELD_ANCHOR: Record<string, string> = {
+    vitals_sets: 'vitals-section-anchor',
+  };
+  const FIELD_HOME_PHASE: Record<string, number> = {
+    preauth_number: 0, transfer_subtype: 0, incident_classification: 0, pre_planned_event: 0,
+    incident_location: 1,
+    patient_name: 2, patient_surname: 2, patient_id_number: 2, patient_weight_kg: 2,
+    billing_type: 2, medical_scheme: 2, medical_aid_number: 2, scheme_option: 2,
+    priority: 2, patient_count: 2,
+    chief_complaint: 0, primary_diagnosis: 0, icd10_primary: 0, icd10_external_cause: 0,
+    assessment_level: 0, iv_therapy: 0, vitals_sets: 0, resuscitation_attempted: 0,
+    has_ecg_attached: 0,
+    closest_facility_bypassed: 4, direct_admission: 4,
+    receiving_facility: 5, handover_qualification: 5, handover_name: 5,
+    patient_index_of_total: 6,
+  };
+  const jumpSweepRef = useRef<{ field: string; queue: number[] } | null>(null);
+  const flashFieldEl = (field: string): boolean => {
+    const id = FIELD_ANCHOR[field] || `prf-field-${field}`;
+    const el = document.getElementById(id);
+    if (!el) return false;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add('prf-jump-flash');
+    window.setTimeout(() => el.classList.remove('prf-jump-flash'), 1700);
+    return true;
+  };
+  const advanceJumpSweep = () => {
+    const st = jumpSweepRef.current;
+    if (!st) return;
+    const next = st.queue.shift();
+    if (next === undefined) { jumpSweepRef.current = null; return; }
+    setPhase(next);
+  };
+  const jumpToField = (field?: string) => {
+    if (!field) return;
+    if (flashFieldEl(field)) return;
+    const home = FIELD_HOME_PHASE[field];
+    const order = [home, 0, 2, 1, 4, 5].filter((p): p is number => typeof p === 'number');
+    jumpSweepRef.current = { field, queue: Array.from(new Set(order)) };
+    advanceJumpSweep();
+  };
+  useEffect(() => {
+    const st = jumpSweepRef.current;
+    if (!st) return;
+    let tries = 0;
+    const tick = () => {
+      if (!jumpSweepRef.current) return;
+      if (flashFieldEl(st.field)) { jumpSweepRef.current = null; return; }
+      if (tries++ < 5) { window.setTimeout(tick, 80); return; }
+      advanceJumpSweep();
+    };
+    const t = window.setTimeout(tick, 110);
+    return () => window.clearTimeout(t);
+  }, [phase]);
+  useEffect(() => {
+    if (document.getElementById('prf-jump-flash-style')) return;
+    const st = document.createElement('style');
+    st.id = 'prf-jump-flash-style';
+    st.textContent = '@keyframes prfJumpFlash{0%{box-shadow:0 0 0 0 rgba(245,158,11,0)}25%{box-shadow:0 0 0 4px rgba(245,158,11,0.55)}100%{box-shadow:0 0 0 0 rgba(245,158,11,0)}}.prf-jump-flash{animation:prfJumpFlash 1.6s ease-out;border-radius:10px}';
+    document.head.appendChild(st);
+  }, []);
+
   // Collects the inline blockers that must clear before the crew can leave the
   // given phase. The broader RULES table in prfValidation.ts is short-circuited
   // for the live rollout, but the team explicitly wants these gates enforced
@@ -4246,6 +4321,31 @@ export default function DigitalPRFForm() {
     // are the only inputs that can change the result.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kms, fd.preauth_number, fd.call_type, phase, vitals.length]);
+
+  // ── Live (debounced) scheme-rule validation ──────────────────────────────
+  // Re-checks the active scheme's billing rules ~600ms after the crew stops
+  // acting, so the gentle amber nudge appears in the banner near the moment of
+  // the action - not only when they leave the phase. Warn-only (never blocks).
+  // CPU-trivial: a handful of predicate checks, debounced so it never runs on
+  // every keystroke (each keystroke only resets a timer). Preserves any
+  // INLINE-* advance-gate blockers; only the scheme findings are refreshed, and
+  // findings are left untouched when nothing changed (no needless re-render).
+  useEffect(() => {
+    const handle = window.setTimeout(() => {
+      const liveCtx = buildValidationContext({ vitals, ivRows, medRows, sigs, crew2Id, prfMeta, timestamps, kms });
+      const live = validatePhaseRules(phase as ValidationPhase, fd, liveCtx, fd.medical_scheme);
+      setFindings(prev => {
+        const inline = prev.filter(f => f.id.startsWith('INLINE-'));
+        const next = [...inline, ...live];
+        const unchanged =
+          next.length === prev.length &&
+          next.every((f, i) => f.id === prev[i].id && f.message === prev[i].message);
+        return unchanged ? prev : next;
+      });
+    }, 600);
+    return () => window.clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fd, vitals, ivRows, medRows, sigs, timestamps, kms, phase]);
 
   // Show en-route overlay when dispatch time is first marked
   useEffect(() => {
@@ -4398,7 +4498,15 @@ export default function DigitalPRFForm() {
     }
     setSubmit(true);
     saveToLocal();  // Persist locally before server attempt
+
+    // Force an explicit save. If one is already running, it queues a pending
+    // save. We then wait for all background networking to drain so the backend
+    // definitely has the data before we hit the /submit endpoint.
     await doSave();
+    while (savingInFlightRef.current || savePendingRef.current) {
+      await new Promise(r => setTimeout(r, 100));
+    }
+
     try {
       const r = await api().post(`/api/digital-prf/${prfId}/submit`);
       const status: string = r.data?.status;
@@ -7216,7 +7324,11 @@ export default function DigitalPRFForm() {
                   </div>
                   <ul style={{ margin: 0, paddingLeft: 18, fontSize: '0.78rem', color: '#7f1d1d', lineHeight: 1.5 }}>
                     {validationBlockers(findings).map(f => (
-                      <li key={f.id} style={{ marginBottom: 4 }}>
+                      <li
+                        key={f.id}
+                        onClick={() => jumpToField(f.field)}
+                        style={{ marginBottom: 4, cursor: f.field ? 'pointer' : 'default', textDecoration: f.field ? 'underline dotted' : 'none' }}
+                      >
                         {f.message}
                       </li>
                     ))}
@@ -7233,7 +7345,11 @@ export default function DigitalPRFForm() {
                   </div>
                   <ul style={{ margin: 0, paddingLeft: 18, fontSize: '0.78rem', color: '#78350f', lineHeight: 1.5 }}>
                     {validationWarnings(findings).map(f => (
-                      <li key={f.id} style={{ marginBottom: 4 }}>
+                      <li
+                        key={f.id}
+                        onClick={() => jumpToField(f.field)}
+                        style={{ marginBottom: 4, cursor: f.field ? 'pointer' : 'default', textDecoration: f.field ? 'underline dotted' : 'none' }}
+                      >
                         {f.message}
                       </li>
                     ))}
@@ -8583,47 +8699,70 @@ export default function DigitalPRFForm() {
                 Reason for IV Therapy
               </div>
               <div style={{ fontSize: '0.78rem', color: S400, marginTop: 3, marginBottom: 12 }}>
-                Select all that apply and tap Continue to add an IV line.
+                Why is this IV line needed?
               </div>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 18 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {(['IFT', 'IHT'].includes(fd.call_type)) && (
-                <label style={{ display: 'flex', alignItems: 'center', gap: 14, cursor: 'pointer', background: S50, border: `1.5px solid ${fd.ift_ongoing_iv_treatment ? '#0369a1' : S200}`, borderRadius: 14, padding: '13px 14px', transition: 'all 0.15s ease' }}>
-                  <input type="checkbox" checked={!!fd.ift_ongoing_iv_treatment} onChange={e => sf('ift_ongoing_iv_treatment', e.target.checked)} style={{ width: 18, height: 18, accentColor: '#0369a1', cursor: 'pointer', flexShrink: 0 }} />
-                  <span style={{ fontWeight: 700, color: S900 }}>On-going IV treatment</span>
-                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    sf('ift_ongoing_iv_treatment', true);
+                    sf('primary_iv_profuse_bleeding', false);
+                    sf('primary_iv_fluid_resuscitation', false);
+                    sf('iv_medication_administration', false);
+                    setIvReasonModalOpen(false);
+                    setIvSectionOpen(true);
+                    setCrewPicker({ phase: 'select', kind: 'iv' });
+                  }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 14,
+                    textAlign: 'left', cursor: 'pointer', width: '100%',
+                    background: S50,
+                    border: `1.5px solid ${S200}`,
+                    borderRadius: 14, padding: '13px 14px',
+                    transition: 'all 0.15s ease',
+                    fontWeight: 700,
+                    color: S900,
+                  }}
+                >
+                  On-going IV treatment
+                </button>
               )}
-              <label style={{ display: 'flex', alignItems: 'center', gap: 14, cursor: 'pointer', background: S50, border: `1.5px solid ${fd.primary_iv_profuse_bleeding ? '#0369a1' : S200}`, borderRadius: 14, padding: '13px 14px', transition: 'all 0.15s ease' }}>
-                <input type="checkbox" checked={!!fd.primary_iv_profuse_bleeding} onChange={e => sf('primary_iv_profuse_bleeding', e.target.checked)} style={{ width: 18, height: 18, accentColor: '#0369a1', cursor: 'pointer', flexShrink: 0 }} />
-                <span style={{ fontWeight: 700, color: S900 }}>Profuse Bleeding</span>
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 14, cursor: 'pointer', background: S50, border: `1.5px solid ${fd.primary_iv_fluid_resuscitation ? '#0369a1' : S200}`, borderRadius: 14, padding: '13px 14px', transition: 'all 0.15s ease' }}>
-                <input type="checkbox" checked={!!fd.primary_iv_fluid_resuscitation} onChange={e => sf('primary_iv_fluid_resuscitation', e.target.checked)} style={{ width: 18, height: 18, accentColor: '#0369a1', cursor: 'pointer', flexShrink: 0 }} />
-                <span style={{ fontWeight: 700, color: S900 }}>Fluid Resuscitation</span>
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 14, cursor: 'pointer', background: S50, border: `1.5px solid ${fd.iv_medication_administration ? '#0369a1' : S200}`, borderRadius: 14, padding: '13px 14px', transition: 'all 0.15s ease' }}>
-                <input type="checkbox" checked={!!fd.iv_medication_administration} onChange={e => sf('iv_medication_administration', e.target.checked)} style={{ width: 18, height: 18, accentColor: '#0369a1', cursor: 'pointer', flexShrink: 0 }} />
-                <span style={{ fontWeight: 700, color: S900 }}>Medication Administered via IV</span>
-              </label>
+              
+              {[
+                { label: 'Profuse Bleeding', key: 'primary_iv_profuse_bleeding' },
+                { label: 'Fluid Resuscitation', key: 'primary_iv_fluid_resuscitation' },
+                { label: 'Medication Administered via IV', key: 'iv_medication_administration' }
+              ].map(opt => (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={() => {
+                    sf('ift_ongoing_iv_treatment', false);
+                    sf('primary_iv_profuse_bleeding', opt.key === 'primary_iv_profuse_bleeding');
+                    sf('primary_iv_fluid_resuscitation', opt.key === 'primary_iv_fluid_resuscitation');
+                    sf('iv_medication_administration', opt.key === 'iv_medication_administration');
+                    setIvReasonModalOpen(false);
+                    setIvSectionOpen(true);
+                    setCrewPicker({ phase: 'select', kind: 'iv' });
+                  }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 14,
+                    textAlign: 'left', cursor: 'pointer', width: '100%',
+                    background: S50,
+                    border: `1.5px solid ${S200}`,
+                    borderRadius: 14, padding: '13px 14px',
+                    transition: 'all 0.15s ease',
+                    fontWeight: 700,
+                    color: S900,
+                  }}
+                >
+                  {opt.label}
+                </button>
+              ))}
             </div>
-
-            <button
-              type="button"
-              onClick={() => {
-                setIvReasonModalOpen(false);
-                setIvSectionOpen(true);
-                setCrewPicker({ phase: 'select', kind: 'iv' });
-              }}
-              style={{
-                width: '100%', padding: '14px', borderRadius: 12, border: 'none',
-                background: 'linear-gradient(135deg,#0369a1,#0284c7)',
-                color: '#fff', fontSize: '0.92rem', fontWeight: 900,
-                cursor: 'pointer', boxShadow: '0 4px 14px rgba(3,105,161,0.3)',
-              }}
-            >
-              Continue — Add IV Line →
-            </button>
           </Modal>
         )}
 

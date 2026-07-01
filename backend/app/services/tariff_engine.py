@@ -80,6 +80,29 @@ async def generate_tariff_lines(
             "error": error_msg,
         }
 
+    # Validation-only scheme modules (e.g. ER24, Netcare) expose RULES for the
+    # adjudication safety-net but carry no gazetted fee schedule here. They flag
+    # PRICING_ENABLED = False so the tariff engine treats them EXACTLY like an
+    # unconfigured scheme - i.e. registering them for adjudication introduces no
+    # pricing change. GEMS/Discovery do not set the flag (default True).
+    if getattr(rules_module, "PRICING_ENABLED", True) is False:
+        error_msg = (
+            f"No pricing module configured for scheme '{scheme_name}'. "
+            f"Contact engineering to add a module under backend/app/rules/."
+        )
+        logger.info(
+            "[TariffEngine] '%s' is validation-only (PRICING_ENABLED=False) - skipping pricing",
+            scheme_name,
+        )
+        return {
+            "lines": [],
+            "total_amount": 0.0,
+            "scheme_matched": None,
+            "rules_used": 0,
+            "ai_powered": False,
+            "error": error_msg,
+        }
+
     # GEMS and Discovery share the NHRPL 2006 billing structure (100km
     # metropolitan rule, 45/60 min base windows, 15-min extensions, IHT
     # call-out fee, multi-patient multipliers, qualification cap). They both

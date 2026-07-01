@@ -338,14 +338,14 @@ describe('blockers() and warnings() filter functions', () => {
 // ══════════════════════════════════════════════════════════════════════════════
 // validatePhase — Discovery warn-only surfacing
 // ══════════════════════════════════════════════════════════════════════════════
-describe('validatePhase — legacy "all" rules stay suppressed', () => {
+describe('validatePhase — unknown scheme silent, known schemes surface', () => {
   it('returns [] when no scheme is supplied (crew never warned by all-rules)', () => {
     expect(validatePhase(6, { icd10_primary: 'INVALID' }, ctx())).toEqual([]);
     expect(validatePhase(0, {}, ctx({ vitalsCount: 0 }))).toEqual([]);
   });
 
-  it('returns [] for a non-Discovery scheme', () => {
-    expect(validatePhase(6, { icd10_primary: 'INVALID' }, ctx(), 'Netcare 911')).toEqual([]);
+  it('returns [] for an unrecognised scheme name', () => {
+    expect(validatePhase(6, { icd10_primary: 'INVALID' }, ctx(), 'Some Unknown Scheme')).toEqual([]);
   });
 });
 
@@ -406,5 +406,86 @@ describe('validatePhase — Discovery rules surface as non-blocking warnings onl
   it('warns when a transport has no documented clinical need', () => {
     const findings = validatePhase(6, { receiving_facility: 'Test Hosp' }, ctx({ vitalsCount: 0, medCount: 0, ivCount: 0 }), DISCOVERY);
     expect(findings.some(f => f.id === 'DISC-NO-CLINICAL-NEED')).toBe(true);
+  });
+});
+
+
+// ============================================================================
+// validatePhase - GEMS surfacing (warn-only)
+// ============================================================================
+describe('validatePhase - GEMS rules surface as non-blocking warnings', () => {
+  const GEMS = 'GEMS';
+
+  it('every GEMS finding is a warning, never a blocker', () => {
+    const f = validatePhase(6, { billing_type: 'Med Aid', call_type: 'IFT' }, ctx({ vitalsCount: 0 }), GEMS);
+    expect(f.length).toBeGreaterThan(0);
+    expect(f.every(x => x.severity === 'warn')).toBe(true);
+    expect(blockers(f)).toHaveLength(0);
+  });
+
+  it('warns when the member number is missing on a med-aid claim', () => {
+    expect(validatePhase(6, { billing_type: 'Med Aid' }, ctx(), GEMS).some(x => x.id === 'GEMS-MEMBER-NUMBER')).toBe(true);
+  });
+
+  it('rejects a Z external-cause code but accepts W01.01', () => {
+    expect(validatePhase(3, { icd10_external_cause: 'Z01.1' }, ctx(), GEMS).some(x => x.id === 'GEMS-EXT-CAUSE-FORMAT')).toBe(true);
+    expect(validatePhase(3, { icd10_external_cause: 'W01.01' }, ctx(), GEMS).some(x => x.id === 'GEMS-EXT-CAUSE-FORMAT')).toBe(false);
+  });
+
+  it('warns below 2 vitals and clears at 2', () => {
+    expect(validatePhase(6, {}, ctx({ vitalsCount: 1 }), GEMS).some(x => x.id === 'GEMS-MIN-2-VITALS')).toBe(true);
+    expect(validatePhase(6, {}, ctx({ vitalsCount: 2 }), GEMS).some(x => x.id === 'GEMS-MIN-2-VITALS')).toBe(false);
+  });
+
+  it('warns when an IFT has no pre-authorisation reference', () => {
+    expect(validatePhase(6, { call_type: 'IFT' }, ctx(), GEMS).some(x => x.id === 'GEMS-IFT-PREAUTH')).toBe(true);
+  });
+});
+
+// ============================================================================
+// validatePhase - ER24 surfacing (warn-only)
+// ============================================================================
+describe('validatePhase - ER24 rules surface as non-blocking warnings', () => {
+  const ER24 = 'ER24';
+
+  it('every ER24 finding is a warning, never a blocker', () => {
+    const f = validatePhase(6, { billing_type: 'Med Aid', call_type: 'IFT' }, ctx({ vitalsCount: 0 }), ER24);
+    expect(f.length).toBeGreaterThan(0);
+    expect(f.every(x => x.severity === 'warn')).toBe(true);
+    expect(blockers(f)).toHaveLength(0);
+  });
+
+  it('IFT requires 3 vitals (warns at 2, clears at 3)', () => {
+    expect(validatePhase(5, { call_type: 'IFT' }, ctx({ vitalsCount: 2 }), ER24).some(x => x.id === 'ER24-MIN-VITALS')).toBe(true);
+    expect(validatePhase(5, { call_type: 'IFT' }, ctx({ vitalsCount: 3 }), ER24).some(x => x.id === 'ER24-MIN-VITALS')).toBe(false);
+  });
+
+  it('warns when the diagnosis ICD-10 is missing or invalid', () => {
+    expect(validatePhase(3, { icd10_primary: 'heart attack' }, ctx(), ER24).some(x => x.id === 'ER24-DIAGNOSIS')).toBe(true);
+    expect(validatePhase(3, { icd10_primary: 'I21.0' }, ctx(), ER24).some(x => x.id === 'ER24-DIAGNOSIS')).toBe(false);
+  });
+});
+
+// ============================================================================
+// validatePhase - Netcare now surfaces (previously deliberately suppressed)
+// ============================================================================
+describe('validatePhase - Netcare rules surface as non-blocking warnings', () => {
+  const NETCARE = 'Netcare 911';
+
+  it('Netcare surfaces findings, all warn-only', () => {
+    const f = validatePhase(6, { billing_type: 'Med Aid', call_type: 'IFT' }, ctx({ vitalsCount: 0, hasPatientSig: false }), NETCARE);
+    expect(f.length).toBeGreaterThan(0);
+    expect(f.every(x => x.severity === 'warn')).toBe(true);
+    expect(blockers(f)).toHaveLength(0);
+  });
+
+  it('warns when an IFT has no 13-digit pre-auth, clears with one', () => {
+    expect(validatePhase(6, { call_type: 'IFT' }, ctx(), NETCARE).some(x => x.id === 'NTC-3.2-IFT-PREAUTH')).toBe(true);
+    expect(validatePhase(6, { call_type: 'IFT', preauth_number: '1234567890123' }, ctx(), NETCARE).some(x => x.id === 'NTC-3.2-IFT-PREAUTH')).toBe(false);
+  });
+
+  it('does not leak Netcare findings into a Discovery claim', () => {
+    const f = validatePhase(6, { call_type: 'IFT' }, ctx(), 'Discovery Health Medical Scheme');
+    expect(f.every(x => x.id.startsWith('DISC-'))).toBe(true);
   });
 });

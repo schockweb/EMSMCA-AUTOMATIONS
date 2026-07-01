@@ -49,6 +49,13 @@ export interface ValidationContext {
   sceneMinutes: number | null;       // on-scene → depart-scene
   totalCallMinutes: number | null;   // dispatch → arrival at facility
   patientCarryingKm: number | null;  // loaded distance: on-scene km → arrival km
+  // Optional deltas (populated by buildContext) used by the Discovery time/distance rules.
+  responseMinutes?: number | null;   // dispatch → on-scene
+  responseKm?: number | null;        // dispatch km → on-scene km
+  transferMinutes?: number | null;   // depart-scene → arrival at facility
+  transferKm?: number | null;        // depart-scene km → arrival km
+  handoverMinutes?: number | null;   // arrival at facility → handover
+  returnKm?: number | null;          // arrival km → back-to-base km
 }
 
 export interface ValidationFinding {
@@ -93,7 +100,7 @@ export const RULES: ValidationRule[] = [
   // ── Phase 0 (Dispatch) — call type and pre-auth gating ──
   {
     id: 'NTC-3.2-IFT-PREAUTH',
-    schemes: ['all'],
+    schemes: ['netcare'],
     phases: [0, 6],
     severity: 'block',
     field: 'preauth_number',
@@ -109,7 +116,7 @@ export const RULES: ValidationRule[] = [
   },
   {
     id: 'NTC-3.2-IFT-SUBTYPE',
-    schemes: ['all'],
+    schemes: ['netcare'],
     phases: [0, 6],
     severity: 'block',
     field: 'transfer_subtype',
@@ -120,7 +127,7 @@ export const RULES: ValidationRule[] = [
   },
   {
     id: 'NTC-3.7-INCIDENT-TYPE',
-    schemes: ['all'],
+    schemes: ['netcare'],
     phases: [0, 6],
     severity: 'block',
     field: 'incident_classification',
@@ -132,7 +139,7 @@ export const RULES: ValidationRule[] = [
   // ── Phase 2 (On Scene) — patient identity and scheme ──
   {
     id: 'NTC-3.7-PATIENT-NAME',
-    schemes: ['all'],
+    schemes: ['netcare'],
     phases: [2, 6],
     severity: 'block',
     field: 'patient_name',
@@ -142,7 +149,7 @@ export const RULES: ValidationRule[] = [
   },
   {
     id: 'NTC-3.7-PATIENT-ID',
-    schemes: ['all'],
+    schemes: ['netcare'],
     phases: [2, 6],
     severity: 'block',
     field: 'patient_id_number',
@@ -157,7 +164,7 @@ export const RULES: ValidationRule[] = [
   },
   {
     id: 'NTC-3.7-SCENE-ADDRESS',
-    schemes: ['all'],
+    schemes: ['netcare'],
     phases: [2, 6],
     severity: 'block',
     field: 'incident_location',
@@ -167,7 +174,7 @@ export const RULES: ValidationRule[] = [
   },
   {
     id: 'NTC-3.7-PATIENT-WEIGHT',
-    schemes: ['all'],
+    schemes: ['netcare'],
     phases: [2, 6],
     severity: 'warn',
     field: 'patient_weight_kg',
@@ -184,7 +191,7 @@ export const RULES: ValidationRule[] = [
   // ── Phase 2/6 — medical scheme details (only when billing to scheme) ──
   {
     id: 'NTC-3.7-SCHEME-NAME',
-    schemes: ['all'],
+    schemes: ['netcare'],
     phases: [5, 6],
     severity: 'block',
     field: 'medical_scheme',
@@ -199,7 +206,7 @@ export const RULES: ValidationRule[] = [
   },
   {
     id: 'NTC-3.7-MEMBER-NUMBER',
-    schemes: ['all'],
+    schemes: ['netcare'],
     phases: [5, 6],
     severity: 'block',
     field: 'medical_aid_number',
@@ -215,7 +222,7 @@ export const RULES: ValidationRule[] = [
   // ── Phase 3 (Clinical) — vitals, surveys, scope-of-practice ──
   {
     id: 'NTC-3.7-MIN-3-VITALS',
-    schemes: ['all'],
+    schemes: ['netcare'],
     phases: [4, 5, 6],
     severity: 'block',
     field: 'vitals_sets',
@@ -230,7 +237,7 @@ export const RULES: ValidationRule[] = [
   },
   {
     id: 'NTC-3.7-PRIMARY-SURVEY',
-    schemes: ['all'],
+    schemes: ['netcare'],
     phases: [3, 6],
     severity: 'block',
     field: 'survey_a',
@@ -242,7 +249,7 @@ export const RULES: ValidationRule[] = [
   },
   {
     id: 'NTC-3.7-CHIEF-COMPLAINT',
-    schemes: ['all'],
+    schemes: ['netcare'],
     phases: [3, 6],
     severity: 'block',
     field: 'chief_complaint',
@@ -252,7 +259,7 @@ export const RULES: ValidationRule[] = [
   },
   {
     id: 'NTC-3.7-PRIMARY-DIAGNOSIS',
-    schemes: ['all'],
+    schemes: ['netcare'],
     phases: [3, 6],
     severity: 'block',
     field: 'primary_diagnosis',
@@ -267,7 +274,7 @@ export const RULES: ValidationRule[] = [
   // ── ILS IV-therapy gate (Netcare §3.7 — IV for ILS only valid in 4 cases) ──
   {
     id: 'NTC-3.7-ILS-IV-JUSTIFICATION',
-    schemes: ['all'],
+    schemes: ['netcare'],
     phases: [3, 6],
     severity: 'warn',
     field: 'iv_therapy',
@@ -294,7 +301,7 @@ export const RULES: ValidationRule[] = [
   // ── Resuscitation fee — strict §3.5 criteria ──
   {
     id: 'NTC-3.5-RESUS-CRITERIA',
-    schemes: ['all'],
+    schemes: ['netcare'],
     phases: [4, 5, 6],
     severity: 'block',
     field: 'resuscitation_attempted',
@@ -323,7 +330,7 @@ export const RULES: ValidationRule[] = [
   // ── ILS call escalating to ALS — prompt crew to call dispatch for upgrade ──
   {
     id: 'ILS-UPGRADE-TO-ALS',
-    schemes: ['all'],
+    schemes: ['netcare'],
     phases: [3, 4, 6],
     severity: 'warn',
     field: 'assessment_level',
@@ -352,7 +359,7 @@ export const RULES: ValidationRule[] = [
   // ── Level-of-care downgrade traps (CMG §3.6) ──
   {
     id: 'NTC-3.6-PARACETAMOL-BLS',
-    schemes: ['all'],
+    schemes: ['netcare'],
     phases: [3, 6],
     severity: 'warn',
     field: 'assessment_level',
@@ -369,7 +376,7 @@ export const RULES: ValidationRule[] = [
   },
   {
     id: 'NTC-3.6-TKVO-IV-BLS',
-    schemes: ['all'],
+    schemes: ['netcare'],
     phases: [3, 6],
     severity: 'warn',
     field: 'assessment_level',
@@ -387,7 +394,7 @@ export const RULES: ValidationRule[] = [
   // ── Phase 5 (Handover) — receiving facility + practitioner ──
   {
     id: 'NTC-3.7-RECEIVING-FACILITY',
-    schemes: ['all'],
+    schemes: ['netcare'],
     phases: [5, 6],
     severity: 'block',
     field: 'receiving_facility',
@@ -397,7 +404,7 @@ export const RULES: ValidationRule[] = [
   },
   {
     id: 'NTC-4-RECEIVING-PRACTITIONER',
-    schemes: ['all'],
+    schemes: ['netcare'],
     phases: [5, 6],
     severity: 'block',
     field: 'handover_qualification',
@@ -408,7 +415,7 @@ export const RULES: ValidationRule[] = [
   },
   {
     id: 'NTC-4-HANDOVER-SIG',
-    schemes: ['all'],
+    schemes: ['netcare'],
     phases: [5, 6],
     severity: 'block',
     check: (_d, ctx) => ctx.hasHandoverSig,
@@ -419,7 +426,7 @@ export const RULES: ValidationRule[] = [
   // ── Phase 6 (Complete / Submit) — ICD-10, signatures, crew, billing codes ──
   {
     id: 'NTC-4-CREW2-HPCSA',
-    schemes: ['all'],
+    schemes: ['netcare'],
     phases: [6],
     severity: 'block',
     check: (_d, ctx) => ctx.hasCrew2,
@@ -429,7 +436,7 @@ export const RULES: ValidationRule[] = [
   },
   {
     id: 'NTC-4-ICD10-PRIMARY',
-    schemes: ['all'],
+    schemes: ['netcare'],
     phases: [6],
     severity: 'block',
     field: 'icd10_primary',
@@ -444,7 +451,7 @@ export const RULES: ValidationRule[] = [
   },
   {
     id: 'NTC-4-PATIENT-SIG',
-    schemes: ['all'],
+    schemes: ['netcare'],
     phases: [6],
     severity: 'block',
     check: (_d, ctx) => ctx.hasPatientSig,
@@ -453,7 +460,7 @@ export const RULES: ValidationRule[] = [
   },
   {
     id: 'NTC-4-CREW-SIG',
-    schemes: ['all'],
+    schemes: ['netcare'],
     phases: [6],
     severity: 'block',
     check: (_d, ctx) => ctx.hasCrewSig,
@@ -464,7 +471,7 @@ export const RULES: ValidationRule[] = [
   // ── Phase 6 — multi-patient billing flag ──
   {
     id: 'NTC-3.4-MULTI-PATIENT',
-    schemes: ['all'],
+    schemes: ['netcare'],
     phases: [6],
     severity: 'block',
     field: 'patient_index_of_total',
@@ -482,7 +489,7 @@ export const RULES: ValidationRule[] = [
   // ── Time-limit warnings (don't block — schemes accept with motivation) ──
   {
     id: 'NTC-5.2-SCENE-TIME-WARN',
-    schemes: ['all'],
+    schemes: ['netcare'],
     phases: [4, 6],
     severity: 'warn',
     check: (d) => {
@@ -499,7 +506,7 @@ export const RULES: ValidationRule[] = [
   },
   {
     id: 'NTC-5.2-CALL-TIME-WARN',
-    schemes: ['all'],
+    schemes: ['netcare'],
     phases: [6],
     severity: 'warn',
     check: (d, _ctx) => {
@@ -737,11 +744,727 @@ const DISCOVERY_RULES: ValidationRule[] = [
       'Social / residence transfers (e.g. to home, old-age home, follow-up, planned admission) are member-liable unless pre-authorised by Discovery 911 (0860 999 911). Confirm funding and capture the pre-auth number.',
     source: 'Discovery Ambulance Guidelines (Mar 2023) — Social transfers; member liable unless pre-authorised [Matrix S1]',
   },
+
+  // ── Response time: max 1 min/km (60 km/h) ──
+  {
+    id: 'DISC-RESPONSE-TIME-LIMIT',
+    schemes: ['discovery'],
+    phases: [4, 6],
+    severity: 'warn',
+    field: 'time_on_scene',
+    check: (d, ctx) => {
+      if (ctx.responseMinutes == null || ctx.responseKm == null || ctx.responseKm <= 0) return true;
+      if (ctx.responseMinutes <= ctx.responseKm) return true;
+      return /motivat|traffic|divert|access|scene safety|delay reason/.test(String(d.management_notes || '').toLowerCase());
+    },
+    message:
+      'Response time exceeds the Discovery limit of 1 minute per kilometre (60 km/h average). Document an operational/clinical motivation in management notes or the extra time is cut.',
+    source: 'Discovery Ambulance Guidelines (Mar 2023) - response to incident max 1 min/km',
+  },
+  // ── Handover time: 10 min BLS/ILS, 20 min ALS ──
+  {
+    id: 'DISC-HANDOVER-TIME-LIMIT',
+    schemes: ['discovery'],
+    phases: [5, 6],
+    severity: 'warn',
+    field: 'time_handover',
+    check: (d, ctx) => {
+      if (ctx.handoverMinutes == null) return true;
+      const lvl = billingLevel(d);
+      const limit = (lvl === 'ALS' || lvl === 'ICU') ? 20 : 10;
+      if (ctx.handoverMinutes <= limit) return true;
+      return /motivat|clinical|unstable|ongoing treatment/.test(String(d.management_notes || '').toLowerCase());
+    },
+    message:
+      'Handover time exceeds the Discovery cap (10 min BLS/ILS, 20 min ALS). Record a PRF motivation for the extended handover or the time is cut.',
+    source: 'Discovery Ambulance Guidelines (Mar 2023) - handover 10 min BLS/ILS, 20 min ALS',
+  },
+  // ── Transfer (scene → hospital) time: max 1.5 min/km (40 km/h) ──
+  {
+    id: 'DISC-TRANSFER-TIME-LIMIT',
+    schemes: ['discovery'],
+    phases: [5, 6],
+    severity: 'warn',
+    field: 'time_at_destination',
+    check: (d, ctx) => {
+      if (ctx.transferMinutes == null || ctx.transferKm == null || ctx.transferKm <= 0) return true;
+      if (ctx.transferMinutes <= ctx.transferKm * 1.5) return true;
+      return /motivat|traffic|clinical|unstable|divert|road/.test(String(d.management_notes || '').toLowerCase());
+    },
+    message:
+      'Transfer (scene to hospital) time exceeds the Discovery limit of 1.5 minutes per kilometre (40 km/h average). Document a motivation in management notes.',
+    source: 'Discovery Ambulance Guidelines (Mar 2023) - transfer to hospital max 1.5 min/km',
+  },
+  // ── Return trip capped 20 km beyond loaded distance unless tracking report ──
+  {
+    id: 'DISC-RETURN-DISTANCE-20KM',
+    schemes: ['discovery'],
+    phases: [6],
+    severity: 'warn',
+    field: 'transfer_subtype',
+    check: (d, ctx) => {
+      const st = String(d.transfer_subtype || '').toLowerCase();
+      if (!st.includes('return')) return true;
+      if (d.vehicle_tracking_report) return true;
+      if (ctx.returnKm == null || ctx.patientCarryingKm == null) return true;
+      return ctx.returnKm <= ctx.patientCarryingKm + 20;
+    },
+    message:
+      'Return-trip distance (codes 9112 / 9130 / 9142) is capped at 20 km beyond the patient-carrying distance. Attach a vehicle tracking report to claim the additional kilometres.',
+    source: 'Discovery Ambulance Guidelines (Mar 2023) - return trip max 20 km beyond loaded unless tracking report [D3/D4]',
+  },
+  // ── Non-clinical delay motivations are rejected ──
+  {
+    id: 'DISC-INVALID-DELAY-MOTIVATION',
+    schemes: ['discovery'],
+    phases: [4, 5, 6],
+    severity: 'warn',
+    field: 'management_notes',
+    check: (d) => {
+      const notes = String(d.management_notes || '').toLowerCase();
+      return !/waiting for (a )?bed|awaiting bed|no beds|paperwork|waiting for papers|police|tow truck|tow-truck|towing|administrative delay/.test(notes);
+    },
+    message:
+      'Extended-time motivations caused by administrative or non-clinical delays (waiting for beds, papers, police, tow trucks) are not accepted by Discovery. Replace with a clinical reason or remove it.',
+    source: 'Discovery Ambulance Guidelines (Mar 2023) - non-clinical/administrative delay motivations rejected',
+  },
+  // ── 4th (or further) patient in one vehicle not billable ──
+  {
+    id: 'DISC-MULTI-PATIENT-4TH-PLUS',
+    schemes: ['discovery'],
+    phases: [2, 6],
+    severity: 'warn',
+    field: 'patient_count',
+    check: (d) => Number(d.patient_count || 1) < 4,
+    message:
+      'A fourth (or further) patient transported in the same vehicle cannot be billed to Discovery (0%). Confirm the patient count and vehicle allocation.',
+    source: 'Discovery Ambulance Guidelines (Mar 2023) - multi-patient 100/75/50/0%; 4th+ not billable [M3]',
+  },
+  // ── IFT funded only to closest appropriately equipped facility ──
+  {
+    id: 'DISC-IFT-CLOSEST-FACILITY',
+    schemes: ['discovery'],
+    phases: [4, 5, 6],
+    severity: 'warn',
+    field: 'closest_facility_bypassed',
+    check: (d) => {
+      if (!isIFT(d) || !d.closest_facility_bypassed) return true;
+      return /motivat|specialis|no capacity|not equipped|cath lab|nearest unable/.test(String(d.management_notes || d.events_hpi || '').toLowerCase());
+    },
+    message:
+      'Inter-facility transfers are funded only to the closest appropriately equipped facility. Document why a closer facility was bypassed, or Discovery reprices the claim.',
+    source: 'Discovery Ambulance Guidelines (Mar 2023) - IFT funded to closest appropriate facility only',
+  },
+  // ── IFT one-way only; return leg needs separate authorization ──
+  {
+    id: 'DISC-IFT-ONE-WAY-ONLY',
+    schemes: ['discovery'],
+    phases: [0, 6],
+    severity: 'warn',
+    field: 'transfer_subtype',
+    check: (d) => {
+      const st = String(d.transfer_subtype || '').toLowerCase();
+      if (!st.includes('return')) return true;
+      return has(d, 'preauth_number');
+    },
+    message:
+      'Discovery funds the primary one-way transfer only. A return trip needs its own facility authorization - capture the separate pre-auth number for the return leg.',
+    source: 'Discovery Ambulance Guidelines (Mar 2023) - one-way transfer funded; return needs separate authorization',
+  },
+  // ── Refusal with only basic first aid is private-billed ──
+  {
+    id: 'DISC-NO-MED-NEED-PRIVATE-BILL',
+    schemes: ['discovery'],
+    phases: [5, 6],
+    severity: 'warn',
+    field: 'billing_type',
+    check: (d) => {
+      const refused = String(d.call_type || '').toUpperCase() === 'RHT' || !!d.patient_refused_transport;
+      if (!refused) return true;
+      const lvl = billingLevel(d);
+      return lvl === 'ILS' || lvl === 'ALS' || lvl === 'ICU';
+    },
+    message:
+      'Patient refused treatment/transport with only basic first aid rendered - this cannot be billed to Discovery and must be billed to the patient privately.',
+    source: 'Discovery Ambulance Guidelines (Mar 2023) - refusal with basic first aid only is member-liable (private)',
+  },
+  // ── ILS+ treatment then refusal → bill code 125 (up to 45 min) ──
+  {
+    id: 'DISC-TREATMENT-NO-TRANSPORT-125',
+    schemes: ['discovery'],
+    phases: [5, 6],
+    severity: 'warn',
+    field: 'assessment_level',
+    check: (d) => {
+      const refused = String(d.call_type || '').toUpperCase() === 'RHT' || !!d.patient_refused_transport;
+      if (!refused) return true;
+      const lvl = billingLevel(d);
+      const ilsPlus = lvl === 'ILS' || lvl === 'ALS' || lvl === 'ICU';
+      return !ilsPlus;
+    },
+    message:
+      'Billing tip: ILS-level (or higher) treatment was given and the patient then refused transport - bill code 125 (treatment, no transport) for up to 45 minutes.',
+    source: 'Discovery Ambulance Guidelines (Mar 2023) - successful ILS+ treatment then refusal bills code 125 up to 45 min',
+  },
 ];
 
-// Register Discovery rules into the shared RULES table. The legacy Netcare/'all'
-// rules above remain in the table but are NOT surfaced to crew (see validatePhase).
-RULES.push(...DISCOVERY_RULES);
+// ----------------------------------------------------------------------------
+// Shared helpers for the GEMS + ER24 rule sets below
+// ----------------------------------------------------------------------------
+
+/** TRUE when at least one medication was given and EVERY given medication used
+ *  an oral / sublingual route (ER24: oral meds are not a life-saving
+ *  intervention, so BLS applies when the patient is transported). */
+const onlyOralMeds = (d: PrfData): boolean => {
+  const meds = Array.isArray(d.medications) ? d.medications : [];
+  const given = meds.filter((m: any) => m?.type);
+  if (given.length === 0) return false;
+  return given.every((m: any) => /^(oral|po|p\.?o\.?|sl|sublingual|buccal)$/i.test(String(m?.route || '').trim()));
+};
+
+/** Count distinct ALS "systems" treated in a resuscitation. ER24 requires at
+ *  least 2 interventions across 2 different systems (e.g. intubation + IV drug).
+ *  Airway/ventilation, circulation/electrical and pharmacology each count once. */
+const alsSystemsCount = (d: PrfData): number => {
+  const air = Array.isArray(d.airway_interventions) ? d.airway_interventions : [];
+  const circ = Array.isArray(d.circulation_interventions) ? d.circulation_interventions : [];
+  const meds = medListLower(d);
+  let n = 0;
+  if (air.includes('Intubation') || air.includes('Surg. Airway') || d.ventilator_in_use) n++;
+  if (circ.includes('Defibrillation') || circ.includes('Cardio Version') || circ.includes('Pacing')) n++;
+  if (/adrenaline|amiodarone|atropine|lignocaine|lidocaine|sodium bicarb|magnesium|adenosine/.test(meds)) n++;
+  return n;
+};
+
+/** Valid SA external-cause ICD-10 code: starts V/W/X/Y, exactly 5 alphanumerics
+ *  excluding the dot (e.g. W01.01). Z codes are never valid as a cause. */
+const isValidExternalCause = (raw: string): boolean =>
+  /^[VWXY]\d{2}\.?\d{2}$/i.test(String(raw || '').trim());
+
+// ============================================================================
+// RULES - GEMS EMS Claims Manual (2023)                       [schemes: 'gems']
+//
+// Source: "2023 GEMS EMS Claims Manual" (Government Employees Medical Scheme,
+// EMED Centre / Europ Assistance). Every rule is severity 'warn' by deliberate
+// product decision - a crew on a live call is NEVER blocked. Section numbers
+// reference the manual so each warning traces back to source. These mirror the
+// backend GEMS adjudication module (app/rules/gems.py) so the crew sees the
+// same flags pre-submit that the pipeline would raise post-submit.
+// ============================================================================
+
+const GEMS_RULES: ValidationRule[] = [
+  // -- Sec 3-5 / 10.1.2 / 11: EMED reference number on every claim --
+  {
+    id: 'GEMS-REF-NUMBER',
+    schemes: ['gems'],
+    phases: [0, 6],
+    severity: 'warn',
+    field: 'preauth_number',
+    check: (d) => has(d, 'preauth_number') || has(d, 'emed_reference_number'),
+    message:
+      'GEMS requires an EMED pre-/post-authorisation reference number on every claim. Phone EMED (Europ Assistance), record the reference on the PRF, or the claim will not be adjudicated.',
+    source: 'GEMS EMS Claims Manual Sec 3-5, 10.1.2 and 11 - reference number required for all calls',
+  },
+  // -- Sec 10 / 11: IFT/IHT needs pre-authorisation --
+  {
+    id: 'GEMS-IFT-PREAUTH',
+    schemes: ['gems'],
+    phases: [0, 4, 6],
+    severity: 'warn',
+    field: 'preauth_number',
+    check: (d) => !isIFT(d) || has(d, 'preauth_number') || has(d, 'emed_reference_number'),
+    message:
+      'Inter-facility transfers must be pre-authorised by GEMS EMED before the patient is moved. Obtain the reference number and capture it, or the IFT claim will be rejected.',
+    source: 'GEMS EMS Claims Manual Sec 10.2 and 11 - no pre-authorisation for inter-facility transfer = rejection',
+  },
+  // -- Sec 10.1: two BLS crew with no supervisor is not billable --
+  {
+    id: 'GEMS-CREW-MIN-ILS',
+    schemes: ['gems'],
+    phases: [6],
+    severity: 'warn',
+    check: (d, ctx) => {
+      if (billingLevel(d) !== 'BLS') return true;
+      return ctx.hasCrew2 || has(d, 'supervising_practitioner_pr') || has(d, 'supervising_practitioner_name');
+    },
+    message:
+      'GEMS rejects claims crewed by two BLS practitioners only. Every vehicle must be crewed to a minimum of ILS, or list an independent supervising practitioner (name + HPCSA number) on the PRF.',
+    source: 'GEMS EMS Claims Manual Sec 10.1.1 - two BLS crew only / lack of supervision = rejection',
+  },
+  // -- Sec 10.1.18: minimum 2 sets of vitals --
+  {
+    id: 'GEMS-MIN-2-VITALS',
+    schemes: ['gems'],
+    phases: [4, 5, 6],
+    severity: 'warn',
+    field: 'vitals_sets',
+    check: (d, ctx) => ctx.vitalsCount >= 2 || has(d, 'vitals_shortfall_motivation'),
+    message:
+      'GEMS requires a minimum of 2 sets of vital signs (more depending on priority and transport distance). Use the "+ VITALS" button to capture another set.',
+    source: 'GEMS EMS Claims Manual Sec 10.1.18 - minimum 2 sets of vitals at intervals set by patient priority',
+  },
+  // -- Sec 10.1.16: external-cause code format (5 digits, V/W/X/Y, not Z) --
+  {
+    id: 'GEMS-EXT-CAUSE-FORMAT',
+    schemes: ['gems'],
+    phases: [3, 6],
+    severity: 'warn',
+    field: 'icd10_external_cause',
+    check: (d) => isBlank(d.icd10_external_cause) || isValidExternalCause(d.icd10_external_cause),
+    message:
+      'External-cause ICD-10 code is invalid. GEMS requires 5 characters excluding the dot, starting with V, W, X or Y (e.g. W01.01). Codes starting with Z are rejected.',
+    source: 'GEMS EMS Claims Manual Sec 10.1.16 - external-cause codes: 5 digits, start V/W/X/Y, no Z',
+  },
+  // -- Sec 10.1.16: injury diagnosis (S/T) needs an external-cause code --
+  {
+    id: 'GEMS-EXT-CAUSE-REQUIRED',
+    schemes: ['gems'],
+    phases: [3, 6],
+    severity: 'warn',
+    field: 'icd10_external_cause',
+    check: (d) => {
+      const primary = String(d.icd10_primary || '').trim().toUpperCase();
+      const isInjury = /^[ST]\d/.test(primary);
+      return !isInjury || has(d, 'icd10_external_cause');
+    },
+    message:
+      'Injury diagnoses (ICD-10 starting S or T) must always be accompanied by an external-cause code (V/W/X/Y). Add the external cause or the claim will be returned.',
+    source: 'GEMS EMS Claims Manual Sec 10.1.16 - external-cause codes must accompany any injury ICD-10',
+  },
+  // -- Sec 10.1 / 11: bypassing nearest facility --
+  {
+    id: 'GEMS-CLOSEST-FACILITY',
+    schemes: ['gems'],
+    phases: [4, 5, 6],
+    severity: 'warn',
+    field: 'closest_facility_bypassed',
+    check: (d) => {
+      if (!d.closest_facility_bypassed) return true;
+      const notes = String(d.management_notes || d.events_hpi || '').toLowerCase();
+      return /motivat|nearest unable|no capacity|specialis|cath lab|trauma unit|not appropriate|bypass reason/.test(notes);
+    },
+    message:
+      'You have bypassed the closest appropriate facility. GEMS reprices to the nearest facility able to provide the required care unless a medical justification is documented - add the reason to management notes.',
+    source: 'GEMS EMS Claims Manual Sec 10.1 and 11 - transport to closest appropriate facility, else repriced',
+  },
+  // -- Sec 10: direct admission bypassing casualty --
+  {
+    id: 'GEMS-DIRECT-ADMISSION',
+    schemes: ['gems'],
+    phases: [4, 6],
+    severity: 'warn',
+    field: 'direct_admission',
+    check: (d) => {
+      if (!d.direct_admission) return true;
+      return !!d.emed_notified && !!d.lifesaving_intervention_required;
+    },
+    message:
+      'Direct admission (bypassing casualty) is not covered by GEMS unless a lifesaving intervention applies (e.g. direct Cath Lab delivery) AND EMED was notified. Tick EMED-notified + lifesaving, or transport via casualty.',
+    source: 'GEMS EMS Claims Manual Sec 10 - direct admission not covered unless lifesaving + EMED notified',
+  },
+  // -- Sec 10.1.25: cardiac incident needs 12-lead ECG / rhythm strip --
+  {
+    id: 'GEMS-CARDIAC-ECG',
+    schemes: ['gems'],
+    phases: [3, 6],
+    severity: 'warn',
+    field: 'has_ecg_attached',
+    check: (d) => {
+      const meds = medListLower(d);
+      const cardiacMed = /adrenaline|amiodarone|atropine|adenosine|nitro/.test(meds);
+      const isCardiac = !!d.cardiac_incident || cardiacMed;
+      return !isCardiac || !!d.has_ecg_attached;
+    },
+    message:
+      'Cardiac incident (or cardiac ALS drug) recorded but no ECG attached. GEMS requires a 12-lead ECG or rhythm strip to accompany the PRF - attach it before submission.',
+    source: 'GEMS EMS Claims Manual Sec 10.1.25 - cardiac incident requires 12-lead ECG / rhythm strip',
+  },
+  // -- Sec 10.1.25: DOD / unsuccessful resus needs ECG rhythm strip --
+  {
+    id: 'GEMS-DOD-ECG',
+    schemes: ['gems'],
+    phases: [3, 6],
+    severity: 'warn',
+    field: 'has_ecg_attached',
+    check: (d) => {
+      const dod = String(d.call_type || '').toUpperCase() === 'DOD' || !!d.med_aid_dec_death;
+      const failedResus = !!d.resuscitation_attempted && !d.rosc_achieved;
+      return !(dod || failedResus) || !!d.has_ecg_attached;
+    },
+    message:
+      'Declaration of Death / unsuccessful resuscitation requires an ECG rhythm strip plus detailed notes on the circumstances of death for the claim to be paid. Attach the rhythm strip.',
+    source: 'GEMS EMS Claims Manual Sec 10.1.25 - unsuccessful resus / DOD requires ECG rhythm strip',
+  },
+  // -- Sec 10.1.26: resus fee + transport needs ROSC + perfusing handover --
+  {
+    id: 'GEMS-RESUS-ROSC',
+    schemes: ['gems'],
+    phases: [4, 5, 6],
+    severity: 'warn',
+    field: 'resuscitation_attempted',
+    check: (d) => {
+      if (!d.resuscitation_attempted) return true;
+      const transported = !!d.receiving_facility || has(d, 'time_at_destination');
+      if (!transported) return true;
+      return !!d.rosc_achieved && !!d.perfusing_rhythm_on_handover;
+    },
+    message:
+      'A transport fee charged together with a resuscitation fee is only payable when ROSC is achieved post-CPR and the patient is handed over with a perfusing rhythm. Confirm ROSC and perfusing-rhythm-on-handover, or only the resuscitation fee applies.',
+    source: 'GEMS EMS Claims Manual Sec 10.1.26 - ALS/ILS transport + resus fee requires ROSC and perfusing handover',
+  },
+  // -- Sec 8.3: on-scene time limits (15 BLS / 20 ILS / 30 ALS-ICU) --
+  {
+    id: 'GEMS-SCENE-TIME',
+    schemes: ['gems'],
+    phases: [4, 6],
+    severity: 'warn',
+    check: (d, ctx) => {
+      if (ctx.sceneMinutes === null) return true;
+      const lvl = billingLevel(d);
+      const limit = lvl === 'BLS' ? 15 : (lvl === 'ALS' || lvl === 'ICU') ? 30 : 20;
+      if (ctx.sceneMinutes <= limit) return true;
+      return /motivat|extricat|entrap|complex|delay|prolong|difficult/.test(String(d.management_notes || '').toLowerCase());
+    },
+    message:
+      'On-scene time exceeds the GEMS allowance (15 min BLS, 20 min ILS, 30 min ALS/ICU). Document a motivation in management notes on the first submission or the time will be cut.',
+    source: 'GEMS EMS Claims Manual Sec 8.3 - on-scene time guidelines per level of care',
+  },
+  // -- Sec 8.2: multi-patient must state "X of Y" --
+  {
+    id: 'GEMS-MULTI-PATIENT',
+    schemes: ['gems'],
+    phases: [6],
+    severity: 'warn',
+    field: 'patient_index_of_total',
+    check: (d) => {
+      if (!d.is_multi_patient && Number(d.patient_count || 1) <= 1) return true;
+      return /^\d+\s*(\/|of)\s*\d+$/i.test(String(d.patient_index_of_total || ''));
+    },
+    message:
+      'For multi-patient transports both the invoice and PRF must state which patient this is, e.g. "1 of 2". Capture the patient index.',
+    source: 'GEMS EMS Claims Manual Sec 8.2 - multi-patient transport must indicate patient one of two, etc.',
+  },
+  // -- Sec 10.1.23: patient (or guardian/witness) signature --
+  {
+    id: 'GEMS-PATIENT-SIG',
+    schemes: ['gems'],
+    phases: [6],
+    severity: 'warn',
+    check: (d, ctx) => ctx.hasPatientSig || has(d, 'signature_refused_reason') || ctx.hasCrew2,
+    message:
+      'Patient or guardian signature is required as proof of transport. Where it cannot be obtained, document the reason and have the second crew member counter-sign as witness, otherwise the claim is rejected.',
+    source: 'GEMS EMS Claims Manual Sec 10.1.23 - patient signature, or documented reason + witness',
+  },
+  // -- Sec 10.1.24: handover signature + qualification --
+  {
+    id: 'GEMS-HANDOVER-SIG',
+    schemes: ['gems'],
+    phases: [5, 6],
+    severity: 'warn',
+    field: 'handover_qualification',
+    check: (d, ctx) => ctx.hasHandoverSig && has(d, 'handover_qualification'),
+    message:
+      'Handover requires the signature AND qualification of the receiving individual as proof of patient receipt. Capture both before submitting.',
+    source: 'GEMS EMS Claims Manual Sec 10.1.24 - signature and qualification of receiving individual',
+  },
+  // -- Sec 5.2 / 8.1 / 11: member number required when billing GEMS --
+  {
+    id: 'GEMS-MEMBER-NUMBER',
+    schemes: ['gems'],
+    phases: [2, 5, 6],
+    severity: 'warn',
+    field: 'medical_aid_number',
+    check: (d) => {
+      const bt = String(d.billing_type || '').toUpperCase();
+      if (bt && !bt.includes('MED')) return true;
+      return has(d, 'medical_aid_number');
+    },
+    message:
+      'Full GEMS membership number (9 digits) is required to bill the scheme. A claim with inaccurate or missing membership details is rejected.',
+    source: 'GEMS EMS Claims Manual Sec 5.2, 8.1 and 11 - full membership number required',
+  },
+  // -- Sec 10: pre-planned events (dialysis, oncology) not covered --
+  {
+    id: 'GEMS-PREPLANNED',
+    schemes: ['gems'],
+    phases: [0, 6],
+    severity: 'warn',
+    field: 'pre_planned_event',
+    check: (d) => !d.pre_planned_event || has(d, 'preauth_number'),
+    message:
+      'GEMS does not cover transport for pre-planned events (including renal dialysis and oncology transfers) without authorisation from EMED. Confirm funding and capture the authorisation, or the member is liable.',
+    source: 'GEMS EMS Claims Manual Sec 10 - pre-planned events (dialysis / oncology) not covered',
+  },
+  // -- Sec 10.1: ILS IV must meet one of the accepted indications --
+  {
+    id: 'GEMS-ILS-IV-JUSTIFY',
+    schemes: ['gems'],
+    phases: [3, 6],
+    severity: 'warn',
+    field: 'iv_therapy',
+    check: (d, ctx) => {
+      if (billingLevel(d) !== 'ILS' || ctx.ivCount === 0) return true;
+      const meds = medListLower(d);
+      const notes = String(d.management_notes || d.events_hpi || '').toLowerCase();
+      return (
+        /dextrose/.test(meds) ||
+        /fluid deplet|haemodynam|hemodynam|abnormal vital|deranged|co-morbid|comorbid|rapid deterior|iv sited prior|prior to arrival|significant delay/.test(notes)
+      );
+    },
+    message:
+      'ILS IV line recorded without a documented indication. GEMS funds ILS-level IV only for: fluid replacement in a depleted/compromised patient, ILS-scope medication, abnormal vitals / high deterioration risk, or an IV sited prior to your arrival. Document the indication or it is repriced to BLS.',
+    source: 'GEMS EMS Claims Manual Sec 10.1 - ILS IV considered only under the listed clinical circumstances',
+  },
+];
+
+// ============================================================================
+// RULES - ER24 Case Management Rules                          [schemes: 'er24']
+//
+// Source: "ER24 Case Management Rules" (clinical guidelines for assessing PRFs).
+// Warn-only, like every other scheme set here. ER24 HPCSA capability matrix is
+// already enforced by the scope-of-practice gate (frontend/src/data/
+// hpcsaScope.ts) - these rules add ER24 billing / documentation guidelines on
+// top of that.
+// ============================================================================
+
+const ER24_RULES: ValidationRule[] = [
+  // -- General: reference number where possible (IFT) --
+  {
+    id: 'ER24-IFT-REF',
+    schemes: ['er24'],
+    phases: [0, 6],
+    severity: 'warn',
+    field: 'preauth_number',
+    check: (d) => !isIFT(d) || has(d, 'preauth_number') || has(d, 'emed_reference_number'),
+    message:
+      'Note the ER24 reference number for this inter-facility transfer. Level-of-care transfers outside scope must be approved by the ER24 Contact Centre and the reference recorded on the PRF.',
+    source: 'ER24 Case Management Rules - reference number to be noted; out-of-scope transfers approved by ER24 case manager',
+  },
+  // -- Mandatory member / scheme details (Medical Schemes Act 1998) --
+  {
+    id: 'ER24-MEMBER-NUMBER',
+    schemes: ['er24'],
+    phases: [2, 5, 6],
+    severity: 'warn',
+    field: 'medical_aid_number',
+    check: (d) => {
+      const bt = String(d.billing_type || '').toUpperCase();
+      if (bt && !bt.includes('MED')) return true;
+      return has(d, 'medical_aid_number');
+    },
+    message:
+      'Membership number is mandatory under the Medical Schemes Act. An account submitted without it is rejected immediately. Capture the member number.',
+    source: 'ER24 Case Management Rules - Medical Schemes Act 1998 mandatory fields (membership number)',
+  },
+  {
+    id: 'ER24-SCHEME-OPTION',
+    schemes: ['er24'],
+    phases: [5, 6],
+    severity: 'warn',
+    field: 'scheme_option',
+    check: (d) => {
+      const bt = String(d.billing_type || '').toUpperCase();
+      if (bt && !bt.includes('MED')) return true;
+      return has(d, 'scheme_option') || has(d, 'plan_option');
+    },
+    message:
+      'Medical scheme option/plan is a mandatory account field under the Medical Schemes Act. Record the scheme option (the benefit plan of the member).',
+    source: 'ER24 Case Management Rules - Medical Schemes Act 1998 mandatory fields (scheme details incl. option)',
+  },
+  // -- Diagnosis required (ICD-10) --
+  {
+    id: 'ER24-DIAGNOSIS',
+    schemes: ['er24'],
+    phases: [3, 6],
+    severity: 'warn',
+    field: 'icd10_primary',
+    check: (d) => /^[A-Z]\d{2}(\.\d{1,3})?$/.test(String(d.icd10_primary || '').trim().toUpperCase()),
+    message:
+      'A diagnosis with a valid ICD-10 code is a mandatory account field (e.g. I21.0). Capture the primary ICD-10 code.',
+    source: 'ER24 Case Management Rules - Medical Schemes Act 1998 mandatory fields (diagnosis + codes)',
+  },
+  // -- Minimum vitals: 2 (3 for IFT, first at referring hospital) --
+  {
+    id: 'ER24-MIN-VITALS',
+    schemes: ['er24'],
+    phases: [4, 5, 6],
+    severity: 'warn',
+    field: 'vitals_sets',
+    check: (d, ctx) => {
+      if (has(d, 'vitals_shortfall_motivation')) return true;
+      const need = isIFT(d) ? 3 : 2;
+      return ctx.vitalsCount >= need;
+    },
+    message:
+      'ER24 requires a minimum of 2 sets of vitals on all patients, and 3 sets for inter-facility transfers (the first recorded at the referring hospital). Capture another set with the "+ VITALS" button.',
+    source: 'ER24 Case Management Rules - minimum 2 sets of vitals (3 for IFT, first at referring hospital)',
+  },
+  // -- IV access only under the 3 accepted guidelines --
+  {
+    id: 'ER24-IV-JUSTIFY',
+    schemes: ['er24'],
+    phases: [3, 6],
+    severity: 'warn',
+    field: 'iv_therapy',
+    check: (d, ctx) => {
+      if (ctx.ivCount === 0) return true;
+      const meds = ctx.medTypesLower;
+      const notes = String(d.management_notes || d.events_hpi || '').toLowerCase();
+      return (
+        /dextrose/.test(meds) ||
+        /fluid replac|iv medication|iv drug|during transport|rapidly deterior|rapid deterior|abnormal vital|unstable|deranged/.test(notes)
+      );
+    },
+    message:
+      'IV access recorded without a documented indication. ER24 funds IV only for fluid replacement, IV medication during transport, or a patient who can rapidly deteriorate with abnormal vitals, otherwise it is downgraded to BLS. Document the reason in management notes.',
+    source: 'ER24 Case Management Rules - IV access established only under the listed guidelines, else downgraded to BLS',
+  },
+  // -- Oral medication results in BLS when transported --
+  {
+    id: 'ER24-ORAL-MEDS-BLS',
+    schemes: ['er24'],
+    phases: [3, 6],
+    severity: 'warn',
+    field: 'assessment_level',
+    check: (d) => {
+      if (!onlyOralMeds(d)) return true;
+      const transported = !!d.receiving_facility || has(d, 'time_at_destination');
+      if (!transported) return true;
+      return billingLevel(d) === 'BLS' || billingLevel(d) === '';
+    },
+    message:
+      'Only oral medication was administered. ER24 does not consider the oral route a life-saving intervention, so a transported patient is refunded at BLS. Bill this call at BLS.',
+    source: 'ER24 Case Management Rules - oral medication refunded at BLS tariff if patient transported',
+  },
+  // -- Resus fee: post-CPR ALS, alive at hospital, >=2 interventions/2 systems --
+  {
+    id: 'ER24-RESUS-CRITERIA',
+    schemes: ['er24'],
+    phases: [4, 6],
+    severity: 'warn',
+    field: 'resuscitation_attempted',
+    check: (d) => {
+      if (!d.resuscitation_attempted) return true;
+      const lvl = billingLevel(d);
+      const isAls = lvl === 'ALS' || lvl === 'ICU';
+      const aliveAtHospital = !!d.rosc_achieved || !!d.perfusing_rhythm_on_handover;
+      return isAls && aliveAtHospital && alsSystemsCount(d) >= 2;
+    },
+    message:
+      'A resuscitation fee with transport is only chargeable for a post-CPR ALS patient who arrives alive at hospital after at least 2 different interventions in 2 different systems (e.g. intubation + IV drug). An ALS resus fee can never be charged for an ILS attempt.',
+    source: 'ER24 Case Management Rules - resuscitation fee: 2 interventions in 2 systems, patient alive at hospital',
+  },
+  // -- DOD / futile resus is non-chargeable --
+  {
+    id: 'ER24-DOD-NONCHARGE',
+    schemes: ['er24'],
+    phases: [3, 6],
+    severity: 'warn',
+    check: (d) => {
+      const dod = String(d.call_type || '').toUpperCase() === 'DOD' || !!d.med_aid_dec_death;
+      if (!dod) return true;
+      return !d.resuscitation_attempted;
+    },
+    message:
+      'Declaration of Death or a futile resuscitation attempt is non-chargeable at ER24 (exceptions discussed case-by-case). Do not bill a resuscitation fee on a DOD unless ER24 has agreed.',
+    source: 'ER24 Case Management Rules - DOD / futile resus initiation non-chargeable',
+  },
+  // -- Non-medically-justified categories: document justification --
+  {
+    id: 'ER24-NON-JUSTIFIED-TRANSPORT',
+    schemes: ['er24'],
+    phases: [3, 6],
+    severity: 'warn',
+    field: 'chief_complaint',
+    check: (d) => {
+      const cc = String(d.chief_complaint || '').toLowerCase();
+      const flagged = /abdominal pain|gastroenter|obstetric|term deliver|\bent\b|malaise|general body|weakness|headache|syncope|anxiety|backache/.test(cc);
+      if (!flagged) return true;
+      const notes = String(d.management_notes || d.events_hpi || d.findings_on_arrival || '').toLowerCase();
+      return notes.length > 40 || /unstable|abnormal|hypotens|tachycard|gcs|spinal|trauma|justif|motivat/.test(notes);
+    },
+    message:
+      'This presenting complaint falls in the ER24 non-medically-justified review list. Clearly document why ambulance transport was clinically necessary, and advise the patient they may be liable if it is deemed unnecessary.',
+    source: 'ER24 Case Management Rules - non-medically-justified categories require documented justification',
+  },
+  // -- Closest appropriate facility --
+  {
+    id: 'ER24-CLOSEST-FACILITY',
+    schemes: ['er24'],
+    phases: [4, 5, 6],
+    severity: 'warn',
+    field: 'closest_facility_bypassed',
+    check: (d) => {
+      if (!d.closest_facility_bypassed) return true;
+      const notes = String(d.management_notes || d.events_hpi || '').toLowerCase();
+      return /motivat|nearest unable|no capacity|specialis|cath lab|trauma unit|not appropriate/.test(notes);
+    },
+    message:
+      'Closest appropriate facility bypassed. ER24 holds any deviation to the patient or service-provider account unless justified. Document the clinical reason in management notes.',
+    source: 'ER24 Case Management Rules - transport to closest most appropriate facility; deviations for own account',
+  },
+  // -- Scene time: 20 min (primary and IFT); ICU 45 with motivation --
+  {
+    id: 'ER24-SCENE-TIME',
+    schemes: ['er24'],
+    phases: [4, 6],
+    severity: 'warn',
+    check: (d, ctx) => {
+      if (ctx.sceneMinutes === null) return true;
+      const lvl = billingLevel(d);
+      const limit = lvl === 'ICU' ? 45 : 20;
+      if (ctx.sceneMinutes <= limit) return true;
+      return /motivat|extricat|entrap|delay|analges|difficult|complex|prolong/.test(String(d.management_notes || '').toLowerCase());
+    },
+    message:
+      'On-scene time exceeds the ER24 allowance (20 min for primary and most IFTs; 45 min for ICU transfers). Record a motivation in management notes or the extra time will be cut.',
+    source: 'ER24 Case Management Rules - scene-time allowance 20 min (ICU 45 min with motivation)',
+  },
+  // -- Only one RED (P1) patient per ALS practitioner --
+  {
+    id: 'ER24-RED-PATIENT-ALS',
+    schemes: ['er24'],
+    phases: [2, 6],
+    severity: 'warn',
+    field: 'patient_count',
+    check: (d) => {
+      const isRed = /priority\s*1|^p1$|\bp1\b/i.test(String(d.priority || ''));
+      const count = Number(d.patient_count || 1);
+      return !(isRed && count > 1);
+    },
+    message:
+      'Only one RED (Priority 1) patient may be transported per ALS practitioner, for both primary responses and IFTs. Confirm crewing / patient allocation for this critical patient.',
+    source: 'ER24 Case Management Rules - only 1 RED patient per ALS practitioner per vehicle',
+  },
+  // -- Handover + patient signature --
+  {
+    id: 'ER24-HANDOVER-SIG',
+    schemes: ['er24'],
+    phases: [5, 6],
+    severity: 'warn',
+    check: (_d, ctx) => ctx.hasHandoverSig,
+    message:
+      'Every ER24 PRF must carry a handover signature from the receiving facility. Capture the handover signature.',
+    source: 'ER24 Case Management Rules - all PRFs should have a handover signature',
+  },
+  {
+    id: 'ER24-PATIENT-SIG',
+    schemes: ['er24'],
+    phases: [6],
+    severity: 'warn',
+    check: (d, ctx) => ctx.hasPatientSig || has(d, 'signature_refused_reason') || ctx.hasCrew2,
+    message:
+      'Every ER24 PRF must carry a patient / legal-guardian signature. If the patient refuses, capture a witness signature and note the refusal.',
+    source: 'ER24 Case Management Rules - all PRFs should have a patient / legal-guardian signature',
+  },
+];
+
+// Register every scheme's rules into the shared RULES table. Each rule is
+// scheme-scoped (Netcare / Discovery / GEMS / ER24); validatePhase() surfaces
+// only the active scheme's rules, and always as non-blocking warnings - a crew
+// on a live call is never blocked by a billing rule (June 2026 crew-safety policy).
+// Post-submit adjudication + tariff pricing are unaffected (they don't call this).
+RULES.push(...DISCOVERY_RULES, ...GEMS_RULES, ...ER24_RULES);
 
 // ────────────────────────────────────────────────────────────────────────────
 // Public API
@@ -788,6 +1511,12 @@ export function buildContext(args: {
     sceneMinutes: mins(ts.time_on_scene, ts.time_depart_scene),
     totalCallMinutes: mins(ts.time_dispatched, ts.time_at_destination),
     patientCarryingKm: loadedKm,
+    responseMinutes: mins(ts.time_dispatched, ts.time_on_scene),
+    responseKm: (() => { const a = num(km.km_dispatched), b = num(km.km_on_scene); return a !== null && b !== null && b >= a ? b - a : null; })(),
+    transferMinutes: mins(ts.time_depart_scene, ts.time_at_destination),
+    transferKm: (() => { const a = num(km.km_depart_scene), b = num(km.km_at_destination); return a !== null && b !== null && b >= a ? b - a : null; })(),
+    handoverMinutes: mins(ts.time_at_destination, ts.time_handover),
+    returnKm: (() => { const a = num(km.km_at_destination), b = num(km.km_back_to_base); return a !== null && b !== null && b >= a ? b - a : null; })(),
   };
 }
 
@@ -811,16 +1540,16 @@ export function validatePhase(
 ): ValidationFinding[] {
   // Crew-safety policy (June 2026): a crew working a live call is NEVER blocked
   // or warned by the legacy scheme-agnostic ('all') rules — those stay
-  // suppressed. We surface ONLY Discovery-scoped guidance, and ONLY as
+  // suppressed. We surface ONLY the active scheme's guidance, and ONLY as
   // non-blocking warnings, so a Discovery claim shows amber "may be downgraded /
   // rejected" nudges the crew can act on but can always submit past. Post-submit
   // adjudication and tariff pricing are unaffected (they don't call this).
   const scheme = normalizeScheme(schemeId);
-  if (scheme !== 'discovery') return [];
+  if (!scheme) return [];
 
   const findings: ValidationFinding[] = [];
   for (const r of RULES) {
-    if (!r.schemes.includes('discovery')) continue;   // Discovery-scoped rules only
+    if (!r.schemes.includes(scheme) && !r.schemes.includes('all')) continue;
     if (!r.phases.includes(phase)) continue;
     let passed = true;
     try {

@@ -82,6 +82,10 @@ def list_configured_schemes() -> list[str]:
 
 from app.rules import gems as _gems            # noqa: E402
 from app.rules import discovery as _discovery  # noqa: E402
+from app.rules import er24 as _er24            # noqa: E402
+from app.rules import netcare as _netcare      # noqa: E402
 
 register(_gems.SCHEME_ID, _gems)               # type: ignore[arg-type]
 register(_discovery.SCHEME_ID, _discovery)     # type: ignore[arg-type]
+register(_er24.SCHEME_ID, _er24)               # type: ignore[arg-type]
+register(_netcare.SCHEME_ID, _netcare)         # type: ignore[arg-type]
