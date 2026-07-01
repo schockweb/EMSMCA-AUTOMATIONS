@@ -370,7 +370,6 @@ export default function ProviderLogin() {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '20px' }}>
                     {crewList.map(c => {
                       const isSelected = selectedCrewIds.includes(c.id);
-                      const isPrimary = selectedCrewIds[0] === c.id;
                       return (
                         <button
                           key={c.id}
@@ -398,15 +397,6 @@ export default function ProviderLogin() {
                             <div style={{ fontWeight: 500, fontSize: '0.85rem', color: '#1f2937' }}>{c.full_name}</div>
                             <div style={{ fontSize: '0.7rem', color: '#9ca3af', marginTop: 1 }}>{c.qualification}</div>
                           </div>
-                          {isPrimary && (
-                            <span style={{
-                              fontSize: '0.65rem', fontWeight: 600, color: 'var(--brand-teal)',
-                              background: 'rgba(20,184,166,0.1)', padding: '2px 8px', borderRadius: '10px',
-                              letterSpacing: '0.03em', flexShrink: 0
-                            }}>
-                              Primary
-                            </span>
-                          )}
                         </button>
                       );
                     })}
