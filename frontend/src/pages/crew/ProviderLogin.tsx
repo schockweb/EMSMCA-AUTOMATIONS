@@ -158,12 +158,24 @@ export default function ProviderLogin() {
          localStorage.removeItem('crew2_profile');
       }
       
-      // Store any 3rd, 4th, etc. extra crew members
-      const extraCrew = assistingCrewIds.slice(1).map(id => crewList.find(c => c.id === id)).filter(Boolean);
-      if (extraCrew.length > 0) {
-         localStorage.setItem('extra_crew_profiles', JSON.stringify(extraCrew));
+      // Store ALL assisting crew members (including 1st partner) as extra_crew_profiles
+      // so the dashboard shows every partner on the shift card
+      const allAssisting = assistingCrewIds.map(id => crewList.find(c => c.id === id)).filter(Boolean);
+      if (allAssisting.length > 0) {
+         localStorage.setItem('extra_crew_profiles', JSON.stringify(allAssisting));
       } else {
          localStorage.removeItem('extra_crew_profiles');
+      }
+
+      // Store the selected vehicle so the crew dashboard doesn't re-prompt
+      const selectedVehicle = vehicleList.find(v => v.id === selectedVehicleId);
+      if (selectedVehicle) {
+        localStorage.setItem('active_vehicle', JSON.stringify({
+          id: selectedVehicle.id,
+          callsign: selectedVehicle.callsign,
+          registration: selectedVehicle.registration_number,
+          vehicle_type: '',
+        }));
       }
 
       navigate(`/${providerSlug}/crew/dashboard`);
@@ -224,13 +236,10 @@ export default function ProviderLogin() {
         {/* Provider Logo Header */}
         <div className="login-logo" style={{ marginBottom: '24px' }}>
           {providerInfo?.logo_url ? (
-            <img src={providerInfo.logo_url} alt={providerInfo.name} style={{ height: 80, objectFit: 'contain', marginBottom: 16 }} />
+            <img src={providerInfo.logo_url} alt={providerInfo.name} style={{ height: 120, objectFit: 'contain', marginBottom: 16 }} />
           ) : (
             <h1 style={{ marginBottom: 16 }}>{providerInfo?.name || 'Company Portal'}</h1>
           )}
-          <p style={{ textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, fontSize: '0.8rem', color: '#088395' }}>
-            Administration Portal
-          </p>
         </div>
 
         {/* ── ADMIN LOGIN + SHIFT START ── */}
