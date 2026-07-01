@@ -1887,4 +1887,4 @@ function Row({ label, keyName, vitals, cols }: {
     </>
   );
 }
-                         
+
