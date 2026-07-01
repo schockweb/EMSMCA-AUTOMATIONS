@@ -92,6 +92,15 @@ const medListLower = (d: PrfData): string => {
   return meds.map((m: any) => (m?.type || '').toLowerCase()).join('|');
 };
 
+// All free-text places a crew can record a billing motivation / justification.
+// The dedicated "Motivation / Other Notes" box (motivation_notes) is the field
+// that renders on the PDF PRF, so it is the primary source; management_notes,
+// events_hpi and findings_on_arrival are included as fallbacks. Lowercased so
+// callers can run keyword tests directly.
+const motivationText = (d: PrfData): string =>
+  [d.motivation_notes, d.management_notes, d.events_hpi, d.findings_on_arrival]
+    .map(v => String(v || '')).join(' ').toLowerCase();
+
 // ────────────────────────────────────────────────────────────────────────────
 // RULES — Netcare 911 Case Management Guidelines v5.2 Feb 2023
 // ────────────────────────────────────────────────────────────────────────────
@@ -281,7 +290,7 @@ export const RULES: ValidationRule[] = [
     check: (d, ctx) => {
       if (billingLevel(d) !== 'ILS' || ctx.ivCount === 0) return true;
       const meds = medListLower(d).toLowerCase();
-      const notes = String(d.management_notes || d.events_hpi || '').toLowerCase();
+      const notes = motivationText(d);
       const justified =
         meds.includes('dextrose') ||
         notes.includes('hypoglycaemic') ||
@@ -294,7 +303,7 @@ export const RULES: ValidationRule[] = [
       return justified;
     },
     message:
-      'ILS IV therapy must fit one of the four accepted cases (50% Dextrose for hypoglycaemia, fluid for haemodynamic compromise, IV sited prior to arrival, or unstable patient with deranged vitals). Document the justification in management notes or the claim will be downgraded.',
+      'ILS IV therapy must fit one of the four accepted cases (50% Dextrose for hypoglycaemia, fluid for haemodynamic compromise, IV sited prior to arrival, or unstable patient with deranged vitals). Document the justification in the Motivation / Other Notes box or the claim will be downgraded.',
     source: 'Netcare CMG §3.7 — IV therapy for ILS level of care will only be accepted in the following circumstances...',
   },
 
@@ -381,7 +390,7 @@ export const RULES: ValidationRule[] = [
     severity: 'warn',
     field: 'assessment_level',
     check: (d) => {
-      const notes = String(d.management_notes || '').toLowerCase();
+      const notes = motivationText(d);
       const isTKVO = notes.includes('tkvo') || notes.includes('to keep vein open');
       if (!isTKVO) return true;
       return billingLevel(d) === 'BLS';
@@ -501,7 +510,7 @@ export const RULES: ValidationRule[] = [
       return minutes <= 20;
     },
     message:
-      'Scene time exceeds 20 minutes. A motivation will be required by the case manager — document the reason in management notes.',
+      'Scene time exceeds 20 minutes. A motivation will be required by the case manager — document the reason in the Motivation / Other Notes box.',
     source: 'Netcare CMG §5.2.1 — Time at scene BLS/ILS/ALS/ICU: maximum 20 minutes',
   },
   {
@@ -519,7 +528,7 @@ export const RULES: ValidationRule[] = [
       return minutes <= limit;
     },
     message:
-      'Total call time exceeds the standard limit (45 min BLS/ILS, 60 min ALS/ICU). Add a motivation to management notes to avoid downgrade.',
+      'Total call time exceeds the standard limit (45 min BLS/ILS, 60 min ALS/ICU). Add a motivation to the Motivation / Other Notes box to avoid downgrade.',
     source: 'Netcare CMG §5.2.1.1 — Total call time limits before motivation required',
   },
 ];
@@ -569,7 +578,7 @@ const DISCOVERY_RULES: ValidationRule[] = [
       if (!isIFT(d)) return true;
       const lvl = billingLevel(d);
       if (lvl === '' || lvl === 'BLS') return true;
-      const notes = String(d.management_notes || d.events_hpi || '').toLowerCase();
+      const notes = motivationText(d);
       const motivated =
         !!String(d.referring_doctor || '').trim() ||
         /icu|ventilat|infus|monitor|inotrop|sedat|unstable|deranged|clinical/.test(notes);
@@ -589,14 +598,14 @@ const DISCOVERY_RULES: ValidationRule[] = [
     check: (d, ctx) => {
       if (billingLevel(d) !== 'ILS' || ctx.ivCount === 0) return true;
       const meds = ctx.medTypesLower;
-      const notes = String(d.management_notes || d.events_hpi || '').toLowerCase();
+      const notes = motivationText(d);
       const justified =
         /dextrose/.test(meds) ||
         /hypoglyc|hyperglyc|hypotension|dehydrat|burn|overdose|poison|haemodynam|hemodynam|unstable|deranged|fluctuat/.test(notes);
       return justified;
     },
     message:
-      'ILS billed with an IV but no clinical justification documented. Discovery funds ILS-level IV only for clear hypotension/BP fluctuation, hyperglycaemia needing IV, burns, dehydration, or overdose/poisoning — otherwise it is downgraded to BLS. Document the indication in management notes.',
+      'ILS billed with an IV but no clinical justification documented. Discovery funds ILS-level IV only for clear hypotension/BP fluctuation, hyperglycaemia needing IV, burns, dehydration, or overdose/poisoning — otherwise it is downgraded to BLS. Document the indication in the Motivation / Other Notes box.',
     source: 'Discovery Ambulance Guidelines (Mar 2023) — IV line placement; prophylactic IV not funded [Matrix IV2/IV4]',
   },
   // ── TKVO IV line must be billed BLS (Matrix IV2) ──
@@ -607,7 +616,7 @@ const DISCOVERY_RULES: ValidationRule[] = [
     severity: 'warn',
     field: 'assessment_level',
     check: (d) => {
-      const notes = String(d.management_notes || d.events_hpi || '').toLowerCase();
+      const notes = motivationText(d);
       const tkvo = notes.includes('tkvo') || notes.includes('to keep vein open');
       if (!tkvo) return true;
       return billingLevel(d) === 'BLS';
@@ -629,7 +638,7 @@ const DISCOVERY_RULES: ValidationRule[] = [
       const meds = ctx.medTypesLower;
       const circ = Array.isArray(d.circulation_interventions) ? d.circulation_interventions : [];
       const air = Array.isArray(d.airway_interventions) ? d.airway_interventions : [];
-      const notes = String(d.management_notes || d.events_hpi || '').toLowerCase();
+      const notes = motivationText(d);
       const alsMed = /adrenaline|amiodarone|atropine|morphine|fentanyl|ketamine|midazolam|naloxone|adenosine|tranexamic/.test(meds);
       const alsProc =
         circ.includes('Cardio Version') || circ.includes('Pacing') ||
@@ -657,7 +666,7 @@ const DISCOVERY_RULES: ValidationRule[] = [
       return ctx.sceneMinutes <= 20;
     },
     message:
-      'On-scene time for a resuscitation (code 151) is limited to 20 minutes — time beyond that is cut. Document a clinical motivation in management notes if the extra time was unavoidable.',
+      'On-scene time for a resuscitation (code 151) is limited to 20 minutes — time beyond that is cut. Document a clinical motivation in the Motivation / Other Notes box if the extra time was unavoidable.',
     source: 'Discovery Ambulance Guidelines (Mar 2023) — Resuscitation in progress; on-scene time limited to 20 min [Matrix RS1]',
   },
   // ── General scene time > 20 min must be motivated (Matrix T4) ──
@@ -668,11 +677,11 @@ const DISCOVERY_RULES: ValidationRule[] = [
     severity: 'warn',
     check: (d, ctx) => {
       if (ctx.sceneMinutes === null || ctx.sceneMinutes <= 20) return true;
-      const notes = String(d.management_notes || d.events_hpi || '').toLowerCase();
+      const notes = motivationText(d);
       return /motivat|extricat|analges|jaws|delay|reason|resus|difficult|entrap/.test(notes);
     },
     message:
-      'Scene time exceeds 20 minutes. Discovery caps scene time at 20 min unless a clinical motivation (e.g. extrication, analgesia onset, difficult access) is documented on the PRF — add it to management notes to avoid a time cut.',
+      'Scene time exceeds 20 minutes. Discovery caps scene time at 20 min unless a clinical motivation (e.g. extrication, analgesia onset, difficult access) is documented on the PRF — add it to the Motivation / Other Notes box to avoid a time cut.',
     source: 'Discovery Ambulance Guidelines (Mar 2023) — Scene time max 20 min; extended time must be motivated [Matrix T4/T7]',
   },
   // ── Transport with no documented clinical need is not funded (Matrix N1) ──
@@ -755,10 +764,10 @@ const DISCOVERY_RULES: ValidationRule[] = [
     check: (d, ctx) => {
       if (ctx.responseMinutes == null || ctx.responseKm == null || ctx.responseKm <= 0) return true;
       if (ctx.responseMinutes <= ctx.responseKm) return true;
-      return /motivat|traffic|divert|access|scene safety|delay reason/.test(String(d.management_notes || '').toLowerCase());
+      return /motivat|traffic|divert|access|scene safety|delay reason/.test(motivationText(d));
     },
     message:
-      'Response time exceeds the Discovery limit of 1 minute per kilometre (60 km/h average). Document an operational/clinical motivation in management notes or the extra time is cut.',
+      'Response time exceeds the Discovery limit of 1 minute per kilometre (60 km/h average). Document an operational/clinical motivation in the Motivation / Other Notes box or the extra time is cut.',
     source: 'Discovery Ambulance Guidelines (Mar 2023) - response to incident max 1 min/km',
   },
   // ── Handover time: 10 min BLS/ILS, 20 min ALS ──
@@ -773,7 +782,7 @@ const DISCOVERY_RULES: ValidationRule[] = [
       const lvl = billingLevel(d);
       const limit = (lvl === 'ALS' || lvl === 'ICU') ? 20 : 10;
       if (ctx.handoverMinutes <= limit) return true;
-      return /motivat|clinical|unstable|ongoing treatment/.test(String(d.management_notes || '').toLowerCase());
+      return /motivat|clinical|unstable|ongoing treatment/.test(motivationText(d));
     },
     message:
       'Handover time exceeds the Discovery cap (10 min BLS/ILS, 20 min ALS). Record a PRF motivation for the extended handover or the time is cut.',
@@ -789,10 +798,10 @@ const DISCOVERY_RULES: ValidationRule[] = [
     check: (d, ctx) => {
       if (ctx.transferMinutes == null || ctx.transferKm == null || ctx.transferKm <= 0) return true;
       if (ctx.transferMinutes <= ctx.transferKm * 1.5) return true;
-      return /motivat|traffic|clinical|unstable|divert|road/.test(String(d.management_notes || '').toLowerCase());
+      return /motivat|traffic|clinical|unstable|divert|road/.test(motivationText(d));
     },
     message:
-      'Transfer (scene to hospital) time exceeds the Discovery limit of 1.5 minutes per kilometre (40 km/h average). Document a motivation in management notes.',
+      'Transfer (scene to hospital) time exceeds the Discovery limit of 1.5 minutes per kilometre (40 km/h average). Document a motivation in the Motivation / Other Notes box.',
     source: 'Discovery Ambulance Guidelines (Mar 2023) - transfer to hospital max 1.5 min/km',
   },
   // ── Return trip capped 20 km beyond loaded distance unless tracking report ──
@@ -821,7 +830,7 @@ const DISCOVERY_RULES: ValidationRule[] = [
     severity: 'warn',
     field: 'management_notes',
     check: (d) => {
-      const notes = String(d.management_notes || '').toLowerCase();
+      const notes = motivationText(d);
       return !/waiting for (a )?bed|awaiting bed|no beds|paperwork|waiting for papers|police|tow truck|tow-truck|towing|administrative delay/.test(notes);
     },
     message:
@@ -849,7 +858,7 @@ const DISCOVERY_RULES: ValidationRule[] = [
     field: 'closest_facility_bypassed',
     check: (d) => {
       if (!isIFT(d) || !d.closest_facility_bypassed) return true;
-      return /motivat|specialis|no capacity|not equipped|cath lab|nearest unable/.test(String(d.management_notes || d.events_hpi || '').toLowerCase());
+      return /motivat|specialis|no capacity|not equipped|cath lab|nearest unable/.test(motivationText(d));
     },
     message:
       'Inter-facility transfers are funded only to the closest appropriately equipped facility. Document why a closer facility was bypassed, or Discovery reprices the claim.',
@@ -1040,11 +1049,11 @@ const GEMS_RULES: ValidationRule[] = [
     field: 'closest_facility_bypassed',
     check: (d) => {
       if (!d.closest_facility_bypassed) return true;
-      const notes = String(d.management_notes || d.events_hpi || '').toLowerCase();
+      const notes = motivationText(d);
       return /motivat|nearest unable|no capacity|specialis|cath lab|trauma unit|not appropriate|bypass reason/.test(notes);
     },
     message:
-      'You have bypassed the closest appropriate facility. GEMS reprices to the nearest facility able to provide the required care unless a medical justification is documented - add the reason to management notes.',
+      'You have bypassed the closest appropriate facility. GEMS reprices to the nearest facility able to provide the required care unless a medical justification is documented - add the reason to the Motivation / Other Notes box.',
     source: 'GEMS EMS Claims Manual Sec 10.1 and 11 - transport to closest appropriate facility, else repriced',
   },
   // -- Sec 10: direct admission bypassing casualty --
@@ -1123,10 +1132,10 @@ const GEMS_RULES: ValidationRule[] = [
       const lvl = billingLevel(d);
       const limit = lvl === 'BLS' ? 15 : (lvl === 'ALS' || lvl === 'ICU') ? 30 : 20;
       if (ctx.sceneMinutes <= limit) return true;
-      return /motivat|extricat|entrap|complex|delay|prolong|difficult/.test(String(d.management_notes || '').toLowerCase());
+      return /motivat|extricat|entrap|complex|delay|prolong|difficult/.test(motivationText(d));
     },
     message:
-      'On-scene time exceeds the GEMS allowance (15 min BLS, 20 min ILS, 30 min ALS/ICU). Document a motivation in management notes on the first submission or the time will be cut.',
+      'On-scene time exceeds the GEMS allowance (15 min BLS, 20 min ILS, 30 min ALS/ICU). Document a motivation in the Motivation / Other Notes box on the first submission or the time will be cut.',
     source: 'GEMS EMS Claims Manual Sec 8.3 - on-scene time guidelines per level of care',
   },
   // -- Sec 8.2: multi-patient must state "X of Y" --
@@ -1205,7 +1214,7 @@ const GEMS_RULES: ValidationRule[] = [
     check: (d, ctx) => {
       if (billingLevel(d) !== 'ILS' || ctx.ivCount === 0) return true;
       const meds = medListLower(d);
-      const notes = String(d.management_notes || d.events_hpi || '').toLowerCase();
+      const notes = motivationText(d);
       return (
         /dextrose/.test(meds) ||
         /fluid deplet|haemodynam|hemodynam|abnormal vital|deranged|co-morbid|comorbid|rapid deterior|iv sited prior|prior to arrival|significant delay/.test(notes)
@@ -1309,14 +1318,14 @@ const ER24_RULES: ValidationRule[] = [
     check: (d, ctx) => {
       if (ctx.ivCount === 0) return true;
       const meds = ctx.medTypesLower;
-      const notes = String(d.management_notes || d.events_hpi || '').toLowerCase();
+      const notes = motivationText(d);
       return (
         /dextrose/.test(meds) ||
         /fluid replac|iv medication|iv drug|during transport|rapidly deterior|rapid deterior|abnormal vital|unstable|deranged/.test(notes)
       );
     },
     message:
-      'IV access recorded without a documented indication. ER24 funds IV only for fluid replacement, IV medication during transport, or a patient who can rapidly deteriorate with abnormal vitals, otherwise it is downgraded to BLS. Document the reason in management notes.',
+      'IV access recorded without a documented indication. ER24 funds IV only for fluid replacement, IV medication during transport, or a patient who can rapidly deteriorate with abnormal vitals, otherwise it is downgraded to BLS. Document the reason in the Motivation / Other Notes box.',
     source: 'ER24 Case Management Rules - IV access established only under the listed guidelines, else downgraded to BLS',
   },
   // -- Oral medication results in BLS when transported --
@@ -1380,7 +1389,7 @@ const ER24_RULES: ValidationRule[] = [
       const cc = String(d.chief_complaint || '').toLowerCase();
       const flagged = /abdominal pain|gastroenter|obstetric|term deliver|\bent\b|malaise|general body|weakness|headache|syncope|anxiety|backache/.test(cc);
       if (!flagged) return true;
-      const notes = String(d.management_notes || d.events_hpi || d.findings_on_arrival || '').toLowerCase();
+      const notes = motivationText(d);
       return notes.length > 40 || /unstable|abnormal|hypotens|tachycard|gcs|spinal|trauma|justif|motivat/.test(notes);
     },
     message:
@@ -1396,11 +1405,11 @@ const ER24_RULES: ValidationRule[] = [
     field: 'closest_facility_bypassed',
     check: (d) => {
       if (!d.closest_facility_bypassed) return true;
-      const notes = String(d.management_notes || d.events_hpi || '').toLowerCase();
+      const notes = motivationText(d);
       return /motivat|nearest unable|no capacity|specialis|cath lab|trauma unit|not appropriate/.test(notes);
     },
     message:
-      'Closest appropriate facility bypassed. ER24 holds any deviation to the patient or service-provider account unless justified. Document the clinical reason in management notes.',
+      'Closest appropriate facility bypassed. ER24 holds any deviation to the patient or service-provider account unless justified. Document the clinical reason in the Motivation / Other Notes box.',
     source: 'ER24 Case Management Rules - transport to closest most appropriate facility; deviations for own account',
   },
   // -- Scene time: 20 min (primary and IFT); ICU 45 with motivation --
@@ -1414,10 +1423,10 @@ const ER24_RULES: ValidationRule[] = [
       const lvl = billingLevel(d);
       const limit = lvl === 'ICU' ? 45 : 20;
       if (ctx.sceneMinutes <= limit) return true;
-      return /motivat|extricat|entrap|delay|analges|difficult|complex|prolong/.test(String(d.management_notes || '').toLowerCase());
+      return /motivat|extricat|entrap|delay|analges|difficult|complex|prolong/.test(motivationText(d));
     },
     message:
-      'On-scene time exceeds the ER24 allowance (20 min for primary and most IFTs; 45 min for ICU transfers). Record a motivation in management notes or the extra time will be cut.',
+      'On-scene time exceeds the ER24 allowance (20 min for primary and most IFTs; 45 min for ICU transfers). Record a motivation in the Motivation / Other Notes box or the extra time will be cut.',
     source: 'ER24 Case Management Rules - scene-time allowance 20 min (ICU 45 min with motivation)',
   },
   // -- Only one RED (P1) patient per ALS practitioner --
