@@ -6876,31 +6876,7 @@ export default function DigitalPRFForm() {
             {/* Terms & Conditions — patient/representative acknowledgment of
                 treatment, financial responsibility, data disclosure, assumption
                 of risk and indemnity. Company name is the crew's provider. */}
-            {/* Scheme / Billing Compliance - flags that clear scheme-rule warnings
-                and print on the PDF PRF. Tick only those that apply to this call. */}
-            <SHdr t="Scheme / Billing Compliance" />
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
-              {(([
-                ['emed_notified', 'EMED / call centre notified'],
-                ['lifesaving_intervention_required', 'Lifesaving intervention required'],
-                ['second_vehicle_present', 'Second vehicle / responder on scene'],
-                ['cardiac_incident', 'Cardiac-related incident'],
-                ['rosc_achieved', 'ROSC achieved (post-CPR)'],
-                ['perfusing_rhythm_on_handover', 'Perfusing rhythm at handover'],
-                ['patient_refused_transport', 'Patient refused treatment / transport'],
-                ['vehicle_tracking_report', 'Vehicle tracking report attached'],
-                ['is_multi_patient', 'Multiple patients on this vehicle'],
-              ]) as [string, string][]).map(([cfk, clabel]) => (
-                <label key={cfk} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', background: S50, border: `1.5px solid ${fd[cfk] ? '#0369a1' : S200}`, borderRadius: 12, padding: '10px 12px' }}>
-                  <input id={`prf-field-${cfk}`} type="checkbox" checked={!!fd[cfk]} onChange={e => sf(cfk, e.target.checked)} style={{ width: 18, height: 18, accentColor: '#0369a1', cursor: 'pointer', flexShrink: 0 }} />
-                  <span style={{ fontWeight: 700, fontSize: '0.8rem', color: S900 }}>{clabel}</span>
-                </label>
-              ))}
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
-              <div><Lbl t="Supervising Practitioner HPCSA No." /><Inp fk="supervising_practitioner_pr" ph="PR / HPCSA number (BLS-only crews)" /></div>
-              <div><Lbl t="Signature-refused Reason" /><Inp fk="signature_refused_reason" ph="If a required signature is unavailable" /></div>
-            </div>
+
 
             <SHdr t="Terms and Conditions" />
             <Card>
