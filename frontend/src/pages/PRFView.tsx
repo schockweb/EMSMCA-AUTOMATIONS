@@ -1411,8 +1411,21 @@ export default function PRFView() {
                 ? motivationNotes
                 : <span style={{ fontStyle: 'italic', color: DIM }}>No motivation or additional notes recorded.</span>}
             </div>
+            {fd.extra_crew && fd.extra_crew.length > 0 && (
+              <>
+                <SectionHead label="Additional Crew" />
+                <div style={{ padding: '4px 0', borderTop: `1px solid ${LN}`, flex: 1 }}>
+                  {fd.extra_crew.map((c: any, idx: number) => (
+                    <div key={idx} style={{ padding: '4px 8px', borderBottom: idx === fd.extra_crew.length - 1 ? 'none' : `1px solid ${LN}` }}>
+                      <FieldRow label="Name" value={c.name || c.full_name} />
+                      <FieldRow label="Qual." value={c.qualification} />
+                      <FieldRow label="HPCSA" value={c.hpcsa_number} />
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
-
 
         </div>
       </div>

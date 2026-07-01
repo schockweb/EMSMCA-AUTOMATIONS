@@ -152,15 +152,27 @@ export default function ProviderLogin() {
 
       // Store partner profile for Digital PRF
       if (partnerId) {
-         const p = crewList.find(c => c.id === partnerId);
-         if (p) localStorage.setItem('crew2_profile', JSON.stringify(p));
+         const rawP = crewList.find(c => c.id === partnerId);
+         if (rawP) {
+           const p = { id: rawP.id, name: rawP.full_name, full_name: rawP.full_name, hpcsa_number: rawP.hpcsa_number, qualification: rawP.qualification };
+           localStorage.setItem('crew2_profile', JSON.stringify(p));
+         }
       } else {
          localStorage.removeItem('crew2_profile');
       }
       
       // Store ALL assisting crew members (including 1st partner) as extra_crew_profiles
       // so the dashboard shows every partner on the shift card
-      const allAssisting = assistingCrewIds.map(id => crewList.find(c => c.id === id)).filter(Boolean);
+      const allAssisting = assistingCrewIds
+        .map(id => crewList.find(c => c.id === id))
+        .filter(Boolean)
+        .map(c => ({
+          id: c!.id,
+          name: c!.full_name,
+          full_name: c!.full_name,
+          hpcsa_number: c!.hpcsa_number,
+          qualification: c!.qualification,
+        }));
       if (allAssisting.length > 0) {
          localStorage.setItem('extra_crew_profiles', JSON.stringify(allAssisting));
       } else {
