@@ -191,10 +191,10 @@ export default function ProviderLogin() {
         <span>←</span> Back
       </button>
 
-      <div className="login-card" style={{ margin: '80px 0 40px 0', minWidth: '400px' }}>
+      <div className="login-card" style={{ margin: '80px 16px 40px 16px', width: '100%', maxWidth: '400px' }}>
         
         {/* Provider Logo Header */}
-        <div className="login-logo" style={{ marginBottom: '24px' }}>
+        <div className="login-logo" style={{ marginBottom: '48px' }}>
           {providerInfo?.logo_url ? (
             <img src={providerInfo.logo_url} alt={providerInfo.name} style={{ height: 80, objectFit: 'contain', marginBottom: 16 }} />
           ) : (
@@ -217,7 +217,7 @@ export default function ProviderLogin() {
               <form onSubmit={handleAdminLogin}>
                 <div className="input-group" style={{ marginBottom: '12px' }}>
                   <input
-                    type="email"
+                    type="text"
                     className="input"
                     placeholder="Admin Email"
                     value={adminEmail}
