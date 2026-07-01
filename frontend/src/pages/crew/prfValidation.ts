@@ -1224,6 +1224,141 @@ const GEMS_RULES: ValidationRule[] = [
       'ILS IV line recorded without a documented indication. GEMS funds ILS-level IV only for: fluid replacement in a depleted/compromised patient, ILS-scope medication, abnormal vitals / high deterioration risk, or an IV sited prior to your arrival. Document the indication or it is repriced to BLS.',
     source: 'GEMS EMS Claims Manual Sec 10.1 - ILS IV considered only under the listed clinical circumstances',
   },
+
+  // ── Sec 8.3: response time 1 min/km ──
+  {
+    id: 'GEMS-RESPONSE-TIME-RATIO',
+    schemes: ['gems'],
+    phases: [4, 6],
+    severity: 'warn',
+    field: 'time_on_scene',
+    check: (d, ctx) => {
+      if (ctx.responseMinutes == null || ctx.responseKm == null || ctx.responseKm <= 0) return true;
+      if (ctx.responseMinutes <= ctx.responseKm) return true;
+      return /motivat|traffic|divert|access|scene safety|delay reason/.test(motivationText(d));
+    },
+    message:
+      'Response time exceeds the GEMS ratio of 1 minute per kilometre. Document a motivation in the Motivation / Other Notes box on the first submission or the time is cut.',
+    source: 'GEMS EMS Claims Manual Sec 8.3 - response to incident 1 min/km',
+  },
+  // ── Sec 8.3: transfer time 1.5 min/km ──
+  {
+    id: 'GEMS-TRANSFER-TIME-RATIO',
+    schemes: ['gems'],
+    phases: [5, 6],
+    severity: 'warn',
+    field: 'time_at_destination',
+    check: (d, ctx) => {
+      if (ctx.transferMinutes == null || ctx.transferKm == null || ctx.transferKm <= 0) return true;
+      if (ctx.transferMinutes <= ctx.transferKm * 1.5) return true;
+      return /motivat|traffic|clinical|unstable|divert|road/.test(motivationText(d));
+    },
+    message:
+      'Scene-to-hospital transfer time exceeds the GEMS ratio of 1.5 minutes per kilometre. Document a motivation in the Motivation / Other Notes box.',
+    source: 'GEMS EMS Claims Manual Sec 8.3 - scene-to-handover 1.5 min/km',
+  },
+  // ── Sec 8.3: handover time 15 BLS/ILS, 20 ALS/ICU ──
+  {
+    id: 'GEMS-HANDOVER-TIME-CAP',
+    schemes: ['gems'],
+    phases: [5, 6],
+    severity: 'warn',
+    field: 'time_handover',
+    check: (d, ctx) => {
+      if (ctx.handoverMinutes == null) return true;
+      const lvl = billingLevel(d);
+      const limit = (lvl === 'ALS' || lvl === 'ICU') ? 20 : 15;
+      if (ctx.handoverMinutes <= limit) return true;
+      return /motivat|clinical|unstable|complex|ongoing treatment/.test(motivationText(d));
+    },
+    message:
+      'Hospital handover time exceeds the GEMS cap (15 min BLS/ILS, 20 min ALS/ICU). Record a motivation for the extended handover.',
+    source: 'GEMS EMS Claims Manual Sec 8.3 - handover 15 min BLS/ILS, 20 min ALS/ICU',
+  },
+  // ── Sec 10.2: IFT with peripheral IV but no active fluid -> BLS ──
+  {
+    id: 'GEMS-IFT-TKVO-BLS',
+    schemes: ['gems'],
+    phases: [3, 6],
+    severity: 'warn',
+    field: 'assessment_level',
+    check: (d) => {
+      if (!isIFT(d)) return true;
+      const lvl = billingLevel(d);
+      if (lvl !== 'ILS' && lvl !== 'ALS' && lvl !== 'ICU') return true;
+      const notes = motivationText(d);
+      const tkvo = /tkvo|to keep vein open|no active fluid|short line|j-loop|j loop|prophylactic/.test(notes);
+      if (!tkvo) return true;
+      return /active fluid|infus|fluid running|fluids up|bolus/.test(notes);
+    },
+    message:
+      'Peripheral IV with no active fluid administration (TKVO / short line / J-loop) on an IFT is billed at BLS by GEMS, not ILS. Document active fluid administration, or bill BLS.',
+    source: 'GEMS EMS Claims Manual Sec 10.2 - IV with no active fluid administration billed as BLS',
+  },
+  // ── Sec 10 / 11: transport to non-hospital destination without authorisation ──
+  {
+    id: 'GEMS-NON-EMERGENCY-DEST',
+    schemes: ['gems'],
+    phases: [5, 6],
+    severity: 'warn',
+    field: 'receiving_facility',
+    check: (d) => {
+      const dest = String(d.receiving_facility || '').toLowerCase();
+      const nonEmerg = /doctor|dr rooms|dr\.? rooms|\brooms\b|clinic|medicross|day hospital|sub-acute|subacute|old age|\bhome\b|residence|frail care/.test(dest);
+      if (!nonEmerg) return true;
+      return has(d, 'preauth_number') || has(d, 'emed_reference_number');
+    },
+    message:
+      'Transport to a doctors rooms, clinic (no 24-hour trauma / overnight beds) or a residence is not covered by GEMS without EMED authorisation. Capture the authorisation, or the claim is rejected.',
+    source: 'GEMS EMS Claims Manual Sec 10 & 11 - non-hospital destinations require authorisation',
+  },
+  // ── Sec 10.1.26: resuscitation fee requires ACLS interventions ──
+  {
+    id: 'GEMS-RESUS-151-ACLS',
+    schemes: ['gems'],
+    phases: [4, 6],
+    severity: 'warn',
+    field: 'resuscitation_attempted',
+    check: (d) => {
+      if (!d.resuscitation_attempted) return true;
+      const meds = medListLower(d);
+      const circ = Array.isArray(d.circulation_interventions) ? d.circulation_interventions : [];
+      const air = Array.isArray(d.airway_interventions) ? d.airway_interventions : [];
+      const aclsDrug = /adrenaline|amiodarone|atropine|lignocaine|lidocaine|sodium bicarb|magnesium/.test(meds);
+      const aclsProc = circ.includes('Defibrillation') || circ.includes('Cardio Version') || circ.includes('Pacing') || air.includes('Intubation');
+      return aclsDrug || aclsProc;
+    },
+    message:
+      'A resuscitation fee (code 151) is only billable when ACLS interventions were used - an ALS drug, cardioversion / defibrillation, external pacing or endotracheal intubation. Record the ACLS intervention or the resuscitation fee is not paid.',
+    source: 'GEMS EMS Claims Manual Sec 10.1.26 - resuscitation fee requires ACLS interventions',
+  },
+  // ── Sec 8.2: only one Priority 1 patient per ambulance ──
+  {
+    id: 'GEMS-MULTI-P1-LIMIT',
+    schemes: ['gems'],
+    phases: [2, 6],
+    severity: 'warn',
+    field: 'patient_count',
+    check: (d) => {
+      const isP1 = /priority\s*1|^p1$|\bp1\b/i.test(String(d.priority || ''));
+      return !(isP1 && Number(d.patient_count || 1) > 1);
+    },
+    message:
+      'Only one Priority 1 patient may be transported and billed per ambulance. Confirm the patient count / priority for this critical patient.',
+    source: 'GEMS EMS Claims Manual Sec 8.2 - only one P1 patient per ambulance',
+  },
+  // ── Sec 10.1.16: Z-code cannot be the primary diagnosis ──
+  {
+    id: 'GEMS-Z-CODE-PRIMARY',
+    schemes: ['gems'],
+    phases: [3, 6],
+    severity: 'warn',
+    field: 'icd10_primary',
+    check: (d) => !String(d.icd10_primary || '').trim().toUpperCase().startsWith('Z'),
+    message:
+      'An ICD-10 code starting with Z cannot be used as the primary diagnosis on a GEMS claim. Capture a clinical primary diagnosis code.',
+    source: 'GEMS EMS Claims Manual Sec 10.1.16 - Z-codes not acceptable as a primary diagnosis',
+  },
 ];
 
 // ============================================================================
