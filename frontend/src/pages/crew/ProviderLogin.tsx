@@ -347,8 +347,6 @@ export default function ProviderLogin() {
           </div>
         </div>
       )}
-
-      </div>
     </div>
   );
 }
