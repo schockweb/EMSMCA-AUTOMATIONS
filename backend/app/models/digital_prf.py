@@ -114,6 +114,7 @@ class DigitalPRF(Base):
     witness_signature: Mapped[Union[str, None]] = mapped_column(Text, nullable=True)
     handover_signature: Mapped[Union[str, None]] = mapped_column(Text, nullable=True)
     crew_signature: Mapped[Union[str, None]] = mapped_column(Text, nullable=True)
+    valuables_signature: Mapped[Union[str, None]] = mapped_column(Text, nullable=True)
 
     # ── Pipeline linkage ──────────────────────────────────
     case_id: Mapped[Union[uuid.UUID, None]] = mapped_column(

@@ -5,7 +5,7 @@
 import { useState, useEffect } from 'react';
 import type { FormEvent } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import axios from '../../api/client';
 
 interface ProviderInfo {
   name: string;
@@ -76,10 +76,16 @@ export default function ProviderLogin() {
   useEffect(() => {
     if (!providerSlug) return;
     axios.get(`/api/providers/${providerSlug}/public-crew`)
-      .then(res => setCrewList(res.data))
+      .then(res => {
+        const data = res.data;
+        setCrewList(Array.isArray(data) ? data : []);
+      })
       .catch(() => {});
     axios.get(`/api/providers/${providerSlug}/public-vehicles`)
-      .then(res => setVehicleList(res.data))
+      .then(res => {
+        const data = res.data;
+        setVehicleList(Array.isArray(data) ? data : []);
+      })
       .catch(() => {});
   }, [providerSlug]);
 
@@ -248,7 +254,7 @@ export default function ProviderLogin() {
         {/* Provider Logo Header */}
         <div className="login-logo" style={{ marginBottom: '24px' }}>
           {providerInfo?.logo_url ? (
-            <img src={providerInfo.logo_url} alt={providerInfo.name} style={{ height: 120, objectFit: 'contain', marginBottom: 16 }} />
+            <img src={providerInfo.logo_url} alt={providerInfo.name} style={{ height: 72, objectFit: 'contain', marginBottom: 16 }} />
           ) : (
             <h1 style={{ marginBottom: 16 }}>{providerInfo?.name || 'Company Portal'}</h1>
           )}

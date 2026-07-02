@@ -244,7 +244,25 @@ export function FullscreenCanvas({ label, initial, onCancel, onSave }: CanvasPro
   const save = () => {
     const canvas = canvasRef.current;
     if (!canvas || !hasContent) return;
-    onSave(canvas.toDataURL('image/png'));
+    
+    // Downscale massive mobile canvases before export to prevent 2MB+ base64
+    // payloads that bloat the DB and trigger Nginx 413 Payload Too Large.
+    const MAX_WIDTH = 600;
+    let exportDataUrl = canvas.toDataURL('image/png');
+    
+    if (canvas.width > MAX_WIDTH) {
+      const scale = MAX_WIDTH / canvas.width;
+      const tCanvas = document.createElement('canvas');
+      tCanvas.width = MAX_WIDTH;
+      tCanvas.height = canvas.height * scale;
+      const tCtx = tCanvas.getContext('2d');
+      if (tCtx) {
+        tCtx.drawImage(canvas, 0, 0, tCanvas.width, tCanvas.height);
+        exportDataUrl = tCanvas.toDataURL('image/webp', 0.8);
+      }
+    }
+    
+    onSave(exportDataUrl);
   };
 
   return (

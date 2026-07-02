@@ -1578,8 +1578,9 @@ tr:hover td {
     gap: 8px !important;
   }
   .login-logo img {
-    width: 88px !important;
-    height: 88px !important;
+    width: auto !important;
+    height: 140px !important;
+    max-width: 100%;
   }
   .login-logo > div > div > div:first-child {
     font-size: 1.6rem !important;
@@ -1902,4 +1903,6 @@ label:has(+ .pulsate-red),
    top navbar globally so it never bleeds into print output. Page-specific
    layout resets live in the relevant component's <style> block. */
 @media print {
-  .navbar { display
+  .navbar { display: none !important; }
+  .no-print { display: none !important; }
+}

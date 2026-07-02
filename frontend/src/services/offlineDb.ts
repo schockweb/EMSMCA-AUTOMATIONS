@@ -63,7 +63,7 @@ export async function getPending(): Promise<OfflineEntry[]> {
   // would show as "pending upload" forever, even when online.
   const all = (await db.getAll(STORE)) as OfflineEntry[];
   return all
-    .filter(e => e.status === 'pending' || e.status === 'syncing')
+    .filter(e => e.status === 'pending' || e.status === 'syncing' || e.status === 'failed')
     .sort((a, b) => a.timestamp - b.timestamp);
 }
 
@@ -95,7 +95,7 @@ export async function markFailed(key: string, error: string) {
 export async function getCount(): Promise<number> {
   const db = await initDb();
   const all = await db.getAll(STORE);
-  return all.filter(e => e.status === 'pending' || e.status === 'syncing').length;
+  return all.filter(e => e.status === 'pending' || e.status === 'syncing' || e.status === 'failed').length;
 }
 
 export async function getAll(): Promise<OfflineEntry[]> {

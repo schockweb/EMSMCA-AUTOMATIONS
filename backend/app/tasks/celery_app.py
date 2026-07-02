@@ -5,6 +5,7 @@ from __future__ import annotations
 import traceback
 from celery import Celery
 from celery.signals import task_failure
+from kombu import Queue, Exchange
 from app.config import get_settings
 
 settings = get_settings()
@@ -36,16 +37,20 @@ celery_app.conf.update(
     task_default_queue="ems_default",
     task_default_exchange="ems_default",
     task_default_routing_key="ems_default",
-    task_queues={
-        "ems_default": {
-            "exchange": "ems_default",
-            "routing_key": "ems_default",
-            "queue_arguments": {
-                "x-dead-letter-exchange": "ems_dlx",
-                "x-dead-letter-routing-key": "ems_dead_letter",
-            },
-        },
-    },
+    task_queues=(
+        Queue("ems_default", Exchange("ems_default"), routing_key="ems_default", queue_arguments={
+            "x-dead-letter-exchange": "ems_dlx",
+            "x-dead-letter-routing-key": "ems_dead_letter",
+        }),
+        Queue("ems_critical", Exchange("ems_critical"), routing_key="ems_critical", queue_arguments={
+            "x-dead-letter-exchange": "ems_dlx",
+            "x-dead-letter-routing-key": "ems_dead_letter",
+        }),
+        Queue("ems_batch", Exchange("ems_batch"), routing_key="ems_batch", queue_arguments={
+            "x-dead-letter-exchange": "ems_dlx",
+            "x-dead-letter-routing-key": "ems_dead_letter",
+        }),
+    ),
 
     # ── Worker Heartbeat & Task Timeout (Item 8) ──────────
     # Hard kill after 120s — prevents hung workers consuming a slot forever.

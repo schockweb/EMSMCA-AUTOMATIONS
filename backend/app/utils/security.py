@@ -122,6 +122,7 @@ async def blacklist_token(
 ) -> None:
     """Add a token JTI to the blacklist."""
     from app.models.token_blacklist import TokenBlacklist
+    from sqlalchemy.exc import IntegrityError
     entry = TokenBlacklist(
         jti=jti,
         user_id=user_id,
@@ -129,7 +130,11 @@ async def blacklist_token(
         expires_at=expires_at,
     )
     db.add(entry)
-    await db.flush()
+    try:
+        async with db.begin_nested():
+            await db.flush()
+    except IntegrityError:
+        pass  # Already blacklisted concurrently
 
 
 # ── Current User Dependency ───────────────────────

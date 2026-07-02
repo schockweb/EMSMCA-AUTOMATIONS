@@ -512,3 +512,32 @@ export default function BodyDiagram({ value, onChange }: Props) {
     </div>
   );
 }
+
+// ── Read-only variant for PDF export ───────────────────────────────────────
+export function PrintableInjuryDiagram({ value }: { value?: BodyMark[] }) {
+  const marks = Array.isArray(value) ? value : [];
+  if (marks.length === 0) return null;
+
+  const bodyMarks = marks.filter(m => m.view === 'body');
+  const headMarks = marks.filter(m =>
+    m.view === 'head_front' || m.view === 'head_left' ||
+    m.view === 'head_right' || m.view === 'head_back' || m.view === 'head'
+  );
+
+  return (
+    <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start', justifyContent: 'center' }}>
+      {bodyMarks.length > 0 && (
+        <div style={{ flex: 1, maxWidth: BODY_MAX_PX }}>
+          <div style={{ fontSize: '0.75rem', fontWeight: 800, color: '#0f172a', textTransform: 'uppercase', marginBottom: 8, textAlign: 'center' }}>Body</div>
+          <BodyCanvas marks={bodyMarks} activeSymbol={null} onAdd={() => {}} onRemoveMark={() => {}} />
+        </div>
+      )}
+      {headMarks.length > 0 && (
+        <div style={{ flex: 1, maxWidth: HEAD_MAX_W_PX }}>
+          <div style={{ fontSize: '0.75rem', fontWeight: 800, color: '#0f172a', textTransform: 'uppercase', marginBottom: 8, textAlign: 'center' }}>Head</div>
+          <HeadCanvas marks={headMarks} activeSymbol={null} onAdd={() => {}} onRemoveMark={() => {}} />
+        </div>
+      )}
+    </div>
+  );
+}

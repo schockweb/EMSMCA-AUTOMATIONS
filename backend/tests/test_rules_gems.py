@@ -185,6 +185,7 @@ def _clean_primary_context() -> dict:
         "patient_count": 1,
         "priority": "ORANGE",
         "cpt_codes": ["125"],
+        "has_ecg_attached": True,
     }
 
 

@@ -3,9 +3,9 @@
  * Renders the submitted Digital PRF in a clean, print-ready paper-form layout
  * with the provider's branding (logo, PR number, address, phone) prominent.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, Fragment } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import axios from 'axios';
+import axios from '../api/client';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 
@@ -13,6 +13,8 @@ import html2canvas from 'html2canvas';
 const GREEN    = '#2f8f4a';      // section headers bar
 const GREEN_DK = '#1f6a33';      // accent + provider brand
 const GREEN_TINT = '#eaf6ed';    // label cell background
+
+import { PrintableInjuryDiagram } from '../components/BodyDiagram';
 const INK      = '#0b1020';      // body text
 const MUT      = '#5b6478';      // secondary text
 const DIM      = '#94a3b8';      // placeholder / empty marker
@@ -130,12 +132,12 @@ const ProviderLogo = ({ prov, height = 36 }: { prov: any; height?: number }) => 
 // Densities are deliberately tight: the whole form has to fit two A4
 // landscape pages with every captured field rendered, so vertical
 // padding is kept under 4 px and font sizes under 0.8 rem throughout.
-const FieldRow = ({ label, value, labelWidth = 95, valueMin = 13 }: {
-  label: string; value?: string | null | React.ReactNode; labelWidth?: number; valueMin?: number;
+const FieldRow = ({ label, value, labelWidth = 95, valueMin = 13, flex }: {
+  label: string; value?: string | null | React.ReactNode; labelWidth?: number; valueMin?: number; flex?: number;
 }) => {
   const blank = typeof value === 'string' ? value.trim() === '' : (value === null || value === undefined);
   return (
-    <div style={{ display: 'flex', alignItems: 'stretch', borderTop: `1px solid ${LN}` }}>
+    <div style={{ display: 'flex', alignItems: 'stretch', borderTop: `1px solid ${LN}`, flex }}>
       <div style={{
         padding: '2px 6px', fontSize: '0.56rem', fontWeight: 800, color: INK,
         textTransform: 'uppercase', letterSpacing: '0.04em',
@@ -241,22 +243,34 @@ export default function PRFView() {
     axios.get(`/api/digital-prf/admin/by-case/${caseId}`, {
       headers: { Authorization: `Bearer ${token}` },
     })
-      .then(r => setPrf(r.data))
+      .then(r => {
+        const data = r.data;
+        // The admin/by-case endpoint returns signatures as flat top-level fields
+        // (patient_signature, crew_signature, etc.) while PRFView reads them via
+        // prf.signatures.xxx (the nested format used by the PDF render endpoint).
+        // Normalise here so all SignatureBox references work regardless of which
+        // endpoint shape is returned.
+        if (!data.signatures) {
+          data.signatures = {
+            patient_signature:   data.patient_signature   || null,
+            witness_signature:   data.witness_signature   || null,
+            handover_signature:  data.handover_signature  || null,
+            crew_signature:      data.crew_signature      || null,
+            valuables_signature: data.valuables_signature || null,
+          };
+        }
+        setPrf(data);
+      })
       .catch(e => setErr(e.response?.data?.detail || 'Failed to load PRF'));
   }, [caseId]);
 
-  // Open the share prompt only when ALL of these hold:
-  //   1. The crew arrived from a `?send=1` post-submit redirect
-  //   2. The PRF data has loaded
-  //   3. The PRF carries a valid Receiving Facility Email
-  // Without all three the modal stays hidden — no point asking the crew
-  // to send a PDF when there's nowhere to send it.
+  // Open the share prompt when the crew arrives from a `?send=1` post-submit
+  // redirect and the PRF data has loaded. The prompt asks whether to send the
+  // rendered PRF to the receiving facility via Gmail.
   useEffect(() => {
     if (searchParams.get('send') !== '1') return;
     if (!prf) return;
-    const email = (prf.form_data?.handover_doctor_email || '').trim();
-    const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-    if (valid) setShowSharePrompt(true);
+    setShowSharePrompt(true);
   }, [searchParams, prf]);
 
   // Pre-warm the PDF in the background as soon as PRF data lands. By the
@@ -324,7 +338,7 @@ export default function PRFView() {
     // never scales text below ~70% (1 / 1.4) and stays legible.
     const SHRINK_LIMIT_MM = maxH * 1.4;
 
-    const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'landscape' });
+    const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'landscape', compress: true });
     let firstSheet = true;
     const newSheet = () => {
       if (!firstSheet) pdf.addPage('a4', 'landscape');
@@ -360,9 +374,9 @@ export default function PRFView() {
             w = el.offsetWidth || w;
           }
           canvas = await html2canvas(el, {
-            // Drop the supersampling factor on widened pages so the canvas
-            // never balloons past tablet memory limits (~7000px wide).
-            scale: (el.offsetWidth || 1220) > 1700 ? 2 : 3,
+            // Scale 1.5 gives ~150 DPI on A4 — crisp enough for medical
+            // forms while keeping canvas memory and PDF size manageable.
+            scale: 1.5,
             useCORS: true,
             backgroundColor: '#ffffff',
             windowWidth: el.scrollWidth,
@@ -377,18 +391,18 @@ export default function PRFView() {
         const ch = canvas?.height || 0;
         if (!canvas || !cw || !ch) continue;      // skip a zero-size snapshot
 
+        // Use JPEG at 0.72 quality — shrinks the PDF from ~64MB (PNG) to
+        // ~2-4MB while keeping text perfectly readable on A4 printouts.
+        const imgData = canvas.toDataURL('image/jpeg', 0.72);
+        const imgFormat = 'JPEG';
+
         const wScale = maxW / cw;                  // mm per source px at full width
         const fullH = ch * wScale;                 // page height in mm rendered full-width
 
         if (fullH <= maxH + 0.5) {
-          // Common case — the whole page fits one sheet at full width. If it
-          // lands within 8% of the sheet height, stretch that last sliver so
-          // the form fills the page edge-to-edge (≤8% vertical stretch is
-          // imperceptible on a form and cannot overlap rows — it's a single
-          // raster image).
           const drawH = fullH >= maxH * 0.92 ? maxH : fullH;
           newSheet();
-          pdf.addImage(canvas.toDataURL('image/png'), 'PNG', INSET_MM, INSET_MM, maxW, drawH, undefined, 'NONE');
+          pdf.addImage(imgData, imgFormat, INSET_MM, INSET_MM, maxW, drawH, undefined, 'FAST');
         } else if (fullH <= SHRINK_LIMIT_MM) {
           // Modest overflow — shrink uniformly onto ONE clean sheet, centred.
           // Aspect ratio is preserved so fields can never smear or overlap.
@@ -396,7 +410,7 @@ export default function PRFView() {
           const drawW = cw * scale;
           const drawH = ch * scale;
           newSheet();
-          pdf.addImage(canvas.toDataURL('image/png'), 'PNG', INSET_MM + (maxW - drawW) / 2, INSET_MM, drawW, drawH, undefined, 'NONE');
+          pdf.addImage(imgData, imgFormat, INSET_MM + (maxW - drawW) / 2, INSET_MM, drawW, drawH, undefined, 'FAST');
         } else {
           // Very tall page — slice into full-width A4 bands across consecutive
           // sheets so every row stays full size and readable, never clipped.
@@ -413,7 +427,7 @@ export default function PRFView() {
               ctx.drawImage(canvas, 0, sy, cw, hpx, 0, 0, cw, hpx);
             }
             newSheet();
-            pdf.addImage(band.toDataURL('image/png'), 'PNG', INSET_MM, INSET_MM, maxW, hpx * wScale, undefined, 'NONE');
+            pdf.addImage(band.toDataURL('image/jpeg', 0.72), imgFormat, INSET_MM, INSET_MM, maxW, hpx * wScale, undefined, 'FAST');
           }
         }
       }
@@ -542,99 +556,30 @@ export default function PRFView() {
   // The implementation decides path B vs A *before* any await, opens
   // the Gmail window immediately if needed, then proceeds with the
   // async PDF build.
-  // SYNCHRONOUS (no async / no await). iOS Safari requires
-  // `navigator.share()` to be the very next thing executed inside a
-  // user-gesture event — any await between the tap and the share call
-  // drops the gesture flag and the share request is silently ignored.
-  // The PDF File is pre-built in the background (see the effect above)
-  // so we have it ready and can call share() instantly on tap.
-  //
-  // If the PDF isn't ready yet (rare — page loaded slowly, crew tapped
-  // immediately) we fall back to opening Gmail compose and letting the
-  // crew attach manually once the download completes.
+  // Open Gmail web compose with To/Subject/Body pre-filled and simultaneously
+  // download the PDF so the crew can attach it via the paperclip icon in Gmail.
   const handleShare = () => {
     const fileName = `PRF_${prf.prf_number || 'export'}.pdf`;
     const toEmail = (prf.form_data?.handover_doctor_email || '').trim();
     const patientName = [prf.form_data?.patient_name, prf.form_data?.patient_surname]
       .filter(Boolean).join(' ') || 'the patient';
     const subject = `Digital PRF #${prf.prf_number} — ${patientName}`;
-
-    const nav = navigator as any;
-    const canFileShare = !!(
-      sharePdfFile &&
-      window.isSecureContext &&
-      nav.canShare &&
-      nav.canShare({ files: [sharePdfFile] })
-    );
-
-    if (canFileShare && sharePdfFile) {
-      // PATH A — synchronous Web Share with the pre-built PDF.
-      // Auto-copy email is fire-and-forget so it doesn't break the
-      // gesture chain.
-      if (toEmail && navigator.clipboard?.writeText) {
-        navigator.clipboard.writeText(toEmail).catch(() => { /* noop */ });
-      }
-      nav.share({
-        files: [sharePdfFile],
-        title: subject,
-        text: toEmail ? `Send to: ${toEmail}` : '',
-      }).catch(() => { /* user cancelled or unsupported, fine */ });
-      return;
-    }
-
-    // PATH B — Web Share isn't available (or the pre-warmed PDF isn't
-    // ready yet). Open the Gmail APP directly via platform-specific URL
-    // schemes so the crew lands inside Gmail's compose screen, then
-    // download the PDF so they can attach it via the paperclip.
-    //
-    //   iOS      → googlegmail://co?...   (Gmail iOS app)
-    //   Android  → intent://...#Intent;package=com.google.android.gm
-    //   Desktop  → mail.google.com/mail/?view=cm (web compose)
-    //
-    // The URL navigation MUST fire synchronously before the PDF save —
-    // iOS Safari only allows `googlegmail://` from inside the user
-    // gesture, and the synthetic download anchor click below doesn't
-    // need a gesture so it can run after.
     const body = `Please find the Digital PRF for ${patientName} (Case ${prf.case_number || prf.prf_number}) attached.`;
+
     const to = encodeURIComponent(toEmail);
     const su = encodeURIComponent(subject);
     const bd = encodeURIComponent(body);
-    const ua = navigator.userAgent || '';
-    const isIOS = /iPhone|iPad|iPod/i.test(ua);
-    const isAndroid = /Android/i.test(ua);
-    const gmailWebUrl = toEmail
+
+    // Build Gmail web compose URL with pre-filled fields
+    const gmailUrl = toEmail
       ? `https://mail.google.com/mail/?view=cm&fs=1&to=${to}&su=${su}&body=${bd}`
-      : 'https://mail.google.com/mail/?view=cm&fs=1';
+      : `https://mail.google.com/mail/?view=cm&fs=1&su=${su}&body=${bd}`;
 
-    if (isIOS) {
-      // googlegmail://co opens the Gmail iOS app directly with the
-      // To/Subject/Body fields pre-populated. If the app isn't
-      // installed the navigation silently fails — a 1500ms fallback
-      // timer routes to web compose so the crew still gets there.
-      const appUrl = toEmail
-        ? `googlegmail://co?to=${to}&subject=${su}&body=${bd}`
-        : 'googlegmail://co';
-      const fallback = window.setTimeout(() => {
-        window.location.href = gmailWebUrl;
-      }, 1500);
-      window.addEventListener('pagehide', () => clearTimeout(fallback), { once: true });
-      window.location.href = appUrl;
-    } else if (isAndroid) {
-      // Android intent pinned to package=com.google.android.gm so
-      // the OS opens Gmail specifically (no app chooser). If Gmail
-      // isn't installed, browser_fallback_url routes to web compose.
-      const intentUrl =
-        `intent://compose?to=${to}&subject=${su}&body=${bd}` +
-        `#Intent;scheme=mailto;package=com.google.android.gm;` +
-        `S.browser_fallback_url=${encodeURIComponent(gmailWebUrl)};end`;
-      window.location.href = intentUrl;
-    } else {
-      window.open(gmailWebUrl, '_blank', 'noopener,noreferrer');
-    }
+    // Open Gmail compose in a new tab — must fire synchronously inside the
+    // click handler so popup blockers don't intercept it.
+    window.open(gmailUrl, '_blank', 'noopener,noreferrer');
 
-    // Trigger PDF download in the background. Synthetic anchor clicks
-    // don't need a user gesture so this works even after the Gmail
-    // navigation above has fired.
+    // Download the PDF so the crew can attach it in Gmail via the paperclip.
     if (sharePdfFile) {
       const a = document.createElement('a');
       a.href = URL.createObjectURL(sharePdfFile);
@@ -718,7 +663,7 @@ export default function PRFView() {
   const debtorSameAsPatient =
     (Array.isArray(fd.flags) && fd.flags.includes('debtor_same_as_patient')) ||
     (!anyValue(fd, debtorKeys) && patientHasData);
-  const valuablesEmpty = isBlank(fd.valuables_handed_to) && isBlank(fd.valuables_description);
+  const valuablesEmpty = isBlank(fd.valuables_handed_to) && isBlank(fd.valuables_description) && isBlank(fd.valuables_signature) && isBlank(prf.signatures?.valuables_signature);
   // Page-1 "Motivation / Other Notes" is its own field now — NO fallback to
   // management_notes (that made the Motivation and Management boxes identical).
   const motivationNotes: string = fd.motivation_notes || '';
@@ -789,8 +734,7 @@ export default function PRFView() {
             opens with the recipient pre-filled — the crew attaches the
             PDF manually. The button is only visible once the email field
             has a value (no destination otherwise). */}
-        {fd.handover_doctor_email && (
-          <button onClick={handleShare} style={{
+        <button onClick={handleShare} style={{
             padding: '9px 18px', border: 'none', marginRight: 10,
             background: 'linear-gradient(135deg, #2563eb, #1d4ed8)', color: '#fff',
             fontSize: '0.84rem', fontWeight: 800, cursor: 'pointer', borderRadius: 6,
@@ -805,7 +749,6 @@ export default function PRFView() {
             </svg>
             Send a copy to receiving facility
           </button>
-        )}
         <button onClick={handlePrint} style={{
           padding: '9px 16px', border: `1px solid #cbd5e1`, marginRight: 10,
           background: '#fff', color: INK,
@@ -1124,6 +1067,9 @@ export default function PRFView() {
             {fd.mechanism_other && (
               <FieldRow label="Detail" value={fd.mechanism_other} valueMin={24} />
             )}
+            
+            <SectionHead label="Patient Priority" />
+            <FieldRow label="Priority" value={fd.priority || '—'} />
             <div style={{ flex: 1, borderTop: `1px solid ${LN}` }} />
           </div>
 
@@ -1246,6 +1192,12 @@ export default function PRFView() {
                 ['Amount (R)', fd.med_aid_quoted_amount],
               ]} />
             )}
+            {/* Handover Signature — moved here per user request */}
+            <SectionHead label="Handover Signature" />
+            <div style={{ padding: '6px 8px', borderTop: `1px solid ${LN}`, flexShrink: 0 }}>
+              <SignatureBox src={prf.signatures?.handover_signature} minHeight={80} />
+            </div>
+
             {/* Hospital Sticker — dedicated placeholder, now positioned beneath
                 Medical Aid Information. Shows the captured sticker inline when
                 present, otherwise a reserved "affix here" box so the slot is
@@ -1355,13 +1307,17 @@ export default function PRFView() {
             ) : (
               <>
                 <FieldRow label="Handed To"   value={fd.valuables_handed_to} />
-                <FieldRow label="Description" value={fd.valuables_description} valueMin={28} />
+                <FieldRow label="Description" value={fd.valuables_description} valueMin={80} flex={1} />
+                {(fd.valuables_signature || prf.signatures?.valuables_signature) && (
+                  <>
+                    <div style={{ padding: '4px 7px', background: SOFT_BG, borderTop: `1px solid ${LN}` }}>
+                      <div style={{ fontSize: '0.58rem', fontWeight: 900, color: MUT, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Recipient Signature</div>
+                      <SignatureBox src={fd.valuables_signature || prf.signatures?.valuables_signature} minHeight={60} />
+                    </div>
+                  </>
+                )}
               </>
             )}
-            <SectionHead label="Handover Signature" />
-            <div style={{ padding: '6px 8px', borderTop: `1px solid ${LN}` }}>
-              <SignatureBox src={prf.signatures?.handover_signature} minHeight={80} />
-            </div>
             {fd.raf_sketch && (
               <>
                 <SectionHead label="RAF Sketch" />
@@ -1549,8 +1505,68 @@ export default function PRFView() {
             <FieldRow label="Last Meal Time" value={fd.last_meal_time} />
             <FieldRow label="Events / HPI"   value={fd.events_hpi}           valueMin={48} />
 
-            {/* IV Therapy + Medication moved to a full-width band below the
-                clinical grid (see end of page 2) so their columns have room. */}
+            {/* Intravenous Therapy (stacked vertically) */}
+            <SectionHead label="Intravenous Therapy" />
+            {(ivRows.length ? ivRows : [{}]).map((row: any, i: number) => (
+              <Fragment key={`iv-${i}`}>
+                {i > 0 && <div style={{ borderTop: `2px solid ${GREEN_DK}` }} />}
+                <FieldRow label="Type / Fluid" value={[row.type, row.jelco_size].filter(Boolean).join(' · ')} />
+                <FieldRow label="Site" value={row.site} />
+                <div style={{ display: 'flex' }}>
+                  <div style={{ flex: 1 }}><FieldRow label="Vol Inf." value={row.vol_infused} /></div>
+                  <div style={{ flex: 1, borderLeft: `1px solid ${LN}` }}><FieldRow label="Time Up" value={row.time_up} /></div>
+                </div>
+                <FieldRow label="Reason" value={row.indication} />
+                <div style={{ padding: '4px 7px', background: SOFT_BG, borderTop: `1px solid ${LN}` }}>
+                  <div style={{ fontSize: '0.58rem', fontWeight: 900, color: MUT, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Signature</div>
+                  <div style={{
+                    minHeight: 50, width: '100%', boxSizing: 'border-box',
+                    border: '2px solid #475569', borderRadius: 4, background: '#fff',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 2,
+                    position: 'relative',
+                  }}>
+                    <div style={{ position: 'absolute', bottom: '25%', left: '10%', right: '10%', borderBottom: '2px dotted #cbd5e1', zIndex: 0 }} />
+                    {typeof row.sign === 'string' && row.sign.startsWith('data:image/') ? (
+                      <img src={row.sign} alt="Sign" style={{ maxWidth: '100%', maxHeight: 44, objectFit: 'contain', position: 'relative', zIndex: 1 }} />
+                    ) : (
+                      <span style={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: row.sign ? INK : DIM, position: 'relative', zIndex: 1 }}>{row.sign || 'Not captured'}</span>
+                    )}
+                  </div>
+                </div>
+              </Fragment>
+            ))}
+
+            {/* Medication / Infusion (stacked vertically) */}
+            <SectionHead label="Medication / Infusion" />
+            {(medRows.length ? medRows : [{}]).map((row: any, i: number) => (
+              <Fragment key={`med-${i}`}>
+                {i > 0 && <div style={{ borderTop: `2px solid ${GREEN_DK}` }} />}
+                <FieldRow label="Drug / Type" value={row.type} />
+                <FieldRow label="Route" value={row.route} />
+                <div style={{ display: 'flex' }}>
+                  <div style={{ flex: 1 }}><FieldRow label="Dose" value={row.dose} /></div>
+                  <div style={{ flex: 1, borderLeft: `1px solid ${LN}` }}><FieldRow label="Time" value={row.time} /></div>
+                </div>
+                <FieldRow label="Reason" value={row.reason} />
+                <div style={{ padding: '4px 7px', background: SOFT_BG, borderTop: `1px solid ${LN}` }}>
+                  <div style={{ fontSize: '0.58rem', fontWeight: 900, color: MUT, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Signature</div>
+                  <div style={{
+                    minHeight: 50, width: '100%', boxSizing: 'border-box',
+                    border: '2px solid #475569', borderRadius: 4, background: '#fff',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 2,
+                    position: 'relative',
+                  }}>
+                    <div style={{ position: 'absolute', bottom: '25%', left: '10%', right: '10%', borderBottom: '2px dotted #cbd5e1', zIndex: 0 }} />
+                    {typeof row.sign === 'string' && row.sign.startsWith('data:image/') ? (
+                      <img src={row.sign} alt="Sign" style={{ maxWidth: '100%', maxHeight: 44, objectFit: 'contain', position: 'relative', zIndex: 1 }} />
+                    ) : (
+                      <span style={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: row.sign ? INK : DIM, position: 'relative', zIndex: 1 }}>{row.sign || 'Not captured'}</span>
+                    )}
+                  </div>
+                </div>
+              </Fragment>
+            ))}
+
             <div style={{ flex: 1, borderTop: `1px solid ${LN}` }} />
           </div>
 
@@ -1654,81 +1670,7 @@ export default function PRFView() {
           </div>
         </div>
 
-        {/* ── IV Therapy + Medication — full-width stacked tables. Full width
-              gives the Indication/Reason and Signature columns real room and
-              scales cleanly as more lines are added (rows just grow downward). ── */}
 
-        {/* Intravenous Therapy */}
-        <SectionHead label="Intravenous Therapy" />
-        <div style={{
-          display: 'grid', gridTemplateColumns: '2fr 1.3fr 1fr 1fr 3fr 2.4fr',
-          background: GREEN_TINT, fontSize: '0.58rem', fontWeight: 800,
-          textTransform: 'uppercase', letterSpacing: '0.06em',
-          borderTop: `2px solid ${LN}`, borderBottom: `1px solid ${LN}`, color: INK,
-        }}>
-          <div style={{ padding: '4px 8px', borderRight: `1px solid ${LN}` }}>Type / Fluid</div>
-          <div style={{ padding: '4px 8px', borderRight: `1px solid ${LN}` }}>Site</div>
-          <div style={{ padding: '4px 8px', borderRight: `1px solid ${LN}` }}>Vol Inf.</div>
-          <div style={{ padding: '4px 8px', borderRight: `1px solid ${LN}` }}>Time Up</div>
-          <div style={{ padding: '4px 8px', borderRight: `1px solid ${LN}` }}>Indication / Reason</div>
-          <div style={{ padding: '4px 8px' }}>Sign</div>
-        </div>
-        {(ivRows.length ? ivRows : [{}, {}]).map((row: any, i: number) => (
-          <div key={i} style={{
-            display: 'grid', gridTemplateColumns: '2fr 1.3fr 1fr 1fr 3fr 2.4fr',
-            borderBottom: `1px solid ${LN}`, fontSize: '0.74rem',
-            fontFamily: 'ui-monospace, monospace',
-          }}>
-            <div style={{ padding: '5px 8px', borderRight: `1px solid ${LN}`, minHeight: 32, display: 'flex', alignItems: 'center' }}>{[row.type, row.jelco_size].filter(Boolean).join(' · ')}</div>
-            <div style={{ padding: '5px 8px', borderRight: `1px solid ${LN}`, display: 'flex', alignItems: 'center' }}>{row.site || ''}</div>
-            <div style={{ padding: '5px 8px', borderRight: `1px solid ${LN}`, display: 'flex', alignItems: 'center' }}>{row.vol_infused || ''}</div>
-            <div style={{ padding: '5px 8px', borderRight: `1px solid ${LN}`, display: 'flex', alignItems: 'center' }}>{row.time_up || ''}</div>
-            <div style={{ padding: '5px 8px', borderRight: `1px solid ${LN}`, fontFamily: '"Segoe UI", sans-serif', display: 'flex', alignItems: 'center' }}>{row.indication || ''}</div>
-            <div style={{ padding: '4px 6px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <div style={{ width: '94%', minHeight: 30, border: `1px solid #cbd5e1`, borderRadius: 4, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 2 }}>
-                {typeof row.sign === 'string' && row.sign.startsWith('data:image/')
-                  ? <img src={row.sign} alt="Sign" style={{ maxWidth: '100%', maxHeight: 28, objectFit: 'contain' }} />
-                  : <span style={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: row.sign ? INK : DIM }}>{row.sign || ''}</span>}
-              </div>
-            </div>
-          </div>
-        ))}
-
-        {/* Medication / Infusion */}
-        <SectionHead label="Medication / Infusion" />
-        <div style={{
-          display: 'grid', gridTemplateColumns: '2.5fr 1fr 1fr 1fr 3fr 2.4fr',
-          background: GREEN_TINT, fontSize: '0.58rem', fontWeight: 800,
-          textTransform: 'uppercase', letterSpacing: '0.06em',
-          borderBottom: `1px solid ${LN}`, color: INK,
-        }}>
-          <div style={{ padding: '4px 8px', borderRight: `1px solid ${LN}` }}>Drug / Type</div>
-          <div style={{ padding: '4px 8px', borderRight: `1px solid ${LN}` }}>Route</div>
-          <div style={{ padding: '4px 8px', borderRight: `1px solid ${LN}` }}>Dose</div>
-          <div style={{ padding: '4px 8px', borderRight: `1px solid ${LN}` }}>Time</div>
-          <div style={{ padding: '4px 8px', borderRight: `1px solid ${LN}` }}>Reason</div>
-          <div style={{ padding: '4px 8px' }}>Sign</div>
-        </div>
-        {(medRows.length ? medRows : [{}, {}]).map((row: any, i: number) => (
-          <div key={i} style={{
-            display: 'grid', gridTemplateColumns: '2.5fr 1fr 1fr 1fr 3fr 2.4fr',
-            borderBottom: `1px solid ${LN}`, fontSize: '0.74rem',
-            fontFamily: 'ui-monospace, monospace',
-          }}>
-            <div style={{ padding: '5px 8px', borderRight: `1px solid ${LN}`, minHeight: 32, display: 'flex', alignItems: 'center' }}>{row.type || ''}</div>
-            <div style={{ padding: '5px 8px', borderRight: `1px solid ${LN}`, display: 'flex', alignItems: 'center' }}>{row.route || ''}</div>
-            <div style={{ padding: '5px 8px', borderRight: `1px solid ${LN}`, display: 'flex', alignItems: 'center' }}>{row.dose || ''}</div>
-            <div style={{ padding: '5px 8px', borderRight: `1px solid ${LN}`, display: 'flex', alignItems: 'center' }}>{row.time || ''}</div>
-            <div style={{ padding: '5px 8px', borderRight: `1px solid ${LN}`, fontFamily: '"Segoe UI", sans-serif', display: 'flex', alignItems: 'center' }}>{row.reason || ''}</div>
-            <div style={{ padding: '4px 6px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <div style={{ width: '94%', minHeight: 30, border: `1px solid #cbd5e1`, borderRadius: 4, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 2 }}>
-                {typeof row.sign === 'string' && row.sign.startsWith('data:image/')
-                  ? <img src={row.sign} alt="Sign" style={{ maxWidth: '100%', maxHeight: 28, objectFit: 'contain' }} />
-                  : <span style={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: row.sign ? INK : DIM }}>{row.sign || ''}</span>}
-              </div>
-            </div>
-          </div>
-        ))}
       </div>
       </div>{/* /prf-print-frame (page 2) */}
 
@@ -1836,11 +1778,34 @@ export default function PRFView() {
       )}
 
       {/* ═══════════════════ ATTACHMENT PAGES ═══════════════════ */}
+      {/* ═══════════════════ PAGE 4 — Injury Diagram ═══════════════════ */}
+      {Array.isArray(fd.body_marks) && fd.body_marks.length > 0 && (
+        <div className="prf-print-frame">
+          <div className="prf-page" style={{
+            width: 1220, minHeight: 862,
+            margin: '28px auto 0', background: '#fff', color: INK,
+            border: `2px solid ${LN}`, boxShadow: '0 6px 24px rgba(0,0,0,0.1)',
+            display: 'flex', flexDirection: 'column',
+          }}>
+            <div style={{ background: GREEN, color: '#fff', padding: '12px 24px', fontSize: '1.2rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+              Injury Diagram
+            </div>
+            <div style={{ flex: 1, padding: 24, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', background: SOFT_BG }}>
+              <div style={{ width: '100%', maxWidth: 1000, background: '#fff', padding: 24, borderRadius: 12, boxShadow: '0 2px 12px rgba(0,0,0,0.05)' }}>
+                <PrintableInjuryDiagram value={fd.body_marks} />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════ PAGE 5+ — Attachments ═══════════════════ */}
       {[
         { label: 'Hospital Sticker', val: fd.hospital_sticker },
         { label: 'Admission Form', val: fd.admission_form_image },
         { label: 'ID Document', val: fd.id_document_image },
         { label: 'Medical Aid Card', val: fd.medical_aid_image },
+        { label: 'AOD Document', val: fd.aod_document },
         ...(Array.isArray(fd.nursing_notes) ? fd.nursing_notes : []).map((n: any, i: number) => ({
           label: `Nursing Note #${i + 1}`,
           val: n.data_url

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
-export type DocKey = 'hospital_sticker' | 'admission_form_image' | 'id_document_image' | 'medical_aid_image';
+export type DocKey = 'hospital_sticker' | 'admission_form_image' | 'id_document_image' | 'medical_aid_image' | 'aod_document';
 
 interface Props {
   docs: {
@@ -8,6 +8,7 @@ interface Props {
     admission_form_image?: string | null;
     id_document_image?: string | null;
     medical_aid_image?: string | null;
+    aod_document?: string | null;
   };
   onChange: (key: DocKey, dataUrl: string | null) => void;
 }
@@ -24,6 +25,7 @@ const DOC_LABELS: Record<DocKey, string> = {
   admission_form_image: 'Admission Form',
   id_document_image: 'ID Document',
   medical_aid_image: 'Medical Aid Card',
+  aod_document: 'AOD Document',
 };
 
 export default function PatientDocumentsCapture({ docs, onChange }: Props) {
@@ -279,7 +281,7 @@ function CameraOverlay({ docType, onCancel, onCapture }: OverlayProps) {
     let rectScreenH = dispH * 0.42;
     if (docType === 'id_document_image' || docType === 'medical_aid_image') {
       rectScreenH = dispW * 0.84 * 0.65; // ~1.5:1 ratio
-    } else if (docType === 'admission_form_image') {
+    } else if (docType === 'admission_form_image' || docType === 'aod_document') {
       rectScreenW = dispW * 0.80;
       rectScreenH = dispH * 0.85; 
     }
@@ -447,7 +449,7 @@ function ViewfinderMask({ docType }: { docType: DocKey }) {
   if (docType === 'id_document_image' || docType === 'medical_aid_image') {
     // 84vw width, ~1.5 ratio height => 54vh (assuming portrait screen), let's use fixed SVG %s
     h = 54;
-  } else if (docType === 'admission_form_image') {
+  } else if (docType === 'admission_form_image' || docType === 'aod_document') {
     w = 80;
     h = 85;
   }

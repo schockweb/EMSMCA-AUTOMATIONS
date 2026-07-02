@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback, createContext, useContext } from 'react';
 import ReactDOM from 'react-dom';
 import { useParams, useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import axios from '../../api/client';
 import SignaturePad from '../../components/SignaturePad';
 import FullscreenSignaturePad, { FullscreenCanvas } from '../../components/FullscreenSignaturePad';
 import PatientDocumentsCapture from '../../components/PatientDocumentsCapture';
@@ -3284,6 +3284,7 @@ export default function DigitalPRFForm() {
   const [sigs, setSigs] = useState<Record<string, string | null>>({
     patient_signature: null, witness_signature: null,
     handover_signature: null, crew_signature: null,
+    valuables_signature: null,
   });
   const [vehicle, setVehicle] = useState('');
   const [crew2Id, setCrew2Id] = useState('');
@@ -3446,7 +3447,7 @@ export default function DigitalPRFForm() {
       setMedRows(draft.medRows || []);
       setTs(draft.timestamps || {});
       setKms(draft.kms || {});
-      setSigs(draft.sigs || { patient_signature: null, witness_signature: null, handover_signature: null, crew_signature: null });
+      setSigs(draft.sigs || { patient_signature: null, witness_signature: null, handover_signature: null, crew_signature: null, valuables_signature: null });
       setGeos(draft.geos || {});
       setVehicle(draft.vehicle || '');
       setCrew2Id(draft.crew2Id || '');
@@ -3515,27 +3516,34 @@ export default function DigitalPRFForm() {
     setPrfMeta(prf);
     // Seed the optimistic-concurrency token from the freshly loaded row.
     baseUpdatedAtRef.current = prf.updated_at || null;
-    setFd(normalizeFormData(data));
-    setVehicle(prf.vehicle_id || '');
-    setCrew2Id(prf.crew_member_2_id || '');
-    setVitals(data.vitals_sets || []);
-    setIvRows(data.iv_therapy || []);
-    setMedRows(data.medications || []);
-    const ts: Record<string, string | null> = {};
-    const km: Record<string, string> = {};
-    // Coerce km to a string — the backend stores odometer values numerically, and
-    // KmInput / fmt() call .split() on them. `?? ''` (not `|| ''`) so a legit 0 is kept.
-    ALL_TIME_ROWS.forEach(r => { ts[r.timeKey] = prf[r.timeKey] || null; km[r.kmKey] = prf[r.kmKey] != null ? String(prf[r.kmKey]) : ''; });
-    setTs(ts);
-    setKms(km);
-    setGeos(prf.geo_locations || {});
-    setSigs({
-      patient_signature: prf.patient_signature || null,
-      witness_signature: prf.witness_signature || null,
-      handover_signature: prf.handover_signature || null,
-      crew_signature: prf.crew_signature || null,
-    });
-    setPhase(inferPhase({ ...ts }));
+
+    // If there is an active local draft, DO NOT overwrite the form state
+    // with the server's version. The local draft contains the user's
+    // most recent auto-saved keystrokes that haven't been pushed yet.
+    if (!localStorage.getItem(`prf-draft:${prfId}`)) {
+      setFd(normalizeFormData(data));
+      setVehicle(prf.vehicle_id || '');
+      setCrew2Id(prf.crew_member_2_id || '');
+      setVitals(data.vitals_sets || []);
+      setIvRows(data.iv_therapy || []);
+      setMedRows(data.medications || []);
+      const ts: Record<string, string | null> = {};
+      const km: Record<string, string> = {};
+      // Coerce km to a string — the backend stores odometer values numerically, and
+      // KmInput / fmt() call .split() on them. `?? ''` (not `|| ''`) so a legit 0 is kept.
+      ALL_TIME_ROWS.forEach(r => { ts[r.timeKey] = prf[r.timeKey] || null; km[r.kmKey] = prf[r.kmKey] != null ? String(prf[r.kmKey]) : ''; });
+      setTs(ts);
+      setKms(km);
+      setGeos(prf.geo_locations || {});
+      setSigs({
+        patient_signature:   prf.patient_signature   || null,
+        witness_signature:   prf.witness_signature   || null,
+        handover_signature:  prf.handover_signature  || null,
+        crew_signature:      prf.crew_signature      || null,
+        valuables_signature: prf.valuables_signature || null,
+      });
+      setPhase(inferPhase({ ...ts }));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prfId]);
 
@@ -3567,11 +3575,11 @@ export default function DigitalPRFForm() {
         setLoadError(null);
         setLoading(false);
         setRetrying(false);
-        // After a successful server fetch, persist the fresh data locally
-        // so it's available on next open even if the server is unreachable.
-        // (saveToLocal reads from state which was just set by fetchPrfOnce.)
-        // Use a microtask to ensure React has flushed the state updates.
-        setTimeout(() => saveToLocal(), 0);
+        // The auto-save useEffect (which depends on fd, vitals, etc.) will
+        // persist the fresh server data to localStorage once React flushes
+        // the state updates from fetchPrfOnce. We must NOT call saveToLocal()
+        // here — it's a closure that captures the previous render's state,
+        // so it would overwrite the good data with stale/empty values.
         return;
       } catch (err: any) {
         if (signal?.aborted || err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') {
@@ -6635,6 +6643,7 @@ export default function DigitalPRFForm() {
                   admission_form_image: fd.admission_form_image,
                   id_document_image: fd.id_document_image,
                   medical_aid_image: fd.medical_aid_image,
+                  aod_document: fd.aod_document,
                 }}
                 onChange={(key, v) => sf(key, v)}
               />

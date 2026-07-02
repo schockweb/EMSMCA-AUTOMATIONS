@@ -77,6 +77,7 @@ class PRFSaveRequest(BaseModel):
     witness_signature: str | None = None
     handover_signature: str | None = None
     crew_signature: str | None = None
+    valuables_signature: str | None = None
     # Crew assignment
     vehicle_id: str | None = None
     crew_member_1_id: str | None = None
@@ -324,7 +325,7 @@ async def save_prf(
             setattr(prf, field, val if val != '' else None)
 
     # Update signatures
-    for sig_field in ["patient_signature", "witness_signature", "handover_signature", "crew_signature"]:
+    for sig_field in ["patient_signature", "witness_signature", "handover_signature", "crew_signature", "valuables_signature"]:
         val = getattr(body, sig_field, None)
         if val is not None:
             setattr(prf, sig_field, val)
@@ -614,6 +615,7 @@ def _build_partial_context(prf: DigitalPRF, crew: CrewMember) -> dict:
         "patient_signature":  prf.patient_signature,
         "witness_signature":  prf.witness_signature,
         "handover_signature": prf.handover_signature,
+        "valuables_signature": prf.valuables_signature,
         "signature_refused_reason": fd.get("signature_refused_reason"),
 
         # Call-out fee (only relevant if claimed)
@@ -1293,6 +1295,7 @@ async def get_prf(
         "witness_signature": prf.witness_signature,
         "handover_signature": prf.handover_signature,
         "crew_signature": prf.crew_signature,
+        "valuables_signature": prf.valuables_signature,
         # Meta
         "submitted_at": prf.submitted_at.isoformat() if prf.submitted_at else None,
         "created_at": prf.created_at.isoformat() if prf.created_at else None,
@@ -1440,6 +1443,7 @@ async def get_prf_by_case_for_admin(
             "witness_signature": prf.witness_signature,
             "handover_signature": prf.handover_signature,
             "crew_signature": prf.crew_signature,
+            "valuables_signature": prf.valuables_signature,
         },
         "provider": {
             "name": provider.name if provider else None,

@@ -440,11 +440,11 @@ export default function Dashboard() {
               path="/cases" accent={TEAL} accentRgb={TEAL_RGB}
               icon={<><path d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></>}
             />
-            <NavCard
+            {/* HIDDEN: <NavCard
               title="ERA / Payment Tracking" desc="Remittance advice & payment status"
               path="/era-tracking" accent={GREEN} accentRgb={GREEN_RGB}
               icon={<><line x1="12" y1="1" x2="12" y2="23" /><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></>}
-            />
+            /> */}
 
           </div>
         </div>

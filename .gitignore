@@ -53,3 +53,5 @@ logs/
 # ── SSL certs ──
 nginx/ssl/
 
+# ── Windows specials ──
+nul

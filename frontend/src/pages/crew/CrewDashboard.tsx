@@ -5,7 +5,7 @@
  */
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import axios from 'axios';
+import axios from '../../api/client';
 
 const G = '#10b981';
 const GD = '#059669';
@@ -272,7 +272,7 @@ export default function CrewDashboard() {
   useEffect(() => {
     setVehiclesError(null);
     axios.get(`/api/providers/${providerSlug}/public-vehicles`)
-      .then(res => setVehicles(res.data))
+      .then(res => { const d = res.data; setVehicles(Array.isArray(d) ? d : []); })
       .catch(err => {
         // Distinguish "couldn't reach server" from "no vehicles exist".
         // 404 means the provider slug is wrong; anything else (network
@@ -289,7 +289,7 @@ export default function CrewDashboard() {
     // a blocker — the start-shift screen still works if the crew types
     // the HPCSA number directly into the underlying value.
     axios.get(`/api/providers/${providerSlug}/public-crew`)
-      .then(res => setCrewRoster(res.data || []))
+      .then(res => { const d = res.data; setCrewRoster(Array.isArray(d) ? d : []); })
       .catch(() => { /* silent — dropdown just shows empty list */ });
 
     if (token) loadDrafts(token);
