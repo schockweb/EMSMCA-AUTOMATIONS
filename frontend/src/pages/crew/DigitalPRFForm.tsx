@@ -1981,9 +1981,10 @@ const DepCodePicker = () => {
 // animation, then a single highlighted pill at the top-left that opens a
 // dropdown of all call types. Replaces the generic Toggle for call_type so
 // the dispatch phase reclaims vertical space once the type is locked in.
-const CALL_TYPE_OPTS = ['PRIMARY', 'IHT', 'RHT', 'COURTESY', 'RESUS', 'DOD'] as const;
+const CALL_TYPE_OPTS = ['PRIMARY', 'IHT', 'RHT', 'WCA_IOD', 'COURTESY', 'RESUS', 'DOD'] as const;
 const CALL_TYPE_LABELS: Record<string, string> = {
   IHT: 'IFT/IHT',
+  WCA_IOD: 'WCA / IOD',
   RESUS: 'Resus',
   DOD: 'Declaration of Death',
 };
@@ -2019,6 +2020,11 @@ const CallTypePicker = ({ onPick }: { onPick?: (o: string) => void }) => {
     sf('med_aid_dec_death', o === 'DOD');
     if (o === 'RESUS') {
       sf('med_aid_resus', true);
+    }
+    // WCA / IOD call type implies its billing type — auto-set so the
+    // WCA billing detail panel appears automatically on Phase 2.
+    if (o === 'WCA_IOD') {
+      sf('billing_type', 'WCA / IOD');
     }
     setOpen(false);
     if (firstPick) {
@@ -2147,7 +2153,7 @@ const CallTypePicker = ({ onPick }: { onPick?: (o: string) => void }) => {
 // Billing Type picker — same UX as CallTypePicker. Full grid until first pick,
 // then non-selected chips slide toward the top-left while the chosen chip
 // highlights, finally collapsing to a single pill that opens a dropdown.
-const BILLING_TYPE_OPTS = ['MED AID', 'IOD', 'RAF', 'PVT', 'EVENT', 'CALL OUT FEE'] as const;
+const BILLING_TYPE_OPTS = ['MED AID', 'RAF', 'PVT', 'EVENT', 'CALL OUT FEE'] as const;
 
 const BillingTypePicker = () => {
   const { fd, sf } = useContext(FormContext);
@@ -2160,11 +2166,11 @@ const BillingTypePicker = () => {
   // BILLING_TYPE_OPTS so legacy records carrying those values still render
   // their conditional billing panels.
   // Declaration of Death call-outs cannot bill third-party payers (no live
-  // patient to bill, no incident exposure) — also strip IOD / RAF.
+  // patient to bill, no incident exposure) — strip RAF.
   // Resus calls are restricted to MED AID and PVT only.
   const baseOpts = BILLING_TYPE_OPTS.filter(o => o !== 'EVENT' && o !== 'CALL OUT FEE');
   const billingOpts = fd.call_type === 'DOD'
-    ? baseOpts.filter(o => o !== 'IOD' && o !== 'RAF')
+    ? baseOpts.filter(o => o !== 'RAF')
     : fd.call_type === 'RESUS'
     ? baseOpts.filter(o => o === 'MED AID' || o === 'PVT')
     : baseOpts;
@@ -4904,14 +4910,15 @@ export default function DigitalPRFForm() {
   // Auto-populates the whole PRF for a chosen call-type × billing-type combo so
   // testers can reach Submit / PDF quickly without retyping every field.
   const TEST_MATRIX: Record<string, string[]> = {
-    PRIMARY:  ['MED AID', 'IOD', 'RAF', 'PVT', 'EVENT', 'CALL OUT FEE'],
-    IHT:      ['MED AID', 'IOD', 'RAF', 'PVT', 'EVENT', 'CALL OUT FEE'],
-    RHT:      ['MED AID', 'IOD', 'RAF', 'PVT', 'EVENT', 'CALL OUT FEE'],
-    COURTESY: ['MED AID', 'IOD', 'RAF', 'PVT', 'EVENT', 'CALL OUT FEE'],
+    PRIMARY:  ['MED AID', 'RAF', 'PVT', 'EVENT', 'CALL OUT FEE'],
+    IHT:      ['MED AID', 'RAF', 'PVT', 'EVENT', 'CALL OUT FEE'],
+    RHT:      ['MED AID', 'RAF', 'PVT', 'EVENT', 'CALL OUT FEE'],
+    WCA_IOD:  ['WCA / IOD'],
+    COURTESY: ['MED AID', 'RAF', 'PVT', 'EVENT', 'CALL OUT FEE'],
     RESUS:    ['MED AID', 'PVT'],
     DOD:      ['MED AID', 'PVT'],
   };
-  const TEST_CALL_LABEL: Record<string, string> = { IHT: 'IFT/IHT' };
+  const TEST_CALL_LABEL: Record<string, string> = { IHT: 'IFT/IHT', WCA_IOD: 'WCA / IOD' };
 
   const applyTestFill = (callType: string, billingType: string) => {
     const base: Record<string, any> = {
@@ -4991,7 +4998,7 @@ export default function DigitalPRFForm() {
       case 'MED AID':
         Object.assign(base, { medical_scheme: 'Discovery Health', medical_aid_number: 'MA-TEST-123', dependent_number: '01', main_member_id: 'MM-TEST-1', scheme_option: 'Classic Comprehensive' });
         break;
-      case 'IOD':
+      case 'WCA / IOD':
         Object.assign(base, { compensation_reference: 'IOD-REF-1', wca_employer: 'Test Employer', wca_employee_number: 'EMP-1', wca_injury_date: '2026-06-10', wca_oar_number: 'OAR-1' });
         break;
       case 'RAF':
@@ -5118,7 +5125,7 @@ export default function DigitalPRFForm() {
 
       <SHdr t="Call Type" />
       <CallTypePicker onPick={(type) => {
-        if (type === 'PRIMARY' || type === 'RESUS' || type === 'COURTESY' || type === 'DOD') {
+        if (type === 'PRIMARY' || type === 'RESUS' || type === 'COURTESY' || type === 'DOD' || type === 'WCA_IOD') {
           setDispatchPromptOpen(true);
           // Wait briefly for the modal to render before focusing the input
           window.setTimeout(() => dispatchKmRef.current?.focus(), 50);
@@ -5194,7 +5201,7 @@ export default function DigitalPRFForm() {
 
       {/* ── Dispatch Time — all call types except IFT/IHT (which waits for preauth) ── */}
       <FadeIn show={
-        (fd.call_type === 'PRIMARY' || fd.call_type === 'COURTESY' || fd.call_type === 'RESUS') ||
+        (fd.call_type === 'PRIMARY' || fd.call_type === 'COURTESY' || fd.call_type === 'RESUS' || fd.call_type === 'WCA_IOD') ||
         (fd.call_type === 'RHT' && !!(fd.rht_call_out_fee || '').trim()) ||
         (fd.call_type === 'DOD') ||
         (['IHT', 'IFT'].includes(fd.call_type) && !!(fd.preauth_number || '').trim())
@@ -5290,7 +5297,7 @@ export default function DigitalPRFForm() {
       )}
 
       {/* ── Clinical section gates (unchanged logic) ── */}
-      {(fd.call_type === 'PRIMARY' || fd.call_type === 'COURTESY') && timestamps.time_dispatched && kms.km_dispatched && timestamps.time_on_scene && kms.km_on_scene && (startedExam ? P3(true) : startExamBtn)}
+      {(fd.call_type === 'PRIMARY' || fd.call_type === 'COURTESY' || fd.call_type === 'WCA_IOD') && timestamps.time_dispatched && kms.km_dispatched && timestamps.time_on_scene && kms.km_on_scene && (startedExam ? P3(true) : startExamBtn)}
 
       {fd.call_type === 'RESUS' && timestamps.time_dispatched && kms.km_dispatched && timestamps.time_on_scene && kms.km_on_scene && (startedExam ? P3(true) : startExamBtn)}
 
@@ -5448,8 +5455,13 @@ export default function DigitalPRFForm() {
           info before being asked to fill billing details. */}
       {fd.call_type !== 'COURTESY' && (
         <>
-          <SHdr t="Billing Type" />
-          <BillingTypePicker />
+          {/* WCA_IOD call type implies billing — skip the picker */}
+          {fd.call_type !== 'WCA_IOD' && (
+            <>
+              <SHdr t="Billing Type" />
+              <BillingTypePicker />
+            </>
+          )}
 
       {fd.billing_type === 'PVT' && (
         <>
@@ -5549,7 +5561,7 @@ export default function DigitalPRFForm() {
           </Card>
         )}
 
-        {fd.billing_type === 'IOD' && (
+        {(fd.billing_type === 'WCA / IOD' || fd.call_type === 'WCA_IOD') && (
           <Card>
             <Lbl t="Company Name" req /><Inp fk="wca_employer" ph="e.g. Eskom Holdings" req />
             <Lbl t="Company Address" /><AddrInp fk="wca_employer_address" ph="Physical address of employer" />
@@ -6778,7 +6790,7 @@ export default function DigitalPRFForm() {
         <Card>
           <Lbl t="Billing Type" />
           <div style={{ fontWeight: 700, fontSize: '0.9rem', color: GDK, marginBottom: 14 }}>{fd.billing_type || '— Not selected —'}</div>
-          {(fd.billing_type === 'IOD' || fd.billing_type === 'RAF') && (
+          {(fd.billing_type === 'WCA / IOD' || fd.call_type === 'WCA_IOD' || fd.billing_type === 'RAF') && (
             <><Lbl t="Reference Number" /><Inp fk="compensation_reference" ph="Reference number" /></>
           )}
         </Card>

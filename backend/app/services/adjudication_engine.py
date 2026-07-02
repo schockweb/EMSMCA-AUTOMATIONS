@@ -274,7 +274,7 @@ async def adjudicate_claim(
         elif not preauth:
             result.checks.append(AdjudicationCheck(
                 check_name="PREAUTH", passed=True, severity="info",
-                message="Pre-authorization constraint bypassed (Private/IOD/Fixed-Account).",
+                message="Pre-authorization constraint bypassed (Private/WCA/IOD/Fixed-Account).",
             ))
         else:
             result.checks.append(AdjudicationCheck(

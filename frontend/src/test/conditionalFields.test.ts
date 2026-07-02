@@ -33,11 +33,15 @@ type Fd = Record<string, any>;
 /** Simulate the `pick` function inside CallTypePicker */
 function pickCallType(fd: Fd, callType: string): Fd {
   let next: Fd = { ...fd, call_type: callType };
-  // From DigitalPRFForm.tsx line 1496: DOD forces dec_death ON, everything else forces it OFF
+  // From DigitalPRFForm.tsx: DOD forces dec_death ON, everything else forces it OFF
   next.med_aid_dec_death = callType === 'DOD';
-  // From line 1497-1499: RESUS forces med_aid_resus ON
+  // RESUS forces med_aid_resus ON
   if (callType === 'RESUS') {
     next.med_aid_resus = true;
+  }
+  // WCA_IOD auto-sets billing_type
+  if (callType === 'WCA_IOD') {
+    next.billing_type = 'WCA / IOD';
   }
   return next;
 }
@@ -61,10 +65,10 @@ function toggleArr(fd: Fd, key: string, value: string): Fd {
 }
 
 /** Mirror the billing options filter from BillingTypePicker */
-const ALL_BILLING_OPTS = ['MED AID', 'PVT', 'IOD', 'RAF', 'WCA', 'EVENT', 'CALL OUT FEE'];
+const ALL_BILLING_OPTS = ['MED AID', 'PVT', 'RAF', 'WCA', 'EVENT', 'CALL OUT FEE'];
 function availableBillingOpts(callType: string): string[] {
   const base = ALL_BILLING_OPTS.filter(o => o !== 'EVENT' && o !== 'CALL OUT FEE');
-  if (callType === 'DOD') return base.filter(o => o !== 'IOD' && o !== 'RAF');
+  if (callType === 'DOD') return base.filter(o => o !== 'RAF');
   if (callType === 'RESUS') return base.filter(o => o === 'MED AID' || o === 'PVT');
   return base;
 }
@@ -77,9 +81,9 @@ function isFieldVisible(fd: Fd, fieldGroup: string): boolean {
     // Section: MED AID billing details (member number, emed ref, scheme)
     case 'med_aid_billing_details':
       return bt === 'MED AID';
-    // Section: IOD (Injury on Duty) reference
+    // Section: IOD (Injury on Duty) reference — now triggered by call_type=WCA_IOD
     case 'iod_details':
-      return bt === 'IOD';
+      return bt === 'WCA / IOD' || fd.call_type === 'WCA_IOD';
     // Section: RAF (Road Accident Fund) claim number
     case 'raf_details':
       return bt === 'RAF';
@@ -187,18 +191,25 @@ describe('Call Type Selection Side-Effects', () => {
   });
 
   it('ALL non-DOD/RESUS call types leave dec_death as false', () => {
-    for (const ct of ['PRIMARY', 'IFT', 'IHT', 'RHT', 'COURTESY']) {
+    for (const ct of ['PRIMARY', 'IFT', 'IHT', 'RHT', 'COURTESY', 'WCA_IOD']) {
       const fd = pickCallType({}, ct);
       expect(fd.med_aid_dec_death).toBe(false);
     }
+  });
+
+  it('selecting WCA_IOD auto-sets billing_type to WCA / IOD', () => {
+    const fd = pickCallType({}, 'WCA_IOD');
+    expect(fd.call_type).toBe('WCA_IOD');
+    expect(fd.billing_type).toBe('WCA / IOD');
+    expect(fd.med_aid_dec_death).toBe(false);
   });
 });
 
 
 describe('Billing Type Availability Per Call Type', () => {
-  it('DOD call cannot use IOD billing', () => {
+  it('DOD call cannot use WCA/IOD or RAF billing', () => {
     const opts = availableBillingOpts('DOD');
-    expect(opts).not.toContain('IOD');
+    expect(opts).not.toContain('WCA / IOD');
     expect(opts).not.toContain('RAF');
     expect(opts).toContain('MED AID');
     expect(opts).toContain('PVT');
@@ -209,18 +220,18 @@ describe('Billing Type Availability Per Call Type', () => {
     expect(opts).toEqual(['MED AID', 'PVT']);
   });
 
-  it('PRIMARY call can use any billing type', () => {
+  it('PRIMARY call can use MED AID, RAF, WCA, PVT (no WCA/IOD — that is a call type now)', () => {
     const opts = availableBillingOpts('PRIMARY');
     expect(opts).toContain('MED AID');
-    expect(opts).toContain('IOD');
+    expect(opts).not.toContain('WCA / IOD');
     expect(opts).toContain('RAF');
     expect(opts).toContain('WCA');
     expect(opts).toContain('PVT');
   });
 
-  it('IFT call can use IOD and RAF (valid for interfacility)', () => {
+  it('IFT call can use RAF (WCA/IOD is now a call type, not billing)', () => {
     const opts = availableBillingOpts('IFT');
-    expect(opts).toContain('IOD');
+    expect(opts).not.toContain('WCA / IOD');
     expect(opts).toContain('RAF');
   });
 
@@ -243,8 +254,8 @@ describe('Billing Type Field Visibility', () => {
     expect(isFieldVisible(fd, 'pvt_details')).toBe(false);
   });
 
-  it('IOD: shows iod_details, hides med_aid/raf/pvt panels', () => {
-    const fd = pickBillingType({ call_type: 'PRIMARY' }, 'IOD');
+  it('WCA_IOD call type: shows iod_details, hides med_aid/raf/pvt panels', () => {
+    const fd = pickCallType({}, 'WCA_IOD');
     expect(isFieldVisible(fd, 'iod_details')).toBe(true);
     expect(isFieldVisible(fd, 'med_aid_billing_details')).toBe(false);
     expect(isFieldVisible(fd, 'raf_details')).toBe(false);
@@ -267,12 +278,12 @@ describe('Billing Type Field Visibility', () => {
     // This is a known behaviour — the backend adjudication engine ignores
     // fields that don't match the active billing_type
     let fd: Fd = { call_type: 'PRIMARY', billing_type: 'MED AID', med_aid_member_number: 'ABC123' };
-    fd = pickBillingType(fd, 'IOD');
+    fd = pickBillingType(fd, 'RAF');
     // med_aid_member_number is stale but still in fd — this is expected
     expect(fd.med_aid_member_number).toBe('ABC123');
-    expect(fd.billing_type).toBe('IOD');
-    // IOD details panel now visible, MED AID panel hidden
-    expect(isFieldVisible(fd, 'iod_details')).toBe(true);
+    expect(fd.billing_type).toBe('RAF');
+    // RAF details panel now visible, MED AID panel hidden
+    expect(isFieldVisible(fd, 'raf_details')).toBe(true);
     expect(isFieldVisible(fd, 'med_aid_billing_details')).toBe(false);
   });
 });
@@ -511,17 +522,16 @@ describe('Stale Data Guard — Hidden Field Data Does Not Corrupt Rules Engine',
     expect(fd.med_aid_dec_death_signatory_name).toBe('Dr Khumalo');
   });
 
-  it('DOD call with IOD billing type — IOD not available, stale billing_type creates no visible panel', () => {
-    // Scenario: crew starts with PRIMARY + IOD, then changes to DOD
-    let fd: Fd = { call_type: 'PRIMARY', billing_type: 'IOD', iod_ref_number: 'IOD2026001' };
+  it('DOD call with stale RAF billing_type — RAF not available, stale billing_type creates no visible panel', () => {
+    // Scenario: crew starts with PRIMARY + RAF, then changes to DOD
+    let fd: Fd = { call_type: 'PRIMARY', billing_type: 'RAF', raf_claim_number: 'RAF2026001' };
     fd = pickCallType(fd, 'DOD');
-    // billing_type is still 'IOD' in fd (not cleared)
-    expect(fd.billing_type).toBe('IOD');
-    // But IOD is NOT in the available billing opts for DOD
+    // billing_type is still 'RAF' in fd (not cleared)
+    expect(fd.billing_type).toBe('RAF');
+    // But RAF is NOT in the available billing opts for DOD
     const opts = availableBillingOpts('DOD');
-    expect(opts).not.toContain('IOD');
-    // The crew MUST re-pick billing type — the DOD picker won't show IOD as an option
-    // Stale billing_type is handled by the UI showing no match selected
+    expect(opts).not.toContain('RAF');
+    // The crew MUST re-pick billing type — the DOD picker won't show RAF as an option
   });
 
   it('RESUS + stale RAF billing_type — RAF panel not shown because it is not in RESUS billing opts', () => {

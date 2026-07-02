@@ -1887,7 +1887,7 @@ export default function DocumentReview() {
               {[
                 { val: 'proceed',  label: '🏥  Proceed to Cases (await manual scheme assignment)' },
                 { val: 'private',  label: '💵  Mark as Private / Cash (no scheme billing)' },
-                { val: 'wca',      label: '⚖️  Mark as IOD / Third Party' },
+                { val: 'wca',      label: '⚖️  Mark as WCA / IOD / Third Party' },
                 { val: 'reopen',   label: '📝  Go back and add scheme details' },
               ].map(opt => (
                 <label key={opt.val} style={{
@@ -1923,7 +1923,7 @@ export default function DocumentReview() {
                   }
                   // Patch the scheme name on the case if needed
                   if (noSchemeAction !== 'proceed') {
-                    const schemeLabel = noSchemeAction === 'private' ? 'Private' : 'IOD';
+                    const schemeLabel = noSchemeAction === 'private' ? 'Private' : 'WCA / IOD';
                     try {
                       await api.patch(`/api/cases/${noSchemeModal.caseId}`, { medical_scheme_name: schemeLabel });
                       handleFieldChange('medical_scheme', schemeLabel);

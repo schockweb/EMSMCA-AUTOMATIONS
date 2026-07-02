@@ -1118,11 +1118,11 @@ export default function PRFView() {
           </div>
 
           {/* Billing Information — content follows the selected billing type so
-              the section reflects the actual payer (Med Aid / IOD / RAF / PVT /
+              the section reflects the actual payer (Med Aid / WCA / IOD / RAF / PVT /
               Event / Call-Out) rather than always showing medical-aid fields. */}
           <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
             <SectionHead label="Billing Information" />
-            {billingType === 'IOD' ? (
+            {billingType === 'WCA / IOD' ? (
               <>
                 <FieldRow label="Reference"   value={fd.compensation_reference} />
                 <FieldRow label="Employer"    value={fd.wca_employer} />
