@@ -4854,7 +4854,33 @@ export default function DigitalPRFForm() {
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 7 }}>
                     <div style={{ fontSize: '0.68rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.07em' }}>{f.label}</div>
                   </div>
-                  {hasOpts ? (
+                  {f.key === 'bp' ? (
+                    <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                      <input
+                        type="text" inputMode="decimal" placeholder="SYS"
+                        value={editing.bp ? editing.bp.split('/')[0] : ''}
+                        onChange={e => {
+                          const sys = e.target.value.replace(/[^0-9]/g, '');
+                          const dia = editing.bp ? editing.bp.split('/')[1] : '';
+                          updVS('bp', dia ? `${sys}/${dia}` : sys);
+                        }}
+                        onFocus={onF} onBlur={onB} {...NO_AUTOFILL} name={`nf-vit-${editVital}-bp-sys-${NF_NONCE}`}
+                        style={{ ...base, marginBottom: 0, flex: 1, textAlign: 'center' }}
+                      />
+                      <span style={{ color: '#94a3b8', fontWeight: 700, fontSize: '1.2rem' }}>/</span>
+                      <input
+                        type="text" inputMode="decimal" placeholder="DIA"
+                        value={editing.bp && editing.bp.includes('/') ? editing.bp.split('/')[1] : ''}
+                        onChange={e => {
+                          const dia = e.target.value.replace(/[^0-9]/g, '');
+                          const sys = editing.bp ? editing.bp.split('/')[0] : '';
+                          updVS('bp', sys ? `${sys}/${dia}` : `/${dia}`);
+                        }}
+                        onFocus={onF} onBlur={onB} {...NO_AUTOFILL} name={`nf-vit-${editVital}-bp-dia-${NF_NONCE}`}
+                        style={{ ...base, marginBottom: 0, flex: 1, textAlign: 'center' }}
+                      />
+                    </div>
+                  ) : hasOpts ? (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                       {f.opts!.map(o => {
                         const on = editing[f.key] === o;
@@ -4871,7 +4897,17 @@ export default function DigitalPRFForm() {
                       {...NO_AUTOFILL}
                       name={`nf-vit-${editVital}-${f.key}-${NF_NONCE}`}
                       onFocus={onF}
-                      onBlur={onB}
+                      onBlur={e => {
+                        onB(e);
+                        // Auto-populate units for HGT and Temp if a value was typed
+                        if (f.key === 'hgt') {
+                          const v = e.target.value.trim();
+                          if (v && !v.toLowerCase().includes('mmol')) updVS(f.key, `${v} mmol/L`);
+                        } else if (f.key === 'temp') {
+                          const v = e.target.value.trim();
+                          if (v && !v.toLowerCase().includes('c')) updVS(f.key, `${v} °C`);
+                        }
+                      }}
                       style={{ ...base, marginBottom: 0 }}
                     />
                   )}
@@ -6326,10 +6362,10 @@ export default function DigitalPRFForm() {
         <div ref={chiefComplaintRef} style={{ scrollMarginTop: 80 }}>
           {fd.call_type !== 'DOD' && (
             <>
-              <SHdr t="Overseen Practitioner Communication" />
+              <SHdr t="Overseeing Practitioner Communication" />
               <Card>
-                <Lbl t="Overseen Practitioner Communication details" />
-                <VoiceTxt fk="overseen_practitioner_communication" ph="Document communication with overseen ALS or ILS practitioner here..." rows={3} />
+                <Lbl t="Overseeing Practitioner Communication details" />
+                <VoiceTxt fk="overseen_practitioner_communication" ph="Document communication with overseeing ALS or ILS practitioner here..." rows={3} />
               </Card>
             </>
           )}

@@ -1272,7 +1272,7 @@ export default function CrewDashboard() {
               BAA Shift Notice
             </div>
             <div style={{ fontSize: '0.88rem', color: M, marginBottom: 24, lineHeight: 1.5 }}>
-              Please note that the overseen practitioner ALS or ILS details and consultation information is documented in the PRF.
+              Please note that the overseeing practitioner ALS or ILS details and consultation information is documented in the PRF.
             </div>
             <button
               onClick={() => setBaaWarningOpen(false)}
