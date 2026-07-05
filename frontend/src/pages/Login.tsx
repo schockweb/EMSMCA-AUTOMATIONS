@@ -47,7 +47,7 @@ export default function Login() {
           } 
         });
       } else {
-        navigate('/');
+        window.location.href = '/cases';
       }
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Login failed. Please try again.');
