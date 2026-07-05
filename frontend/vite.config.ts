@@ -11,6 +11,8 @@ export default defineConfig({
       manifest: false,  // We provide our own manifest.json in public/
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
+        skipWaiting: true,
+        clientsClaim: true,
         runtimeCaching: [
           {
             urlPattern: /^\/api\//,

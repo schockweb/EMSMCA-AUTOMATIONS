@@ -584,7 +584,7 @@ const VS_FULL = [
   { label: 'Pupil Reaction L/R', key: 'pupil_react', opts: ['Equal/Reactive', 'Unequal', 'Sluggish', 'Fixed/Dilated'] },
   { label: 'Neuro Deficit', key: 'neuro_def', opts: ['Yes', 'No'] },
   { label: 'HGT (mmol/L)', key: 'hgt', type: 'number', placeholder: 'mmol/L' },
-  { label: 'Temp (°C)', key: 'temp', placeholder: 'e.g. 36.8' },
+  { label: 'Temp (°C)', key: 'temp', placeholder: '°C' },
   { label: 'Vent Mode', key: 'vent_mode', placeholder: 'e.g. SIMV, CPAP' },
   { label: 'ETCO₂', key: 'etco2', type: 'number', placeholder: 'mmHg' },
   { label: 'Tidal Vol', key: 'tidal_vol', type: 'number', placeholder: 'ml' },
@@ -4893,7 +4893,7 @@ export default function DigitalPRFForm() {
                       inputMode={isNumericField ? 'decimal' : 'text'}
                       value={editing[f.key] ?? ''}
                       onChange={e => updVS(f.key, e.target.value)}
-                      placeholder=""
+                      placeholder={'placeholder' in f ? f.placeholder : ''}
                       {...NO_AUTOFILL}
                       name={`nf-vit-${editVital}-${f.key}-${NF_NONCE}`}
                       onFocus={onF}

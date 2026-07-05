@@ -47,6 +47,16 @@ export default function Login() {
           } 
         });
       } else {
+        // Nuke the PWA service-worker cache so the browser loads the
+        // latest JS bundle instead of serving a stale cached version.
+        if ('serviceWorker' in navigator) {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(regs.map(r => r.unregister()));
+        }
+        if ('caches' in window) {
+          const keys = await caches.keys();
+          await Promise.all(keys.map(k => caches.delete(k)));
+        }
         window.location.href = '/';
       }
     } catch (err: any) {
