@@ -685,7 +685,7 @@ function VitalsReminder({ lastVitalAt, level, onClick }: { lastVitalAt: number |
     const id = setInterval(() => tick(t => t + 1), 1000);
     return () => clearInterval(id);
   }, [lastVitalAt]);
-  if (!lastVitalAt) return null;
+  if (!lastVitalAt || !level) return null;
   const intervalMs = vitalsIntervalMs(level);
   const remaining = intervalMs - (Date.now() - lastVitalAt);
   const overdue = remaining <= 0;
@@ -1907,10 +1907,59 @@ const VoiceTxt = ({ fk, rows = 3 }: { fk: string; ph?: string; rows?: number }) 
 
 const Sel = ({ fk, opts }: { fk: string; opts: string[] }) => {
   const { fd, sf } = useContext(FormContext);
-  return <select value={fd[fk] ?? ''} onChange={e => sf(fk, e.target.value)} onFocus={onF} onBlur={onB} style={{ ...base, marginBottom: 14, appearance: 'menulist' }}>
-    <option value="">— Select —</option>
-    {opts.map((o: string) => <option key={o} value={o}>{o}</option>)}
-  </select>
+  const val = fd[fk] ?? '';
+  const isCustom = val !== '' && !opts.includes(val);
+  const [showCustom, setShowCustom] = useState(isCustom);
+
+  useEffect(() => {
+    if (val !== '' && !opts.includes(val)) setShowCustom(true);
+  }, [val, opts]);
+
+  if (showCustom) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+        <input 
+          autoFocus
+          type="text" 
+          value={val} 
+          onChange={e => sf(fk, e.target.value)} 
+          onFocus={onF} 
+          onBlur={onB} 
+          autoComplete="off" 
+          placeholder="Type custom value..." 
+          style={{ ...base, marginBottom: 0, flex: 1 }} 
+        />
+        <button 
+          type="button" 
+          onClick={() => { sf(fk, ''); setShowCustom(false); }} 
+          style={{ fontSize: '0.72rem', fontWeight: 600, color: '#64748b', background: 'none', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline', flexShrink: 0 }}
+        >
+          Back
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <select 
+      value={val} 
+      onChange={e => {
+        if (e.target.value === '__custom__') {
+          setShowCustom(true);
+          sf(fk, '');
+        } else {
+          sf(fk, e.target.value);
+        }
+      }} 
+      onFocus={onF} 
+      onBlur={onB} 
+      style={{ ...base, marginBottom: 14, appearance: 'auto' }}
+    >
+      <option value="">— Select —</option>
+      {opts.map((o: string) => <option key={o} value={o}>{o}</option>)}
+      <option value="__custom__">Other (Type Custom...)</option>
+    </select>
+  );
 };
 
 const Toggle = ({ fk, opts, colors, size, labels }: { fk: string; opts: string[]; colors?: Record<string, string>; size?: 'sm'; labels?: Record<string, string> }) => {
@@ -3102,11 +3151,53 @@ const Modal = ({ open, onClose, children }: { open: boolean; onClose: () => void
   );
 };
 
-const CTA = ({ label, color = '#22c55e', onClick }: { label: string; color?: string; onClick: () => void }) => (
-  <button type="button" onClick={onClick} style={{ width: '100%', padding: 18, borderRadius: 14, fontSize: '1rem', fontWeight: 800, border: 'none', background: `linear-gradient(135deg, ${color}, ${color}cc)`, color: '#ffffff', cursor: 'pointer', marginTop: 8, boxShadow: `0 6px 20px ${color}40`, letterSpacing: '0.04em' }}>
-    {label}
-  </button>
-);
+const CTA = ({ label, color = '#0f172a', onClick }: { label: string; color?: string; onClick: () => void }) => {
+  const isPrimary = color === '#0f172a' || color === '#22c55e';
+  const bg = isPrimary ? '#0f172a' : color;
+  const shadow = isPrimary ? 'rgba(15, 23, 42, 0.25)' : `${color}40`;
+  
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        width: '100%',
+        padding: '18px 24px',
+        borderRadius: 16,
+        fontSize: '1.05rem',
+        fontWeight: 700,
+        border: `1px solid ${isPrimary ? '#1e293b' : 'transparent'}`,
+        background: bg,
+        color: '#ffffff',
+        cursor: 'pointer',
+        marginTop: 16,
+        boxShadow: `0 4px 12px ${shadow}`,
+        letterSpacing: '0.03em',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 12,
+        transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+        WebkitTapHighlightColor: 'transparent',
+      }}
+      onMouseEnter={e => {
+        (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-2px)';
+        (e.currentTarget as HTMLButtonElement).style.boxShadow = `0 8px 24px ${shadow}`;
+      }}
+      onMouseLeave={e => {
+        (e.currentTarget as HTMLButtonElement).style.transform = 'none';
+        (e.currentTarget as HTMLButtonElement).style.boxShadow = `0 4px 12px ${shadow}`;
+      }}
+      onMouseDown={e => {
+        (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(1px)';
+        (e.currentTarget as HTMLButtonElement).style.boxShadow = `0 2px 8px ${shadow}`;
+      }}
+    >
+      <span>{label.replace('→', '').replace('  ', ' ').trim()}</span>
+      <span style={{ fontSize: '1.2rem', fontWeight: 600 }}>→</span>
+    </button>
+  );
+};
 
 const EnRouteOverlay = ({ dispatchedAt, onDoubleTap }: { dispatchedAt: string; onDoubleTap: () => void }) => {
   const [, tick] = useState(0);
@@ -4841,7 +4932,10 @@ export default function DigitalPRFForm() {
           <div style={{ background: '#ffffff', border: `1.5px solid ${S200}`, borderRadius: 14, padding: 18, marginBottom: 16, boxShadow: '0 4px 14px rgba(0,0,0,0.03)' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
               <div style={{ fontWeight: 800, color: S900 }}>Vitals Set #{editVital + 1}</div>
-              <button type="button" onClick={() => setEditVital(-1)} style={{ padding: '8px 18px', borderRadius: 8, fontSize: '0.82rem', fontWeight: 800, border: 'none', background: S800, color: W, cursor: 'pointer' }}>Done</button>
+              <button type="button" onClick={() => {
+                setEditVital(-1);
+                window.setTimeout(() => document.getElementById('vitals-section-anchor')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 10);
+              }} style={{ padding: '8px 18px', borderRadius: 8, fontSize: '0.82rem', fontWeight: 800, border: 'none', background: S800, color: W, cursor: 'pointer' }}>Done</button>
             </div>
             <Lbl t="Time Recorded" />
             <input type="time" value={editing.time ?? ''} onChange={e => updVS('time', e.target.value)} onFocus={onF} onBlur={onB} style={{ ...base, marginBottom: 14 }} />
@@ -4923,7 +5017,10 @@ export default function DigitalPRFForm() {
                 </div>
               );
             })}
-            <button type="button" onClick={() => setEditVital(-1)} style={{ width: '100%', padding: 14, borderRadius: 10, fontWeight: 800, fontSize: '0.92rem', border: 'none', background: `linear-gradient(135deg,${G},${GDK})`, color: W, cursor: 'pointer', marginTop: 4 }}>Save Set #{editVital + 1}</button>
+            <button type="button" onClick={() => {
+              setEditVital(-1);
+              window.setTimeout(() => document.getElementById('vitals-section-anchor')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 10);
+            }} style={{ width: '100%', padding: 14, borderRadius: 10, fontWeight: 800, fontSize: '0.92rem', border: 'none', background: `linear-gradient(135deg,${G},${GDK})`, color: W, cursor: 'pointer', marginTop: 4 }}>Save Set #{editVital + 1}</button>
           </div>
         )}
 
@@ -5173,21 +5270,22 @@ export default function DigitalPRFForm() {
       <FadeIn show={fd.call_type === 'IHT'} delay={150}>
         <div style={{ marginBottom: 14 }}>
           <Lbl t="Why is this an IFT/IHT call?" req />
-          <select
+          <input
+            list="transfer-subtypes"
             value={fd.transfer_subtype ?? ''}
             onChange={e => sf('transfer_subtype', e.target.value)}
+            placeholder="Select or type reason…"
             style={{
               width: '100%', padding: '12px 14px', fontSize: '0.88rem',
               borderRadius: 10, border: `1.5px solid ${S200}`, background: W,
-              color: fd.transfer_subtype ? S900 : S400, cursor: 'pointer',
+              color: fd.transfer_subtype ? S900 : S400, cursor: 'text',
               fontWeight: fd.transfer_subtype ? 700 : 400,
               boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
-              appearance: 'auto',
             }}
-          >
-            <option value="" disabled>Select reason…</option>
-            {TRANSFER_SUBTYPES.map(r => <option key={r} value={r}>{r}</option>)}
-          </select>
+          />
+          <datalist id="transfer-subtypes">
+            {TRANSFER_SUBTYPES.map(r => <option key={r} value={r} />)}
+          </datalist>
         </div>
       </FadeIn>
 
@@ -5521,19 +5619,22 @@ export default function DigitalPRFForm() {
               <Card>
                 {/* Amount paid dropdown */}
                 <Lbl t="Amount Paid (R)" req />
-                <select
+                <input
+                  list="cash-amounts"
+                  type="text"
                   value={fd.pvt_cash_amount_paid ?? ''}
                   onChange={e => sf('pvt_cash_amount_paid', e.target.value)}
                   onFocus={onF}
                   onBlur={onB}
-                  style={{ ...base, marginBottom: 14, appearance: 'auto' }}
-                >
-                  <option value="">— Select amount —</option>
+                  placeholder="e.g. 1500"
+                  style={{ ...base, marginBottom: 14 }}
+                />
+                <datalist id="cash-amounts">
                   {['100','200','300','400','500','600','700','800','900','1000',
                     '1100','1200','1300','1400','1500','1600','1700','1800','1900','2000',
                     '2500','3000','3500','4000','4500','5000','6000','7000','8000','9000','10000',
-                    'Other'].map(v => <option key={v} value={v}>R {v}</option>)}
-                </select>
+                    'Other'].map(v => <option key={v} value={v} />)}
+                </datalist>
 
                 {/* Payer signature block */}
                 <div style={{ padding: '12px 14px', border: `1.5px solid ${S200}`, borderRadius: 10, marginBottom: 14 }}>
@@ -6056,32 +6157,56 @@ export default function DigitalPRFForm() {
                   { l: 'Type / Fluid', k: 'type' },
                   { l: 'Jelco Size', k: 'jelco_size', opts: ['24g', '22g', '20g', '18g', '16g', '14g'] },
                   { l: 'Site', k: 'site' },
-                  { l: 'Vol. Infused', k: 'vol_infused' },
+                  { l: 'Vol. Infused', k: 'vol_infused', placeholder: 'ml' },
                   { l: 'Time Up', k: 'time_up' },
                   { l: 'Indication / Reason', k: 'indication' },
-                ] as Array<{ l: string; k: string; opts?: string[] }>).map(f => (
+                ] as Array<{ l: string; k: string; opts?: string[]; placeholder?: string }>).map(f => (
                   <div key={f.k}>
                     <Lbl t={f.l} />
-                    {f.opts ? (
-                      <select
-                        value={row[f.k] ?? ''}
-                        onChange={e => { const r = [...ivRows]; r[i] = { ...r[i], [f.k]: e.target.value }; setIvRows(r); dirtyRef.current = true; }}
+                    {f.k === 'time_up' ? (
+                      <input
+                        type="time"
+                        value={row.time_up ?? ''}
+                        onClick={() => {
+                          if (!row.time_up) {
+                            const now = new Date();
+                            const hh = String(now.getHours()).padStart(2, '0');
+                            const mm = String(now.getMinutes()).padStart(2, '0');
+                            const r = [...ivRows]; r[i] = { ...r[i], time_up: `${hh}:${mm}` }; setIvRows(r); dirtyRef.current = true;
+                          }
+                        }}
+                        onChange={e => { const r = [...ivRows]; r[i] = { ...r[i], time_up: e.target.value }; setIvRows(r); dirtyRef.current = true; }}
                         onFocus={onF}
                         onBlur={onB}
-                        style={{ ...base, marginBottom: 8, appearance: 'auto' }}
-                      >
-                        <option value=""></option>
-                        {f.opts.map(o => <option key={o} value={o}>{o}</option>)}
-                      </select>
+                        style={{ ...base, marginBottom: 8 }}
+                      />
                     ) : (
                       <input
+                        list={f.opts ? `iv-${f.k}-${i}` : undefined}
                         value={row[f.k] ?? ''}
                         onChange={e => { const r = [...ivRows]; r[i] = { ...r[i], [f.k]: e.target.value }; setIvRows(r); dirtyRef.current = true; }}
+                        placeholder={f.placeholder || ''}
                         onFocus={onF}
-                        onBlur={onB}
+                        onBlur={e => {
+                          onB(e);
+                          if (f.k === 'vol_infused') {
+                            const v = e.target.value.trim();
+                            if (v && !v.toLowerCase().includes('ml')) {
+                              const r = [...ivRows];
+                              r[i] = { ...r[i], [f.k]: `${v} ml` };
+                              setIvRows(r);
+                              dirtyRef.current = true;
+                            }
+                          }
+                        }}
                         autoComplete="off"
                         style={{ ...base, marginBottom: 8 }}
                       />
+                    )}
+                    {f.opts && (
+                      <datalist id={`iv-${f.k}-${i}`}>
+                        {f.opts.map(o => <option key={o} value={o} />)}
+                      </datalist>
                     )}
                   </div>
                 ))}
@@ -6164,30 +6289,126 @@ export default function DigitalPRFForm() {
                           <div key={f.k}>
                             <Lbl t={f.l} />
                             {f.k === 'type' ? (
-                              <select
-                                value={row[f.k] ?? ''}
-                                onChange={e => { const r = [...medRows]; r[i] = { ...r[i], [f.k]: e.target.value }; setMedRows(r); dirtyRef.current = true; }}
+                              <>
+                                <input
+                                  list={`med-type-${i}`}
+                                  value={row.type ?? ''}
+                                  onChange={e => { const r = [...medRows]; r[i] = { ...r[i], type: e.target.value }; setMedRows(r); dirtyRef.current = true; }}
+                                  onFocus={onF}
+                                  onBlur={onB}
+                                  placeholder="Search or type drug name…"
+                                  autoComplete="off"
+                                  style={{ ...base, marginBottom: 8 }}
+                                />
+                                <datalist id={`med-type-${i}`}>
+                                  {authorised.map(n => <option key={n} value={n} />)}
+                                </datalist>
+                              </>
+                            ) : f.k === 'route' ? (() => {
+                              const QUICK_ROUTES = ['IM', 'IV', 'ORAL', 'IN'];
+                              const isCustom = !!row.route && !QUICK_ROUTES.includes(row.route) && row.route !== '__custom__';
+                              const showCustomInput = isCustom || row.route === '__custom__';
+                              const isSelected = !!row.route && QUICK_ROUTES.includes(row.route);
+
+                              if (isSelected) {
+                                return (
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                                    <span style={{
+                                      display: 'inline-flex', alignItems: 'center',
+                                      padding: '7px 18px', borderRadius: 20, fontWeight: 800,
+                                      fontSize: '0.88rem', background: '#0f172a', color: '#ffffff',
+                                      letterSpacing: '0.06em',
+                                    }}>{row.route}</span>
+                                    <button type="button"
+                                      onClick={() => { const r = [...medRows]; r[i] = { ...r[i], route: '' }; setMedRows(r); dirtyRef.current = true; }}
+                                      style={{ fontSize: '0.72rem', fontWeight: 600, color: '#64748b', background: 'none', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline' }}>
+                                      Change
+                                    </button>
+                                  </div>
+                                );
+                              }
+                              if (showCustomInput) {
+                                return (
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                                    <input
+                                      autoFocus
+                                      autoComplete="off"
+                                      value={isCustom ? (row.route ?? '') : ''}
+                                      placeholder="Type route…"
+                                      onChange={e => { const r = [...medRows]; r[i] = { ...r[i], route: e.target.value }; setMedRows(r); dirtyRef.current = true; }}
+                                      onFocus={onF}
+                                      onBlur={onB}
+                                      style={{ ...base, marginBottom: 0, flex: 1 }}
+                                    />
+                                    <button type="button"
+                                      onClick={() => { const r = [...medRows]; r[i] = { ...r[i], route: '' }; setMedRows(r); dirtyRef.current = true; }}
+                                      style={{ fontSize: '0.72rem', fontWeight: 600, color: '#64748b', background: 'none', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline', flexShrink: 0 }}>
+                                      Back
+                                    </button>
+                                  </div>
+                                );
+                              }
+                              // Default: quick-pick pill grid
+                              return (
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6, marginBottom: 8 }}>
+                                  {QUICK_ROUTES.map(opt => (
+                                    <button key={opt} type="button"
+                                      onClick={() => { const r = [...medRows]; r[i] = { ...r[i], route: opt }; setMedRows(r); dirtyRef.current = true; }}
+                                      style={{
+                                        padding: '10px 4px', borderRadius: 10, fontWeight: 800,
+                                        fontSize: '0.82rem', border: '2px solid #e2e8f0',
+                                        background: '#f8fafc', color: '#334155', cursor: 'pointer',
+                                        textAlign: 'center', WebkitTapHighlightColor: 'transparent',
+                                      }}>
+                                      {opt}
+                                    </button>
+                                  ))}
+                                  <button type="button"
+                                    onClick={() => { const r = [...medRows]; r[i] = { ...r[i], route: '__custom__' }; setMedRows(r); dirtyRef.current = true; }}
+                                    style={{
+                                      padding: '10px 4px', borderRadius: 10, fontWeight: 800,
+                                      fontSize: '1.1rem', border: '2px dashed #cbd5e1',
+                                      background: '#f8fafc', color: '#94a3b8', cursor: 'pointer',
+                                      textAlign: 'center', letterSpacing: '0.08em',
+                                      WebkitTapHighlightColor: 'transparent',
+                                    }}>
+                                    ···
+                                  </button>
+                                </div>
+                              );
+                            })() : f.k === 'time' ? (
+                              <input
+                                type="time"
+                                value={row.time ?? ''}
+                                onClick={() => {
+                                  if (!row.time) {
+                                    const now = new Date();
+                                    const hh = String(now.getHours()).padStart(2, '0');
+                                    const mm = String(now.getMinutes()).padStart(2, '0');
+                                    const r = [...medRows]; r[i] = { ...r[i], time: `${hh}:${mm}` }; setMedRows(r); dirtyRef.current = true;
+                                  }
+                                }}
+                                onChange={e => { const r = [...medRows]; r[i] = { ...r[i], time: e.target.value }; setMedRows(r); dirtyRef.current = true; }}
                                 onFocus={onF}
                                 onBlur={onB}
-                                style={{ ...base, marginBottom: 8, appearance: 'auto' }}
-                              >
-                                <option value=""></option>
-                                {authorised.map(n => <option key={n} value={n}>{n}</option>)}
-                                {row[f.k] && !authorised.includes(row[f.k] as string) && (
-                                  <option value={row[f.k]}>{row[f.k]} (Out of Scope)</option>
-                                )}
-                              </select>
+                                style={{ ...base, marginBottom: 8 }}
+                              />
                             ) : f.opts ? (
-                              <select
-                                value={row[f.k] ?? ''}
-                                onChange={e => { const r = [...medRows]; r[i] = { ...r[i], [f.k]: e.target.value }; setMedRows(r); dirtyRef.current = true; }}
-                                onFocus={onF}
-                                onBlur={onB}
-                                style={{ ...base, marginBottom: 8, appearance: 'auto' }}
-                              >
-                                <option value=""></option>
-                                {f.opts.map(o => <option key={o} value={o}>{o}</option>)}
-                              </select>
+                              <>
+                                <input
+                                  list={`med-${f.k}-${i}`}
+                                  value={row[f.k] ?? ''}
+                                  onChange={e => { const r = [...medRows]; r[i] = { ...r[i], [f.k]: e.target.value }; setMedRows(r); dirtyRef.current = true; }}
+                                  onFocus={onF}
+                                  onBlur={onB}
+                                  placeholder=""
+                                  autoComplete="off"
+                                  style={{ ...base, marginBottom: 8 }}
+                                />
+                                <datalist id={`med-${f.k}-${i}`}>
+                                  {f.opts?.map(o => <option key={o} value={o} />)}
+                                </datalist>
+                              </>
                             ) : (
                               <input
                                 autoComplete="off"
@@ -6195,6 +6416,7 @@ export default function DigitalPRFForm() {
                                 onChange={e => { const r = [...medRows]; r[i] = { ...r[i], [f.k]: e.target.value }; setMedRows(r); dirtyRef.current = true; }}
                                 onFocus={onF}
                                 onBlur={onB}
+                                placeholder=""
                                 style={{ ...base, marginBottom: 8 }}
                               />
                             )}
@@ -6438,8 +6660,8 @@ export default function DigitalPRFForm() {
         <SHdr t="Oxygen Administration" />
         <Card>
           <G2>
-            <div><Lbl t="Flow Rate (L/Min)" /><Inp fk="o2_flow_rate" ph="e.g. 15" type="number" /></div>
-            <div><Lbl t="Device" /><Sel fk="o2_device" opts={['Mask', 'Nasal Cannula', 'Non-Rebreather', 'BVM', 'Nebuliser', 'Other']} /></div>
+            <div><Lbl t="Flow Rate (L/Min)" /><Sel fk="o2_flow_rate" opts={['1', '1.5', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15']} /></div>
+            <div><Lbl t="Device" /><Sel fk="o2_device" opts={['Mask', 'Nasal Cannula', 'Non-Rebreather', 'Polymask Rebreather', 'Polymask Non-Rebreather', 'Nebulisation Mask', 'Venturi Mask', 'EtCO2 Device', 'BVM', 'Nebuliser']} /></div>
             <div><Lbl t="Start Time" /><Inp fk="o2_start_time" type="time" /></div>
             <div><Lbl t="Stop Time" /><Inp fk="o2_stop_time" type="time" /></div>
           </G2>
@@ -6770,16 +6992,18 @@ export default function DigitalPRFForm() {
                   </div>
                   <div>
                     <Lbl t="Route" />
-                    <select
+                    <input
+                      list={`hospital-route-${i}`}
                       value={row.route ?? ''}
                       onChange={e => updateRow(i, 'route', e.target.value)}
                       onFocus={onF}
                       onBlur={onB}
-                      style={{ ...base, marginBottom: 8, appearance: 'auto' }}
-                    >
-                      <option value=""></option>
-                      {ROUTES.map(r => <option key={r} value={r}>{r}</option>)}
-                    </select>
+                      autoComplete="off"
+                      style={{ ...base, marginBottom: 8 }}
+                    />
+                    <datalist id={`hospital-route-${i}`}>
+                      {ROUTES.map(r => <option key={r} value={r} />)}
+                    </datalist>
                   </div>
                 </DodG2>
               </Card>
@@ -7129,8 +7353,10 @@ export default function DigitalPRFForm() {
   // calendar day. Returns null until at least one vital set has been
   // recorded — that's the trigger for the reminder pill to appear.
   const lastVitalAt = useMemo<number | null>(() => {
-    if (!vitals.length) return null;
-    const last = vitals[vitals.length - 1];
+    // Only count vital sets that are fully completed (not currently being edited)
+    const completedVitals = vitals.filter((_, i) => i !== editVital);
+    if (!completedVitals.length) return null;
+    const last = completedVitals[completedVitals.length - 1];
     if (!last?.time) return null;
     const [hh, mm] = String(last.time).split(':').map((s: string) => parseInt(s, 10));
     if (Number.isNaN(hh) || Number.isNaN(mm)) return null;
@@ -7145,7 +7371,7 @@ export default function DigitalPRFForm() {
       d.setDate(d.getDate() + 1);
     }
     return d.getTime();
-  }, [vitals, timestamps.time_dispatched]);
+  }, [vitals, editVital, timestamps.time_dispatched]);
 
   // Tap-to-jump: route the crew straight to the Clinical phase (vitals live
   // there) and scroll the vitals heading into view on the next paint.
@@ -7486,7 +7712,7 @@ export default function DigitalPRFForm() {
 
         {/* ── Vitals reminder pill — interval driven by assessment_level
             (BLS 20m / ILS 15m / ALS 10m). Hidden on Complete phase. ── */}
-        {phase < 6 && <VitalsReminder lastVitalAt={lastVitalAt} level={fd.assessment_level} onClick={jumpToVitals} />}
+        {phase < 6 && editVital < 0 && !quickVital && <VitalsReminder lastVitalAt={lastVitalAt} level={fd.assessment_level} onClick={jumpToVitals} />}
 
         {/* ── Quick vitals overlay ── */}
         {quickVital && (
