@@ -493,7 +493,7 @@ export default function DocumentReview() {
             {F('Full Name', nameKey, data)}
             {F('Initials', initKey, data)}
             {F('Qualification', qualKey, data)}
-            {F('HPCSA No.', hpcsaKey, data)}
+            {F('Practitioner Number', hpcsaKey, data)}
           </G4>
         </div>
       );

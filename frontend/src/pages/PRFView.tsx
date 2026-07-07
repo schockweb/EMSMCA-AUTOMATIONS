@@ -1184,7 +1184,7 @@ export default function PRFView() {
               <SubBlock title="Declaration of Death" rows={[
                 ['Time',        fd.med_aid_dec_death_time],
                 ['Declared By', fd.med_aid_dec_death_declared_by],
-                ['HPCSA No',    fd.med_aid_dec_death_hpcsa],
+                ['Practitioner Number',    fd.med_aid_dec_death_hpcsa],
               ]} />
             )}
             {fd.med_aid_quoted && (
@@ -1806,6 +1806,7 @@ export default function PRFView() {
         { label: 'ID Document', val: fd.id_document_image },
         { label: 'Medical Aid Card', val: fd.medical_aid_image },
         { label: 'AOD Document', val: fd.aod_document },
+        { label: 'Additional Document', val: fd.additional_document_image },
         ...(Array.isArray(fd.nursing_notes) ? fd.nursing_notes : []).map((n: any, i: number) => ({
           label: `Nursing Note #${i + 1}`,
           val: n.data_url

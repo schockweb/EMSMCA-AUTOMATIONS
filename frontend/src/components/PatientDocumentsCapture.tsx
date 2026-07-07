@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
-export type DocKey = 'hospital_sticker' | 'admission_form_image' | 'id_document_image' | 'medical_aid_image' | 'aod_document';
+export type DocKey = 'hospital_sticker' | 'admission_form_image' | 'id_document_image' | 'medical_aid_image' | 'aod_document' | 'additional_document_image';
 
 interface Props {
   docs: {
@@ -9,6 +9,7 @@ interface Props {
     id_document_image?: string | null;
     medical_aid_image?: string | null;
     aod_document?: string | null;
+    additional_document_image?: string | null;
   };
   onChange: (key: DocKey, dataUrl: string | null) => void;
 }
@@ -26,6 +27,7 @@ const DOC_LABELS: Record<DocKey, string> = {
   id_document_image: 'ID Document',
   medical_aid_image: 'Medical Aid Card',
   aod_document: 'AOD Document',
+  additional_document_image: 'Additional Documents',
 };
 
 export default function PatientDocumentsCapture({ docs, onChange }: Props) {

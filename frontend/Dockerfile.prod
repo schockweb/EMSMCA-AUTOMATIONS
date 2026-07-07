@@ -6,7 +6,7 @@
 
 # ── Stage 1: Build ─────────────────────────────────────────
 # Install deps and produce the Vite production bundle.
-FROM node:20-alpine AS build
+FROM node:20-slim AS build
 
 WORKDIR /app
 
@@ -22,6 +22,9 @@ COPY . .
 # Build args — API URL is baked into the bundle at build time
 ARG VITE_API_URL=/api
 ENV VITE_API_URL=$VITE_API_URL
+
+# Increase heap size to prevent SIGBUS/OOM during heavy TS/Vite compilation
+ENV NODE_OPTIONS="--max_old_space_size=4096"
 
 # Produce optimised production build to /app/dist
 RUN npm run build

@@ -457,32 +457,6 @@ export default function ProviderAdminDashboard() {
     navigate(`/${providerSlug}/login`);
   };
 
-  // ── Nav ────────────────────────────────────────────────────────
-  const SideBtn = ({ tab, label, count }: { tab: Tab; label: string; count: number }) => {
-    const active = activeTab === tab;
-    return (
-      <button onClick={() => { setActiveTab(tab); setSearch(''); setStatusFilter('all'); }} style={{
-        display: 'flex', alignItems: 'center',
-        justifyContent: isMobile ? 'center' : 'space-between',
-        gap: isMobile ? 8 : 0,
-        padding: '10px 14px', border: 'none', cursor: 'pointer',
-        textAlign: isMobile ? 'center' : 'left',
-        width: isMobile ? 'auto' : '100%',
-        flex: isMobile ? '1 1 auto' : undefined,
-        background: active ? G : 'transparent',
-        color: active ? '#fff' : INK,
-        fontSize: '0.82rem', fontWeight: 700,
-        borderRadius: 4, fontFamily: 'inherit',
-        whiteSpace: 'nowrap',
-      }}>
-        <span>{label}</span>
-        <span style={{
-          fontSize: '0.7rem', fontWeight: 700, fontFamily: 'ui-monospace, monospace',
-          color: active ? 'rgba(255,255,255,0.65)' : MUT,
-        }}>{count}</span>
-      </button>
-    );
-  };
 
   const thStyle: React.CSSProperties = {
     padding: '9px 14px', textAlign: 'left', fontSize: '0.62rem',
@@ -533,6 +507,93 @@ export default function ProviderAdminDashboard() {
         </div>
       </header>
 
+      {/* ── Icon Navigation Bar ─────────────────────────────────────────
+          Three centred quick-action icons below the header.
+          · Home   — resets to default view (Employees tab)
+          · Crew   — jumps to Employees section
+          · Ambulance — jumps to Vehicles section                      */}
+      <nav style={{
+        background: '#fff', borderBottom: `1px solid ${LN}`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        gap: isMobile ? 32 : 56, padding: isMobile ? '10px 0' : '12px 0',
+        flexShrink: 0,
+      }}>
+        {([
+          {
+            key: 'home',
+            label: 'Home',
+            tab: 'employees' as Tab,
+            icon: (
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 9.5L12 3l9 6.5V20a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9.5z"/>
+                <polyline points="9 21 9 12 15 12 15 21"/>
+              </svg>
+            ),
+          },
+          {
+            key: 'crew',
+            label: 'Crew',
+            tab: 'employees' as Tab,
+            icon: (
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="9" cy="7" r="3"/>
+                <path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/>
+                <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                <path d="M21 21v-2a4 4 0 0 0-3-3.87"/>
+              </svg>
+            ),
+          },
+          {
+            key: 'ambulance',
+            label: 'Ambulance',
+            tab: 'vehicles' as Tab,
+            icon: (
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="1" y="7" width="16" height="11" rx="1"/>
+                <path d="M16 12h4l2 4v2h-6V12z"/>
+                <circle cx="5.5" cy="18.5" r="1.5"/>
+                <circle cx="18.5" cy="18.5" r="1.5"/>
+                <path d="M7 10h3M8.5 8.5v3"/>
+              </svg>
+            ),
+          },
+        ] as { key: string; label: string; tab: Tab; icon: React.ReactNode }[]).map(({ key, label, tab, icon }) => {
+          const isActive = activeTab === tab && (key === 'home' ? true : key === 'crew' ? activeTab === 'employees' : activeTab === 'vehicles');
+          const active = key === 'home' ? false : activeTab === tab;
+          return (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setActiveTab(tab)}
+              style={{
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+                background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px 10px',
+                color: activeTab === tab && key !== 'home'
+                  ? G
+                  : key === 'home' && activeTab === 'employees'
+                    ? G
+                    : MUT,
+                transition: 'color 0.18s',
+              }}
+            >
+              {icon}
+              <span style={{ fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                {label}
+              </span>
+              {/* Active underline dot */}
+              <span style={{
+                width: 5, height: 5, borderRadius: 99,
+                background: (activeTab === tab && key !== 'home') || (key === 'home' && activeTab === 'employees') ? G : 'transparent',
+                transition: 'background 0.18s',
+              }} />
+            </button>
+          );
+        })}
+      </nav>
+
       {/* Body — column layout on mobile so the sidebar becomes a horizontal
           tab strip above the main content. The desktop side-by-side layout
           collapses on phones because a 200px sidebar leaves only ~150px for
@@ -544,31 +605,6 @@ export default function ProviderAdminDashboard() {
         flexDirection: isMobile ? 'column' : 'row',
       }}>
 
-        {/* Sidebar / top tabs */}
-        <aside style={{
-          ...(isMobile
-            ? {
-              width: '100%', flexShrink: 0, background: '#fff',
-              borderBottom: `1px solid ${LN}`, padding: '8px 10px',
-              display: 'flex', flexDirection: 'row', gap: 6,
-              overflowX: 'auto',
-            }
-            : {
-              width: 200, flexShrink: 0, background: '#fff',
-              borderRight: `1px solid ${LN}`, padding: '18px 10px',
-              display: 'flex', flexDirection: 'column', gap: 2,
-            }),
-        }}>
-          {!isMobile && (
-            <div style={{
-              fontSize: '0.58rem', fontWeight: 800, color: MUT,
-              textTransform: 'uppercase', letterSpacing: '0.16em',
-              padding: '0 10px 10px', marginBottom: 2,
-            }}>Registry</div>
-          )}
-          <SideBtn tab="employees" label="Employees" count={employees.length} />
-          <SideBtn tab="vehicles"  label="Vehicles"  count={vehicles.length}  />
-        </aside>
 
         {/* Main */}
         <main style={{ flex: 1, overflowY: 'auto', padding: isMobile ? '14px 12px' : '24px 28px', minWidth: 0 }}>
