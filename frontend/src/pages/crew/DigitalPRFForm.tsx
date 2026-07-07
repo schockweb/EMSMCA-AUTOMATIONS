@@ -4526,6 +4526,9 @@ export default function DigitalPRFForm() {
     // callback so the crew confirms GPS before the journey moves forward.
     if (timeKey && !timestamps[timeKey]) {
       if (timeKey === 'time_depart_scene') {
+        if (!kms.km_depart_scene && kms.km_on_scene) {
+          handleKmChange('km_depart_scene', kms.km_on_scene);
+        }
         setDepartPromptOpen(true);
         return;
       }
@@ -4934,7 +4937,7 @@ export default function DigitalPRFForm() {
               <div style={{ fontWeight: 800, color: S900 }}>Vitals Set #{editVital + 1}</div>
               <button type="button" onClick={() => {
                 setEditVital(-1);
-                window.setTimeout(() => document.getElementById('vitals-section-anchor')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 10);
+                window.setTimeout(() => document.getElementById('vitals-add-button')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 10);
               }} style={{ padding: '8px 18px', borderRadius: 8, fontSize: '0.82rem', fontWeight: 800, border: 'none', background: S800, color: W, cursor: 'pointer' }}>Done</button>
             </div>
             <Lbl t="Time Recorded" />
@@ -5019,19 +5022,21 @@ export default function DigitalPRFForm() {
             })}
             <button type="button" onClick={() => {
               setEditVital(-1);
-              window.setTimeout(() => document.getElementById('vitals-section-anchor')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 10);
+              window.setTimeout(() => document.getElementById('vitals-add-button')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 10);
             }} style={{ width: '100%', padding: 14, borderRadius: 10, fontWeight: 800, fontSize: '0.92rem', border: 'none', background: `linear-gradient(135deg,${G},${GDK})`, color: W, cursor: 'pointer', marginTop: 4 }}>Save Set #{editVital + 1}</button>
           </div>
         )}
 
         {editVital < 0 && (
-          <button type="button" onClick={() => {
-            const t = new Date();
-            const newSet = { time: `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}` };
-            const next = [...vitals, newSet]; setVitals(next); setEditVital(next.length - 1); dirtyRef.current = true;
-          }} style={{ width: '100%', padding: 15, borderRadius: 12, fontSize: '0.9rem', fontWeight: 800, border: `2px dashed ${G}`, background: GBG, color: GDK, cursor: 'pointer', marginBottom: 4 }}>
-            + Add Vitals Set #{vitals.length + 1}
-          </button>
+          <div id="vitals-add-button">
+            <button type="button" onClick={() => {
+              const t = new Date();
+              const newSet = { time: `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}` };
+              const next = [...vitals, newSet]; setVitals(next); setEditVital(next.length - 1); dirtyRef.current = true;
+            }} style={{ width: '100%', padding: 15, borderRadius: 12, fontSize: '0.9rem', fontWeight: 800, border: `2px dashed ${G}`, background: GBG, color: GDK, cursor: 'pointer', marginBottom: 4 }}>
+              + Add Vitals Set #{vitals.length + 1}
+            </button>
+          </div>
         )}
       </>
     );
@@ -7843,7 +7848,12 @@ export default function DigitalPRFForm() {
                       setTimeout(() => {
                         if (kmConfirm.kmKey === 'km_dispatched') setDispatchPromptOpen(true);
                         if (kmConfirm.kmKey === 'km_on_scene') setOnScenePromptOpen(true);
-                        if (kmConfirm.kmKey === 'km_depart_scene') setDepartPromptOpen(true);
+                        if (kmConfirm.kmKey === 'km_depart_scene') {
+                          if (!kms.km_depart_scene && kms.km_on_scene) {
+                            handleKmChange('km_depart_scene', kms.km_on_scene);
+                          }
+                          setDepartPromptOpen(true);
+                        }
                         if (kmConfirm.kmKey === 'km_at_destination') setDestinationPromptOpen(true);
                         setTimeout(() => document.getElementById(`input-${kmConfirm.kmKey}`)?.focus(), 50);
                       }, 10);
@@ -8990,7 +9000,12 @@ export default function DigitalPRFForm() {
                 'Medication / IV Administered On Route',
                 'Medication Administered via IV',
                 'Fluid Resuscitation Required',
-                'Profuse Bleeding'
+                'Profuse Bleeding',
+                'Nebuliser',
+                'Oral',
+                'IV',
+                'IMI',
+                'Inhalation'
               ].map(opt => (
                 <button
                   key={opt}
