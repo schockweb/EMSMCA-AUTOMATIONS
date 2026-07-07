@@ -596,54 +596,70 @@ export default function CrewDashboard() {
             <h1 style={{ fontSize: '1.45rem', fontWeight: 800, color: T, margin: '0 0 14px', letterSpacing: '-0.01em' }}>
               {profile.name}
             </h1>
-            <div style={{ display: 'flex', gap: 10, marginBottom: 0, flexWrap: 'wrap' }}>
+            <div style={{ 
+              background: '#fff', 
+              borderRadius: 10, 
+              border: `1px solid ${B}`,
+              boxShadow: '0 1px 3px rgba(0,0,0,0.03)', 
+              overflow: 'hidden',
+              marginBottom: 10
+            }}>
               {savedVehicle && (
                 <div style={{
-                  flex: '1 1 140px', minWidth: 140, padding: '11px 14px', borderRadius: 10,
-                  background: '#fff', border: `1px solid ${B}`,
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  padding: '12px 14px', borderBottom: (dashboardExtraCrews.length > 0 || shiftSupervisor) ? `1px solid ${B}` : 'none'
                 }}>
-                  <div style={{ fontSize: '0.58rem', fontWeight: 700, color: M, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Vehicle</div>
-                  <div style={{ fontWeight: 800, fontSize: '0.88rem', color: T, marginTop: 3 }}>{savedVehicle.callsign}</div>
-                  <div style={{ fontSize: '0.7rem', color: M, fontFamily: 'monospace' }}>{savedVehicle.registration}</div>
+                  <div>
+                    <div style={{ fontSize: '0.6rem', fontWeight: 700, color: M, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>Vehicle</div>
+                    <div style={{ fontWeight: 800, fontSize: '0.9rem', color: T }}>{savedVehicle.callsign}</div>
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: M, fontFamily: 'monospace', background: '#f1f5f9', padding: '4px 8px', borderRadius: 6, fontWeight: 600 }}>
+                    {savedVehicle.registration}
+                  </div>
                 </div>
               )}
-              {dashboardExtraCrews.map((c, i) => (
-                <div key={c.id || i} style={{
-                  flex: '1 1 140px', minWidth: 140, padding: '11px 14px', borderRadius: 10,
-                  background: '#fff', border: `1px solid ${B}`,
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.03)', position: 'relative',
-                }}>
-                  <button
-                    type="button"
-                    onClick={() => persistExtraCrews(dashboardExtraCrews.filter((_, idx) => idx !== i))}
-                    aria-label="Remove crew member"
-                    style={{
-                      position: 'absolute', top: 4, right: 6,
-                      background: 'none', border: 'none', color: M, cursor: 'pointer',
-                      fontSize: '0.95rem', lineHeight: 1, padding: 4, fontWeight: 600,
-                    }}
-                  >×</button>
-                  <div style={{ fontSize: '0.58rem', fontWeight: 700, color: GD, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Crew {i + 2}</div>
-                  <div style={{ fontWeight: 800, fontSize: '0.88rem', color: T, marginTop: 3, paddingRight: 14 }}>{c.name}</div>
-                  <div style={{ fontSize: '0.7rem', color: M, fontFamily: 'monospace' }}>{c.hpcsa_number}</div>
-                </div>
-              ))}
+              {dashboardExtraCrews.map((c, i) => {
+                const isLast = i === dashboardExtraCrews.length - 1 && !shiftSupervisor;
+                return (
+                  <div key={c.id || i} style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '12px 14px', borderBottom: isLast ? 'none' : `1px solid ${B}`
+                  }}>
+                    <div>
+                      <div style={{ fontSize: '0.6rem', fontWeight: 700, color: GD, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>Crew {i + 2}</div>
+                      <div style={{ fontWeight: 800, fontSize: '0.9rem', color: T }}>{c.name}</div>
+                      <div style={{ fontSize: '0.75rem', color: M, fontFamily: 'monospace', marginTop: 2 }}>{c.hpcsa_number}</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => persistExtraCrews(dashboardExtraCrews.filter((_, idx) => idx !== i))}
+                      aria-label="Remove crew member"
+                      title="Remove crew member"
+                      style={{
+                        background: '#fee2e2', border: 'none', color: '#ef4444', cursor: 'pointer',
+                        width: 28, height: 28, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: '1rem', fontWeight: 600, padding: 0
+                      }}
+                    >×</button>
+                  </div>
+                );
+              })}
               {/* Supervising practitioner card — present only when the shift
                   was captured as BAA-only. Amber accent so it reads as a
                   supervision relationship distinct from on-vehicle crew. */}
               {shiftSupervisor && (
                 <div style={{
-                  flex: '1 1 140px', minWidth: 140, padding: '11px 14px', borderRadius: 10,
-                  background: '#fffbeb', border: '1px solid #fcd34d',
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  padding: '12px 14px', background: '#fffbeb', borderTop: dashboardExtraCrews.length > 0 ? `1px solid #fde68a` : 'none'
                 }}>
-                  <div style={{ fontSize: '0.58rem', fontWeight: 700, color: '#92400e', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                    Supervisor
+                  <div>
+                    <div style={{ fontSize: '0.6rem', fontWeight: 700, color: '#92400e', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>
+                      Supervisor
+                    </div>
+                    <div style={{ fontWeight: 800, fontSize: '0.9rem', color: T }}>{shiftSupervisor.name}</div>
                   </div>
-                  <div style={{ fontWeight: 800, fontSize: '0.88rem', color: T, marginTop: 3 }}>{shiftSupervisor.name}</div>
-                  <div style={{ fontSize: '0.7rem', color: M, fontFamily: 'monospace' }}>
-                    {shiftSupervisor.hpcsa_number} · {shiftSupervisor.qualification}
+                  <div style={{ fontSize: '0.75rem', color: '#92400e', fontFamily: 'monospace', background: '#fef3c7', padding: '4px 8px', borderRadius: 6, fontWeight: 600 }}>
+                    {shiftSupervisor.hpcsa_number}
                   </div>
                 </div>
               )}

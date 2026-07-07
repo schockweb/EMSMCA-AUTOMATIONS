@@ -10,7 +10,6 @@ import axios from '../../api/client';
 import SignaturePad from '../../components/SignaturePad';
 import FullscreenSignaturePad, { FullscreenCanvas } from '../../components/FullscreenSignaturePad';
 import PatientDocumentsCapture from '../../components/PatientDocumentsCapture';
-import StickerCameraCapture from '../../components/StickerCameraCapture';
 import DocumentsCapture from '../../components/DocumentsCapture';
 import BodyDiagram from '../../components/BodyDiagram';
 import {
@@ -2462,7 +2461,7 @@ const DodFormBody = () => {
       </DodG2>
       <DodG2>
         <div><Lbl t="ID No" /><Inp fk="med_aid_dec_death_hcp_id" ph="ID number" /></div>
-        <div><Lbl t="HPCSA No" /><Inp fk="med_aid_dec_death_hcp_hpcsa" ph="MP / PB number" /></div>
+        <div><Lbl t="Practitioner Number" /><Inp fk="med_aid_dec_death_hcp_hpcsa" ph="MP / PB number" /></div>
       </DodG2>
 
       <DodSubHdr t="Medical Information" />
@@ -3350,6 +3349,9 @@ export default function DigitalPRFForm() {
   // Crew sign-off gate — on Submit, every crew member must sign before the PRF
   // can go through. Signatures are stored in fd.crew_signoff_sigs keyed by crew.
   const [crewSignOffOpen, setCrewSignOffOpen] = useState(false);
+  // Summary review gate — before crew sign-off, show all entered data so crew
+  // can spot typos or missing info. The modal's "Looks Good" continues to submit.
+  const [summaryReviewOpen, setSummaryReviewOpen] = useState(false);
   const [prfMeta, setPrfMeta] = useState<any>({});
 
   const [fd, setFd] = useState<Record<string, any>>({});
@@ -4595,6 +4597,14 @@ export default function DigitalPRFForm() {
         `Cannot submit yet — ${validationBlockers(f).length} required item(s) missing. See the highlighted issues at the top of the form.`,
       );
       submitInFlightRef.current = false;
+      return;
+    }
+    // Summary review gate — show the crew a read-only summary of everything
+    // they entered so they can spot typos before signing. The "Looks Good"
+    // button in the modal closes it and calls handleSubmit again.
+    if (!summaryReviewOpen && !allCrewSigned()) {
+      submitInFlightRef.current = false;
+      setSummaryReviewOpen(true);
       return;
     }
     // Crew sign-off gate (replaces the plain confirm). Every crew member must
@@ -6902,7 +6912,7 @@ export default function DigitalPRFForm() {
               </div>
             </div>
 
-            <Lbl t="HPCSA No." /><Inp fk="handover_qualification" ph="e.g. PR0123456" />
+            <Lbl t="Practitioner Number" /><Inp fk="handover_qualification" ph="e.g. PR0123456" />
             <Lbl t="Receiving Facility Email" /><Inp fk="handover_doctor_email" ph="dr@hospital.co.za" type="email" />
             <Lbl t="Condition on Handover" /><Txt fk="handover_notes" ph="Patient condition at time of handover..." rows={2} />
             <div style={{ marginTop: 14 }}>
@@ -6914,6 +6924,7 @@ export default function DigitalPRFForm() {
                   id_document_image: fd.id_document_image,
                   medical_aid_image: fd.medical_aid_image,
                   aod_document: fd.aod_document,
+                  additional_document_image: fd.additional_document_image,
                 }}
                 onChange={(key, v) => sf(key, v)}
               />
@@ -7013,25 +7024,6 @@ export default function DigitalPRFForm() {
         );
       })()}
 
-      <SHdr t={['IHT', 'IFT'].includes(fd.call_type) ? "Additional Documents / Nursing Notes" : "Additional Documents"} />
-      <Card>
-        <DocumentsCapture
-          value={fd.additional_documents}
-          onChange={v => sf('additional_documents', v)}
-        />
-      </Card>
-
-      {/* Dedicated hospital-sticker capture. Stores to fd.hospital_sticker
-          (the same field the branded PRF / PDF renders in its Hospital
-          Sticker placeholder), so capturing here populates that spot. */}
-      <SHdr t="Hospital Sticker" />
-      <Card>
-        <StickerCameraCapture
-          value={fd.hospital_sticker}
-          onChange={v => sf('hospital_sticker', v)}
-          buttonLabel="Photograph Hospital Sticker"
-        />
-      </Card>
 
       <SHdr t="Medical Aid Information" />
       {fd.billing_type === 'MED AID' && (
@@ -7334,6 +7326,344 @@ export default function DigitalPRFForm() {
                     }}
                   >
                     {allSigned ? 'Confirm & Submit' : `${signedCount} / ${totalCount} Signed`}
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* ── Summary Review Modal (Swipeable Cards) ── */}
+        {summaryReviewOpen && (() => {
+          // Helper to extract non-empty fields
+          const v = (key: string, label?: string) => {
+            const val = fd[key];
+            if (val === undefined || val === null || val === '') return null;
+            return { label: label || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()), value: String(val) };
+          };
+
+          type SummarySection = { title: string; emoji: string; items: { label: string; value: string }[] };
+
+          // ── Card 1: Patient Information + Billing ──
+          const card1Sections: SummarySection[] = [];
+          const patient = [
+            v('patient_name', 'First Name'), v('patient_surname', 'Surname'),
+            v('gender', 'Gender'), v('patient_id_number', 'ID Number'),
+            v('patient_passport_number', 'Passport Number'),
+            v('patient_dob', 'Date of Birth'), v('age', 'Age'),
+            v('patient_phone_cell', 'Cell Phone'), v('patient_phone_home', 'Home Phone'),
+            v('patient_address', 'Address'), v('patient_suburb', 'Suburb'),
+            v('patient_postal_code', 'Postal Code'),
+          ].filter(Boolean) as { label: string; value: string }[];
+          if (patient.length) card1Sections.push({ title: 'Patient Information', emoji: '👤', items: patient });
+
+          const billing = [
+            v('billing_type', 'Billing Type'),
+            v('scheme_name', 'Medical Aid Scheme'), v('scheme_option', 'Plan / Option'),
+            v('med_aid_number', 'Med Aid Number'), v('main_member_name', 'Main Member'),
+            v('main_member_id', 'Main Member ID'), v('main_member_surname', 'Main Member Surname'),
+            v('dependant_code', 'Dependant Code'), v('post_auth_number', 'Post-Auth Number'),
+            v('pvt_payment_method', 'Payment Method'), v('pvt_amount_quoted', 'Amount Quoted'),
+            v('pvt_account_holder', 'Account Holder'), v('pvt_account_holder_id', 'Account Holder ID'),
+          ].filter(Boolean) as { label: string; value: string }[];
+          if (billing.length) card1Sections.push({ title: 'Billing', emoji: '💳', items: billing });
+
+          // ── Card 2: Dispatch & Scene ──
+          const card2Sections: SummarySection[] = [];
+          const dispatch = [
+            v('call_type', 'Call Type'), v('transfer_subtype', 'Transfer Subtype'),
+            v('preauth_number', 'Pre-Auth Number'), v('med_aid_quoted_amount', 'Quoted Amount'),
+            v('rht_call_out_fee', 'RHT Call-Out Fee'),
+          ].filter(Boolean) as { label: string; value: string }[];
+          if (timestamps.time_dispatched) dispatch.push({ label: 'Dispatched', value: timestamps.time_dispatched });
+          if (timestamps.time_mobile) dispatch.push({ label: 'Mobile', value: timestamps.time_mobile });
+          if (dispatch.length) card2Sections.push({ title: 'Dispatch & Mobilisation', emoji: '🚑', items: dispatch });
+
+          const scene = [
+            v('incident_location', 'Incident Location'), v('suburb_ward', 'Suburb / Ward'),
+            v('priority', 'Priority'),
+          ].filter(Boolean) as { label: string; value: string }[];
+          if (timestamps.time_on_scene) scene.push({ label: 'On Scene', value: timestamps.time_on_scene });
+          if (scene.length) card2Sections.push({ title: 'Scene', emoji: '📍', items: scene });
+
+          // ── Card 3: Clinical Notes ──
+          const card3Sections: SummarySection[] = [];
+          const clinical = [
+            v('chief_complaint', 'Chief Complaint'), v('primary_diagnosis', 'Primary Diagnosis'),
+            v('findings_on_arrival', 'Findings on Arrival'),
+            v('allergies', 'Allergies'), v('current_medications', 'Current Medications'),
+            v('past_medical_history', 'Past Medical History'),
+            v('last_meal', 'Last Meal'), v('last_meal_time', 'Last Meal Time'),
+            v('events_hpi', 'Events / HPI'), v('mechanism', 'Mechanism'),
+          ].filter(Boolean) as { label: string; value: string }[];
+          if (clinical.length) card3Sections.push({ title: 'Clinical Assessment', emoji: '🩺', items: clinical });
+
+          if (vitals.length > 0) {
+            const vitalsItems: { label: string; value: string }[] = [];
+            vitals.forEach((vs: any, i: number) => {
+              const parts: string[] = [];
+              if (vs.time) parts.push(`Time: ${vs.time}`);
+              if (vs.bp_sys || vs.bp_dia) parts.push(`BP: ${vs.bp_sys || '—'}/${vs.bp_dia || '—'}`);
+              if (vs.pulse) parts.push(`Pulse: ${vs.pulse}`);
+              if (vs.spo2) parts.push(`SpO₂: ${vs.spo2}%`);
+              if (vs.rr) parts.push(`RR: ${vs.rr}`);
+              if (vs.temp) parts.push(`Temp: ${vs.temp}°C`);
+              if (vs.gcs_e || vs.gcs_v || vs.gcs_m) parts.push(`GCS: E${vs.gcs_e || '?'}V${vs.gcs_v || '?'}M${vs.gcs_m || '?'}`);
+              if (vs.blood_glucose) parts.push(`BGL: ${vs.blood_glucose}`);
+              if (parts.length) vitalsItems.push({ label: `Set ${i + 1}`, value: parts.join(' · ') });
+            });
+            if (vitalsItems.length) card3Sections.push({ title: 'Vitals', emoji: '❤️', items: vitalsItems });
+          }
+
+          if (ivRows.length > 0) {
+            const ivItems = ivRows.map((row: any, i: number) => {
+              const parts: string[] = [];
+              if (row.fluid) parts.push(row.fluid);
+              if (row.volume) parts.push(`${row.volume}ml`);
+              if (row.rate) parts.push(`${row.rate}ml/hr`);
+              if (row.site) parts.push(`Site: ${row.site}`);
+              return { label: `Line ${i + 1}`, value: parts.join(' · ') || 'No details' };
+            });
+            card3Sections.push({ title: 'IV Therapy', emoji: '💉', items: ivItems });
+          }
+
+          if (medRows.length > 0) {
+            const medItems = medRows.map((row: any, i: number) => {
+              const parts: string[] = [];
+              if (row.drug) parts.push(row.drug);
+              if (row.dose) parts.push(row.dose);
+              if (row.route) parts.push(`Route: ${row.route}`);
+              if (row.time) parts.push(`@ ${row.time}`);
+              return { label: `Med ${i + 1}`, value: parts.join(' · ') || 'No details' };
+            });
+            card3Sections.push({ title: 'Medications', emoji: '💊', items: medItems });
+          }
+
+          const notes = [
+            v('management_notes', 'Management Notes'), v('motivation_notes', 'Motivation'),
+            v('vitals_shortfall_motivation', 'Vitals Shortfall Motivation'),
+          ].filter(Boolean) as { label: string; value: string }[];
+          if (notes.length) card3Sections.push({ title: 'Notes', emoji: '📝', items: notes });
+
+          // ── Card 4: Handover ──
+          const card4Sections: SummarySection[] = [];
+          const transport: { label: string; value: string }[] = [];
+          if (timestamps.time_depart_scene) transport.push({ label: 'Departed Scene', value: timestamps.time_depart_scene });
+          if (timestamps.time_at_destination) transport.push({ label: 'At Destination', value: timestamps.time_at_destination });
+          if (timestamps.time_available) transport.push({ label: 'Available', value: timestamps.time_available });
+          if (transport.length) card4Sections.push({ title: 'Transport Times', emoji: '🕐', items: transport });
+
+          const handover = [
+            v('handover_name', 'Handover To'), v('handover_doctor_email', 'Handover Email'),
+            v('ward', 'Ward'), v('referring_doctor', 'Referring Doctor'),
+            v('receiving_doctor', 'Receiving Doctor'),
+          ].filter(Boolean) as { label: string; value: string }[];
+          if (handover.length) card4Sections.push({ title: 'Handover', emoji: '🏥', items: handover });
+
+          // All 4 cards
+          const cards = [
+            { title: 'Patient & Billing', color: '#3b82f6', sections: card1Sections },
+            { title: 'Dispatch & Scene', color: '#f59e0b', sections: card2Sections },
+            { title: 'Clinical & Notes', color: '#10b981', sections: card3Sections },
+            { title: 'Handover', color: '#8b5cf6', sections: card4Sections },
+          ];
+
+          // Render a section block
+          const renderSection = (section: SummarySection, si: number) => (
+            <div key={si} style={{ marginBottom: 14 }}>
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                padding: '8px 0 6px', borderBottom: `1px solid ${S100}`,
+              }}>
+                <span style={{ fontSize: '0.9rem' }}>{section.emoji}</span>
+                <span style={{ fontSize: '0.76rem', fontWeight: 800, color: S800, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  {section.title}
+                </span>
+              </div>
+              {section.items.map((item, ii) => (
+                <div key={ii} style={{
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
+                  gap: 8, padding: '7px 2px',
+                  borderBottom: ii < section.items.length - 1 ? `1px solid ${S50}` : 'none',
+                }}>
+                  <div style={{ fontSize: '0.76rem', fontWeight: 600, color: S500, minWidth: 80, flexShrink: 0 }}>
+                    {item.label}
+                  </div>
+                  <div style={{
+                    fontSize: '0.8rem', fontWeight: 700, color: S900, textAlign: 'right',
+                    wordBreak: 'break-word', lineHeight: 1.4,
+                  }}>
+                    {item.value}
+                  </div>
+                </div>
+              ))}
+            </div>
+          );
+
+          // Swipeable carousel component (inline)
+          const Carousel = () => {
+            const [activeCard, setActiveCard] = useState(0);
+            const touchStartX = useRef(0);
+            const touchDeltaX = useRef(0);
+            const containerRef = useRef<HTMLDivElement>(null);
+
+            const goTo = (i: number) => setActiveCard(Math.max(0, Math.min(cards.length - 1, i)));
+
+            const handleTouchStart = (e: React.TouchEvent) => {
+              touchStartX.current = e.touches[0].clientX;
+              touchDeltaX.current = 0;
+            };
+            const handleTouchMove = (e: React.TouchEvent) => {
+              touchDeltaX.current = e.touches[0].clientX - touchStartX.current;
+            };
+            const handleTouchEnd = () => {
+              if (Math.abs(touchDeltaX.current) > 50) {
+                if (touchDeltaX.current < 0) goTo(activeCard + 1);
+                else goTo(activeCard - 1);
+              }
+              touchDeltaX.current = 0;
+            };
+
+            return (
+              <>
+                {/* Card indicator dots + title */}
+                <div style={{ padding: '14px 20px 8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ fontSize: '0.82rem', fontWeight: 800, color: cards[activeCard].color }}>
+                    {activeCard + 1} / {cards.length} — {cards[activeCard].title}
+                  </div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    {cards.map((card, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => goTo(i)}
+                        style={{
+                          width: i === activeCard ? 20 : 8, height: 8,
+                          borderRadius: 99, border: 'none', cursor: 'pointer',
+                          background: i === activeCard ? card.color : S200,
+                          transition: 'all 0.3s ease',
+                        }}
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                {/* Swipeable card area */}
+                <div
+                  ref={containerRef}
+                  onTouchStart={handleTouchStart}
+                  onTouchMove={handleTouchMove}
+                  onTouchEnd={handleTouchEnd}
+                  style={{
+                    overflow: 'hidden', padding: '0 16px 8px',
+                    minHeight: 280,
+                  }}
+                >
+                  <div style={{
+                    display: 'flex', transition: 'transform 0.35s cubic-bezier(0.4,0,0.2,1)',
+                    transform: `translateX(-${activeCard * 100}%)`,
+                  }}>
+                    {cards.map((card, ci) => (
+                      <div key={ci} style={{
+                        minWidth: '100%', flexShrink: 0,
+                        padding: '0 4px',
+                      }}>
+                        <div style={{
+                          background: W, borderRadius: 14,
+                          border: `1.5px solid ${ci === activeCard ? card.color + '40' : S100}`,
+                          padding: '14px 14px 10px',
+                          maxHeight: '52vh', overflowY: 'auto',
+                          boxShadow: ci === activeCard ? `0 4px 20px ${card.color}15` : 'none',
+                          transition: 'border-color 0.3s, box-shadow 0.3s',
+                        }}>
+                          {card.sections.length > 0 ? (
+                            card.sections.map((s, si) => renderSection(s, si))
+                          ) : (
+                            <div style={{ textAlign: 'center', padding: '40px 0', color: S400, fontSize: '0.85rem' }}>
+                              No data recorded for this section.
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Swipe hint (only on first card) */}
+                {activeCard === 0 && (
+                  <div style={{
+                    textAlign: 'center', fontSize: '0.72rem', color: S400,
+                    padding: '2px 0 6px', fontWeight: 600,
+                  }}>
+                    ← Swipe to review all cards →
+                  </div>
+                )}
+              </>
+            );
+          };
+
+          return (
+            <div style={{
+              position: 'fixed', inset: 0, zIndex: 9998,
+              background: 'rgba(15,23,42,0.6)', backdropFilter: 'blur(4px)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              padding: '16px 10px',
+            }}
+              onClick={e => { if (e.target === e.currentTarget) { setSummaryReviewOpen(false); submitInFlightRef.current = false; } }}
+            >
+              <div style={{
+                background: S50, borderRadius: 22, width: '100%', maxWidth: 440,
+                boxShadow: '0 16px 56px rgba(0,0,0,0.3)', overflow: 'hidden',
+                maxHeight: '90vh', display: 'flex', flexDirection: 'column',
+              }}
+                onClick={e => e.stopPropagation()}
+              >
+                {/* Header */}
+                <div style={{
+                  padding: '18px 20px 14px', borderBottom: `1px solid ${S100}`,
+                  background: 'linear-gradient(135deg, #f0fdf4, #ecfdf5)',
+                  flexShrink: 0,
+                }}>
+                  <div style={{ fontSize: '1.05rem', fontWeight: 900, color: S900, marginBottom: 3 }}>
+                    📋 Review Before Submitting
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: S600, lineHeight: 1.5 }}>
+                    Swipe through each card to check for accuracy and spelling errors.
+                  </div>
+                </div>
+
+                {/* Carousel */}
+                <div style={{ flex: 1, overflow: 'hidden' }}>
+                  <Carousel />
+                </div>
+
+                {/* Footer buttons */}
+                <div style={{
+                  padding: '12px 16px 16px', borderTop: `1px solid ${S100}`,
+                  display: 'flex', gap: 10, background: S50, flexShrink: 0,
+                }}>
+                  <button
+                    type="button"
+                    onClick={() => { setSummaryReviewOpen(false); submitInFlightRef.current = false; }}
+                    style={{
+                      flex: 1, padding: '13px 0', borderRadius: 12, fontWeight: 700,
+                      border: `2px solid ${S200}`, background: W, color: S600, cursor: 'pointer',
+                      fontSize: '0.85rem',
+                    }}
+                  >
+                    Go Back
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setSummaryReviewOpen(false); submitInFlightRef.current = false; void handleSubmit(); }}
+                    style={{
+                      flex: 2, padding: '13px 0', borderRadius: 12, fontWeight: 800,
+                      border: 'none', color: W, fontSize: '0.85rem',
+                      background: `linear-gradient(135deg, #16a34a, #15803d)`,
+                      cursor: 'pointer', boxShadow: '0 4px 16px rgba(22,163,74,0.3)',
+                    }}
+                  >
+                    ✓ Looks Good — Continue
                   </button>
                 </div>
               </div>
