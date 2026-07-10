@@ -13,66 +13,54 @@ gives every crew member their own budget regardless of shared NAT.
 Login/refresh requests have no token yet, so they fall back to per-IP keying —
 which is exactly what brute-force protection needs.
 
-Note: buckets are in-memory and per-process. With multiple workers each holds its
-own buckets, so the effective limit is `limit × workers`. For strict cluster-wide
-limiting, back this with Redis. Per-token keying (the important correctness fix)
-works the same either way.
+Backend: Redis sliding-window (INCR + EXPIRE)
+---------------------------------------------
+All Gunicorn workers share the same Redis instance, so the effective limit is the
+configured value — not limit × workers (the in-memory bug).
+
+Fallback: if Redis is unavailable, requests are passed through (fail-open).
+We already have Nginx-level rate limiting as the first line of defence, so the
+backend limiter is a belt-and-braces layer. Dropping to pass-through on Redis
+failure is safer than locking out the whole fleet.
 """
 from __future__ import annotations
-import time
 import hashlib
-from collections import defaultdict
-from dataclasses import dataclass, field
+import logging
 from fastapi import Request, status
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import Response, JSONResponse
 
-
-@dataclass
-class RateBucket:
-    """Sliding window rate limiter bucket."""
-    timestamps: list[float] = field(default_factory=list)
-
-    def prune(self, window: float):
-        cutoff = time.time() - window
-        self.timestamps = [t for t in self.timestamps if t > cutoff]
-
-    def count(self) -> int:
-        return len(self.timestamps)
-
-    def add(self):
-        self.timestamps.append(time.time())
+logger = logging.getLogger("ems.rate_limit")
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """
-    Per-identity rate limiting + request body size cap.
+    Redis-backed sliding-window rate limiting + request body size cap.
 
     Rules:
-    - Auth endpoints (/api/auth/login, /api/auth/refresh): `auth_limit` / window, per IP
-    - General API: `api_limit` / window, per crew/user token (falls back to IP)
+    - Auth endpoints (/api/auth/login, /api/auth/refresh): auth_limit / window, per IP
+    - General API: api_limit / window, per crew/user token (falls back to IP)
     - Static / health: unlimited
-    - Any request whose Content-Length exceeds `max_body_bytes` → 413
+    - Any request whose Content-Length exceeds max_body_bytes → 413
     """
 
     def __init__(
         self,
         app,
-        auth_limit: int = 100,        # 100 login attempts per window (was 60)
+        auth_limit: int = 100,        # 100 login attempts per window
         api_limit: int = 600,
-        window: int = 60,
-        max_body_bytes: int = 15 * 1024 * 1024,  # 15 MB — allows photo/sticker captures
+        window: int = 60,             # sliding window in seconds
+        max_body_bytes: int = 15 * 1024 * 1024,  # 15 MB
     ):
         super().__init__(app)
         self.auth_limit = auth_limit
         self.api_limit = api_limit
         self.window = window
         self.max_body_bytes = max_body_bytes
-        self._buckets: dict[str, RateBucket] = defaultdict(RateBucket)
-        self._sweep_counter = 0
+
+    # ── Helpers ────────────────────────────────────────────────────────────
 
     def _get_client_ip(self, request: Request) -> str:
-        # Respect X-Forwarded-For from reverse proxy
         forwarded = request.headers.get("x-forwarded-for")
         if forwarded:
             return forwarded.split(",")[0].strip()
@@ -81,7 +69,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     def _get_identity_key(self, request: Request) -> str:
         """Per-token identity when authenticated, else per-IP.
 
-        We hash the token so raw credentials never become dict keys / log lines.
+        We hash the token so raw credentials never become Redis keys / log lines.
         """
         auth = request.headers.get("authorization", "")
         if auth.lower().startswith("bearer "):
@@ -90,31 +78,43 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 return "tok:" + hashlib.sha256(token.encode()).hexdigest()[:16]
         return "ip:" + self._get_client_ip(request)
 
-    def _maybe_evict(self):
-        """Periodically drop empty buckets so memory doesn't grow unbounded."""
-        self._sweep_counter += 1
-        if self._sweep_counter < 500:
-            return
-        self._sweep_counter = 0
-        for key in list(self._buckets.keys()):
-            self._buckets[key].prune(self.window)
-            if self._buckets[key].count() == 0:
-                del self._buckets[key]
+    async def _check_limit(self, redis_client, key: str, limit: int) -> tuple[bool, int]:
+        """
+        Sliding-window counter using Redis INCR + EXPIRE.
+
+        Returns (rate_limited: bool, current_count: int).
+        """
+        try:
+            pipe = redis_client.pipeline()
+            pipe.incr(key)
+            pipe.ttl(key)
+            count, ttl = await pipe.execute()
+
+            # Set expiry only on the first hit (when TTL is -1 = no expiry set)
+            if ttl == -1:
+                await redis_client.expire(key, self.window)
+
+            return count > limit, int(count)
+        except Exception as exc:
+            # Redis error — fail-open (Nginx is the hard edge)
+            logger.warning("Rate limit Redis error for key=%s: %s", key, exc)
+            return False, 0
+
+    # ── Dispatch ───────────────────────────────────────────────────────────
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         path = request.url.path
 
-        # Skip rate limiting for health checks, docs, and local dev
+        # Skip rate limiting for health checks, docs, and static assets
         if path in ("/", "/health", "/docs", "/openapi.json") or path.startswith("/static"):
             return await call_next(request)
 
-        # Skip rate limiting entirely for localhost / loopback — these are internal
-        # docker-compose health checks, dev logins, and CI requests, not remote attackers.
+        # Skip rate limiting for localhost / loopback — docker health checks, CI, dev logins
         client_ip = self._get_client_ip(request)
         if client_ip in ("127.0.0.1", "::1", "localhost") or client_ip.startswith("172.") or client_ip.startswith("192.168."):
             return await call_next(request)
 
-        # ── Request body size cap (cheap header check; stops oversized uploads) ──
+        # ── Request body size cap (cheap header check) ──────────────────
         content_length = request.headers.get("content-length")
         if content_length:
             try:
@@ -131,38 +131,52 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             except ValueError:
                 pass
 
-        # Determine which limit applies. Strict, per-IP limits only for the
-        # brute-force-sensitive auth endpoints; everything else per-token.
+        # ── Redis-backed rate limiting ───────────────────────────────────
         AUTH_STRICT_PATHS = {"/api/auth/login", "/api/auth/refresh"}
         is_auth = path in AUTH_STRICT_PATHS
+
         if is_auth:
-            bucket_key = "auth:ip:" + self._get_client_ip(request)
+            bucket_key = f"rl:auth:{self._get_client_ip(request)}"
             limit = self.auth_limit
         else:
-            bucket_key = "api:" + self._get_identity_key(request)
+            bucket_key = f"rl:api:{self._get_identity_key(request)}"
             limit = self.api_limit
 
-        bucket = self._buckets[bucket_key]
-        bucket.prune(self.window)
+        # Lazily obtain Redis — if unavailable, pass through (fail-open)
+        from app.cache import _get_redis
+        redis_client = await _get_redis()
 
-        if bucket.count() >= limit:
-            retry_after = int(self.window - (time.time() - bucket.timestamps[0]))
-            return JSONResponse(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                content={
-                    "detail": f"Rate limit exceeded. Try again in {max(retry_after, 1)}s.",
-                    "retry_after": max(retry_after, 1),
-                },
-                headers={"Retry-After": str(max(retry_after, 1))},
-            )
-
-        bucket.add()
-        self._maybe_evict()
+        if redis_client is not None:
+            rate_limited, count = await self._check_limit(redis_client, bucket_key, limit)
+            if rate_limited:
+                retry_after = self.window
+                try:
+                    ttl = await redis_client.ttl(bucket_key)
+                    retry_after = max(int(ttl), 1)
+                except Exception:
+                    pass
+                return JSONResponse(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    content={
+                        "detail": f"Rate limit exceeded. Try again in {retry_after}s.",
+                        "retry_after": retry_after,
+                    },
+                    headers={"Retry-After": str(retry_after)},
+                )
 
         response = await call_next(request)
-        # Add rate limit headers
-        response.headers["X-RateLimit-Limit"] = str(limit)
-        response.headers["X-RateLimit-Remaining"] = str(max(limit - bucket.count(), 0))
-        response.headers["X-RateLimit-Reset"] = str(int(time.time()) + self.window)
+
+        # Add informational rate-limit headers
+        try:
+            if redis_client is not None:
+                current = await redis_client.get(bucket_key)
+                current_count = int(current) if current else 0
+                response.headers["X-RateLimit-Limit"] = str(limit)
+                response.headers["X-RateLimit-Remaining"] = str(max(limit - current_count, 0))
+                response.headers["X-RateLimit-Reset"] = str(
+                    int(__import__("time").time()) + self.window
+                )
+        except Exception:
+            pass  # Never let header injection crash a response
 
         return response

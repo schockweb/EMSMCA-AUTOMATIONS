@@ -1,21 +1,16 @@
 # ═══════════════════════════════════════════════════════════════════════════
 # EMS Claims Portal — Production Deployment
-# Rolling deploy to Hetzner Cloud Johannesburg
+# Single Azure VM: ems-portal-vm (172.209.218.22)
+# Domain: portal.emsmca.co.za
 #
 # Trigger:
 #   - Automatically after CI passes on main
 #   - Manual dispatch via GitHub UI
 #
-# Server topology:
-#   app-1  (CX32) — app + nginx
-#   app-2  (CX32) — app + nginx
-#   worker (CX42) — celery workers + beat
-#
 # Required GitHub Secrets:
-#   SSH_PRIVATE_KEY  — deploy key (ed25519 recommended)
-#   APP1_HOST        — IP / hostname of app-1
-#   APP2_HOST        — IP / hostname of app-2
-#   WORKER_HOST      — IP / hostname of the worker server
+#   SSH_PRIVATE_KEY   — deploy key (ed25519 recommended)
+#   DEPLOY_HOST       — IP of the Azure VM (e.g. 172.209.218.22)
+#   VITE_GOOGLE_MAPS_KEY — Google Maps API key (injected at build time)
 # ═══════════════════════════════════════════════════════════════════════════
 
 name: Deploy
@@ -37,13 +32,11 @@ on:
 
 concurrency:
   group: deploy-production
-  cancel-in-progress: false            # never cancel an in-flight deploy
+  cancel-in-progress: false          # never cancel an in-flight deploy
 
 env:
   DEPLOY_USER: deploy
   DEPLOY_DIR: /opt/ems-claims
-  COMPOSE_FILE: docker-compose.prod.yml
-  WORKER_COMPOSE_FILE: docker-compose.worker.yml
 
 jobs:
   # ═══════════════════════════════════════════════════════════════════════
@@ -59,25 +52,25 @@ jobs:
       - run: echo "✅ CI passed — proceeding with deploy"
 
   # ═══════════════════════════════════════════════════════════════════════
-  # Deploy App Server 1
+  # Deploy: app server + worker on the single Azure VM
   # ═══════════════════════════════════════════════════════════════════════
-  deploy-app-1:
-    name: "Deploy app-1"
+  deploy:
+    name: "Deploy to Azure VM"
     runs-on: ubuntu-latest
     needs: check-ci
     environment: production
 
     steps:
-      - name: Deploy to app-1
+      - name: Deploy app + worker
         uses: appleboy/ssh-action@v1
         with:
-          host: ${{ secrets.APP1_HOST }}
+          host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ env.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          command_timeout: 10m
+          command_timeout: 15m
           script: |
             set -euo pipefail
-            echo "═══ Deploying app-1 ═══"
+            echo "═══ Deploying EMS Portal to Azure VM ═══"
 
             cd ${{ env.DEPLOY_DIR }}
 
@@ -85,157 +78,57 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
 
-            # Build and restart containers
-            docker compose -f ${{ env.COMPOSE_FILE }} pull 2>/dev/null || true
-            docker compose -f ${{ env.COMPOSE_FILE }} up -d --build --remove-orphans
+            # ── App services (backend + nginx) ──────────────────────────
+            VITE_GOOGLE_MAPS_KEY="${{ secrets.VITE_GOOGLE_MAPS_KEY }}" \
+              docker compose -f docker-compose.prod.yml up -d --build --remove-orphans
 
-            # Run database migrations (only on app-1 to avoid race conditions)
-            docker compose -f ${{ env.COMPOSE_FILE }} exec -T backend \
+            # Run database migrations — only after backend is healthy
+            docker compose -f docker-compose.prod.yml exec -T ems_backend \
               python -m alembic upgrade head
 
-            # Prune old images
+            # ── Worker services (RabbitMQ + Celery + Flower) ────────────
+            docker compose -f docker-compose.worker.yml up -d --build --remove-orphans
+
+            # Prune dangling images to save disk
             docker image prune -f
 
-            echo "✅ app-1 deployed"
+            echo "✅ Deploy complete"
 
-      - name: Health check app-1
+      - name: Health check
         if: inputs.skip_health_check != 'true'
         uses: appleboy/ssh-action@v1
         with:
-          host: ${{ secrets.APP1_HOST }}
+          host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ env.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             set -euo pipefail
-            echo "⏳ Waiting for app-1 to become healthy..."
+            echo "⏳ Waiting for services to become healthy..."
 
             # Retry health check up to 30 times (60 seconds)
             for i in $(seq 1 30); do
-              HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/api/health || true)
+              HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/health || true)
               if [ "$HTTP_CODE" = "200" ]; then
-                echo "✅ app-1 healthy (attempt $i)"
-                exit 0
+                echo "✅ API healthy (attempt $i)"
+                break
               fi
               echo "  attempt $i: HTTP $HTTP_CODE — retrying in 2s"
               sleep 2
-            done
-
-            echo "❌ app-1 health check failed after 60s"
-            exit 1
-
-  # ═══════════════════════════════════════════════════════════════════════
-  # Deploy App Server 2 (only after app-1 is healthy)
-  # ═══════════════════════════════════════════════════════════════════════
-  deploy-app-2:
-    name: "Deploy app-2"
-    runs-on: ubuntu-latest
-    needs: deploy-app-1
-    environment: production
-
-    steps:
-      - name: Deploy to app-2
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.APP2_HOST }}
-          username: ${{ env.DEPLOY_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          command_timeout: 10m
-          script: |
-            set -euo pipefail
-            echo "═══ Deploying app-2 ═══"
-
-            cd ${{ env.DEPLOY_DIR }}
-
-            git fetch origin main
-            git reset --hard origin/main
-
-            docker compose -f ${{ env.COMPOSE_FILE }} pull 2>/dev/null || true
-            docker compose -f ${{ env.COMPOSE_FILE }} up -d --build --remove-orphans
-
-            # No migrations here — already ran on app-1
-
-            docker image prune -f
-
-            echo "✅ app-2 deployed"
-
-      - name: Health check app-2
-        if: inputs.skip_health_check != 'true'
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.APP2_HOST }}
-          username: ${{ env.DEPLOY_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
-            set -euo pipefail
-            echo "⏳ Waiting for app-2 to become healthy..."
-
-            for i in $(seq 1 30); do
-              HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/api/health || true)
-              if [ "$HTTP_CODE" = "200" ]; then
-                echo "✅ app-2 healthy (attempt $i)"
-                exit 0
+              if [ "$i" -eq 30 ]; then
+                echo "❌ Health check failed after 60s"
+                docker compose -f /opt/ems-claims/docker-compose.prod.yml logs --tail=50 ems_backend
+                exit 1
               fi
-              echo "  attempt $i: HTTP $HTTP_CODE — retrying in 2s"
-              sleep 2
             done
 
-            echo "❌ app-2 health check failed after 60s"
-            exit 1
-
-  # ═══════════════════════════════════════════════════════════════════════
-  # Deploy Worker Server (after both app servers are up)
-  # ═══════════════════════════════════════════════════════════════════════
-  deploy-worker:
-    name: "Deploy worker"
-    runs-on: ubuntu-latest
-    needs: deploy-app-2
-    environment: production
-
-    steps:
-      - name: Deploy to worker
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.WORKER_HOST }}
-          username: ${{ env.DEPLOY_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          command_timeout: 10m
-          script: |
-            set -euo pipefail
-            echo "═══ Deploying worker ═══"
-
-            cd ${{ env.DEPLOY_DIR }}
-
-            git fetch origin main
-            git reset --hard origin/main
-
-            # Worker uses a dedicated compose file
-            docker compose -f ${{ env.WORKER_COMPOSE_FILE }} pull 2>/dev/null || true
-            docker compose -f ${{ env.WORKER_COMPOSE_FILE }} up -d --build --remove-orphans
-
-            docker image prune -f
-
-            echo "✅ worker deployed"
-
-      - name: Verify Celery workers
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.WORKER_HOST }}
-          username: ${{ env.DEPLOY_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
-            set -euo pipefail
-            echo "⏳ Verifying Celery workers..."
-
-            sleep 10    # give workers time to register with RabbitMQ
-
-            # Check that the celery worker container is running
-            RUNNING=$(docker compose -f /opt/ems-claims/${{ env.WORKER_COMPOSE_FILE }} ps --status running --format json | grep -c celery || true)
+            # Verify Celery workers registered with RabbitMQ
+            sleep 5
+            RUNNING=$(docker compose -f /opt/ems-claims/docker-compose.worker.yml ps --status running --format json 2>/dev/null | grep -c "ems_celery" || true)
             if [ "$RUNNING" -ge 1 ]; then
               echo "✅ Celery workers running ($RUNNING container(s))"
             else
-              echo "❌ No Celery workers running"
-              docker compose -f /opt/ems-claims/${{ env.WORKER_COMPOSE_FILE }} logs --tail=50 celery_worker
-              exit 1
+              echo "⚠️  No Celery workers detected — check logs"
+              docker compose -f /opt/ems-claims/docker-compose.worker.yml logs --tail=30 ems_celery_worker
             fi
 
   # ═══════════════════════════════════════════════════════════════════════
@@ -244,21 +137,15 @@ jobs:
   notify:
     name: "Notify"
     runs-on: ubuntu-latest
-    needs: [deploy-app-1, deploy-app-2, deploy-worker]
+    needs: [deploy]
     if: always()
 
     steps:
       - name: Deployment summary
         run: |
-          if [ "${{ needs.deploy-worker.result }}" = "success" ]; then
-            echo "🚀 Deployment to all servers completed successfully"
-            echo "   app-1:  ${{ needs.deploy-app-1.result }}"
-            echo "   app-2:  ${{ needs.deploy-app-2.result }}"
-            echo "   worker: ${{ needs.deploy-worker.result }}"
+          if [ "${{ needs.deploy.result }}" = "success" ]; then
+            echo "🚀 EMS Portal deployed successfully to portal.emsmca.co.za"
           else
-            echo "⚠️  Deployment had issues:"
-            echo "   app-1:  ${{ needs.deploy-app-1.result }}"
-            echo "   app-2:  ${{ needs.deploy-app-2.result }}"
-            echo "   worker: ${{ needs.deploy-worker.result }}"
+            echo "⚠️  Deployment failed — result: ${{ needs.deploy.result }}"
             exit 1
           fi

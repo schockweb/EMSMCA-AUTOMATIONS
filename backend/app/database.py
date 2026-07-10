@@ -31,10 +31,19 @@ else:
             "statement_cache_size": 0,
         }
 
+    # Azure PostgreSQL enforces SSL — pass ssl=True when DB_SSL_MODE='require'.
+    # asyncpg accepts a raw ssl.SSLContext or the string 'require'; we keep it
+    # simple and pass the Python ssl module's default context (which verifies
+    # the server certificate against the system trust store).
+    if settings.DB_SSL_MODE == "require":
+        import ssl as _ssl
+        _connect_args["ssl"] = _ssl.create_default_context()
+        logger.info("Database SSL: verify-full (Azure PostgreSQL)")
+
     engine = create_async_engine(
         settings.DATABASE_URL,
         echo=False,
-        # ── Connection Pool ──────────────────────────────────────
+        # ── Connection Pool ────────────────────────────────────────────
         pool_size=settings.DB_POOL_SIZE,
         max_overflow=settings.DB_MAX_OVERFLOW,
         pool_timeout=settings.DB_POOL_TIMEOUT,

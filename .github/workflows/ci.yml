@@ -156,8 +156,10 @@ jobs:
         with:
           context: ./frontend
           push: false
-          target: production
+          target: serve
           tags: ems-frontend:ci-${{ github.sha }}
-          build-args: VITE_API_URL=/api
+          build-args: |
+            VITE_API_URL=/api
+            VITE_GOOGLE_MAPS_KEY=ci-placeholder
           cache-from: type=gha
           cache-to: type=gha,mode=max

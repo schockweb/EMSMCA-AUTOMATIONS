@@ -54,18 +54,20 @@ async def lifespan(app: FastAPI):
     logger.info("Starting EMS Claims Portal...")
 
     # Create tables on startup (dev mode — production uses Alembic)
-    await create_tables()
-    logger.info("Database tables verified.")
+    if settings.APP_ENV == "development":
+        await create_tables()
+        logger.info("Database tables verified.")
 
     # Initialise the PRF number sequence — sync with existing data so the
     # sequence starts from MAX(prf_number)+1, preventing collisions.
     await _init_prf_sequence()
 
-    # Seed admin user if none exists
-    await seed_admin_user()
-
-    # Seed super admin user
-    await seed_super_admin()
+    if settings.APP_ENV != "production":
+        # Seed admin user if none exists
+        await seed_admin_user()
+        
+        # Seed super admin user
+        await seed_super_admin()
 
     # Auto-purge crash events older than 90 days
     await purge_old_crashes()
@@ -177,20 +179,7 @@ app = FastAPI(
     redoc_url="/redoc" if settings.APP_ENV == "development" else None,
 )
 
-from starlette.middleware.base import BaseHTTPMiddleware
-import traceback
 
-class ErrorLoggingMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request, call_next):
-        try:
-            return await call_next(request)
-        except Exception as e:
-            with open('global_errors.txt', 'a') as f:
-                f.write('==========================\t\n')
-                f.write(str(request.url) + '\n')
-                traceback.print_exc(file=f)
-            raise
-app.add_middleware(ErrorLoggingMiddleware)
 
 # ── Middleware Stack (order matters: last added = first executed) ──
 
@@ -284,8 +273,9 @@ app.include_router(metrics_router)
 app.include_router(tariff_lines_router)
 
 # ── Static file serving — uploaded logos and assets ──────────
-os.makedirs("/app/uploads", exist_ok=True)
-app.mount("/uploads", StaticFiles(directory="/app/uploads"), name="uploads")
+_upload_dir = settings.UPLOAD_DIR or "./uploads"
+os.makedirs(_upload_dir, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=_upload_dir), name="uploads")
 
 # ═══════════════════════════════════════════════════════════
 # HEALTH CHECK ENDPOINTS — for container orchestration
@@ -322,7 +312,8 @@ async def health_check():
             await db.execute(text("SELECT 1"))
             checks["database"] = "healthy"
     except Exception as e:
-        checks["database"] = f"unhealthy: {str(e)[:100]}"
+        logger.error("Database health check failed: %s", str(e))
+        checks["database"] = "unhealthy"
 
     # RabbitMQ
     try:
@@ -332,7 +323,8 @@ async def health_check():
         conn.close()
         checks["rabbitmq"] = "healthy"
     except Exception as e:
-        checks["rabbitmq"] = f"unhealthy: {str(e)[:100]}"
+        logger.error("RabbitMQ health check failed: %s", str(e))
+        checks["rabbitmq"] = "unhealthy"
 
     # Celery workers
     try:
@@ -342,7 +334,8 @@ async def health_check():
         wc = len(active) if active else 0
         checks["celery_workers"] = f"healthy ({wc} nodes)" if wc > 0 else "unhealthy: no active workers"
     except Exception as e:
-        checks["celery_workers"] = f"unhealthy: {str(e)[:100]}"
+        logger.error("Celery workers health check failed: %s", str(e))
+        checks["celery_workers"] = "unhealthy"
 
     # Queue depth (Item 9) — query RabbitMQ management API
     try:
@@ -381,7 +374,8 @@ async def health_check():
         else:
             checks["queue"] = "unknown (could not parse broker URL)"
     except Exception as e:
-        checks["queue"] = f"unknown: {str(e)[:100]}"
+        logger.error("Queue depth health check failed: %s", str(e))
+        checks["queue"] = "unknown"
 
     # Determine overall status
     unhealthy = False

@@ -57,19 +57,17 @@ There is no `billing_schema_code` field on the `DigitalPRF` model or form. The m
 
 ---
 
-## 3. Track 2 — Hetzner Johannesburg Production Infrastructure
+## 3. Track 2 — Azure Production Infrastructure
 
-Once the billing logic is correct, deploy to production infrastructure. The choice is Hetzner Cloud in the Johannesburg region — self-hosted, fully containerised, fixed cost, and entirely within South Africa.
+Once the billing logic is correct, deploy to production infrastructure. The choice is Azure in the South Africa North region — a hybrid of a single VM for application containers and Azure Managed PostgreSQL (Flexible Server) for bulletproof data resilience.
 
-### Why Hetzner for this project
+### Why Azure + Managed Postgres for this project
 
-**Data sovereignty** — Hetzner's Johannesburg data centre keeps all patient data in South Africa, satisfying POPIA data residency requirements without any cloud provider contract negotiation.
+**Data sovereignty** — Azure's South Africa North (Johannesburg) region keeps all patient data in South Africa, satisfying POPIA data residency requirements.
 
-**Predictable cost** — R1,420/month flat, regardless of how many PRFs you process. No per-execution billing, no egress charges, no surprise invoices. As your client base grows, the server cost does not.
+**Bulletproof Database** — By using Azure Managed PostgreSQL (Flexible Server), you offload the most critical part of the system (database backups, failover, high availability, and patching) to Microsoft. If the server crashes or corrupts, Azure recovers it automatically or allows point-in-time restoration.
 
-**Full control** — Every component is open-source software running in Docker containers. Rate limits, database tuning, queue behaviour, backup schedules — nothing is hidden behind a managed service abstraction. Your team owns the entire stack.
-
-**No lock-in** — If you ever want to move to Azure or AWS, every piece of software (FastAPI, PostgreSQL, RabbitMQ, Celery, MinIO) runs identically on any cloud provider. The migration is a DNS change and a data export.
+**Predictable scaling** — A single Azure VM handles the FastAPI backend, Celery workers, RabbitMQ, and Nginx reverse proxy using Docker Compose. If traffic grows, you scale the VM size vertically with a single click.
 
 ### Capacity at Your Real Scale
 
@@ -79,51 +77,45 @@ With 90 clients and a combined fleet of 600–900 active ambulances, your actual
 |---|---|
 | Mid-shift sustained | 200–300 PRFs/hr |
 | Shift change burst (06:00 and 18:00) | 600–900 PRFs/hr |
-| System processing capacity (12 Celery workers) | 14,400 PRFs/hr |
-| Headroom above real-world peak | 15× minimum |
+| System processing capacity (4 Celery workers) | ~4,800 PRFs/hr |
+| Headroom above real-world peak | 5× minimum |
 
-The shift change burst is the design case. When 400+ ambulances close their shift paperwork simultaneously, 400+ forms queue simultaneously. With 12 concurrent Celery workers each processing a form in approximately 3 seconds, the entire burst queue drains within 10–20 seconds. Zero backlog. Crews and billing staff notice nothing.
+The shift change burst is the design case. With 4 concurrent Celery workers each processing a form in approximately 3 seconds, the entire burst queue drains within a minute. Zero backlog.
 
 ### Production Server Architecture
 
-Five servers plus a load balancer. All services run in Docker containers, orchestrated with Docker Compose, deployed via GitHub Actions.
+A single Azure VM handles all application logic, connected securely to an Azure Managed Database.
 
 ```
                         Internet
                            │ HTTPS
                            ▼
-               Hetzner Load Balancer (LB11)
-               SSL termination · health checks · failover
-                    │                │
-                    ▼                ▼
-           App-1 (CX32)        App-2 (CX32)
-           FastAPI + Nginx      FastAPI + Nginx
-           4 Gunicorn workers   4 Gunicorn workers
-                    │
-                    │ Enqueue job (AMQP)
-                    ▼
-             Worker (CX42)
-             Celery × 12 processes
-             RabbitMQ · Flower · etcd
-                    │
-                    ▼
-           DB Primary (CX42)
-           PostgreSQL 16 + PgBouncer
-                    │ Patroni streaming replication
-                    ▼
-           DB Standby (CX32)
-           Patroni hot standby · pgBackRest
+                 Azure VM (e.g., B2ms)
+                 172.209.x.x (Static IP)
+                 
+         ┌─────────────────────────────────────┐
+         │ Docker Compose                      │
+         │                                     │
+         │  ► Nginx (Reverse Proxy + SSL)      │
+         │  ► FastAPI Backend (Gunicorn)       │
+         │  ► RabbitMQ (Message Broker)        │
+         │  ► Celery Workers (Background Tasks)│
+         └──────────────────┬──────────────────┘
+                            │ (SSL Encrypted Connection)
+                            ▼
+           Azure Managed PostgreSQL (Flexible Server)
+           (e.g., Burstable B2s or General Purpose)
+           ► Automated Backups (Point-in-Time)
+           ► Automated Patching
+           ► High Availability (Optional Multi-AZ)
 ```
 
-| Server | Hetzner Type | vCPU | RAM | Purpose | Monthly Cost |
+| Component | Azure Instance Type | vCPU | RAM | Purpose | Est. Monthly Cost |
 |---|---|---|---|---|---|
-| App-1 | CX32 | 4 | 8 GB | FastAPI + Nginx + etcd | ~R180 |
-| App-2 | CX32 | 4 | 8 GB | FastAPI + Nginx + etcd (HA pair) | ~R180 |
-| Worker | CX42 | 8 | 16 GB | Celery × 12 + RabbitMQ + Flower + etcd | ~R380 |
-| DB Primary | CX42 | 8 | 16 GB | PostgreSQL 16 + PgBouncer + etcd | ~R380 |
-| DB Standby | CX32 | 4 | 8 GB | Patroni hot standby + pgBackRest | ~R180 |
-| Load Balancer | LB11 | — | — | SSL termination, health checks, failover | ~R120 |
-| **Total** | | | | | **~R1,420/mo** |
+| App & Worker VM | B2ms (Burstable) | 2 | 8 GB | Nginx + FastAPI + Celery + RabbitMQ | ~$36 (R700) |
+| Managed Database | B2s Flexible Server | 2 | 4 GB | PostgreSQL + Automated Backups | ~$30 (R560) |
+| Storage & Network | Standard SSD / Bandwidth | — | — | VM OS Disk, Database Storage | ~$15 (R280) |
+| **Total** | | | | | **~$81/mo (R1,540)** |
 
 ### Full Tool Stack
 

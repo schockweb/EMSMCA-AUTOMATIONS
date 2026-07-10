@@ -303,7 +303,7 @@ export const RULES: ValidationRule[] = [
       return justified;
     },
     message:
-      'ILS IV therapy must fit one of the four accepted cases (50% Dextrose for hypoglycaemia, fluid for haemodynamic compromise, IV sited prior to arrival, or unstable patient with deranged vitals). Document the justification in the Motivation / Other Notes box or the claim will be downgraded.',
+      'ILS IV therapy must fit one of the four accepted cases (50% Dextrose for hypoglycaemia, fluid for haemodynamic compromise, IV sited prior to arrival, or unstable patient with deranged vitals). Document the justification in the Motivation / Other Notes box or the claim will be rejected.',
     source: 'Netcare CMG §3.7 — IV therapy for ILS level of care will only be accepted in the following circumstances...',
   },
 
@@ -528,7 +528,7 @@ export const RULES: ValidationRule[] = [
       return minutes <= limit;
     },
     message:
-      'Total call time exceeds the standard limit (45 min BLS/ILS, 60 min ALS/ICU). Add a motivation to the Motivation / Other Notes box to avoid downgrade.',
+      'Total call time exceeds the standard limit (45 min BLS/ILS, 60 min ALS/ICU). Add a motivation to the Motivation / Other Notes box to avoid rejection.',
     source: 'Netcare CMG §5.2.1.1 — Total call time limits before motivation required',
   },
   {
@@ -694,7 +694,7 @@ const DISCOVERY_RULES: ValidationRule[] = [
       return motivated;
     },
     message:
-      'Inter-facility transfers default to BLS. To bill ILS/ALS, record the referring doctor’s motivation and practice number/name on the PRF — otherwise Discovery downgrades the claim to BLS.',
+      'Inter-facility transfers default to BLS. To bill ILS/ALS, record the referring doctor’s motivation and practice number/name on the PRF — otherwise Discovery rejects the claim.',
     source: 'Discovery Ambulance Guidelines (Mar 2023) — Inter-facility transfers accepted at BLS unless motivated [Matrix IF1]',
   },
   // ── ILS IV must be clinically justified, else billed BLS (Matrix IV2/IV4) ──
@@ -714,7 +714,7 @@ const DISCOVERY_RULES: ValidationRule[] = [
       return justified;
     },
     message:
-      'ILS billed with an IV but no clinical justification documented. Discovery funds ILS-level IV only for clear hypotension/BP fluctuation, hyperglycaemia needing IV, burns, dehydration, or overdose/poisoning — otherwise it is downgraded to BLS. Document the indication in the Motivation / Other Notes box.',
+      'ILS billed with an IV but no clinical justification documented. Discovery funds ILS-level IV only for clear hypotension/BP fluctuation, hyperglycaemia needing IV, burns, dehydration, or overdose/poisoning — otherwise it is rejected. Document the indication in the Motivation / Other Notes box.',
     source: 'Discovery Ambulance Guidelines (Mar 2023) — IV line placement; prophylactic IV not funded [Matrix IV2/IV4]',
   },
   // ── TKVO IV line must be billed BLS (Matrix IV2) ──
@@ -731,7 +731,7 @@ const DISCOVERY_RULES: ValidationRule[] = [
       return billingLevel(d) === 'BLS';
     },
     message:
-      'A TKVO (“to keep vein open”) IV line must be billed at BLS, not ILS, unless a clinical requirement is documented. Discovery will downgrade to BLS.',
+      'A TKVO (“to keep vein open”) IV line must be billed at BLS, not ILS, unless a clinical requirement is documented. Discovery will reject the claim.',
     source: 'Discovery Ambulance Guidelines (Mar 2023) — IV line TKVO billed as BLS [Matrix IV2]',
   },
   // ── ALS must show ALS-level treatment or motivation (Matrix A1/A3) ──
@@ -758,7 +758,7 @@ const DISCOVERY_RULES: ValidationRule[] = [
       return alsMed || alsProc || motivated;
     },
     message:
-      'ALS billed but no ALS-level treatment is documented. Discovery downgrades to the lowest level of care needed unless an ALS drug/procedure is recorded, or the referring doctor’s motivation and practice number/name are on the PRF.',
+      'ALS billed but no ALS-level treatment is documented. Discovery rejects the claim unless an ALS drug/procedure is recorded, or the referring doctor’s motivation and practice number/name are on the PRF.',
     source: 'Discovery Ambulance Guidelines (Mar 2023) — ALS treatment must be indicated/motivated [Matrix A1/A3]',
   },
   // ── Resuscitation (151) on-scene time capped at 20 min (Matrix RS1) ──
@@ -1569,7 +1569,7 @@ const ER24_RULES: ValidationRule[] = [
       );
     },
     message:
-      'IV access recorded without a documented indication. ER24 funds IV only for fluid replacement, IV medication during transport, or a patient who can rapidly deteriorate with abnormal vitals, otherwise it is downgraded to BLS. Document the reason in the Motivation / Other Notes box.',
+      'IV access recorded without a documented indication. ER24 funds IV only for fluid replacement, IV medication during transport, or a patient who can rapidly deteriorate with abnormal vitals, otherwise it is rejected. Document the reason in the Motivation / Other Notes box.',
     source: 'ER24 Case Management Rules - IV access established only under the listed guidelines, else downgraded to BLS',
   },
   // -- Oral medication results in BLS when transported --
@@ -1878,7 +1878,7 @@ const ER24_RULES: ValidationRule[] = [
       return !!String(d.referring_doctor || '').trim() || /icu|ventilat|infus|monitor|inotrop|sedat|unstable|deranged|clinical|referr/.test(notes);
     },
     message:
-      'Inter-facility transfers default to BLS billing. To bill ILS/ALS, document the referring doctor and the higher clinical need on the PRF, or ER24 downgrades to BLS.',
+      'Inter-facility transfers default to BLS billing. To bill ILS/ALS, document the referring doctor and the higher clinical need on the PRF, or ER24 rejects the claim.',
     source: 'ER24/Mediclinic Billing - IFT defaults to BLS unless higher need documented',
   },
   // ── Social transfer member-liable unless pre-authorised ──
@@ -1931,7 +1931,7 @@ const ER24_RULES: ValidationRule[] = [
       return alsMed || alsProc || motivated;
     },
     message:
-      'ALS billed but only prophylactic / monitoring interventions are documented (e.g. 12-lead for monitoring, anti-emetic without active nausea). ER24 downgrades unless an ALS drug/procedure or clinical indication is recorded.',
+      'ALS billed but only prophylactic / monitoring interventions are documented (e.g. 12-lead for monitoring, anti-emetic without active nausea). ER24 rejects the claim unless an ALS drug/procedure or clinical indication is recorded.',
     source: 'ER24/Mediclinic Billing - prophylactic ALS downgraded to a lower level of care',
   },
   // ── 4th (or further) patient not billable ──

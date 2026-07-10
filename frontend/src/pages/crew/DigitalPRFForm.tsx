@@ -822,13 +822,131 @@ function useNoAutofill(fk?: string): Record<string, any> {
 // callsites passing it continue to compile; we just ignore it. Re-enable
 // hints by changing `placeholder=""` back to `placeholder={ph}` in Inp,
 // ComboInp and Txt below.
+const SpeechRecognitionAPI: any =
+  (typeof window !== 'undefined' &&
+    ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition)) || null;
+
 const Inp = ({ fk, type = 'text', onBlur }: { fk: string; ph?: string; type?: string; req?: boolean; onBlur?: (e: React.FocusEvent<HTMLInputElement>) => void }) => {
   const { fd, sf } = useContext(FormContext);
   // PRF data is unique per patient, so browser form-history suggestions (e.g.
   // re-offering the last value you typed) are never useful and are turned off.
   // The Ward field is deliberately left untouched per request.
   const nf = useNoAutofill(fk);
-  return <input id={`prf-field-${fk}`} type={type} value={fd[fk] ?? ''} onChange={e => sf(fk, e.target.value)} onFocus={onF} onBlur={e => { onB(e); if (onBlur) onBlur(e); }} placeholder="" {...nf} style={{ ...base, marginBottom: 14, borderColor: '#e2e8f0' }} />
+
+  // â”€â”€ Voice dictation for text fields â”€â”€
+  // Exclude: number, tel, date, time, email types + ID/passport/phone field keys
+  const excludedTypes = ['number', 'tel', 'date', 'time', 'email'];
+  const excludedKeyPatterns = /(id_number|passport|phone|_id$|_dob$|dependant_code|med_aid_number|postal_code)/i;
+  const showMic = !!SpeechRecognitionAPI && !excludedTypes.includes(type) && !excludedKeyPatterns.test(fk);
+
+  const [recording, setRecording] = useState(false);
+  const recogRef = useRef<any>(null);
+  const fdRef = useRef(fd);
+  fdRef.current = fd;
+  const baselineRef = useRef<string>('');
+
+  useEffect(() => () => {
+    try { recogRef.current?.stop?.(); } catch { /* ignore */ }
+    recogRef.current = null;
+  }, []);
+
+  const startVoice = () => {
+    if (!SpeechRecognitionAPI || recording) return;
+    const recog = new SpeechRecognitionAPI();
+    recog.lang = 'en-ZA';
+    recog.continuous = true;
+    recog.interimResults = true;
+    const existing: string = fdRef.current[fk] || '';
+    baselineRef.current = existing && !/\s$/.test(existing) ? existing + ' ' : existing;
+    recog.onresult = (e: any) => {
+      let finalText = '';
+      let interimText = '';
+      for (let i = 0; i < e.results.length; i++) {
+        const t = e.results[i][0].transcript;
+        if (e.results[i].isFinal) finalText += t;
+        else interimText += t;
+      }
+      const live = (
+        finalText.trim() +
+        (finalText && interimText ? ' ' : '') +
+        interimText.trim()
+      ).trim();
+      sf(fk, baselineRef.current + live);
+    };
+    recog.onend = () => { setRecording(false); recogRef.current = null; };
+    recog.onerror = () => { setRecording(false); recogRef.current = null; };
+    recogRef.current = recog;
+    try {
+      recog.start();
+      setRecording(true);
+    } catch {
+      setRecording(false);
+      recogRef.current = null;
+    }
+  };
+
+  const stopVoice = () => {
+    try { recogRef.current?.stop?.(); } catch { /* ignore */ }
+    setRecording(false);
+  };
+
+  if (!showMic) {
+    return <input id={`prf-field-${fk}`} type={type} value={fd[fk] ?? ''} onChange={e => sf(fk, e.target.value)} onFocus={onF} onBlur={e => { onB(e); if (onBlur) onBlur(e); }} placeholder="" {...nf} style={{ ...base, marginBottom: 14, borderColor: '#e2e8f0' }} />;
+  }
+
+  return (
+    <div style={{ position: 'relative', marginBottom: 14 }}>
+      <input
+        id={`prf-field-${fk}`}
+        type={type}
+        value={fd[fk] ?? ''}
+        onChange={e => sf(fk, e.target.value)}
+        onFocus={onF}
+        onBlur={e => { onB(e); if (onBlur) onBlur(e); }}
+        placeholder=""
+        {...nf}
+        style={{ ...base, marginBottom: 0, borderColor: '#e2e8f0', paddingRight: 54 }}
+      />
+      <button
+        type="button"
+        onPointerDown={e => {
+          e.preventDefault();
+          try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+          startVoice();
+        }}
+        onPointerUp={e => { e.preventDefault(); stopVoice(); }}
+        onPointerCancel={() => stopVoice()}
+        onLostPointerCapture={() => { if (recording) stopVoice(); }}
+        onContextMenu={e => e.preventDefault()}
+        aria-label={recording ? 'Recording â€” release to stop' : 'Hold to dictate'}
+        title={recording ? 'Release to stop' : 'Hold to dictate'}
+        style={{
+          position: 'absolute',
+          top: '50%', right: 6, transform: 'translateY(-50%)',
+          width: 40, height: 40, borderRadius: 10,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          border: `2.5px solid \$\{recording \? '#991b1b' : '#1e3a8a'\}`,
+          background: recording ? '#ef4444' : '#3b82f6',
+          color: '#ffffff',
+          cursor: 'pointer',
+          boxShadow: recording ? '0 0 0 4px rgba(239,68,68,0.4)' : '0 6px 12px rgba(0,0,0,0.3)',
+          animation: recording ? 'voicePulse 1.4s ease-in-out infinite' : 'none',
+          transition: 'all 0.15s',
+          touchAction: 'none',
+          userSelect: 'none',
+          WebkitUserSelect: 'none',
+          WebkitTouchCallout: 'none',
+          WebkitTapHighlightColor: 'transparent',
+        }}
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <rect x="9" y="2" width="6" height="12" rx="3" />
+          <path d="M5 10v2a7 7 0 0 0 14 0v-2" />
+          <line x1="12" y1="19" x2="12" y2="22" />
+        </svg>
+      </button>
+    </div>
+  );
 };
 
 // ── Address autocomplete (forward-search via Nominatim) ─────────────────────
@@ -1767,9 +1885,6 @@ const Txt = ({ fk, rows = 3 }: { fk: string; ph?: string; rows?: number }) => {
 //   never overwrite, so the mic can extend partial entries.
 // • Auto-hides on browsers that don't expose SpeechRecognition (no harm,
 //   the plain textarea still works).
-const SpeechRecognitionAPI: any =
-  (typeof window !== 'undefined' &&
-    ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition)) || null;
 
 const VoiceTxt = ({ fk, rows = 3 }: { fk: string; ph?: string; rows?: number }) => {
   const { fd, sf } = useContext(FormContext);
@@ -1853,7 +1968,7 @@ const VoiceTxt = ({ fk, rows = 3 }: { fk: string; ph?: string; rows?: number }) 
           resize: 'vertical',
           marginBottom: 0,
           fontFamily: 'inherit',
-          paddingRight: supported ? 50 : (base as any).padding,
+          paddingRight: supported ? 60 : (base as any).padding,
         }}
       />
       {supported && (
@@ -1877,21 +1992,23 @@ const VoiceTxt = ({ fk, rows = 3 }: { fk: string; ph?: string; rows?: number }) 
             style={{
               position: 'absolute',
               top: 8, right: 8,
-              width: 36, height: 36, borderRadius: 9,
+              width: 46, height: 46, borderRadius: 12,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              border: `1.5px solid ${recording ? '#ef4444' : '#cbd5e1'}`,
-              background: recording ? 'rgba(239,68,68,0.12)' : '#ffffff',
-              color: recording ? '#dc2626' : '#475569',
+              border: `2.5px solid \$\{recording \? '#991b1b' : '#1e3a8a'\}`,
+              background: recording ? '#ef4444' : '#3b82f6',
+              color: '#ffffff',
               cursor: 'pointer',
-              boxShadow: recording ? '0 0 0 4px rgba(239,68,68,0.18)' : 'none',
+              boxShadow: recording ? '0 0 0 4px rgba(239,68,68,0.4)' : '0 6px 12px rgba(0,0,0,0.3)',
               animation: recording ? 'voicePulse 1.4s ease-in-out infinite' : 'none',
               transition: 'all 0.15s',
               touchAction: 'none',
               userSelect: 'none',
+              WebkitUserSelect: 'none',
+              WebkitTouchCallout: 'none',
               WebkitTapHighlightColor: 'transparent',
             }}
           >
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <rect x="9" y="2" width="6" height="12" rx="3" />
               <path d="M5 10v2a7 7 0 0 0 14 0v-2" />
               <line x1="12" y1="19" x2="12" y2="22" />
@@ -3328,6 +3445,15 @@ export default function DigitalPRFForm() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
+  const [isScrolled, setIsScrolled] = useState(false);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      setIsScrolled(window.scrollY > 40);
+    };
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
 
   // Ensure that when the PRF successfully loads, the page scrolls to the top
   // so the Call Type title and choices are fully visible without any scroll drift.
@@ -5215,21 +5341,25 @@ export default function DigitalPRFForm() {
 
     return (
     <div>
+
       {/* QA / Dev test-fill — quickly populate the whole PRF for a chosen
           call-type × billing-type combination. Lives on the Dispatch screen so
-          it's reachable for every call type (the En Route phase is auto-skipped). */}
-      <button
-        type="button"
-        onClick={() => setTestFillOpen(true)}
-        style={{
-          width: '100%', padding: '12px', borderRadius: 12, marginBottom: 16,
-          border: `2px dashed ${S300}`, background: S50, color: S700,
-          fontSize: '0.85rem', fontWeight: 800, cursor: 'pointer',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-        }}
-      >
-        🧪 Test Fill — auto-populate for testing
-      </button>
+          it's reachable for every call type.
+          Only visible for the 'test' provider account. */}
+      {providerSlug?.toLowerCase() === 'test' && (
+        <button
+          type="button"
+          onClick={() => setTestFillOpen(true)}
+          style={{
+            width: '100%', padding: '12px', borderRadius: 12, marginBottom: 16,
+            border: `2px dashed ${S300}`, background: S50, color: S700,
+            fontSize: '0.85rem', fontWeight: 800, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+          }}
+        >
+          🧪 Test Fill — auto-populate for testing
+        </button>
+      )}
 
       {testFillOpen && (
         <div
@@ -5272,6 +5402,7 @@ export default function DigitalPRFForm() {
       )}
 
       <SHdr t="Call Type" />
+
       <CallTypePicker onPick={(type) => {
         if (type === 'PRIMARY' || type === 'RESUS' || type === 'COURTESY' || type === 'DOD' || type === 'WCA_IOD') {
           setDispatchPromptOpen(true);
@@ -5727,7 +5858,7 @@ export default function DigitalPRFForm() {
               <div><Lbl t="Date of Injury" req /><Inp fk="wca_injury_date" type="date" req /></div>
             </G2>
             <Lbl t="Description of Incident" />
-            <Txt fk="wca_incident_description" ph="Describe how the injury occurred, what happened, mechanism of injury..." rows={3} />
+            <VoiceTxt fk="wca_incident_description" ph="Describe how the injury occurred, what happened, mechanism of injury..." rows={3} />
             <div style={{ marginBottom: 14 }}>
               <Lbl t="Documents (WCA / Employee)" />
               <select
@@ -6619,8 +6750,8 @@ export default function DigitalPRFForm() {
           }} />
           <Lbl t="Findings on Arrival" /><VoiceTxt fk="findings_on_arrival" ph="What you observed on arrival..." rows={2} />
           <Lbl t="Allergies" req /><Inp fk="allergies" ph="Known allergies (or None Known)" req />
-          <Lbl t="Current Medications" /><Txt fk="current_medications" ph="List current medications..." rows={2} />
-          <Lbl t="Past Medical / Surgical History" /><Txt fk="past_medical_history" ph="Relevant past history..." rows={2} />
+          <Lbl t="Current Medications" /><VoiceTxt fk="current_medications" ph="List current medications..." rows={2} />
+          <Lbl t="Past Medical / Surgical History" /><VoiceTxt fk="past_medical_history" ph="Relevant past history..." rows={2} />
           <G2>
             <div><Lbl t="Last Meal" /><Inp fk="last_meal" ph="e.g. Breakfast" /></div>
             <div><Lbl t="Time" /><Inp fk="last_meal_time" type="time" /></div>
@@ -6919,7 +7050,7 @@ export default function DigitalPRFForm() {
 
             <Lbl t="Practitioner Number" /><Inp fk="handover_qualification" ph="e.g. PR0123456" />
             <Lbl t="Receiving Facility Email" /><Inp fk="handover_doctor_email" ph="dr@hospital.co.za" type="email" />
-            <Lbl t="Condition on Handover" /><Txt fk="handover_notes" ph="Patient condition at time of handover..." rows={2} />
+            <Lbl t="Condition on Handover" /><VoiceTxt fk="handover_notes" ph="Patient condition at time of handover..." rows={2} />
             <div style={{ marginTop: 14 }}>
               <Lbl t="Patient Documents" />
               <PatientDocumentsCapture
@@ -7056,7 +7187,7 @@ export default function DigitalPRFForm() {
       <SHdr t="Valuables" />
       <Card>
         <Lbl t="Valuables Handed To" /><Inp fk="valuables_handed_to" ph="Name of person receiving valuables" />
-        <Lbl t="Description" /><Txt fk="valuables_description" ph="List valuables..." rows={2} />
+        <Lbl t="Description" /><VoiceTxt fk="valuables_description" ph="List valuables..." rows={2} />
       </Card>
 
       {['IHT', 'IFT'].includes(fd.call_type) && (
@@ -7347,7 +7478,7 @@ export default function DigitalPRFForm() {
             return { label: label || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()), value: String(val) };
           };
 
-          type SummarySection = { title: string; emoji: string; items: { label: string; value: string }[] };
+          type SummarySection = { title: string; items: { label: string; value: string }[] };
 
           // ── Card 1: Patient Information + Billing ──
           const card1Sections: SummarySection[] = [];
@@ -7360,7 +7491,7 @@ export default function DigitalPRFForm() {
             v('patient_address', 'Address'), v('patient_suburb', 'Suburb'),
             v('patient_postal_code', 'Postal Code'),
           ].filter(Boolean) as { label: string; value: string }[];
-          if (patient.length) card1Sections.push({ title: 'Patient Information', emoji: '👤', items: patient });
+          if (patient.length) card1Sections.push({ title: 'Patient Information', items: patient });
 
           const billing = [
             v('billing_type', 'Billing Type'),
@@ -7371,7 +7502,7 @@ export default function DigitalPRFForm() {
             v('pvt_payment_method', 'Payment Method'), v('pvt_amount_quoted', 'Amount Quoted'),
             v('pvt_account_holder', 'Account Holder'), v('pvt_account_holder_id', 'Account Holder ID'),
           ].filter(Boolean) as { label: string; value: string }[];
-          if (billing.length) card1Sections.push({ title: 'Billing', emoji: '💳', items: billing });
+          if (billing.length) card1Sections.push({ title: 'Billing', items: billing });
 
           // ── Card 2: Dispatch & Scene ──
           const card2Sections: SummarySection[] = [];
@@ -7382,14 +7513,14 @@ export default function DigitalPRFForm() {
           ].filter(Boolean) as { label: string; value: string }[];
           if (timestamps.time_dispatched) dispatch.push({ label: 'Dispatched', value: timestamps.time_dispatched });
           if (timestamps.time_mobile) dispatch.push({ label: 'Mobile', value: timestamps.time_mobile });
-          if (dispatch.length) card2Sections.push({ title: 'Dispatch & Mobilisation', emoji: '🚑', items: dispatch });
+          if (dispatch.length) card2Sections.push({ title: 'Dispatch & Mobilisation', items: dispatch });
 
           const scene = [
             v('incident_location', 'Incident Location'), v('suburb_ward', 'Suburb / Ward'),
             v('priority', 'Priority'),
           ].filter(Boolean) as { label: string; value: string }[];
           if (timestamps.time_on_scene) scene.push({ label: 'On Scene', value: timestamps.time_on_scene });
-          if (scene.length) card2Sections.push({ title: 'Scene', emoji: '📍', items: scene });
+          if (scene.length) card2Sections.push({ title: 'Scene', items: scene });
 
           // ── Card 3: Clinical Notes ──
           const card3Sections: SummarySection[] = [];
@@ -7401,24 +7532,9 @@ export default function DigitalPRFForm() {
             v('last_meal', 'Last Meal'), v('last_meal_time', 'Last Meal Time'),
             v('events_hpi', 'Events / HPI'), v('mechanism', 'Mechanism'),
           ].filter(Boolean) as { label: string; value: string }[];
-          if (clinical.length) card3Sections.push({ title: 'Clinical Assessment', emoji: '🩺', items: clinical });
+          if (clinical.length) card3Sections.push({ title: 'Clinical Assessment', items: clinical });
 
-          if (vitals.length > 0) {
-            const vitalsItems: { label: string; value: string }[] = [];
-            vitals.forEach((vs: any, i: number) => {
-              const parts: string[] = [];
-              if (vs.time) parts.push(`Time: ${vs.time}`);
-              if (vs.bp_sys || vs.bp_dia) parts.push(`BP: ${vs.bp_sys || '—'}/${vs.bp_dia || '—'}`);
-              if (vs.pulse) parts.push(`Pulse: ${vs.pulse}`);
-              if (vs.spo2) parts.push(`SpO₂: ${vs.spo2}%`);
-              if (vs.rr) parts.push(`RR: ${vs.rr}`);
-              if (vs.temp) parts.push(`Temp: ${vs.temp}°C`);
-              if (vs.gcs_e || vs.gcs_v || vs.gcs_m) parts.push(`GCS: E${vs.gcs_e || '?'}V${vs.gcs_v || '?'}M${vs.gcs_m || '?'}`);
-              if (vs.blood_glucose) parts.push(`BGL: ${vs.blood_glucose}`);
-              if (parts.length) vitalsItems.push({ label: `Set ${i + 1}`, value: parts.join(' · ') });
-            });
-            if (vitalsItems.length) card3Sections.push({ title: 'Vitals', emoji: '❤️', items: vitalsItems });
-          }
+
 
           if (ivRows.length > 0) {
             const ivItems = ivRows.map((row: any, i: number) => {
@@ -7429,7 +7545,7 @@ export default function DigitalPRFForm() {
               if (row.site) parts.push(`Site: ${row.site}`);
               return { label: `Line ${i + 1}`, value: parts.join(' · ') || 'No details' };
             });
-            card3Sections.push({ title: 'IV Therapy', emoji: '💉', items: ivItems });
+            card3Sections.push({ title: 'IV Therapy', items: ivItems });
           }
 
           if (medRows.length > 0) {
@@ -7441,14 +7557,14 @@ export default function DigitalPRFForm() {
               if (row.time) parts.push(`@ ${row.time}`);
               return { label: `Med ${i + 1}`, value: parts.join(' · ') || 'No details' };
             });
-            card3Sections.push({ title: 'Medications', emoji: '💊', items: medItems });
+            card3Sections.push({ title: 'Medications', items: medItems });
           }
 
           const notes = [
             v('management_notes', 'Management Notes'), v('motivation_notes', 'Motivation'),
             v('vitals_shortfall_motivation', 'Vitals Shortfall Motivation'),
           ].filter(Boolean) as { label: string; value: string }[];
-          if (notes.length) card3Sections.push({ title: 'Notes', emoji: '📝', items: notes });
+          if (notes.length) card3Sections.push({ title: 'Notes', items: notes });
 
           // ── Card 4: Handover ──
           const card4Sections: SummarySection[] = [];
@@ -7456,14 +7572,14 @@ export default function DigitalPRFForm() {
           if (timestamps.time_depart_scene) transport.push({ label: 'Departed Scene', value: timestamps.time_depart_scene });
           if (timestamps.time_at_destination) transport.push({ label: 'At Destination', value: timestamps.time_at_destination });
           if (timestamps.time_available) transport.push({ label: 'Available', value: timestamps.time_available });
-          if (transport.length) card4Sections.push({ title: 'Transport Times', emoji: '🕐', items: transport });
+          if (transport.length) card4Sections.push({ title: 'Transport Times', items: transport });
 
           const handover = [
             v('handover_name', 'Handover To'), v('handover_doctor_email', 'Handover Email'),
             v('ward', 'Ward'), v('referring_doctor', 'Referring Doctor'),
             v('receiving_doctor', 'Receiving Doctor'),
           ].filter(Boolean) as { label: string; value: string }[];
-          if (handover.length) card4Sections.push({ title: 'Handover', emoji: '🏥', items: handover });
+          if (handover.length) card4Sections.push({ title: 'Handover', items: handover });
 
           // All 4 cards
           const cards = [
@@ -7480,23 +7596,22 @@ export default function DigitalPRFForm() {
                 display: 'flex', alignItems: 'center', gap: 6,
                 padding: '8px 0 6px', borderBottom: `1px solid ${S100}`,
               }}>
-                <span style={{ fontSize: '0.9rem' }}>{section.emoji}</span>
                 <span style={{ fontSize: '0.76rem', fontWeight: 800, color: S800, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                   {section.title}
                 </span>
               </div>
               {section.items.map((item, ii) => (
                 <div key={ii} style={{
-                  display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
-                  gap: 8, padding: '7px 2px',
+                  display: 'flex', flexDirection: 'column',
+                  gap: 4, padding: '8px 2px',
                   borderBottom: ii < section.items.length - 1 ? `1px solid ${S50}` : 'none',
                 }}>
-                  <div style={{ fontSize: '0.76rem', fontWeight: 600, color: S500, minWidth: 80, flexShrink: 0 }}>
+                  <div style={{ fontSize: '0.72rem', fontWeight: 600, color: S500, textTransform: 'uppercase' }}>
                     {item.label}
                   </div>
                   <div style={{
-                    fontSize: '0.8rem', fontWeight: 700, color: S900, textAlign: 'right',
-                    wordBreak: 'break-word', lineHeight: 1.4,
+                    fontSize: '0.85rem', fontWeight: 700, color: S900,
+                    wordBreak: 'break-word', lineHeight: 1.4, minWidth: 0
                   }}>
                     {item.value}
                   </div>
@@ -7577,7 +7692,7 @@ export default function DigitalPRFForm() {
                           background: W, borderRadius: 14,
                           border: `1.5px solid ${ci === activeCard ? card.color + '40' : S100}`,
                           padding: '14px 14px 10px',
-                          maxHeight: '52vh', overflowY: 'auto',
+                          maxHeight: '52vh', overflowY: 'auto', overscrollBehavior: 'contain',
                           boxShadow: ci === activeCard ? `0 4px 20px ${card.color}15` : 'none',
                           transition: 'border-color 0.3s, box-shadow 0.3s',
                         }}>
@@ -7612,7 +7727,7 @@ export default function DigitalPRFForm() {
               position: 'fixed', inset: 0, zIndex: 9998,
               background: 'rgba(15,23,42,0.6)', backdropFilter: 'blur(4px)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              padding: '16px 10px',
+              padding: '16px 10px', overscrollBehavior: 'none',
             }}
               onClick={e => { if (e.target === e.currentTarget) { setSummaryReviewOpen(false); submitInFlightRef.current = false; } }}
             >
@@ -7630,7 +7745,7 @@ export default function DigitalPRFForm() {
                   flexShrink: 0,
                 }}>
                   <div style={{ fontSize: '1.05rem', fontWeight: 900, color: S900, marginBottom: 3 }}>
-                    📋 Review Before Submitting
+                    Review Before Submitting
                   </div>
                   <div style={{ fontSize: '0.78rem', color: S600, lineHeight: 1.5 }}>
                     Swipe through each card to check for accuracy and spelling errors.
@@ -7822,16 +7937,17 @@ export default function DigitalPRFForm() {
           Now shown on brand-new PRFs (phase 0 / Dispatch) as well. */}
         {phase >= 0 && (
         <div style={{
-          position: 'sticky', top: 12, zIndex: 50,
-          width: 'min(760px, calc(100% - 32px))', margin: '12px auto 0',
+          position: 'sticky', top: 8, zIndex: 50,
+          width: isScrolled ? 'min(400px, calc(100% - 64px))' : 'min(760px, calc(100% - 32px))', margin: '12px auto 0',
           background: 'linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(248,250,252,0.96) 100%)',
           backdropFilter: 'blur(14px)',
           WebkitBackdropFilter: 'blur(14px)',
           border: `1px solid ${S200}`,
-          borderRadius: 16,
-          boxShadow: '0 6px 24px rgba(15,23,42,0.08)',
+          borderRadius: isScrolled ? 999 : 16,
+          boxShadow: isScrolled ? '0 4px 12px rgba(15,23,42,0.06)' : '0 6px 24px rgba(15,23,42,0.08)',
+          transition: 'all 0.3s ease',
         }}>
-          <div style={{ padding: '14px 18px 10px' }}>
+          <div style={{ padding: isScrolled ? '6px 16px' : '14px 18px 10px', transition: 'padding 0.3s ease' }}>
             {/* Nodes + connectors row */}
             <div style={{ display: 'flex', alignItems: 'center', position: 'relative' }}>
               {(() => {
@@ -7898,11 +8014,11 @@ export default function DigitalPRFForm() {
                       }}
                       aria-label={`Go to ${_p.label}`}
                       style={{
-                        width: 34, height: 34, borderRadius: 999, flexShrink: 0,
+                        width: isScrolled ? 26 : 34, height: isScrolled ? 26 : 34, borderRadius: 999, flexShrink: 0,
                         background: nodeFill,
                         border: `1.5px solid ${nodeBorder}`,
                         color: nodeColor,
-                        fontSize: '0.74rem', fontWeight: 900,
+                        fontSize: isScrolled ? '0.65rem' : '0.74rem', fontWeight: 900,
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         cursor: 'pointer',
                         boxShadow: nodeShadow,
@@ -7912,7 +8028,7 @@ export default function DigitalPRFForm() {
                       }}
                     >
                       {done ? (
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                        <svg width={isScrolled ? 12 : 14} height={isScrolled ? 12 : 14} viewBox="0 0 24 24" fill="none"
                           stroke="currentColor" strokeWidth="3.2"
                           strokeLinecap="round" strokeLinejoin="round">
                           <polyline points="20 6 9 17 4 12" />
@@ -7935,7 +8051,14 @@ export default function DigitalPRFForm() {
             </div>
 
             {/* Labels row */}
-            <div style={{ display: 'flex', marginTop: 8 }}>
+            <div style={{ 
+              display: 'flex', 
+              marginTop: isScrolled ? 0 : 8, 
+              maxHeight: isScrolled ? 0 : 20, 
+              opacity: isScrolled ? 0 : 1, 
+              overflow: 'hidden', 
+              transition: 'all 0.3s ease' 
+            }}>
               {(() => {
                 const hidden = fd.med_aid_dec_death
                   ? new Set([1, 3, 4, 5, 6])
@@ -7972,7 +8095,7 @@ export default function DigitalPRFForm() {
         </div>
         )}
 
-        <div style={{ paddingTop: 110 }}>
+        <div style={{ paddingTop: isMobileView ? 72 : 110 }}>
           {/* ── Validation banner (rule findings from prfValidation.ts) ── */}
           {findings.length > 0 && (
             <div id="prf-validation-banner" style={{ padding: '0 18px 16px', maxWidth: 640, margin: '0 auto' }}>
@@ -8003,7 +8126,7 @@ export default function DigitalPRFForm() {
                   padding: '12px 14px', marginBottom: 8,
                 }}>
                   <div style={{ fontSize: '0.78rem', fontWeight: 800, color: '#92400e', marginBottom: 6, letterSpacing: '0.02em' }}>
-                    {validationWarnings(findings).length} warning{validationWarnings(findings).length === 1 ? '' : 's'} — claim may be downgraded if not addressed
+                    {validationWarnings(findings).length} warning{validationWarnings(findings).length === 1 ? '' : 's'} — claim may be rejected if not addressed
                   </div>
                   <ul style={{ margin: 0, paddingLeft: 18, fontSize: '0.78rem', color: '#78350f', lineHeight: 1.5 }}>
                     {validationWarnings(findings).map(f => (

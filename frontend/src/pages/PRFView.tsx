@@ -431,11 +431,10 @@ export default function PRFView() {
           }
         }
       }
-    } catch (e) {
+    } catch (_e) {
       // A single bad image — e.g. a cross-origin logo that tainted the canvas
       // and made toDataURL throw — must never silently brick the whole export.
       // Returning null lets callers show their "couldn't build" fallback.
-      console.error('PRF PDF build failed:', e);
       return null;
     }
 

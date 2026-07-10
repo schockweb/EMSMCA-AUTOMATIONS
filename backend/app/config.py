@@ -19,6 +19,11 @@ class Settings(BaseSettings):
     # ── Database ──
     DATABASE_URL: str = "postgresql+asyncpg://ems_admin:ems_secure_2024@localhost:5432/ems_claims"
 
+    # ── Database SSL ──
+    # Set to 'require' in production (Azure PostgreSQL enforces SSL).
+    # Leave empty for local dev (plain Docker Postgres needs no SSL).
+    DB_SSL_MODE: str = ""
+
     # ── Database Connection Pool ──
     # Tuned for high concurrency (500+ ambulances, 1500 crew members).
     # pool_size × num_workers = persistent connections per backend replica.

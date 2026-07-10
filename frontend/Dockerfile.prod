@@ -19,9 +19,12 @@ RUN npm ci --no-audit --no-fund
 # Copy the rest of the source
 COPY . .
 
-# Build args — API URL is baked into the bundle at build time
+# Build args — API URL and Maps key are baked into the bundle at build time
 ARG VITE_API_URL=/api
 ENV VITE_API_URL=$VITE_API_URL
+
+ARG VITE_GOOGLE_MAPS_KEY
+ENV VITE_GOOGLE_MAPS_KEY=$VITE_GOOGLE_MAPS_KEY
 
 # Increase heap size to prevent SIGBUS/OOM during heavy TS/Vite compilation
 ENV NODE_OPTIONS="--max_old_space_size=4096"

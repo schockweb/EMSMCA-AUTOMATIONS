@@ -9,7 +9,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ems_admin
-      POSTGRES_PASSWORD: ems_secure_2024
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ems_claims
     ports:
       - "5433:5432"

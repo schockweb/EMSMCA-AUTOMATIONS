@@ -138,8 +138,8 @@ export default function Dashboard() {
       const res = await api.get('/api/stats');
       setStats(res.data);
       setLastRefresh(new Date());
-    } catch (err) {
-      console.error('Failed to fetch stats:', err);
+    } catch (_err) {
+      // Error handled by API interceptor
     } finally {
       setLoading(false);
     }

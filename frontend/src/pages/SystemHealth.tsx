@@ -63,8 +63,8 @@ export default function SystemHealth() {
       setCrashes(crashesRes.data.items);
       setTotalCrashes(crashesRes.data.total);
       setTotalPages(crashesRes.data.pages);
-    } catch (err) {
-      console.error('Failed to fetch crash data:', err);
+    } catch (_err) {
+      // Error handled by API interceptor
     } finally {
       setLoading(false);
     }
@@ -80,8 +80,8 @@ export default function SystemHealth() {
     try {
       await api.patch(`/api/crashes/${id}/resolve`);
       fetchData();
-    } catch (err) {
-      console.error('Failed to resolve crash:', err);
+    } catch (_err) {
+      // Error handled by API interceptor
     }
   };
 
@@ -89,8 +89,8 @@ export default function SystemHealth() {
     try {
       await api.delete(`/api/crashes/${id}`);
       fetchData();
-    } catch (err) {
-      console.error('Failed to delete crash:', err);
+    } catch (_err) {
+      // Error handled by API interceptor
     }
   };
 
@@ -100,8 +100,8 @@ export default function SystemHealth() {
       const res = await api.post('/api/crashes/purge');
       alert(`Purged ${res.data.purged} old crash records.`);
       fetchData();
-    } catch (err) {
-      console.error('Purge failed:', err);
+    } catch (_err) {
+      // Error handled by API interceptor
     } finally {
       setPurging(false);
     }

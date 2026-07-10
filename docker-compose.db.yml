@@ -110,4 +110,5 @@ volumes:
 # the host for app/worker server connections.
 networks:
   ems_db_net:
+    name: ems_db_net
     driver: bridge

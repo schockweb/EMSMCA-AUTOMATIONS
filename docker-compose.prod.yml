@@ -21,7 +21,12 @@ services:
       context: ./backend
       dockerfile: Dockerfile.prod
     container_name: ems_backend
-    restart: always
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
     env_file:
       - .env.prod
     volumes:
@@ -36,6 +41,7 @@ services:
     networks:
       - ems_app_net
       - ems_shared_net
+      - ems_db_net
 
   # ── Nginx Reverse Proxy + Static Frontend ───────────────
   # Serves the React SPA (built into the image) and proxies
@@ -48,8 +54,14 @@ services:
       dockerfile: Dockerfile.prod
       args:
         VITE_API_URL: /api
+        VITE_GOOGLE_MAPS_KEY: ${VITE_GOOGLE_MAPS_KEY}
     container_name: ems_nginx
-    restart: always
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
     ports:
       - "80:80"
       - "443:443"
@@ -80,7 +92,12 @@ services:
   ems_certbot:
     image: certbot/certbot:latest
     container_name: ems_certbot
-    restart: always
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
     volumes:
       - certbot_certs:/etc/letsencrypt
       - certbot_webroot:/var/www/certbot
@@ -111,3 +128,6 @@ networks:
   ems_shared_net:
     name: ems_shared_net
     driver: bridge
+  ems_db_net:
+    external: true
+    name: ems_db_net

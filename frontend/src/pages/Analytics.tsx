@@ -28,7 +28,7 @@ export default function AnalyticsDashboard() {
     try {
       const res = await api.get('/api/analytics/dashboard');
       setData(res.data);
-    } catch (err) { console.error(err); } finally { setLoading(false); }
+    } catch (_err) { /* Error handled by API interceptor */ } finally { setLoading(false); }
   };
 
   const formatZAR = (n: number) => `R ${n.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;

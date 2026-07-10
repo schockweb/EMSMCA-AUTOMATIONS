@@ -24,9 +24,9 @@ from app.utils.security import (
     get_current_user,
     blacklist_token,
     is_token_blacklisted,
+    oauth2_scheme,
     MAX_FAILED_ATTEMPTS,
     LOCKOUT_DURATION_MINUTES,
-    oauth2_scheme,
 )
 
 import logging
@@ -97,50 +97,25 @@ async def login(
                     "pr_number": provider.pr_number,
                 })
 
-    # ── Check if account is locked ──
-    if user and user.locked_until:
-        if datetime.now(timezone.utc) < user.locked_until:
-            remaining = int((user.locked_until - datetime.now(timezone.utc)).total_seconds() / 60)
-            logger.warning("Blocked login for locked account user=%s, %d min remaining", form_data.username, remaining)
-            await _record_login_audit(
-                db, user.id, "LOGIN_BLOCKED_LOCKOUT", client_ip,
-                {"reason": f"Account locked for {remaining} more minutes"},
-            )
-            await db.commit()
-            raise HTTPException(
-                status_code=status.HTTP_423_LOCKED,
-                detail=f"Account is locked due to too many failed attempts. Try again in {remaining} minutes.",
-            )
-        else:
-            # Lockout expired — reset
-            user.failed_login_attempts = 0
-            user.locked_until = None
+    # ── Check if locked out ──
+    if user and user.locked_until and user.locked_until > datetime.now(timezone.utc):
+        await _record_login_audit(db, user.id, "LOGIN_FAILED_LOCKED", client_ip)
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account locked due to too many failed attempts. Try again later.",
+        )
 
     # ── Validate credentials ──
     if not user or not await verify_password_async(form_data.password, user.hashed_password):
         # Record failed attempt
         if user:
             user.failed_login_attempts = (user.failed_login_attempts or 0) + 1
-
             if user.failed_login_attempts >= MAX_FAILED_ATTEMPTS:
                 user.locked_until = datetime.now(timezone.utc) + timedelta(minutes=LOCKOUT_DURATION_MINUTES)
-                logger.warning(
-                    "Account locked: user=%s after %d failed attempts. Locked for %d min.",
-                    form_data.username, user.failed_login_attempts, LOCKOUT_DURATION_MINUTES,
-                )
-                await _record_login_audit(
-                    db, user.id, "ACCOUNT_LOCKED", client_ip,
-                    {"failed_attempts": user.failed_login_attempts, "lockout_minutes": LOCKOUT_DURATION_MINUTES},
-                )
-                await db.commit()
-                raise HTTPException(
-                    status_code=status.HTTP_423_LOCKED,
-                    detail=f"Account locked after {MAX_FAILED_ATTEMPTS} failed attempts. Try again in {LOCKOUT_DURATION_MINUTES} minutes.",
-                )
-
             await _record_login_audit(
                 db, user.id, "LOGIN_FAILED", client_ip,
-                {"failed_attempts": user.failed_login_attempts},
+                {"failed_attempts": user.failed_login_attempts, "locked_until": user.locked_until.isoformat() if user.locked_until else None},
             )
             await db.commit()
 

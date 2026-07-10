@@ -252,7 +252,7 @@ export default function AdminQueue() {
       const res = await api.get('/api/documents/', { params });
       setDocuments(res.data.documents);
       setTotal(res.data.total);
-    } catch (e) { console.error(e); }
+    } catch (_e) { /* Error handled by API interceptor */ }
     finally { setLoading(false); }
   };
 
