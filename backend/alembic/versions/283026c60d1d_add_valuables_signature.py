@@ -26,8 +26,10 @@ def upgrade() -> None:
                existing_type=sa.VARCHAR(length=255),
                comment="Email used on main EMSMCA login page to redirect to this provider's portal",
                existing_nullable=True)
-    op.drop_constraint(op.f('service_providers_portal_login_email_key'), 'service_providers', type_='unique')
-    op.create_index(op.f('ix_service_providers_portal_login_email'), 'service_providers', ['portal_login_email'], unique=True)
+    # Dev DBs have a UNIQUE constraint here; prod (migrated via d7e8f9a0b1c2) has a
+    # unique index instead. Use IF EXISTS / IF NOT EXISTS so both states converge.
+    op.execute('ALTER TABLE service_providers DROP CONSTRAINT IF EXISTS service_providers_portal_login_email_key')
+    op.execute('CREATE UNIQUE INDEX IF NOT EXISTS ix_service_providers_portal_login_email ON service_providers (portal_login_email)')
     # ### end Alembic commands ###
 
 

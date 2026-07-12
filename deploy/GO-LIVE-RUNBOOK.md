@@ -101,6 +101,21 @@ Back to working HTTP while you diagnose. Send Claude the nginx logs.
 
 ---
 
+## Manual deploy procedure (used 2026-07-12; repeat whenever deploying by hand)
+After pushing from the laptop, on the VM:
+```bash
+cd /opt/ems
+sudo git fetch origin main && sudo git reset --hard origin/main
+sudo cp /opt/ems/nginx/nginx.conf.bak-2026-07-12 /opt/ems/nginx/nginx.conf   # keep the safe HTTP-only config until HTTPS is live
+sudo VITE_GOOGLE_MAPS_KEY="$(sudo grep -oP '(?<=VITE_GOOGLE_MAPS_KEY=).*' /opt/ems/.env.prod)" docker compose -f docker-compose.prod.yml up -d --build --force-recreate
+sudo docker compose -f docker-compose.prod.yml exec -T ems_backend python -m alembic upgrade head   # ⚠️ MANDATORY — code + database must update together
+sudo docker compose -f docker-compose.worker.yml up -d --build
+curl -s http://localhost/health   # uptime_seconds must be small
+```
+- ⚠️ NEVER pass `--remove-orphans` to the **worker** compose command — it deletes the app containers (shared project name).
+- Docker network `ems_db_net` must exist (`sudo docker network create ems_db_net` — already created 2026-07-12).
+- Browser check needs Ctrl+F5, possibly Service-Worker unregister (PWA caching).
+
 ## Known drift to resolve later (not needed for go-live)
 - Laptop repo (`8d42d1c`) ≠ VM (`76228d3`). Reconcile before pushing Digital PRF changes.
 - `deploy.yml` `DEPLOY_DIR` is `/opt/ems-claims` but the real dir is `/opt/ems` — fix or the pipeline fails.
