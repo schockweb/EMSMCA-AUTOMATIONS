@@ -10,7 +10,17 @@
       "Bash(docker ps *)",
       "Bash(ls \"c:\\\\Users\\\\USER-PC\\\\Desktop\\\\New EMS AUTOMATIONS\\\\\")",
       "Read(//c/Users/USER-PC/Desktop/**)",
-      "Bash(grep -oE '\\\\bS[0-9]{2,3}\\\\b' src/pages/crew/DigitalPRFForm.tsx)"
+      "Bash(grep -oE '\\\\bS[0-9]{2,3}\\\\b' src/pages/crew/DigitalPRFForm.tsx)",
+      "Bash(nslookup portal.emsmca.co.za)",
+      "Bash(nslookup portal.emsmca.co.za 8.8.8.8)",
+      "Bash(curl -s -o /dev/null -w \"http_code=%{http_code} final_url=%{url_effective} time=%{time_total}s\\\\n\" -L --max-time 15 http://portal.emsmca.co.za)",
+      "Bash(curl -s -o /dev/null -w \"http_code=%{http_code} final_url=%{url_effective} time=%{time_total}s\\\\n\" -L --max-time 15 https://portal.emsmca.co.za)",
+      "Bash(curl -s -o /dev/null -w \"http_code=%{http_code} time=%{time_total}s\\\\n\" --max-time 15 http://172.209.218.22)",
+      "Bash(curl -s --max-time 15 http://172.209.218.22/health -w \"\\\\n[health http=%{http_code}]\\\\n\")",
+      "Bash(curl -s --max-time 15 http://172.209.218.22)",
+      "Bash(curl -s --max-time 15 http://172.209.218.22/api/health -w \"\\\\n[http=%{http_code}]\\\\n\")",
+      "mcp__visualize__read_me",
+      "mcp__visualize__show_widget"
     ]
   }
 }
