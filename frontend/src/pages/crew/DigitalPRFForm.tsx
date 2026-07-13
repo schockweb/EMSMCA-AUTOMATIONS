@@ -826,7 +826,7 @@ const SpeechRecognitionAPI: any =
   (typeof window !== 'undefined' &&
     ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition)) || null;
 
-const Inp = ({ fk, type = 'text', onBlur }: { fk: string; ph?: string; type?: string; req?: boolean; onBlur?: (e: React.FocusEvent<HTMLInputElement>) => void }) => {
+const Inp = ({ fk, type = 'text', onBlur, noMic }: { fk: string; ph?: string; type?: string; req?: boolean; noMic?: boolean; onBlur?: (e: React.FocusEvent<HTMLInputElement>) => void }) => {
   const { fd, sf } = useContext(FormContext);
   // PRF data is unique per patient, so browser form-history suggestions (e.g.
   // re-offering the last value you typed) are never useful and are turned off.
@@ -837,7 +837,7 @@ const Inp = ({ fk, type = 'text', onBlur }: { fk: string; ph?: string; type?: st
   // Exclude: number, tel, date, time, email types + ID/passport/phone field keys
   const excludedTypes = ['number', 'tel', 'date', 'time', 'email'];
   const excludedKeyPatterns = /(id_number|passport|phone|_id$|_dob$|dependant_code|med_aid_number|postal_code)/i;
-  const showMic = !!SpeechRecognitionAPI && !excludedTypes.includes(type) && !excludedKeyPatterns.test(fk);
+  const showMic = !noMic && !!SpeechRecognitionAPI && !excludedTypes.includes(type) && !excludedKeyPatterns.test(fk);
 
   const [recording, setRecording] = useState(false);
   const recogRef = useRef<any>(null);
@@ -6829,9 +6829,9 @@ export default function DigitalPRFForm() {
             })}
           </div>
           {inArr('airway_interventions', 'OP Airway') && (
-            <div style={{ padding: 14, background: GBG, borderRadius: 10, marginBottom: 14, border: `1px solid ${G}30` }}>
-              <Lbl t="OP Airway Size" /><Inp fk="op_airway_size" ph="e.g. 3 / 80mm" />
-            </div>
+            <>
+              <Lbl t="OP Airway Size" /><Inp fk="op_airway_size" noMic />
+            </>
           )}
           {inArr('airway_interventions', 'Intubation') && (
             <div style={{ padding: 14, background: GBG, borderRadius: 10, marginBottom: 14, border: `1px solid ${G}30` }}>

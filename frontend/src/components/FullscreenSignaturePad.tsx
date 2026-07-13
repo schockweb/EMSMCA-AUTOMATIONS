@@ -168,7 +168,7 @@ export function FullscreenCanvas({ label, initial, onCancel, onSave }: CanvasPro
     // Pure black + thicker stroke so the signature stays bold and clearly
     // visible when scaled down on the printed/exported PDF.
     ctx.strokeStyle = '#000000';
-    ctx.lineWidth = 4;
+    ctx.lineWidth = 6;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     if (initial) {

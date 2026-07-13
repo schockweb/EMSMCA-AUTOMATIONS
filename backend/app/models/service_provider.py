@@ -5,7 +5,7 @@ Each provider (e.g., JEMS Medical Services) has their own crew, vehicles, and PR
 from typing import Union
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import String, Boolean, Text, DateTime
+from sqlalchemy import String, Boolean, Text, DateTime, Integer
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
@@ -45,6 +45,15 @@ class ServiceProvider(Base):
         comment="Email used on main EMSMCA login page to redirect to this provider's portal"
     )
     portal_login_password_hash: Mapped[Union[str, None]] = mapped_column(String(255), nullable=True)
+
+    # Per-provider PRF numbering baseline. Set once by the admin at onboarding
+    # (the count of PRFs the company has already completed). The next digital
+    # PRF continues from here — see `_next_prf_number` in api/digital_prf.py.
+    # Not surfaced back to the settings form; it only seeds the counter.
+    prf_start_number: Mapped[Union[int, None]] = mapped_column(
+        Integer, nullable=True,
+        comment="Onboarding baseline; next digital PRF = max(this, provider's current max) + 1"
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)

@@ -9,7 +9,7 @@ import uuid
 import enum
 from datetime import datetime, timezone
 from decimal import Decimal
-from sqlalchemy import String, Text, ForeignKey, DateTime, JSON, Enum as SAEnum, Integer, Numeric
+from sqlalchemy import String, Text, ForeignKey, DateTime, JSON, Enum as SAEnum, Integer, Numeric, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
@@ -25,6 +25,13 @@ class PRFStatus(str, enum.Enum):
 
 class DigitalPRF(Base):
     __tablename__ = "digital_prfs"
+
+    # PRF numbers count independently per provider, so #1 can exist for every
+    # company. Uniqueness is therefore scoped to (provider_id, prf_number) — a
+    # global unique on prf_number alone would force one shared counter.
+    __table_args__ = (
+        UniqueConstraint("provider_id", "prf_number", name="uq_digital_prf_provider_number"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
@@ -46,8 +53,8 @@ class DigitalPRF(Base):
 
     # ── PRF Identification ────────────────────────────────
     prf_number: Mapped[int] = mapped_column(
-        Integer, unique=True, nullable=False, index=True,
-        comment="Auto-sequential PRF number"
+        Integer, nullable=False, index=True,
+        comment="Per-provider sequential PRF number (unique within provider_id)"
     )
     case_number: Mapped[Union[str, None]] = mapped_column(
         String(50), unique=True, nullable=True,

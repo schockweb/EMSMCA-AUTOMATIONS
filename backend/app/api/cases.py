@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.case import Case, PreAuthStatus
+from app.models.digital_prf import DigitalPRF
 from app.models.user import User
 from app.schemas.case import CaseCreate, CaseUpdate, CaseResponse
 from app.utils.security import get_current_user
@@ -18,7 +19,42 @@ from app.utils.security import get_current_user
 router = APIRouter(prefix="/api/cases", tags=["Cases"])
 
 
-def _case_to_response(c: Case) -> CaseResponse:
+def _prf_display_name(provider_name, prf_number, form_data) -> Optional[str]:
+    """Canonical PRF name — "{PREFIX}{prf_number} PRF {scheme} {call_type}",
+    e.g. "TES106 PRF Discovery Health IHT". Kept in sync with the exported-PDF
+    filename (buildPrfFileName in PRFView.tsx). Prefix = first 3 alphanumerics
+    of the provider name, uppercased. Empty parts are dropped; returns None when
+    there's nothing meaningful to show."""
+    fd = form_data or {}
+    prefix = "".join(ch for ch in str(provider_name or "") if ch.isalnum())[:3].upper()
+    head = f"{prefix}{prf_number}".strip() if prf_number is not None else prefix.strip()
+    tail = [str(fd.get("medical_scheme") or "").strip(), str(fd.get("call_type") or "").strip()]
+    tail = [t for t in tail if t]
+    if not head and not tail:
+        return None
+    return " ".join(([head] if head else []) + ["PRF"] + tail)
+
+
+async def _display_names_for(db: AsyncSession, case_ids: list) -> dict:
+    """Map case_id -> PRF display name, sourced from each case's DigitalPRF +
+    provider. When a case has multiple PRFs (e.g. corrections) the newest wins."""
+    if not case_ids:
+        return {}
+    rows = (await db.execute(
+        select(DigitalPRF)
+        .options(selectinload(DigitalPRF.provider))
+        .where(DigitalPRF.case_id.in_(case_ids))
+        .order_by(DigitalPRF.created_at.asc())
+    )).scalars().all()
+    names: dict = {}
+    for p in rows:
+        nm = _prf_display_name(p.provider.name if p.provider else None, p.prf_number, p.form_data)
+        if nm:
+            names[p.case_id] = nm  # asc order → later (newer) row overwrites
+    return names
+
+
+def _case_to_response(c: Case, display_name: Optional[str] = None) -> CaseResponse:
     """Helper to convert a Case ORM instance to a CaseResponse."""
     docs = getattr(c, 'documents', None)
     has_docs = docs and len(docs) > 0
@@ -39,6 +75,7 @@ def _case_to_response(c: Case) -> CaseResponse:
         file_name=file_name,
         original_filename=original_filename,
         document_id=document_id,
+        display_name=display_name,
         extracted_data=extracted_data,
         patient_name=c.patient_name,
         patient_id_number=c.patient_id_number,
@@ -118,7 +155,8 @@ async def list_cases(
 
     result = await db.execute(query.offset(skip).limit(limit))
     cases = result.scalars().all()
-    return [_case_to_response(c) for c in cases]
+    names = await _display_names_for(db, [c.id for c in cases])
+    return [_case_to_response(c, names.get(c.id)) for c in cases]
 
 
 @router.get("/{case_id}", response_model=CaseResponse)
@@ -136,7 +174,8 @@ async def get_case(
     case = result.scalar_one_or_none()
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
-    return _case_to_response(case)
+    names = await _display_names_for(db, [case.id])
+    return _case_to_response(case, names.get(case.id))
 
 
 @router.patch("/{case_id}", response_model=CaseResponse)

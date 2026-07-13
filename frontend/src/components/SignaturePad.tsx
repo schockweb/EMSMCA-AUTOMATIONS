@@ -29,7 +29,7 @@ export default function SignaturePad({ label, value, onChange, height = 140 }: S
     if (ctx) {
       ctx.scale(2, 2);
       ctx.strokeStyle = '#000000';
-      ctx.lineWidth = 3.5;
+      ctx.lineWidth = 5;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
     }

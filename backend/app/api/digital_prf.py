@@ -101,27 +101,30 @@ def _parse_iso(val: str | None) -> datetime | None:
         return None
 
 
-async def _next_prf_number(db: AsyncSession) -> int:
-    """Get the next auto-sequential PRF number using a PostgreSQL SEQUENCE.
+async def _next_prf_number(db: AsyncSession, provider: ServiceProvider) -> int:
+    """Next PRF number for THIS provider only.
 
-    A SEQUENCE is atomic and lock-free — two concurrent INSERTs will always
-    get different numbers, even under heavy load with 500+ ambulances.
+    Each of the 100+ providers counts its own PRFs independently — provider A
+    creating #103 must never advance provider B's numbering. The number is
+    therefore derived from this provider's own rows, not a shared sequence.
+
+    `provider.prf_start_number` is the baseline an admin enters once at
+    onboarding (the count of PRFs already completed on paper). The first digital
+    PRF continues from there (baseline + 1); once digital PRFs pass the baseline,
+    the provider's own max drives the count.
+
+    Concurrency: `create_prf` loads the provider row `FOR UPDATE`, which
+    serialises concurrent PRF creation for the *same* provider (other providers
+    are unaffected), so this max()+1 cannot hand two crews the same number.
     """
-    from app.config import get_settings
-    settings = get_settings()
-    if settings.DATABASE_URL.startswith("sqlite"):
-        result = await db.execute(select(func.max(DigitalPRF.prf_number)))
-        max_val = result.scalar() or 0
-        return max_val + 1
-
-    # Ensure the sequence exists (idempotent — CREATE IF NOT EXISTS).
-    # This runs once on first call; PostgreSQL caches the definition.
-    await db.execute(text(
-        "CREATE SEQUENCE IF NOT EXISTS prf_number_seq "
-        "START WITH 1 INCREMENT BY 1 NO CYCLE"
-    ))
-    result = await db.execute(text("SELECT nextval('prf_number_seq')"))
-    return result.scalar()
+    result = await db.execute(
+        select(func.max(DigitalPRF.prf_number)).where(
+            DigitalPRF.provider_id == provider.id
+        )
+    )
+    provider_max = result.scalar() or 0
+    baseline = provider.prf_start_number or 0
+    return max(provider_max, baseline) + 1
 
 
 def _generate_case_number(provider_slug: str, prf_number: int) -> str:
@@ -200,13 +203,17 @@ async def create_prf(
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new draft PRF. Auto-fills crew + provider."""
-    # Load provider for case number generation
+    # Load provider for case number generation. FOR UPDATE serialises
+    # concurrent PRF creation for this one provider so `_next_prf_number`'s
+    # max()+1 is race-free (other providers never contend on this row).
     provider = await db.execute(
-        select(ServiceProvider).where(ServiceProvider.id == crew.provider_id)
+        select(ServiceProvider)
+        .where(ServiceProvider.id == crew.provider_id)
+        .with_for_update()
     )
     provider = provider.scalar_one()
 
-    prf_number = await _next_prf_number(db)
+    prf_number = await _next_prf_number(db, provider)
     case_number = _generate_case_number(provider.slug, prf_number)
 
     # Seed form_data with the supervising practitioner if the frontend sent

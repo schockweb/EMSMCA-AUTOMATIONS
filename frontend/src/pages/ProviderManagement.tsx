@@ -79,7 +79,7 @@ export default function ProviderManagement() {
   const [crewLoading, setCrewLoading] = useState(false);
 
   // Add forms
-  const [newProvider, setNewProvider] = useState({ name: '', clientEmail: '', clientPassword: '', adminEmail: '', adminPassword: '' });
+  const [newProvider, setNewProvider] = useState({ name: '', phone: '', email: '', prNumber: '', ptyRegNumber: '', address: '', clientEmail: '', clientPassword: '', adminEmail: '', adminPassword: '' });
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [newCrew, setNewCrew] = useState({ full_name: '', email: '', initials: '', hpcsa_number: '', qualification: 'ILS', phone: '' });
   const [newVehicle, setNewVehicle] = useState({ callsign: '', registration: '', vehicle_type: 'Ambulance' });
@@ -206,6 +206,11 @@ export default function ProviderManagement() {
     try {
       const payload = {
         name: newProvider.name,
+        phone: newProvider.phone || undefined,
+        email: newProvider.email || undefined,
+        pr_number: newProvider.prNumber || undefined,
+        pty_reg_number: newProvider.ptyRegNumber || undefined,
+        address: newProvider.address || undefined,
         portal_login_email: newProvider.clientEmail || undefined,
         portal_login_password: newProvider.clientPassword || undefined,
         admin_email: newProvider.adminEmail || undefined,
@@ -223,7 +228,7 @@ export default function ProviderManagement() {
       }
 
       setShowAddProvider(false);
-      setNewProvider({ name: '', clientEmail: '', clientPassword: '', adminEmail: '', adminPassword: '' });
+      setNewProvider({ name: '', phone: '', email: '', prNumber: '', ptyRegNumber: '', address: '', clientEmail: '', clientPassword: '', adminEmail: '', adminPassword: '' });
       setLogoFile(null);
       fetchProviders();
     } catch (e: any) {
@@ -298,13 +303,15 @@ export default function ProviderManagement() {
     boxSizing: 'border-box',
   };
 
+  // Field labels: full-contrast dark text, bolder and a touch larger than the
+  // old muted-grey 0.68rem — the low contrast was the eye-strain culprit.
   const labelStyle: React.CSSProperties = {
-    fontSize: '0.68rem',
-    fontWeight: 700,
-    color: 'var(--text-muted)',
+    fontSize: '0.78rem',
+    fontWeight: 800,
+    color: 'var(--text)',
     textTransform: 'uppercase',
-    letterSpacing: '0.06em',
-    marginBottom: 3,
+    letterSpacing: '0.04em',
+    marginBottom: 5,
     display: 'block',
   };
 
@@ -336,16 +343,42 @@ export default function ProviderManagement() {
                   <label style={labelStyle}>Company Name *</label>
                   <input style={inputStyle} placeholder="e.g. JEMS Medical Services" value={newProvider.name} onChange={e => setNewProvider({ ...newProvider, name: e.target.value })} />
                 </div>
-                
+
+                {/* Company details — auto-filled into the top-left corner of every PDF PRF (mirrors Company Settings). */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div>
+                    <label style={labelStyle}>Phone Number</label>
+                    <input style={inputStyle} placeholder="e.g. 011 123 4567" value={newProvider.phone} onChange={e => setNewProvider({ ...newProvider, phone: e.target.value })} />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Email Address</label>
+                    <input style={inputStyle} type="email" placeholder="e.g. info@company.co.za" value={newProvider.email} onChange={e => setNewProvider({ ...newProvider, email: e.target.value })} />
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div>
+                    <label style={labelStyle}>PR Number</label>
+                    <input style={inputStyle} placeholder="e.g. PR-1234" value={newProvider.prNumber} onChange={e => setNewProvider({ ...newProvider, prNumber: e.target.value })} />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>PTY Reg Number</label>
+                    <input style={inputStyle} placeholder="e.g. 2020/123456/07" value={newProvider.ptyRegNumber} onChange={e => setNewProvider({ ...newProvider, ptyRegNumber: e.target.value })} />
+                  </div>
+                </div>
+
+                <div>
+                  <label style={labelStyle}>Address</label>
+                  <textarea style={{ ...inputStyle, minHeight: 70, resize: 'vertical', fontFamily: 'inherit' }} placeholder="Company address" value={newProvider.address} onChange={e => setNewProvider({ ...newProvider, address: e.target.value })} />
+                </div>
+
                 <div>
                   <label style={labelStyle}>Company Logo</label>
                   <input type="file" style={{ ...inputStyle, padding: '8px' }} accept="image/*" onChange={e => setLogoFile(e.target.files?.[0] || null)} />
-                  <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: '-4px 0 0' }}>This logo will appear on the client's login portal and on all PRF PDFs.</p>
                 </div>
 
                 <div style={{ background: 'var(--surface-50)', padding: 16, borderRadius: 8, border: '1px solid var(--surface-100)' }}>
-                  <h4 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: 4, color: 'var(--text)' }}>EMSMCA Client Login</h4>
-                  <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', margin: '0 0 12px' }}>Shared credentials ALL staff use to access <code style={{ background: 'var(--surface-100)', padding: '1px 5px', borderRadius: 4 }}>/{'{slug}'}/login</code></p>
+                  <h4 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: 12, color: 'var(--text)' }}>EMSMCA Client Login</h4>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                     <div>
                       <label style={labelStyle}>Username *</label>
@@ -363,8 +396,7 @@ export default function ProviderManagement() {
                 </div>
 
                 <div style={{ background: 'var(--surface-50)', padding: 16, borderRadius: 8, border: '1px solid var(--surface-100)' }}>
-                  <h4 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: 4, color: 'var(--text)' }}>Portal Admin Login</h4>
-                  <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', margin: '0 0 12px' }}>The admin's personal login credentials for the provider dashboard (optional — can be added later).</p>
+                  <h4 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: 12, color: 'var(--text)' }}>Portal Admin Login</h4>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                     <div>
                       <label style={labelStyle}>Admin Email</label>

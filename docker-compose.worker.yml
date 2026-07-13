@@ -83,7 +83,7 @@ services:
       --concurrency=12
       --max-tasks-per-child=1000
       --without-heartbeat
-      -Q default,ocr,adjudication,notifications
+      -Q ems_default,ems_critical,default,ocr,adjudication,notifications
     networks:
       - ems_worker_net
       - ems_shared_net

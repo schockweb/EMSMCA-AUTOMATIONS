@@ -179,13 +179,22 @@ function MarkGlyph({ symbol, cx, cy, size }: { symbol: InjurySymbol; cx: number;
 
 // ── Body chart — image with marker overlay ─────────────────────────────────
 function BodyCanvas({
-  marks, activeSymbol, onAdd, onRemoveMark,
+  marks, activeSymbol, onAdd, onRemoveMark, printW,
 }: {
   marks: BodyMark[];
   activeSymbol: InjurySymbol | null;
   onAdd: (x: number, y: number) => void;
   onRemoveMark: (id: string) => void;
+  // When set, the stage renders at explicit pixel dimensions instead of a CSS
+  // aspect-ratio box. html2canvas (used for PDF export) does NOT compute the
+  // `aspect-ratio` property in its cloned document, so the box collapsed to 0
+  // height and the diagram exported blank. Fixed px sizes render reliably.
+  printW?: number;
 }) {
+  const isPrint = printW != null;
+  const boxW = printW ?? BODY_MAX_PX;
+  const boxH = boxW * VB_H / VB_W;   // square viewBox → boxH === boxW
+
   // Stage uses a 1:1 aspect ratio matching the imported SVG's viewBox.
   // Wrapper supplies the size; image fills it, marker SVG overlays on top.
   const onStageClick = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -200,7 +209,12 @@ function BodyCanvas({
   return (
     <div
       onClick={onStageClick}
-      style={{
+      style={isPrint ? {
+        position: 'relative',
+        width: boxW, height: boxH, margin: '0 auto',
+        background: '#fff', border: `1px solid ${S200}`, borderRadius: 8,
+        overflow: 'hidden',
+      } : {
         position: 'relative',
         width: '100%',
         maxWidth: BODY_MAX_PX,
@@ -218,7 +232,11 @@ function BodyCanvas({
         src={bodyDiagramUrl}
         alt="Body diagram"
         draggable={false}
-        style={{
+        style={isPrint ? {
+          position: 'absolute', top: 0, left: 0,
+          width: boxW, height: boxH, objectFit: 'contain',
+          pointerEvents: 'none', userSelect: 'none',
+        } : {
           position: 'absolute', inset: 0,
           width: '100%', height: '100%',
           objectFit: 'contain',
@@ -229,7 +247,10 @@ function BodyCanvas({
       <svg
         viewBox={`0 0 ${VB_W} ${VB_H}`}
         preserveAspectRatio="xMidYMid meet"
-        style={{
+        style={isPrint ? {
+          position: 'absolute', top: 0, left: 0,
+          width: boxW, height: boxH, pointerEvents: 'none',
+        } : {
           position: 'absolute', inset: 0,
           width: '100%', height: '100%',
           pointerEvents: 'none',
@@ -255,13 +276,20 @@ function BodyCanvas({
 
 // ── Head chart — image with quadrant labels + marker overlay ───────────────
 function HeadCanvas({
-  marks, activeSymbol, onAdd, onRemoveMark,
+  marks, activeSymbol, onAdd, onRemoveMark, printW,
 }: {
   marks: BodyMark[];
   activeSymbol: InjurySymbol | null;
   onAdd: (x: number, y: number, view: BodyView) => void;
   onRemoveMark: (id: string) => void;
+  // See BodyCanvas.printW — explicit px sizing for reliable html2canvas export.
+  printW?: number;
 }) {
+  const isPrint = printW != null;
+  const boxW = printW ?? HEAD_MAX_W_PX;
+  const cropH = boxW * HEAD_CROP_H / HEAD_VB_W;   // visible (clipped) height
+  const naturalH = boxW * HEAD_VB_H / HEAD_VB_W;  // full image height
+
   const onStageClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!activeSymbol) return;
     const stage = e.currentTarget;
@@ -279,7 +307,12 @@ function HeadCanvas({
   return (
     <div
       onClick={onStageClick}
-      style={{
+      style={isPrint ? {
+        position: 'relative',
+        width: boxW, height: cropH, margin: '0 auto',
+        background: '#fff', border: `1px solid ${S200}`, borderRadius: 8,
+        overflow: 'hidden',
+      } : {
         position: 'relative',
         width: '100%',
         maxWidth: HEAD_MAX_W_PX,
@@ -298,7 +331,11 @@ function HeadCanvas({
         src={headDiagramUrl}
         alt="Head diagram"
         draggable={false}
-        style={{
+        style={isPrint ? {
+          position: 'absolute', top: 0, left: 0,
+          width: boxW, height: naturalH,
+          pointerEvents: 'none', userSelect: 'none',
+        } : {
           // Render at natural aspect; container overflow:hidden clips bottom.
           position: 'absolute', top: 0, left: 0,
           width: '100%',
@@ -310,7 +347,10 @@ function HeadCanvas({
       <svg
         viewBox={`0 0 ${HEAD_VB_W} ${HEAD_VB_H}`}
         preserveAspectRatio="xMinYMin meet"
-        style={{
+        style={isPrint ? {
+          position: 'absolute', top: 0, left: 0,
+          width: boxW, height: naturalH, pointerEvents: 'none',
+        } : {
           // Same natural aspect + top-left anchor, so marker viewBox
           // coordinates land exactly where the image renders them.
           position: 'absolute', top: 0, left: 0,
@@ -524,18 +564,25 @@ export function PrintableInjuryDiagram({ value }: { value?: BodyMark[] }) {
     m.view === 'head_right' || m.view === 'head_back' || m.view === 'head'
   );
 
+  // Larger, FIXED pixel sizes for the print / PDF page (a dedicated full page,
+  // so we can afford bigger charts). Both diagrams share the same rendered
+  // height so they sit level side-by-side: head width is derived so its cropped
+  // height equals the square body's height.
+  const PRINT_BODY_W = 340;
+  const PRINT_HEAD_W = Math.round(PRINT_BODY_W * HEAD_VB_W / HEAD_CROP_H);
+
   return (
     <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start', justifyContent: 'center' }}>
       {bodyMarks.length > 0 && (
-        <div style={{ flex: 1, maxWidth: BODY_MAX_PX }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
           <div style={{ fontSize: '0.75rem', fontWeight: 800, color: '#0f172a', textTransform: 'uppercase', marginBottom: 8, textAlign: 'center' }}>Body</div>
-          <BodyCanvas marks={bodyMarks} activeSymbol={null} onAdd={() => {}} onRemoveMark={() => {}} />
+          <BodyCanvas marks={bodyMarks} activeSymbol={null} onAdd={() => {}} onRemoveMark={() => {}} printW={PRINT_BODY_W} />
         </div>
       )}
       {headMarks.length > 0 && (
-        <div style={{ flex: 1, maxWidth: HEAD_MAX_W_PX }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
           <div style={{ fontSize: '0.75rem', fontWeight: 800, color: '#0f172a', textTransform: 'uppercase', marginBottom: 8, textAlign: 'center' }}>Head</div>
-          <HeadCanvas marks={headMarks} activeSymbol={null} onAdd={() => {}} onRemoveMark={() => {}} />
+          <HeadCanvas marks={headMarks} activeSymbol={null} onAdd={() => {}} onRemoveMark={() => {}} printW={PRINT_HEAD_W} />
         </div>
       )}
     </div>

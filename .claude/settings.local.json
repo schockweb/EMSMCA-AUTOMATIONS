@@ -20,7 +20,28 @@
       "Bash(curl -s --max-time 15 http://172.209.218.22)",
       "Bash(curl -s --max-time 15 http://172.209.218.22/api/health -w \"\\\\n[http=%{http_code}]\\\\n\")",
       "mcp__visualize__read_me",
-      "mcp__visualize__show_widget"
+      "mcp__visualize__show_widget",
+      "PowerShell(python -m py_compile \"C:\\\\Users\\\\USER-PC\\\\Desktop\\\\New EMS AUTOMATIONS\\\\backend\\\\app\\\\api\\\\providers.py\"; echo \"PY-OK $LASTEXITCODE\")",
+      "PowerShell(cd \"C:\\\\Users\\\\USER-PC\\\\Desktop\\\\New EMS AUTOMATIONS\\\\frontend\"; npx tsc -b 2>&1 | Select-Object -First 30; echo \"TSC-EXIT $LASTEXITCODE\")",
+      "PowerShell(try { $r = Invoke-WebRequest -Uri \"http://localhost:5173/\" -TimeoutSec 20 -UseBasicParsing; echo \"HTTP $\\($r.StatusCode\\)\" } catch { echo \"ERR: $\\($_.Exception.Message\\)\" }; docker ps --filter \"name=ems_frontend\" --format \"{{.Names}} {{.Status}}\")",
+      "PowerShell(try { \\(Get-Command az -ErrorAction Stop\\).Source } catch { echo \"az: not installed\" }; try { \\(Get-Command ssh -ErrorAction Stop\\).Source } catch { echo \"ssh: not installed\" }; if \\(Test-Path \"$env:USERPROFILE\\\\.ssh\"\\) { Get-ChildItem \"$env:USERPROFILE\\\\.ssh\" | Select-Object Name, Length } else { echo \"no .ssh dir\" })",
+      "PowerShell(cd \"C:\\\\Users\\\\USER-PC\\\\Desktop\\\\New EMS AUTOMATIONS\"; git ls-files | Select-String -Pattern \"\\\\.env\" ; echo \"---gitignore env entries---\"; Select-String -Path .gitignore -Pattern \"env\" | ForEach-Object { $_.Line })",
+      "Bash(ssh -i ~/.ssh/ems_vm -o BatchMode=yes -o ConnectTimeout=15 azureuser@172.209.218.22 ' *)",
+      "Bash(ssh -i ~/.ssh/ems_vm -o BatchMode=yes azureuser@172.209.218.22 'sudo grep -oE \"^[A-Z_]+=\" /opt/ems/.env.prod; echo \"--- DB host:\"; sudo grep -oP \"\\(?<=@\\)[^/:]+\" /opt/ems/.env.prod | head -2; echo \"--- git rev:\"; cd /opt/ems && sudo git rev-parse --short HEAD')",
+      "Bash(ssh -i ~/.ssh/ems_vm -o BatchMode=yes azureuser@172.209.218.22 ' *)",
+      "Bash(scp -i ~/.ssh/ems_vm \"/c/Users/USER-PC/Desktop/New EMS AUTOMATIONS/nginx/security-headers.conf\" azureuser@172.209.218.22:/tmp/security-headers.conf)",
+      "Bash(curl -s -o /dev/null -w \"site HTTP %{http_code}\\\\n\" --max-time 15 http://172.209.218.22/)",
+      "Bash(curl -s --max-time 15 http://172.209.218.22/health)",
+      "Bash(ssh -i ~/.ssh/ems_vm -o BatchMode=yes azureuser@172.209.218.22 'sudo sh -c \"find /opt/backups/db -name \\\\\"*.sql.gz\\\\\" -size -100c -delete; ls -lh /opt/backups/db\"; echo \"---\"; sudo tail -2 /var/log/ems-backup.log 2>/dev/null || echo \"\\(log will populate at next 02:00 run\\)\"')",
+      "PowerShell(winget install --id Microsoft.AzureCLI -e --accept-source-agreements --accept-package-agreements --silent)",
+      "PowerShell(\\(Invoke-RestMethod -Uri \"https://api.ipify.org\" -TimeoutSec 15\\))",
+      "PowerShell($az = \"C:\\\\Program Files\\\\Microsoft SDKs\\\\Azure\\\\CLI2\\\\wbin\\\\az.cmd\"; if \\(Test-Path $az\\) { echo \"AZ-INSTALLED\"; & $az version 2>&1 | Select-Object -First 3 } else { echo \"AZ-NOT-READY-YET\" })",
+      "PowerShell(& \"C:\\\\Program Files\\\\Microsoft SDKs\\\\Azure\\\\CLI2\\\\wbin\\\\az.cmd\" login --use-device-code --only-show-errors)",
+      "Read(//c/Users/USER-PC/AppData/Local/Temp/claude/C--Users-USER-PC-Desktop-New-EMS-AUTOMATIONS/bdf0314f-2dbb-442d-b8b7-633b7519f561/tasks/**)",
+      "Bash(break)",
+      "PowerShell(cd \"C:\\\\Users\\\\USER-PC\\\\Desktop\\\\New EMS AUTOMATIONS\\\\frontend\"; npx tsc -b 2>&1 | Select-Object -First 20; echo \"TSC-EXIT $LASTEXITCODE\")",
+      "Bash(curl -s -o /dev/null -w \"localhost:5173 -> HTTP %{http_code}\\\\n\" --max-time 15 http://localhost:5173/)",
+      "PowerShell(cd \"C:\\\\Users\\\\USER-PC\\\\Desktop\\\\New EMS AUTOMATIONS\\\\frontend\"; $out = npx tsc -b 2>&1; echo \"=== ProviderAdminDashboard errors ===\"; $out | Select-String \"ProviderAdminDashboard\"; echo \"=== full error count / other files ===\"; $out | Select-Object -First 15; echo \"TSC-EXIT $LASTEXITCODE\")"
     ]
   }
 }

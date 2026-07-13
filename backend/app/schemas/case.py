@@ -38,6 +38,10 @@ class CaseResponse(BaseModel):
     document_id: Optional[str] = None
     file_name: Optional[str] = None
     original_filename: Optional[str] = None
+    # Canonical PRF display name — "{PREFIX}{prf_number} PRF {scheme} {call_type}"
+    # (e.g. "TES106 PRF Discovery Health IHT"), matching the exported-PDF filename.
+    # None when the case has no linked DigitalPRF; the frontend then falls back.
+    display_name: Optional[str] = None
     extracted_data: Optional[dict] = None
     patient_name: str
     patient_id_number: Optional[str] = None

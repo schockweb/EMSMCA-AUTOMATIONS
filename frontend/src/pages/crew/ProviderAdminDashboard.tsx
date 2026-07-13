@@ -21,7 +21,7 @@ function getApi() {
   return axios.create({ headers: { Authorization: `Bearer ${localStorage.getItem('crew_token')}` } });
 }
 
-type Tab = 'employees' | 'vehicles';
+type Tab = 'employees' | 'vehicles' | 'settings';
 
 interface Employee {
   id: string;
@@ -69,6 +69,15 @@ const HPCSA_QUAL_OPTIONS = HPCSA_CATEGORIES.map(code => ({
 const blankEmp = () => ({ full_name: '', initials: '', hpcsa_number: '', qualification: 'AEA', phone: '', role: 'crew', is_active: true });
 const blankVeh = () => ({ callsign: '', registration: '', vehicle_type: 'Ambulance' });
 const blankVehEdit = () => ({ callsign: '', registration: '', vehicle_type: 'Ambulance', is_active: true });
+// Company settings — these details print in the top-left corner of the PDF PRF.
+const blankSettings = () => ({
+  name: '', phone: '', email: '', pr_number: '', pty_reg_number: '', address: '',
+  logo_url: '', portal_login_username: '', portal_login_password: '',
+  admin_email: '', admin_password: '',
+  // Onboarding-only: seeds the per-provider PRF counter. Never populated from
+  // the server — always blank on load so a re-save doesn't reset the sequence.
+  current_prf_number: '',
+});
 
 // ── Field primitives ────────────────────────────────────────────
 const inputStyle: React.CSSProperties = {
@@ -95,6 +104,21 @@ function Field({ label, value, onChange, placeholder, type = 'text', required, m
         onChange={e => onChange(e.target.value)} placeholder={placeholder}
         onFocus={onFc} onBlur={onBl}
         style={{ ...inputStyle, fontFamily: mono ? 'ui-monospace, SFMono-Regular, monospace' : 'inherit' }} />
+    </div>
+  );
+}
+
+function AreaField({ label, value, onChange, placeholder, rows = 3 }: {
+  label: string; value: string; onChange: (v: string) => void;
+  placeholder?: string; rows?: number;
+}) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <label style={labelStyle}>{label}</label>
+      <textarea value={value} rows={rows}
+        onChange={e => onChange(e.target.value)} placeholder={placeholder}
+        onFocus={onFc} onBlur={onBl}
+        style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.45 }} />
     </div>
   );
 }
@@ -221,6 +245,9 @@ export default function ProviderAdminDashboard() {
   // search + status filter (reset on tab switch)
   const [search,       setSearch]       = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  // Mobile-only: the crew toolbar collapses to icons; the search icon toggles
+  // this to reveal the search input.
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
 
   // data
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -257,6 +284,14 @@ export default function ProviderAdminDashboard() {
   const [pwReset,    setPwReset]    = useState<string | null>(null);
   const [pwResetBusy, setPwResetBusy] = useState(false);
 
+  // company settings
+  const [settings,        setSettings]        = useState(blankSettings());
+  const [settingsLoading, setSettingsLoading] = useState(false);
+  const [settingsSav,     setSettingsSav]     = useState(false);
+  const [settingsErr,     setSettingsErr]     = useState('');
+  const [settingsOk,      setSettingsOk]      = useState('');
+  const [logoBusy,        setLogoBusy]        = useState(false);
+
   // auth guard
   useEffect(() => {
     if (!localStorage.getItem('crew_token')) navigate(`/${providerSlug}/login`);
@@ -278,8 +313,35 @@ export default function ProviderAdminDashboard() {
     setLoading(false);
   }, [providerId]);
 
+  const fetchSettings = useCallback(async () => {
+    if (!providerId) return;
+    setSettingsLoading(true); setSettingsErr(''); setSettingsOk('');
+    try {
+      const { data } = await getApi().get(`/api/providers/${providerId}/settings`);
+      setSettings({
+        name:                  data.name || '',
+        phone:                 data.phone || '',
+        email:                 data.email || '',
+        pr_number:             data.pr_number || '',
+        pty_reg_number:        data.pty_reg_number || '',
+        address:               data.address || '',
+        logo_url:              data.logo_url || '',
+        portal_login_username: data.portal_login_username || '',
+        portal_login_password: '',
+        admin_email:           data.admin_email || '',
+        admin_password:        '',
+        current_prf_number:    '',
+      });
+    } catch (err: any) {
+      setSettingsErr(err.response?.data?.detail || 'Failed to load company settings.');
+    }
+    setSettingsLoading(false);
+  }, [providerId]);
+
   useEffect(() => {
-    if (activeTab === 'employees') fetchEmployees(); else fetchVehicles();
+    if (activeTab === 'employees') fetchEmployees();
+    else if (activeTab === 'vehicles') fetchVehicles();
+    else fetchSettings();
   }, [activeTab]);
 
   // ── Search + status filtering (client-side; lists are small) ─────
@@ -452,6 +514,62 @@ export default function ProviderAdminDashboard() {
     setPwResetBusy(false);
   };
 
+  const saveSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!providerId) { setSettingsErr('Session invalid.'); return; }
+    if (!settings.name.trim()) { setSettingsErr('Company name is required.'); return; }
+    setSettingsSav(true); setSettingsErr(''); setSettingsOk('');
+    try {
+      const payload: Record<string, string | number> = {
+        name:                  settings.name.trim(),
+        phone:                 settings.phone.trim(),
+        email:                 settings.email.trim(),
+        pr_number:             settings.pr_number.trim(),
+        pty_reg_number:        settings.pty_reg_number.trim(),
+        address:               settings.address.trim(),
+        portal_login_username: settings.portal_login_username.trim(),
+      };
+      if (settings.admin_email.trim())           payload.admin_email = settings.admin_email.trim();
+      if (settings.portal_login_password.trim()) payload.portal_login_password = settings.portal_login_password;
+      if (settings.admin_password.trim())        payload.admin_password = settings.admin_password;
+      // Only sent when the admin typed a baseline — a blank field must never
+      // reset the counter. Sent as a number so the backend seeds it directly.
+      if (settings.current_prf_number.trim()) {
+        const n = Number(settings.current_prf_number.trim());
+        if (!Number.isInteger(n) || n < 0) { setSettingsErr('Current PRF number must be a whole number of 0 or more.'); setSettingsSav(false); return; }
+        payload.current_prf_number = n;
+      }
+      await getApi().patch(`/api/providers/${providerId}/settings`, payload);
+      // Keep the header's provider name in sync without a re-login
+      const prof = JSON.parse(localStorage.getItem('crew_profile') || '{}');
+      prof.provider_name = payload.name;
+      localStorage.setItem('crew_profile', JSON.stringify(prof));
+      setSettings(p => ({ ...p, portal_login_password: '', admin_password: '', current_prf_number: '' }));
+      setSettingsOk('Settings saved. New PRFs will show the updated company details.');
+    } catch (err: any) {
+      setSettingsErr(err.response?.data?.detail || 'Failed to save settings.');
+    }
+    setSettingsSav(false);
+  };
+
+  const uploadLogo = async (file: File) => {
+    if (!providerId) return;
+    setLogoBusy(true); setSettingsErr(''); setSettingsOk('');
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const { data } = await getApi().post(`/api/providers/${providerId}/settings/logo`, form,
+        { headers: { 'Content-Type': 'multipart/form-data' } });
+      // Cache-bust: the logo filename is stable per provider, so the browser
+      // would otherwise keep showing the previous image.
+      setSettings(p => ({ ...p, logo_url: `${data.logo_url}?v=${Date.now()}` }));
+      setSettingsOk('Logo updated.');
+    } catch (err: any) {
+      setSettingsErr(err.response?.data?.detail || 'Failed to upload logo.');
+    }
+    setLogoBusy(false);
+  };
+
   const handleLogout = () => {
     localStorage.removeItem('crew_token'); localStorage.removeItem('crew_profile');
     navigate(`/${providerSlug}/login`);
@@ -474,6 +592,27 @@ export default function ProviderAdminDashboard() {
     background: '#fff', fontSize: '0.68rem', fontWeight: 700, color,
     whiteSpace: 'nowrap',
   });
+  // Mobile compact-toolbar icon button. `primary` gives the green filled look
+  // used for the add-employee action; others are neutral outlined squares.
+  const iconBtn = (primary: boolean): React.CSSProperties => ({
+    width: 42, height: 42, borderRadius: 8, padding: 0, flexShrink: 0,
+    display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+    background: primary ? G : '#fff',
+    color: primary ? '#fff' : INK,
+    border: `1px solid ${primary ? GD : LN2}`,
+  });
+  // Settings page section cards
+  const cardStyle: React.CSSProperties = {
+    background: '#fff', border: `1px solid ${LN}`, borderRadius: 6,
+    padding: isMobile ? 14 : 20, marginBottom: 14,
+  };
+  const cardTitleStyle: React.CSSProperties = {
+    fontSize: '0.72rem', fontWeight: 800, color: INK,
+    textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4,
+  };
+  const cardHintStyle: React.CSSProperties = {
+    fontSize: '0.72rem', color: MUT, marginBottom: 14, lineHeight: 1.5,
+  };
 
   // ── Render ─────────────────────────────────────────────────────
   return (
@@ -547,6 +686,18 @@ export default function ProviderAdminDashboard() {
               </svg>
             ),
           },
+          {
+            key: 'settings',
+            label: 'Settings',
+            tab: 'settings' as Tab,
+            icon: (
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.08a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.08a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.08a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+              </svg>
+            ),
+          },
         ] as { key: string; label: string; tab: Tab; icon: React.ReactNode }[]).map(({ key, label, tab, icon }) => {
           return (
             <button
@@ -589,6 +740,161 @@ export default function ProviderAdminDashboard() {
 
         {/* Main */}
         <main style={{ flex: 1, overflowY: 'auto', padding: isMobile ? '14px 12px' : '24px 28px', minWidth: 0 }}>
+          {activeTab === 'settings' ? (
+          <div style={{ maxWidth: 800, margin: '0 auto' }}>
+            <div style={{ marginBottom: 16 }}>
+              <h1 style={{
+                margin: 0, fontSize: '1.05rem', fontWeight: 800, color: INK,
+                textTransform: 'uppercase', letterSpacing: '0.04em',
+              }}>
+                Company Settings
+              </h1>
+              <div style={{ fontSize: '0.78rem', color: MUT, marginTop: 6, lineHeight: 1.5 }}>
+                These details are auto-filled into the top-left corner of every PDF PRF and are required by medical schemes.
+              </div>
+            </div>
+
+            {settingsErr && <Alert type="error" text={settingsErr} />}
+            {settingsOk  && <Alert type="success" text={settingsOk} />}
+
+            {settingsLoading ? (
+              <div style={{ padding: 40, textAlign: 'center', color: MUT, fontSize: '0.84rem', background: '#fff', border: `1px solid ${LN}`, borderRadius: 6 }}>Loading…</div>
+            ) : (
+              <form onSubmit={saveSettings}>
+                {/* ── Company details — printed top-left on the PDF PRF ── */}
+                <section style={cardStyle}>
+                  <div style={cardTitleStyle}>Company Details</div>
+                  <div style={cardHintStyle}>Printed in the top-left corner of every PRF.</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '0 14px' }}>
+                    <Field label="Company Name" value={settings.name} onChange={v => setSettings(p => ({ ...p, name: v }))} placeholder="JEMS Medical Services" required />
+                    <Field label="Phone Number" value={settings.phone} onChange={v => setSettings(p => ({ ...p, phone: v }))} placeholder="011 000 0000" />
+                    <Field label="Email Address" value={settings.email} onChange={v => setSettings(p => ({ ...p, email: v }))} type="email" placeholder="accounts@company.co.za" />
+                    <Field label="PR Number" value={settings.pr_number} onChange={v => setSettings(p => ({ ...p, pr_number: v }))} placeholder="0123456" mono />
+                    <Field label="PTY Reg Number" value={settings.pty_reg_number} onChange={v => setSettings(p => ({ ...p, pty_reg_number: v }))} placeholder="2024/123456/07" mono />
+                  </div>
+                  <AreaField label="Address" value={settings.address} onChange={v => setSettings(p => ({ ...p, address: v }))} placeholder={'12 Main Road\nJohannesburg\n2000'} />
+                </section>
+
+                {/* ── Company logo ── */}
+                <section style={cardStyle}>
+                  <div style={cardTitleStyle}>Company Logo</div>
+                  <div style={cardHintStyle}>Shown on the PRF brand block and your portal login page.</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+                    <div style={{
+                      width: 150, height: 64, border: `1px dashed ${LN2}`, borderRadius: 4,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      background: BG, overflow: 'hidden', flexShrink: 0,
+                    }}>
+                      {settings.logo_url
+                        ? <img src={settings.logo_url} alt="Company logo" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+                        : <span style={{ fontSize: '0.68rem', color: MUT }}>No logo</span>}
+                    </div>
+                    <label style={{
+                      padding: '9px 16px', fontSize: '0.76rem', fontWeight: 700,
+                      background: '#fff', color: INK, border: `1px solid ${LN2}`, borderRadius: 4,
+                      cursor: logoBusy ? 'wait' : 'pointer', whiteSpace: 'nowrap',
+                    }}>
+                      {logoBusy ? 'Uploading…' : settings.logo_url ? 'Replace Logo' : 'Upload Logo'}
+                      <input type="file" accept=".png,.jpg,.jpeg,.svg,.webp" style={{ display: 'none' }} disabled={logoBusy}
+                        onChange={e => { const f = e.target.files?.[0]; if (f) uploadLogo(f); e.currentTarget.value = ''; }} />
+                    </label>
+                    <div style={{ fontSize: '0.68rem', color: MUT }}>PNG, JPG, SVG or WEBP.</div>
+                  </div>
+                </section>
+
+                {/* ── EMSMCA Client Login (shared portal credentials) ── */}
+                <section style={cardStyle}>
+                  <div style={cardTitleStyle}>EMSMCA Client Login</div>
+                  <div style={cardHintStyle}>Shared company login all staff use on the main EMSMCA login page to reach your portal.</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '0 14px' }}>
+                    <Field label="Username" value={settings.portal_login_username} onChange={v => setSettings(p => ({ ...p, portal_login_username: v }))} placeholder="company@emsmca.co.za" />
+                    <Field label="New Password" value={settings.portal_login_password} onChange={v => setSettings(p => ({ ...p, portal_login_password: v }))} type="password" placeholder="Leave blank to keep current" />
+                  </div>
+                </section>
+
+                {/* ── Portal Admin Login (admin crew credentials) ── */}
+                <section style={cardStyle}>
+                  <div style={cardTitleStyle}>Portal Admin Login</div>
+                  <div style={cardHintStyle}>Email and password the administrator uses to sign in to this dashboard.</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '0 14px' }}>
+                    <Field label="Admin Email" value={settings.admin_email} onChange={v => setSettings(p => ({ ...p, admin_email: v }))} type="email" placeholder="admin@company.co.za" />
+                    <Field label="New Password" value={settings.admin_password} onChange={v => setSettings(p => ({ ...p, admin_password: v }))} type="password" placeholder="Leave blank to keep current" />
+                  </div>
+                </section>
+
+                {/* ── PRF numbering baseline (onboarding) ── */}
+                <section style={cardStyle}>
+                  <div style={cardTitleStyle}>PRF</div>
+                  <div style={cardHintStyle}>
+                    Enter the number of PRFs your company has completed so far. Your digital
+                    PRFs will continue counting from the next number after this. Leave blank to
+                    keep the current count — this field is intentionally cleared each visit.
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '0 14px' }}>
+                    <Field
+                      label="Current PRF Number"
+                      value={settings.current_prf_number}
+                      onChange={v => setSettings(p => ({ ...p, current_prf_number: v.replace(/[^0-9]/g, '') }))}
+                      type="number"
+                      placeholder="e.g. 500"
+                      mono
+                    />
+                  </div>
+                </section>
+
+                <div style={{ display: 'flex', gap: 8, justifyContent: isMobile ? 'stretch' : 'flex-end' }}>
+                  <Btn onClick={fetchSettings} disabled={settingsSav} style={isMobile ? { flex: 1, padding: '11px 14px' } : { padding: '11px 18px' }}>Discard Changes</Btn>
+                  <button type="submit" disabled={settingsSav} style={{
+                    padding: '11px 22px', background: G, color: '#fff',
+                    border: `1px solid ${GD}`, fontSize: '0.8rem', fontWeight: 700, borderRadius: 4,
+                    cursor: settingsSav ? 'wait' : 'pointer', fontFamily: 'inherit',
+                    flex: isMobile ? 2 : undefined,
+                  }}>
+                    {settingsSav ? 'Saving…' : 'Save Settings'}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+          ) : (
+          <>
+          {activeTab === 'employees' ? (
+          /* Crew view (mobile + desktop) — decluttered: no title, chips or status
+             filter. Just a neat right-aligned group of icon actions. The search
+             icon toggles a full-width search input beneath the group. */
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8 }}>
+              <button type="button" aria-label="Search" onClick={() => setMobileSearchOpen(o => !o)} style={iconBtn(mobileSearchOpen)}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>
+                </svg>
+              </button>
+              <button type="button" aria-label="Refresh" onClick={fetchEmployees} style={iconBtn(false)}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/>
+                </svg>
+              </button>
+              <button type="button" aria-label="New employee" onClick={() => setAddEmpOpen(true)} style={iconBtn(true)}>
+                <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="9" cy="7" r="3.2"/>
+                  <path d="M3.5 20v-1.5a4.5 4.5 0 0 1 4.5-4.5h2a4.5 4.5 0 0 1 2.6.83"/>
+                  <path d="M17 14v6M20 17h-6"/>
+                </svg>
+              </button>
+            </div>
+            {mobileSearchOpen && (
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Search name, HPCSA, level…"
+                onFocus={onFc} onBlur={onBl}
+                autoComplete="off" autoFocus
+                style={{ ...inputStyle, padding: '9px 12px', marginTop: 8, width: '100%' }}
+              />
+            )}
+          </div>
+          ) : (
+          <>
           {/* Title bar — stacks vertically on mobile so the title and
               the Refresh / New button row each get a full screen-width line. */}
           <div style={{
@@ -601,31 +907,23 @@ export default function ProviderAdminDashboard() {
                 margin: 0, fontSize: '1.05rem', fontWeight: 800, color: INK,
                 textTransform: 'uppercase', letterSpacing: '0.04em',
               }}>
-                {activeTab === 'employees' ? 'Crew Members' : 'Fleet'}
+                Fleet
               </h1>
+              {/* Vehicles-only block — the crew tab renders the compact icon
+                  toolbar above, so this branch is reached for vehicles only. */}
               <div style={{ display: 'flex', gap: 6, marginTop: 7, flexWrap: 'wrap' }}>
-                {activeTab === 'employees' ? (
-                  <>
-                    <span style={chipStyle()}>{employees.length} total</span>
-                    <span style={chipStyle(GD)}>● {empActive} active</span>
-                    {employees.length - empActive > 0 && <span style={chipStyle(RED)}>● {employees.length - empActive} inactive</span>}
-                  </>
-                ) : (
-                  <>
-                    <span style={chipStyle()}>{vehicles.length} total</span>
-                    <span style={chipStyle(GD)}>● {vehActive} active</span>
-                    {vehInUse > 0 && <span style={chipStyle('#d97706')}>● {vehInUse} in use</span>}
-                    {vehicles.length - vehActive > 0 && <span style={chipStyle(RED)}>● {vehicles.length - vehActive} inactive</span>}
-                  </>
-                )}
+                <span style={chipStyle()}>{vehicles.length} total</span>
+                <span style={chipStyle(GD)}>● {vehActive} active</span>
+                {vehInUse > 0 && <span style={chipStyle('#d97706')}>● {vehInUse} in use</span>}
+                {vehicles.length - vehActive > 0 && <span style={chipStyle(RED)}>● {vehicles.length - vehActive} inactive</span>}
               </div>
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
-              <Btn onClick={activeTab === 'employees' ? fetchEmployees : fetchVehicles}
+              <Btn onClick={fetchVehicles}
                 style={isMobile ? { flex: 1, padding: '10px 14px' } : undefined}>Refresh</Btn>
-              <Btn kind="primary" onClick={() => activeTab === 'employees' ? setAddEmpOpen(true) : setAddVehOpen(true)}
+              <Btn kind="primary" onClick={() => setAddVehOpen(true)}
                 style={isMobile ? { flex: 2, padding: '10px 14px' } : undefined}>
-                + New {activeTab === 'employees' ? 'Employee' : 'Vehicle'}
+                + New Vehicle
               </Btn>
             </div>
           </div>
@@ -640,7 +938,7 @@ export default function ProviderAdminDashboard() {
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
-              placeholder={activeTab === 'employees' ? 'Search name, HPCSA, level…' : 'Search callsign, registration, type…'}
+              placeholder="Search callsign, registration, type…"
               onFocus={onFc} onBlur={onBl}
               autoComplete="off"
               style={{ ...inputStyle, padding: '9px 12px', flex: 1, minWidth: 0 }}
@@ -657,6 +955,8 @@ export default function ProviderAdminDashboard() {
               ))}
             </div>
           </div>
+          </>
+          )}
 
           {/* List — table on desktop, stacked card list on mobile.
               Tables don't fit a phone screen; cards keep all info visible
@@ -863,6 +1163,8 @@ export default function ProviderAdminDashboard() {
               </table>
             )}
           </div>
+          )}
+          </>
           )}
         </main>
       </div>

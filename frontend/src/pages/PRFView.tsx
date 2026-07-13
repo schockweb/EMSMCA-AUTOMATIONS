@@ -10,15 +10,19 @@ import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 
 // ── Paper-form tokens ────────────────────────────────────────────────
-const GREEN    = '#2f8f4a';      // section headers bar
-const GREEN_DK = '#1f6a33';      // accent + provider brand
-const GREEN_TINT = '#eaf6ed';    // label cell background
+// Brand teal palette — matches the Case Management page (--brand-teal #088395)
+// so the whole product reads as one brand. Hardcoded hex (not the CSS var) so
+// html2canvas resolves the colour correctly during PDF export. GREEN/GREEN_DK/
+// GREEN_TINT names retained so every header, border and tint recolours here.
+const GREEN    = '#088395';      // section headers bar (brand teal)
+const GREEN_DK = '#005f6b';      // accent + provider brand (dark teal)
+const GREEN_TINT = '#e7f3f5';    // label cell background (teal tint)
 
 import { PrintableInjuryDiagram } from '../components/BodyDiagram';
 const INK      = '#0b1020';      // body text
 const MUT      = '#5b6478';      // secondary text
 const DIM      = '#94a3b8';      // placeholder / empty marker
-const LN       = '#2f8f4a';      // borders
+const LN       = '#088395';      // borders (brand teal)
 const SOFT_BG  = '#f8fafc';      // empty-state background
 
 // ── Formatters ───────────────────────────────────────────────────────
@@ -50,7 +54,7 @@ const EmptyMark = () => (
 );
 const EmptySignature = ({ label = 'Not captured', minHeight = 48 }: { label?: string; minHeight?: number }) => (
   <div style={{
-    minHeight, width: '100%', boxSizing: 'border-box',
+    minHeight, width: '100%', maxWidth: 300, boxSizing: 'border-box',
     background: SOFT_BG, border: `2px dashed #475569`,
     borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center',
     position: 'relative',
@@ -76,7 +80,7 @@ const SignatureBox = ({ src, minHeight = 56, label }: {
 }) => (
   src ? (
     <div style={{
-      minHeight, width: '100%', boxSizing: 'border-box',
+      minHeight, width: '100%', maxWidth: 300, boxSizing: 'border-box',
       border: '2px solid #475569', borderRadius: 4, background: '#fff',
       display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 2,
       position: 'relative',
@@ -212,6 +216,26 @@ const SubBlock = ({ title, rows }: { title: string; rows: Array<[string, any, nu
   );
 };
 
+// Filename for the exported / shared PDF, e.g. "JEM690 PRF Discovery IHT.pdf".
+//   • prefix  — first 3 alphanumerics of the provider name, uppercased (JEMS → JEM)
+//   • number  — the provider-scoped PRF number
+//   • scheme  — medical scheme from the form data
+//   • call    — call type (Primary / IHT / …)
+// Empty parts are dropped and filename-illegal characters stripped.
+const buildPrfFileName = (prf: any): string => {
+  const prov = prf?.provider || {};
+  const fd = prf?.form_data || {};
+  const prefix = String(prov.name || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 3).toUpperCase();
+  const parts = [
+    `${prefix}${prf?.prf_number ?? ''}`.trim(),
+    'PRF',
+    String(fd.medical_scheme || '').trim(),
+    String(fd.call_type || '').trim(),
+  ].filter(Boolean);
+  const base = parts.join(' ').replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, ' ').trim();
+  return `${base || 'PRF_export'}.pdf`;
+};
+
 // ── Component ────────────────────────────────────────────────────────
 export default function PRFView() {
   const { caseId } = useParams<{ caseId: string }>();
@@ -299,7 +323,7 @@ export default function PRFView() {
       const blob = pdf.output('blob');
       const file = new File(
         [blob],
-        `PRF_${prf.prf_number || 'export'}.pdf`,
+        buildPrfFileName(prf),
         { type: 'application/pdf' },
       );
       setSharePdfFile(file);
@@ -455,7 +479,7 @@ export default function PRFView() {
     try {
       const pdf = await buildPrfPdf();
       if (pdf) {
-        pdf.save(`PRF_${prf?.prf_number || 'export'}.pdf`);
+        pdf.save(buildPrfFileName(prf));
       } else {
         // Snapshot failed — fall back to the native print dialog so the
         // crew can still produce a PDF rather than being dead-ended.
@@ -558,7 +582,7 @@ export default function PRFView() {
   // Open Gmail web compose with To/Subject/Body pre-filled and simultaneously
   // download the PDF so the crew can attach it via the paperclip icon in Gmail.
   const handleShare = () => {
-    const fileName = `PRF_${prf.prf_number || 'export'}.pdf`;
+    const fileName = buildPrfFileName(prf);
     const toEmail = (prf.form_data?.handover_doctor_email || '').trim();
     const patientName = [prf.form_data?.patient_name, prf.form_data?.patient_surname]
       .filter(Boolean).join(' ') || 'the patient';
@@ -733,36 +757,61 @@ export default function PRFView() {
             opens with the recipient pre-filled — the crew attaches the
             PDF manually. The button is only visible once the email field
             has a value (no destination otherwise). */}
-        <button onClick={handleShare} style={{
-            padding: '9px 18px', border: 'none', marginRight: 10,
+        <button onClick={handleShare} title="Send a copy to receiving facility" aria-label="Send a copy to receiving facility" style={{
+            width: 40, height: 40, padding: 0, border: 'none', marginRight: 10,
             background: 'linear-gradient(135deg, #2563eb, #1d4ed8)', color: '#fff',
-            fontSize: '0.84rem', fontWeight: 800, cursor: 'pointer', borderRadius: 6,
-            boxShadow: '0 3px 10px rgba(37,99,235,0.3)', letterSpacing: '0.02em',
-            display: 'inline-flex', alignItems: 'center', gap: 8,
+            cursor: 'pointer', borderRadius: 6,
+            boxShadow: '0 3px 10px rgba(37,99,235,0.3)',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
           }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
                  stroke="currentColor" strokeWidth="2.2"
                  strokeLinecap="round" strokeLinejoin="round">
-              <path d="M22 2 11 13" />
-              <path d="m22 2-7 20-4-9-9-4 20-7z" />
+              <rect x="2" y="4" width="20" height="16" rx="2" />
+              <path d="m22 7-10 5L2 7" />
             </svg>
-            Send a copy to receiving facility
           </button>
-        <button onClick={handlePrint} style={{
-          padding: '9px 16px', border: `1px solid #cbd5e1`, marginRight: 10,
+        <button onClick={handlePrint} title="Print" aria-label="Print" style={{
+          width: 40, height: 40, padding: 0, border: `1px solid #cbd5e1`, marginRight: 10,
           background: '#fff', color: INK,
-          fontSize: '0.84rem', fontWeight: 700, cursor: 'pointer', borderRadius: 6,
+          cursor: 'pointer', borderRadius: 6,
           boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
-        }}>Print</button>
-        <button onClick={handleSavePdf} disabled={savingPdf} style={{
-          padding: '9px 20px', border: 'none',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="6 9 6 2 18 2 18 9" />
+            <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
+            <rect x="6" y="14" width="12" height="8" />
+          </svg>
+        </button>
+        <button onClick={handleSavePdf} disabled={savingPdf} title={savingPdf ? 'Building PDF…' : 'Save as PDF'} aria-label="Save as PDF" style={{
+          width: 40, height: 40, padding: 0, border: 'none',
           background: savingPdf ? '#94a3b8' : `linear-gradient(135deg, ${GREEN}, ${GREEN_DK})`, color: '#fff',
-          fontSize: '0.84rem', fontWeight: 800, cursor: savingPdf ? 'wait' : 'pointer', borderRadius: 6,
-          boxShadow: `0 3px 10px rgba(47,143,74,0.3)`, letterSpacing: '0.02em',
-        }}>{savingPdf ? 'Building PDF…' : 'Save as PDF'}</button>
+          cursor: savingPdf ? 'wait' : 'pointer', borderRadius: 6,
+          boxShadow: `0 3px 10px rgba(47,143,74,0.3)`,
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          {savingPdf ? (
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 strokeWidth="2.5" strokeLinecap="round" style={{ animation: 'prfPdfSpin 0.8s linear infinite' }}>
+              <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+            </svg>
+          ) : (
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+              <line x1="16" y1="13" x2="8" y2="13" />
+              <line x1="16" y1="17" x2="8" y2="17" />
+              <line x1="10" y1="9" x2="8" y2="9" />
+            </svg>
+          )}
+        </button>
       </div>
 
       <style>{`
+        @keyframes prfPdfSpin { to { transform: rotate(360deg); } }
         /* Print pipeline — fit each PRF page to ONE A4 landscape sheet:
              - @page is A4 landscape with zero printer margins (form has
                its own outer border, no need for OS margins).
@@ -866,59 +915,54 @@ export default function PRFView() {
         display: 'flex', flexDirection: 'column',
       }}>
         {/* ── BAND A — Brand │ Address+Date+Call-Type │ Call Info │ Alpha Unit + Times ── */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 1.5fr 2.4fr 2.2fr' }}>
-          {/* Brand block — minimalist: small logo + provider details */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1.95fr 1.45fr 2.2fr 2.0fr' }}>
+          {/* Brand block — framed logo placeholder + enlarged provider details */}
           <div style={{
             padding: '10px 12px', borderRight: `1px solid ${LN}`,
-            display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4,
+            display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 7,
           }}>
-            <ProviderLogo prov={prov} height={40} />
+            {/* Dedicated, outlined logo placeholder — always shows the frame so
+                the brand mark sits in a consistent box on every provider's PRF.
+                The logo scales to fit (objectFit:contain + maxWidth:100%): it is
+                never cropped or stretched — a wide logo just uses the extra
+                width, a tall one fills the height. */}
+            <div style={{
+              border: `1.5px solid ${LN}`, borderRadius: 6, background: '#fff',
+              height: 78, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              padding: '5px 12px', overflow: 'hidden',
+            }}>
+              <ProviderLogo prov={prov} height={62} />
+            </div>
             {prov.phone && (
-              <div style={{
-                fontSize: '0.82rem', fontWeight: 900, color: INK,
-                fontFamily: 'ui-monospace, monospace', letterSpacing: '0.02em', marginTop: 2,
-              }}>{prov.phone}</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                <span style={{ fontSize: '0.5rem', fontWeight: 800, color: MUT, textTransform: 'uppercase', letterSpacing: '0.09em' }}>Phone</span>
+                <span style={{
+                  fontSize: '1.02rem', fontWeight: 900, color: INK,
+                  fontFamily: 'ui-monospace, monospace', letterSpacing: '0.02em',
+                }}>{prov.phone}</span>
+              </div>
             )}
             {prov.pr_number && (
-              <div style={{ fontSize: '0.58rem', fontWeight: 700, color: MUT, letterSpacing: '0.04em' }}>
-                PR No: <span style={{ fontFamily: 'ui-monospace, monospace', color: INK }}>{prov.pr_number}</span>
+              <div style={{ fontSize: '0.74rem', fontWeight: 700, color: MUT, letterSpacing: '0.03em' }}>
+                PR No: <span style={{ fontFamily: 'ui-monospace, monospace', color: INK, fontWeight: 800 }}>{prov.pr_number}</span>
               </div>
             )}
             {prov.pty_reg_number && (
-              <div style={{ fontSize: '0.55rem', fontWeight: 600, color: MUT }}>
-                PTY Reg: <span style={{ fontFamily: 'ui-monospace, monospace' }}>{prov.pty_reg_number}</span>
+              <div style={{ fontSize: '0.72rem', fontWeight: 700, color: MUT, letterSpacing: '0.03em' }}>
+                PTY Reg: <span style={{ fontFamily: 'ui-monospace, monospace', color: INK, fontWeight: 800 }}>{prov.pty_reg_number}</span>
               </div>
             )}
-            {(() => {
-              const lvl = (fd.assessment_level || '').toString().toUpperCase();
-              if (!['BLS', 'ILS', 'ALS'].includes(lvl)) return null;
-              const palette: Record<string, { bg: string; border: string; fg: string }> = {
-                BLS: { bg: '#eff6ff', border: '#bfdbfe', fg: '#1d4ed8' },
-                ILS: { bg: '#fff7ed', border: '#fed7aa', fg: '#c2410c' },
-                ALS: { bg: '#fef2f2', border: '#fecaca', fg: '#b91c1c' },
-              };
-              const c = palette[lvl];
-              return (
-                <div style={{
-                  marginTop: 6, padding: '3px 9px',
-                  background: c.bg, border: `1px solid ${c.border}`, color: c.fg,
-                  borderRadius: 6, fontSize: '0.66rem', fontWeight: 800,
-                  letterSpacing: '0.12em', textTransform: 'uppercase',
-                  fontFamily: 'Arial, "Helvetica Neue", Helvetica, system-ui, -apple-system, sans-serif',
-                }}>{lvl}</div>
-              );
-            })()}
           </div>
 
           {/* Address + meta (date / case / call type) */}
           <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
             {prov.address && (
-              <div style={{ padding: '6px 9px 3px', fontSize: '0.62rem', color: INK, whiteSpace: 'pre-wrap', lineHeight: 1.35 }}>
+              <div style={{ padding: '8px 10px 3px', fontSize: '0.82rem', fontWeight: 600, color: INK, whiteSpace: 'pre-wrap', lineHeight: 1.3 }}>
                 {prov.address}
               </div>
             )}
             {prov.email && (
-              <div style={{ padding: '0 9px 4px', fontSize: '0.56rem', color: MUT }}>{prov.email}</div>
+              <div style={{ padding: '0 10px 7px', fontSize: '0.74rem', fontWeight: 700, color: GREEN_DK, wordBreak: 'break-word' }}>{prov.email}</div>
             )}
             <FieldRow label="Date" value={fmtDate(ts.time_call_received || prf.submitted_at)} />
             <FieldRow label="Case No" value={prf.case_number} />
@@ -926,8 +970,8 @@ export default function PRFView() {
             {/* Assessment level + Billing Type */}
             <FieldRow label="Assessment"   value={fd.assessment_level} />
             <FieldRow label="Billing Type" value={fd.billing_type} />
-            {/* Call type — moved to the bottom and stretched (flex:1) so it
-                fills the otherwise-empty space, with its label(s) centered. */}
+            {/* Call type — rendered as a standard labelled field row; flex:1
+                stretches it to fill the remaining column height. */}
             {(() => {
               const ct = (fd.call_type || '').toUpperCase();
               const cells: string[] = [];
@@ -936,31 +980,7 @@ export default function PRFView() {
                 cells.push('Transfer');
                 if (['IHT', 'IFT', 'RHT', 'COURTESY'].includes(ct)) cells.push(ct);
               }
-              return (
-                <div style={{
-                  flex: 1, display: 'flex', borderTop: `1px solid ${LN}`,
-                  background: 'rgba(47,143,74,0.08)', minHeight: 40,
-                }}>
-                  {(cells.length ? cells : ['—']).map((label, i, arr) => (
-                    <div key={label} style={{
-                      flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      gap: 7, padding: '6px 8px',
-                      borderRight: i < arr.length - 1 ? `1px solid ${LN}` : 'none',
-                    }}>
-                      <span style={{
-                        width: 13, height: 13, border: `1.4px solid ${GREEN_DK}`,
-                        background: GREEN_DK, display: 'inline-flex', alignItems: 'center',
-                        justifyContent: 'center', color: '#fff', fontSize: '0.7rem',
-                        fontWeight: 900, flexShrink: 0,
-                      }}>✓</span>
-                      <span style={{
-                        fontSize: '0.78rem', fontWeight: 800, color: INK,
-                        textTransform: 'uppercase', letterSpacing: '0.06em',
-                      }}>{label}</span>
-                    </div>
-                  ))}
-                </div>
-              );
+              return <FieldRow label="Call Type" value={cells.join(' — ')} flex={1} />;
             })()}
           </div>
 
@@ -1000,7 +1020,7 @@ export default function PRFView() {
               </div>
             )}
             <div style={{
-              display: 'grid', gridTemplateColumns: '1.1fr 1fr 1fr',
+              display: 'grid', gridTemplateColumns: '1.6fr 0.7fr 1fr',
               fontSize: '0.54rem', fontWeight: 800, textTransform: 'uppercase',
               letterSpacing: '0.06em', background: GREEN_TINT,
               borderBottom: `1px solid ${LN}`, color: INK,
@@ -1014,7 +1034,7 @@ export default function PRFView() {
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
               {timeRows.map(r => (
                 <div key={r.t} style={{
-                  flex: 1, display: 'grid', gridTemplateColumns: '1.1fr 1fr 1fr',
+                  flex: 1, display: 'grid', gridTemplateColumns: '1.6fr 0.7fr 1fr',
                   borderTop: `1px solid ${LN}`, fontSize: '0.76rem',
                 }}>
                   <div style={{ padding: '2px 6px', display: 'flex', alignItems: 'center', fontWeight: 700, borderRight: `1px solid ${LN}`, background: GREEN_TINT, fontSize: '0.56rem', textTransform: 'uppercase', letterSpacing: '0.04em', color: INK }}>{r.label}</div>
@@ -1026,9 +1046,12 @@ export default function PRFView() {
           </div>
         </div>
 
-        {/* ── BAND B — Patient │ Clinical summary │ Medical Aid │ Channel + Return Trip ── */}
+        {/* ── BAND B — Patient │ Clinical summary │ Medical Aid │ Channel + Return Trip ──
+             Patient column is 1.64fr (not 1.7) so its right border lines up
+             vertically with Band A's Call Type left border (1.95/7.6). The
+             0.06fr goes to Debtor, so only the Patient/Debtor border moves. */}
         <div style={{
-          display: 'grid', gridTemplateColumns: '1.7fr 1.3fr 1.8fr 1.6fr',
+          display: 'grid', gridTemplateColumns: '1.64fr 1.36fr 1.8fr 1.6fr',
           borderTop: `2px solid ${LN}`, flex: 1, minHeight: 0,
         }}>
           {/* Patient Information — all populated fields rendered (16 max) */}
@@ -1273,28 +1296,45 @@ export default function PRFView() {
               );
             })()}
             <SectionHead label="Signatures" />
-            <div style={{ display: 'flex', flexDirection: 'column', borderTop: `1px solid ${LN}` }}>
-              <div style={{ padding: '5px 7px', borderBottom: `1px solid ${LN}` }}>
-                <div style={{ fontSize: '0.65rem', fontWeight: 900, color: MUT, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Patient / Rep.</div>
-                <SignatureBox src={fd.tc_patient_signature || prf.signatures?.patient_signature} minHeight={80} />
-              </div>
-              <div style={{ padding: '5px 7px', borderBottom: `1px solid ${LN}` }}>
-                <div style={{ fontSize: '0.65rem', fontWeight: 900, color: MUT, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Witness</div>
-                <SignatureBox src={fd.tc_witness_signature || prf.signatures?.witness_signature} minHeight={80} />
-              </div>
-              <div style={{ padding: '5px 7px' }}>
-                <div style={{ fontSize: '0.65rem', fontWeight: 900, color: MUT, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Next of Kin</div>
-                <SignatureBox src={fd.next_of_kin_signature || prf.signatures?.next_of_kin_signature} minHeight={70} />
-              </div>
-            </div>
+            {(() => {
+              const sigLabel: React.CSSProperties = { fontSize: '0.65rem', fontWeight: 900, color: MUT, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 };
+              const witnessSig = fd.tc_witness_signature || prf.signatures?.witness_signature;
+              const nokSig      = fd.next_of_kin_signature || prf.signatures?.next_of_kin_signature;
+              // Patient / Rep always shows (it's a mandatory signature). Witness
+              // and Next of Kin only render when actually captured, so empty
+              // "Not captured" boxes don't clutter the form.
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', borderTop: `1px solid ${LN}` }}>
+                  <div style={{ padding: '5px 7px', borderBottom: (witnessSig || nokSig) ? `1px solid ${LN}` : 'none' }}>
+                    <div style={sigLabel}>Patient / Rep.</div>
+                    <SignatureBox src={fd.tc_patient_signature || prf.signatures?.patient_signature} minHeight={80} />
+                  </div>
+                  {witnessSig && (
+                    <div style={{ padding: '5px 7px', borderBottom: nokSig ? `1px solid ${LN}` : 'none' }}>
+                      <div style={sigLabel}>Witness</div>
+                      <SignatureBox src={witnessSig} minHeight={80} />
+                    </div>
+                  )}
+                  {nokSig && (
+                    <div style={{ padding: '5px 7px' }}>
+                      <div style={sigLabel}>Next of Kin</div>
+                      <SignatureBox src={nokSig} minHeight={70} />
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
             <div style={{ flex: 1, borderTop: `1px solid ${LN}` }} />
           </div>
         </div>
 
         {/* ── BAND C — Closeout: Valuables + Handover sig │ Crew sign-off (×2) │
               Motivation, all grouped in one band so nothing stretches across a
-              sparse full-width row. ── */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1.3fr 1.3fr 1.9fr', borderTop: `2px solid ${LN}` }}>
+              sparse full-width row. ──
+              Valuables is 1.54fr so the Crew · Assessed By left border lines up
+              vertically with Band B's Patient/Debtor border (1.64/6.4). The
+              freed width goes to Motivation, widening it. */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1.54fr 1.5fr 1.5fr 1.46fr', borderTop: `2px solid ${LN}` }}>
           {/* Valuables + Handover Signature (+ RAF sketch if any) */}
           <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
             <SectionHead label="Valuables" />

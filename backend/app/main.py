@@ -58,9 +58,9 @@ async def lifespan(app: FastAPI):
         await create_tables()
         logger.info("Database tables verified.")
 
-    # Initialise the PRF number sequence — sync with existing data so the
-    # sequence starts from MAX(prf_number)+1, preventing collisions.
-    await _init_prf_sequence()
+    # PRF numbering is now per-provider (see `_next_prf_number`), so there is
+    # no global sequence to seed. Startup no longer touches prf_number_seq —
+    # migration f4b9c1d7e2a8 drops it.
 
     if settings.APP_ENV != "production":
         # Seed admin user if none exists
@@ -75,38 +75,6 @@ async def lifespan(app: FastAPI):
     logger.info("EMS Claims Portal ready.")
     yield
     logger.info("EMS Claims Portal shutting down.")
-
-
-async def _init_prf_sequence():
-    """Initialise the PostgreSQL sequence for PRF numbers.
-
-    On first run, creates the sequence. On subsequent runs, ensures it starts
-    from MAX(prf_number)+1 so there are no collisions with existing PRFs.
-    """
-    if settings.DATABASE_URL.startswith("sqlite"):
-        logger.info("Using SQLite — skipping PRF sequence initialization (SQLite max logic will be used).")
-        return
-
-    from app.models.digital_prf import DigitalPRF
-    from sqlalchemy import func
-
-    async with AsyncSessionLocal() as db:
-        await db.execute(text(
-            "CREATE SEQUENCE IF NOT EXISTS prf_number_seq "
-            "START WITH 1 INCREMENT BY 1 NO CYCLE"
-        ))
-
-        # Sync with existing data
-        result = await db.execute(select(func.max(DigitalPRF.prf_number)))
-        max_prf = result.scalar() or 0
-        if max_prf > 0:
-            await db.execute(text(
-                f"ALTER SEQUENCE prf_number_seq RESTART WITH {max_prf + 1}"
-            ))
-            logger.info("PRF number sequence synced — next PRF will be #%d", max_prf + 1)
-        else:
-            logger.info("PRF number sequence initialised at #1")
-        await db.commit()
 
 
 async def seed_admin_user():

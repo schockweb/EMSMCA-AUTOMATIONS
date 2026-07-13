@@ -84,7 +84,10 @@ class ProviderCreate(BaseModel):
     phone: str | None = None
     email: str | None = None
     address: str | None = None
-    
+    # PRF numbering baseline — the last PRF number already used; new PRFs for this
+    # provider start after it. Same semantics as `current_prf_number` in settings.
+    current_prf_number: int | None = None
+
     # New Client Onboarding fields
     portal_login_email: str | None = None
     portal_login_password: str | None = None
@@ -378,6 +381,7 @@ async def create_provider(
         phone=body.phone,
         email=body.email,
         address=body.address,
+        prf_start_number=body.current_prf_number,
         portal_login_email=portal_email,
         portal_login_password_hash=hash_password(body.portal_login_password) if body.portal_login_password else None,
     )
@@ -562,6 +566,195 @@ async def delete_provider(
 
     await db.commit()
     logger.info("Deleted provider %s (%s) and all related data", provider.name, provider_id)
+
+
+# ═══════════════════════════════════════════════════════════
+# PROVIDER SETTINGS (accessible to the provider's own crew admin)
+# ═══════════════════════════════════════════════════════════
+
+class ProviderSettingsUpdate(BaseModel):
+    name: str | None = None
+    pr_number: str | None = None
+    pty_reg_number: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    address: str | None = None
+    # EMSMCA Client Login (shared portal credentials on ServiceProvider)
+    portal_login_username: str | None = None
+    portal_login_password: str | None = None
+    # Portal Admin Login (admin crew member credentials)
+    admin_email: str | None = None
+    admin_password: str | None = None
+    # PRF numbering baseline — count of PRFs completed so far at onboarding.
+    # Only sent when the admin fills the field; the next digital PRF continues
+    # from here. Never echoed back on GET (the field stays blank on return).
+    current_prf_number: int | None = None
+
+
+def _assert_settings_access(principal, provider_id: uuid.UUID) -> None:
+    """Crew tokens may only manage their own provider's settings, and only
+    when they hold the admin role. Full admin User tokens pass unchanged."""
+    if isinstance(principal, CrewMember):
+        if principal.role != "admin" or principal.provider_id != provider_id:
+            raise HTTPException(status_code=403, detail="Admin access required")
+
+
+async def _load_provider(db: AsyncSession, pid: uuid.UUID) -> ServiceProvider:
+    result = await db.execute(select(ServiceProvider).where(ServiceProvider.id == pid))
+    provider = result.scalar_one_or_none()
+    if not provider:
+        raise HTTPException(404, "Provider not found")
+    return provider
+
+
+@router.get("/{provider_id}/settings")
+async def get_provider_settings(
+    provider_id: str,
+    db: AsyncSession = Depends(get_db),
+    principal = Depends(get_admin_or_crew_admin),
+):
+    """Company settings for the client admin dashboard. These details are
+    auto-populated into the top-left corner of the PDF PRF."""
+    pid = uuid.UUID(provider_id)
+    _assert_settings_access(principal, pid)
+    provider = await _load_provider(db, pid)
+
+    admin_res = await db.execute(
+        select(CrewMember.email)
+        .where(CrewMember.provider_id == pid, CrewMember.role == "admin")
+        .limit(1)
+    )
+    return {
+        "id": str(provider.id),
+        "name": provider.name,
+        "slug": provider.slug,
+        "pr_number": provider.pr_number,
+        "pty_reg_number": provider.pty_reg_number,
+        "phone": provider.phone,
+        "email": provider.email,
+        "address": provider.address,
+        "logo_url": provider.logo_url,
+        "portal_login_username": provider.portal_login_email,
+        "admin_email": admin_res.scalar_one_or_none(),
+    }
+
+
+@router.patch("/{provider_id}/settings")
+async def update_provider_settings(
+    provider_id: str,
+    body: ProviderSettingsUpdate,
+    db: AsyncSession = Depends(get_db),
+    principal = Depends(get_admin_or_crew_admin),
+):
+    """Update company details, portal credentials, and admin login."""
+    pid = uuid.UUID(provider_id)
+    _assert_settings_access(principal, pid)
+    provider = await _load_provider(db, pid)
+
+    data = body.model_dump(exclude_unset=True)
+    for key in ("name", "pr_number", "pty_reg_number", "phone", "email", "address"):
+        if key in data:
+            val = (data[key] or "").strip() or None
+            if key == "name":
+                if not val:
+                    raise HTTPException(400, "Company name cannot be empty")
+                provider.name = val
+            else:
+                setattr(provider, key, val)
+
+    # EMSMCA Client Login (shared portal credentials)
+    if body.portal_login_username is not None:
+        new_username = body.portal_login_username.strip().lower() or None
+        if new_username and new_username != (provider.portal_login_email or "").lower():
+            dup = await db.execute(
+                select(ServiceProvider).where(
+                    ServiceProvider.portal_login_email == new_username,
+                    ServiceProvider.id != pid,
+                )
+            )
+            if dup.scalar_one_or_none():
+                raise HTTPException(400, "Portal login username is already in use by another client.")
+        provider.portal_login_email = new_username
+    if body.portal_login_password and body.portal_login_password.strip():
+        provider.portal_login_password_hash = hash_password(body.portal_login_password)
+
+    # PRF numbering baseline. Only touched when the admin actually entered a
+    # value — a blank field (None) leaves the existing counter untouched, so
+    # re-saving other settings never resets the sequence. The next digital PRF
+    # will be this value + 1 (see `_next_prf_number`).
+    if body.current_prf_number is not None:
+        if body.current_prf_number < 0:
+            raise HTTPException(400, "Current PRF number cannot be negative.")
+        provider.prf_start_number = body.current_prf_number
+
+    # Portal Admin Login (admin crew member)
+    if body.admin_email or (body.admin_password and body.admin_password.strip()):
+        admin_res = await db.execute(
+            select(CrewMember)
+            .where(CrewMember.provider_id == pid, CrewMember.role == "admin")
+            .limit(1)
+        )
+        admin = admin_res.scalar_one_or_none()
+        new_email = body.admin_email.strip().lower() if body.admin_email else None
+
+        if new_email and (not admin or new_email != (admin.email or "").lower()):
+            dup_q = select(CrewMember).where(CrewMember.email == new_email)
+            if admin:
+                dup_q = dup_q.where(CrewMember.id != admin.id)
+            dup = await db.execute(dup_q)
+            if dup.scalar_one_or_none():
+                raise HTTPException(400, f"Admin email '{new_email}' is already registered to another user.")
+
+        if admin:
+            if new_email:
+                admin.email = new_email
+            if body.admin_password and body.admin_password.strip():
+                admin.hashed_password = hash_password(body.admin_password)
+        elif new_email and body.admin_password and body.admin_password.strip():
+            db.add(CrewMember(
+                provider_id=pid,
+                email=new_email,
+                hashed_password=hash_password(body.admin_password),
+                full_name=f"{provider.name} Admin",
+                initials="AD",
+                qualification="ILS",
+                role="admin",
+                is_active=True,
+            ))
+
+    await db.commit()
+    logger.info("Updated settings for provider %s", provider_id)
+    return {"message": "Settings updated", "id": str(provider.id)}
+
+
+ALLOWED_LOGO_EXTENSIONS = {".png", ".jpg", ".jpeg", ".svg", ".webp"}
+
+
+@router.post("/{provider_id}/settings/logo")
+async def upload_provider_logo_settings(
+    provider_id: str,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    principal = Depends(get_admin_or_crew_admin),
+):
+    """Upload a company logo from the client admin dashboard."""
+    pid = uuid.UUID(provider_id)
+    _assert_settings_access(principal, pid)
+    provider = await _load_provider(db, pid)
+
+    file_ext = (os.path.splitext(file.filename)[1] if file.filename else ".png").lower()
+    if file_ext not in ALLOWED_LOGO_EXTENSIONS:
+        raise HTTPException(400, f"Unsupported logo format '{file_ext}'. Use PNG, JPG, SVG or WEBP.")
+
+    safe_filename = f"{provider.slug}_logo{file_ext}"
+    file_path = os.path.join(UPLOAD_DIR, safe_filename)
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    provider.logo_url = f"/uploads/logos/{safe_filename}"
+    await db.commit()
+    logger.info("Uploaded logo for provider %s", provider_id)
+    return {"logo_url": provider.logo_url}
 
 
 # ═══════════════════════════════════════════════════════════
