@@ -109,9 +109,22 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if path in ("/", "/health", "/docs", "/openapi.json") or path.startswith("/static"):
             return await call_next(request)
 
-        # Skip rate limiting for localhost / loopback — docker health checks, CI, dev logins
+        # Password-login paths are brute-force targets and must NEVER be exempted
+        # by the internal-IP shortcut below: client_ip is derived from the
+        # attacker-controlled X-Forwarded-For header, so a spoofed
+        # `X-Forwarded-For: 127.0.0.1` (or 172.x / 192.168.x) would otherwise skip
+        # all rate limiting on /login. Decide auth-strict first, then bypass.
+        AUTH_STRICT_PATHS = {"/api/auth/login", "/api/auth/refresh", "/api/crew/login"}
+        is_auth = path in AUTH_STRICT_PATHS
+
+        # Skip rate limiting for localhost / loopback — docker health checks, CI,
+        # dev logins — but only for non-auth paths (see note above).
         client_ip = self._get_client_ip(request)
-        if client_ip in ("127.0.0.1", "::1", "localhost") or client_ip.startswith("172.") or client_ip.startswith("192.168."):
+        if not is_auth and (
+            client_ip in ("127.0.0.1", "::1", "localhost")
+            or client_ip.startswith("172.")
+            or client_ip.startswith("192.168.")
+        ):
             return await call_next(request)
 
         # ── Request body size cap (cheap header check) ──────────────────
@@ -132,9 +145,6 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 pass
 
         # ── Redis-backed rate limiting ───────────────────────────────────
-        AUTH_STRICT_PATHS = {"/api/auth/login", "/api/auth/refresh"}
-        is_auth = path in AUTH_STRICT_PATHS
-
         if is_auth:
             bucket_key = f"rl:auth:{self._get_client_ip(request)}"
             limit = self.auth_limit

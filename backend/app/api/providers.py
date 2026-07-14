@@ -9,7 +9,9 @@ import re
 from datetime import datetime, timezone
 
 import os
+import io
 import shutil
+from PIL import Image
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import select, func
@@ -30,6 +32,10 @@ router = APIRouter(prefix="/api/providers", tags=["Service Providers"])
 
 UPLOAD_DIR = "/app/uploads/logos"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+CREW_PHOTO_DIR = "/app/uploads/crew"
+os.makedirs(CREW_PHOTO_DIR, exist_ok=True)
+ALLOWED_PHOTO_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 
 
 # ── Dual auth: accept admin OR crew-admin tokens ──────────
@@ -426,10 +432,12 @@ async def upload_provider_logo(
     if not provider:
         raise HTTPException(404, "Provider not found")
         
-    file_ext = os.path.splitext(file.filename)[1] if file.filename else ".png"
+    file_ext = (os.path.splitext(file.filename)[1] if file.filename else ".png").lower()
+    if file_ext not in ALLOWED_LOGO_EXTENSIONS:
+        raise HTTPException(400, f"Unsupported logo format '{file_ext}'. Use PNG, JPG, SVG or WEBP.")
     safe_filename = f"{provider.slug}_logo{file_ext}"
     file_path = os.path.join(UPLOAD_DIR, safe_filename)
-    
+
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
         
@@ -765,9 +773,10 @@ async def upload_provider_logo_settings(
 async def list_crew(
     provider_id: str,
     db: AsyncSession = Depends(get_db),
-    _auth = Depends(get_admin_or_crew_admin),
+    principal = Depends(get_admin_or_crew_admin),
 ):
     """List all crew members for a provider."""
+    _assert_settings_access(principal, uuid.UUID(provider_id))
     result = await db.execute(
         select(CrewMember)
         .where(CrewMember.provider_id == uuid.UUID(provider_id))
@@ -785,6 +794,7 @@ async def list_crew(
             "phone": c.phone,
             "role": c.role,
             "is_active": c.is_active,
+            "photo_url": c.photo_url,
             "last_login": c.last_login.isoformat() if c.last_login else None,
             "created_at": c.created_at.isoformat() if c.created_at else None,
         }
@@ -797,9 +807,10 @@ async def add_crew_member(
     provider_id: str,
     body: CrewMemberCreate,
     db: AsyncSession = Depends(get_db),
-    _auth = Depends(get_admin_or_crew_admin),
+    principal = Depends(get_admin_or_crew_admin),
 ):
     """Add a new crew member to a provider."""
+    _assert_settings_access(principal, uuid.UUID(provider_id))
     # Verify provider exists
     provider = await db.execute(
         select(ServiceProvider).where(ServiceProvider.id == uuid.UUID(provider_id))
@@ -857,9 +868,10 @@ async def update_crew_member(
     crew_id: str,
     body: CrewMemberUpdate,
     db: AsyncSession = Depends(get_db),
-    _auth = Depends(get_admin_or_crew_admin),
+    principal = Depends(get_admin_or_crew_admin),
 ):
     """Update a crew member's details."""
+    _assert_settings_access(principal, uuid.UUID(provider_id))
     result = await db.execute(
         select(CrewMember).where(
             CrewMember.id == uuid.UUID(crew_id),
@@ -879,14 +891,64 @@ async def update_crew_member(
     return {"message": "Crew member updated", "id": str(crew.id)}
 
 
+@router.post("/{provider_id}/crew/{crew_id}/photo")
+async def upload_crew_photo(
+    provider_id: str,
+    crew_id: str,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    principal = Depends(get_admin_or_crew_admin),
+):
+    """Upload / replace a crew member's face photo.
+
+    The image is centre-cropped to a square and resized to a 256×256 JPEG
+    thumbnail (~20-40KB) so storage stays tiny even across thousands of crew —
+    only the file lands on disk, and just the URL string on the row (never the
+    image bytes)."""
+    _assert_settings_access(principal, uuid.UUID(provider_id))
+    result = await db.execute(
+        select(CrewMember).where(
+            CrewMember.id == uuid.UUID(crew_id),
+            CrewMember.provider_id == uuid.UUID(provider_id),
+        )
+    )
+    crew = result.scalar_one_or_none()
+    if not crew:
+        raise HTTPException(404, "Crew member not found")
+
+    ext = (os.path.splitext(file.filename)[1] if file.filename else "").lower()
+    if ext and ext not in ALLOWED_PHOTO_EXTENSIONS:
+        raise HTTPException(400, f"Unsupported image format '{ext}'. Use PNG, JPG or WEBP.")
+
+    raw = await file.read()
+    try:
+        img = Image.open(io.BytesIO(raw)).convert("RGB")
+        # Centre-crop to a square, then resize down to a 256×256 thumbnail.
+        w, h = img.size
+        side = min(w, h)
+        left, top = (w - side) // 2, (h - side) // 2
+        img = img.crop((left, top, left + side, top + side)).resize((256, 256), Image.LANCZOS)
+    except Exception:
+        raise HTTPException(400, "Could not read the image file.")
+
+    filename = f"{crew.id}.jpg"
+    img.save(os.path.join(CREW_PHOTO_DIR, filename), "JPEG", quality=80, optimize=True)
+
+    crew.photo_url = f"/uploads/crew/{filename}"
+    await db.commit()
+    logger.info("Uploaded crew photo for %s (%s)", crew.full_name, crew.id)
+    return {"photo_url": crew.photo_url}
+
+
 @router.post("/{provider_id}/crew/{crew_id}/reset-password")
 async def reset_crew_password(
     provider_id: str,
     crew_id: str,
     db: AsyncSession = Depends(get_db),
-    _auth = Depends(get_admin_or_crew_admin),
+    principal = Depends(get_admin_or_crew_admin),
 ):
     """Reset a crew member's password (admin action)."""
+    _assert_settings_access(principal, uuid.UUID(provider_id))
     result = await db.execute(
         select(CrewMember).where(
             CrewMember.id == uuid.UUID(crew_id),
@@ -908,9 +970,10 @@ async def delete_crew_member(
     provider_id: str,
     crew_id: str,
     db: AsyncSession = Depends(get_db),
-    _auth = Depends(get_admin_or_crew_admin),
+    principal = Depends(get_admin_or_crew_admin),
 ):
     """Delete a crew member from a provider."""
+    _assert_settings_access(principal, uuid.UUID(provider_id))
     result = await db.execute(
         select(CrewMember).where(
             CrewMember.id == uuid.UUID(crew_id),
@@ -947,7 +1010,7 @@ async def delete_crew_member(
 async def list_vehicles(
     provider_id: str,
     db: AsyncSession = Depends(get_db),
-    _auth = Depends(get_admin_or_crew_admin),
+    principal = Depends(get_admin_or_crew_admin),
 ):
     """List all vehicles for a provider, plus whether each one is currently
     on an in-progress call. `is_active` reflects registry enable/disable;
@@ -956,6 +1019,7 @@ async def list_vehicles(
     shows In Use / Available based on `in_use`, not `is_active`.
     """
     pid = uuid.UUID(provider_id)
+    _assert_settings_access(principal, pid)
     result = await db.execute(
         select(Vehicle)
         .where(Vehicle.provider_id == pid)
@@ -994,9 +1058,10 @@ async def add_vehicle(
     provider_id: str,
     body: VehicleCreate,
     db: AsyncSession = Depends(get_db),
-    _auth = Depends(get_admin_or_crew_admin),
+    principal = Depends(get_admin_or_crew_admin),
 ):
     """Add a vehicle to a provider's fleet."""
+    _assert_settings_access(principal, uuid.UUID(provider_id))
     vehicle = Vehicle(
         provider_id=uuid.UUID(provider_id),
         callsign=body.callsign,
@@ -1016,9 +1081,10 @@ async def update_vehicle(
     vehicle_id: str,
     body: VehicleUpdate,
     db: AsyncSession = Depends(get_db),
-    _auth = Depends(get_admin_or_crew_admin),
+    principal = Depends(get_admin_or_crew_admin),
 ):
     """Update a vehicle's details."""
+    _assert_settings_access(principal, uuid.UUID(provider_id))
     result = await db.execute(
         select(Vehicle).where(
             Vehicle.id == uuid.UUID(vehicle_id),
@@ -1039,9 +1105,10 @@ async def delete_vehicle(
     provider_id: str,
     vehicle_id: str,
     db: AsyncSession = Depends(get_db),
-    _auth = Depends(get_admin_or_crew_admin),
+    principal = Depends(get_admin_or_crew_admin),
 ):
     """Delete a vehicle from a provider's fleet."""
+    _assert_settings_access(principal, uuid.UUID(provider_id))
     result = await db.execute(
         select(Vehicle).where(
             Vehicle.id == uuid.UUID(vehicle_id),

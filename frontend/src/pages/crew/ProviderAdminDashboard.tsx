@@ -34,6 +34,7 @@ interface Employee {
   is_active: boolean;
   last_login: string | null;
   role?: string;
+  photo_url?: string | null;
 }
 
 interface Vehicle {
@@ -263,11 +264,18 @@ export default function ProviderAdminDashboard() {
   const [newEmp,    setNewEmp]    = useState(blankEmp());
   const [newEmpErr, setNewEmpErr] = useState('');
   const [newEmpSav, setNewEmpSav] = useState(false);
+  // Photo is chosen before the crew row exists, so it's held here and uploaded
+  // right after creation (the create call returns the new crew id).
+  const [newEmpPhoto,    setNewEmpPhoto]    = useState<File | null>(null);
+  const [newEmpPhotoUrl, setNewEmpPhotoUrl] = useState('');
+  const resetNewEmpPhoto = () => { setNewEmpPhoto(null); setNewEmpPhotoUrl(''); };
 
   // edit employee
   const [editEmp,    setEditEmp]    = useState(blankEmp());
   const [editEmpErr, setEditEmpErr] = useState('');
   const [editEmpSav, setEditEmpSav] = useState(false);
+  const [editEmpPhoto, setEditEmpPhoto] = useState<string | null>(null);
+  const [empPhotoBusy, setEmpPhotoBusy] = useState(false);
 
   // add vehicle
   const [newVeh,    setNewVeh]    = useState(blankVeh());
@@ -372,7 +380,7 @@ export default function ProviderAdminDashboard() {
     if (newEmp.role !== 'admin' && !newEmp.hpcsa_number.trim()) { setNewEmpErr('HPCSA number is required for crew.'); return; }
     setNewEmpSav(true); setNewEmpErr('');
     try {
-      await getApi().post(`/api/providers/${providerId}/crew`, {
+      const { data } = await getApi().post(`/api/providers/${providerId}/crew`, {
         full_name:    newEmp.full_name.trim(),
         initials:     newEmp.role === 'admin' ? null : newEmp.initials.trim() || null,
         email:        newEmp.role === 'admin' ? null : `${newEmp.hpcsa_number.trim().toLowerCase()}@noemail.local`, // backend will auto-gen if email is missing
@@ -381,7 +389,17 @@ export default function ProviderAdminDashboard() {
         phone:        newEmp.role === 'admin' ? null : newEmp.phone.trim() || null,
         role:         newEmp.role,
       });
+      // Upload the chosen face photo now that we have the new crew id.
+      if (newEmpPhoto && data?.id) {
+        try {
+          const form = new FormData();
+          form.append('file', newEmpPhoto);
+          await getApi().post(`/api/providers/${providerId}/crew/${data.id}/photo`, form,
+            { headers: { 'Content-Type': 'multipart/form-data' } });
+        } catch { /* photo is non-fatal — the crew member was still created */ }
+      }
       setNewEmp(blankEmp());
+      resetNewEmpPhoto();
       setAddEmpOpen(false);
       fetchEmployees();
     } catch (err: any) {
@@ -401,8 +419,28 @@ export default function ProviderAdminDashboard() {
       role:         e.role || 'crew',
       is_active:    e.is_active,
     });
+    setEditEmpPhoto(e.photo_url || null);
     setEditEmpErr('');
     setPwReset(null);
+  };
+
+  const uploadEmpPhoto = async (file: File) => {
+    if (!editEmpId || !providerId) return;
+    setEmpPhotoBusy(true); setEditEmpErr('');
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const { data } = await getApi().post(
+        `/api/providers/${providerId}/crew/${editEmpId}/photo`, form,
+        { headers: { 'Content-Type': 'multipart/form-data' } },
+      );
+      // Cache-bust so the replaced thumbnail (same filename) refreshes at once.
+      setEditEmpPhoto(data.photo_url ? `${data.photo_url}?t=${Date.now()}` : null);
+      fetchEmployees();
+    } catch (err: any) {
+      setEditEmpErr(err.response?.data?.detail || 'Failed to upload photo.');
+    }
+    setEmpPhotoBusy(false);
   };
 
   const submitEditEmp = async (e: React.FormEvent) => {
@@ -1045,76 +1083,41 @@ export default function ProviderAdminDashboard() {
           ) : (
           <div style={{ background: '#fff', border: `1px solid ${LN}`, borderRadius: 6, overflowX: 'auto' }}>
             {activeTab === 'employees' ? (
-              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 760 }}>
-                <thead>
-                  <tr>
-                    <th style={{ ...thStyle, width: 52 }}></th>
-                    <th style={thStyle}>Name</th>
-                    <th style={thStyle}>HPCSA</th>
-                    <th style={thStyle}>Level</th>
-                    <th style={thStyle}>Phone</th>
-                    <th style={thStyle}>Last Login</th>
-                    <th style={{ ...thStyle, textAlign: 'right' }}></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {loading ? (
-                    <tr><td colSpan={7} style={{ padding: 40, textAlign: 'center', color: MUT, fontSize: '0.82rem' }}>Loading…</td></tr>
-                  ) : filteredEmployees.length === 0 ? (
-                    <tr><td colSpan={7} style={{ padding: 48, textAlign: 'center', color: MUT, fontSize: '0.82rem' }}>
-                      {employees.length === 0 ? <>No crew members. Click <b>New Employee</b> to register.</> : 'No crew members match your search or filter.'}
-                    </td></tr>
-                  ) : filteredEmployees.map(e => (
-                    <tr key={e.id} style={{ borderTop: `1px solid ${LN}` }}
-                      onMouseEnter={ev => ev.currentTarget.style.background = '#fafafa'}
-                      onMouseLeave={ev => ev.currentTarget.style.background = 'transparent'}>
-                      <td style={tdStyle}>
-                        <div style={{
-                          width: 30, height: 30, background: G, color: '#fff',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          fontSize: '0.66rem', fontWeight: 800,
-                          fontFamily: 'ui-monospace, monospace', borderRadius: 4,
-                        }}>
-                          {(e.initials || e.full_name.split(' ').map(n => n[0]).join('')).slice(0, 2).toUpperCase()}
-                        </div>
-                      </td>
-                      <td style={tdStyle}>
-                        <div style={{ fontWeight: 700 }}>{e.full_name}</div>
-                        {!e.is_active && <div style={{ fontSize: '0.66rem', color: RED, fontWeight: 700, marginTop: 2, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Inactive</div>}
-                      </td>
-                      <td style={{ ...tdStyle, fontFamily: 'ui-monospace, monospace', fontSize: '0.78rem' }}>
-                        {e.hpcsa_number || '—'}
-                      </td>
-                      <td style={tdStyle}>
-                        {e.role === 'admin' ? (
-                          <span style={{
-                            display: 'inline-block', padding: '2px 7px',
-                            border: `1px solid ${INK}`, color: INK,
-                            fontSize: '0.64rem', fontWeight: 700,
-                            letterSpacing: '0.06em', borderRadius: 3,
-                          }}>ADMIN</span>
-                        ) : (
-                          <span style={{
-                            display: 'inline-block', padding: '2px 7px',
-                            border: `1px solid ${qualColour(e.qualification)}`,
-                            color: qualColour(e.qualification),
-                            fontSize: '0.64rem', fontWeight: 700,
-                            letterSpacing: '0.06em', borderRadius: 3,
-                          }}>{e.qualification}</span>
-                        )}
-                      </td>
-                      <td style={{ ...tdStyle, color: MUT, fontSize: '0.78rem' }}>{e.phone || '—'}</td>
-                      <td style={{ ...tdStyle, color: MUT, fontSize: '0.78rem' }}>
-                        {e.last_login ? new Date(e.last_login).toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: '2-digit' }) : '—'}
-                      </td>
-                      <td style={{ ...tdStyle, textAlign: 'right', whiteSpace: 'nowrap' }}>
-                        <Btn onClick={() => openEditEmp(e)} style={{ marginRight: 6 }}>Edit</Btn>
-                        <Btn kind="danger" onClick={() => deleteEmployee(e.id, e.full_name)}>Delete</Btn>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 20, padding: 16 }}>
+                {loading ? (
+                  <div style={{ gridColumn: '1 / -1', padding: 32, textAlign: 'center', color: MUT, fontSize: '0.82rem' }}>Loading…</div>
+                ) : filteredEmployees.length === 0 ? (
+                  <div style={{ gridColumn: '1 / -1', padding: 40, textAlign: 'center', color: MUT, fontSize: '0.82rem' }}>
+                    {employees.length === 0 ? <>No crew members. Click <b>New Employee</b> to register.</> : 'No crew members match your search or filter.'}
+                  </div>
+                ) : filteredEmployees.map(e => (
+                  <div key={e.id} style={{ background: '#fff', border: `1px solid ${LN}`, borderRadius: 12, padding: 28, minHeight: 400, display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+                    {/* Profile photo — face thumbnail, or initials fallback */}
+                    <div style={{
+                      width: 160, height: 160, borderRadius: '50%', overflow: 'hidden',
+                      background: G, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: '2.8rem', fontWeight: 800, fontFamily: 'ui-monospace, monospace',
+                      marginBottom: 20, flexShrink: 0, border: `2px solid ${LN}`,
+                    }}>
+                      {e.photo_url ? (
+                        <img src={e.photo_url} alt={e.full_name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      ) : (
+                        (e.initials || e.full_name.split(' ').map(n => n[0]).join('')).slice(0, 2).toUpperCase()
+                      )}
+                    </div>
+                    <div style={{ fontWeight: 700, fontSize: '0.92rem', color: INK, maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.full_name}</div>
+                    {!e.is_active && <div style={{ fontSize: '0.62rem', color: RED, fontWeight: 700, marginTop: 2, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Inactive</div>}
+                    <div style={{ fontSize: '0.76rem', color: MUT, marginTop: 8, lineHeight: 1.7 }}>
+                      <div><span style={{ fontWeight: 700, color: INK }}>HPCSA:</span> <span style={{ fontFamily: 'ui-monospace, monospace' }}>{e.hpcsa_number || '—'}</span></div>
+                      <div><span style={{ fontWeight: 700, color: INK }}>Phone:</span> {e.phone || '—'}</div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, marginTop: 'auto', paddingTop: 16, width: '100%' }}>
+                      <Btn onClick={() => openEditEmp(e)} style={{ flex: 1, padding: '8px 10px', fontSize: '0.78rem' }}>Edit</Btn>
+                      <Btn kind="danger" onClick={() => deleteEmployee(e.id, e.full_name)} style={{ flex: 1, padding: '8px 10px', fontSize: '0.78rem' }}>Delete</Btn>
+                    </div>
+                  </div>
+                ))}
+              </div>
             ) : (
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
@@ -1171,9 +1174,37 @@ export default function ProviderAdminDashboard() {
 
       {/* Add Employee Modal */}
       {addEmpOpen && (
-        <Modal title="Register New Employee" onClose={() => { setAddEmpOpen(false); setNewEmpErr(''); }}>
+        <Modal title="Register New Employee" onClose={() => { setAddEmpOpen(false); setNewEmpErr(''); resetNewEmpPhoto(); }}>
           {newEmpErr && <Alert type="error" text={newEmpErr} />}
           <form onSubmit={submitNewEmp}>
+            {/* ── Crew face photo ── */}
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+              <div style={{
+                width: 96, height: 96, borderRadius: '50%', overflow: 'hidden',
+                background: G, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: '1.6rem', fontWeight: 800, fontFamily: 'ui-monospace, monospace',
+                flexShrink: 0, border: `2px solid ${LN}`,
+              }}>
+                {newEmpPhotoUrl ? (
+                  <img src={newEmpPhotoUrl} alt="Crew photo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                ) : (
+                  (newEmp.initials || newEmp.full_name.split(' ').map(n => n[0]).join('')).slice(0, 2).toUpperCase() || '?'
+                )}
+              </div>
+              <label style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+                padding: '8px 14px', border: `1px solid ${GD}`, borderRadius: 4,
+                background: G, color: '#fff', fontSize: '0.78rem', fontWeight: 700,
+              }}>
+                {newEmpPhotoUrl ? 'Change Photo of Crew' : 'Add Photo of Crew'}
+                <input type="file" accept="image/png,image/jpeg,image/webp" style={{ display: 'none' }}
+                  onChange={e => {
+                    const f = e.target.files?.[0];
+                    if (f) { if (newEmpPhotoUrl) URL.revokeObjectURL(newEmpPhotoUrl); setNewEmpPhoto(f); setNewEmpPhotoUrl(URL.createObjectURL(f)); }
+                    e.currentTarget.value = '';
+                  }} />
+              </label>
+            </div>
             <div style={{ marginBottom: 16 }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer' }}>
                 <input type="checkbox" checked={newEmp.role === 'admin'} onChange={e => setNewEmp(p => ({ ...p, role: e.target.checked ? 'admin' : 'crew' }))} style={{ width: 16, height: 16, cursor: 'pointer' }} />
@@ -1213,6 +1244,32 @@ export default function ProviderAdminDashboard() {
         <Modal title="Edit Employee" onClose={() => { setEditEmpId(null); setEditEmpErr(''); }}>
           {editEmpErr && <Alert type="error" text={editEmpErr} />}
           <form onSubmit={submitEditEmp}>
+            {/* ── Crew face photo ── */}
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+              <div style={{
+                width: 96, height: 96, borderRadius: '50%', overflow: 'hidden',
+                background: G, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: '1.6rem', fontWeight: 800, fontFamily: 'ui-monospace, monospace',
+                flexShrink: 0, border: `2px solid ${LN}`,
+              }}>
+                {editEmpPhoto ? (
+                  <img src={editEmpPhoto} alt="Crew photo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                ) : (
+                  (editEmp.initials || editEmp.full_name.split(' ').map(n => n[0]).join('')).slice(0, 2).toUpperCase() || '?'
+                )}
+              </div>
+              <label style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6, cursor: empPhotoBusy ? 'wait' : 'pointer',
+                padding: '8px 14px', border: `1px solid ${GD}`, borderRadius: 4,
+                background: empPhotoBusy ? '#e5e7eb' : G, color: empPhotoBusy ? MUT : '#fff',
+                fontSize: '0.78rem', fontWeight: 700,
+              }}>
+                {empPhotoBusy ? 'Uploading…' : (editEmpPhoto ? 'Replace Photo of Crew' : 'Add Photo of Crew')}
+                <input type="file" accept="image/png,image/jpeg,image/webp" style={{ display: 'none' }}
+                  disabled={empPhotoBusy}
+                  onChange={e => { const f = e.target.files?.[0]; if (f) uploadEmpPhoto(f); e.currentTarget.value = ''; }} />
+              </label>
+            </div>
             <div style={{ marginBottom: 16 }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer' }}>
                 <input type="checkbox" checked={editEmp.role === 'admin'} onChange={e => setEditEmp(p => ({ ...p, role: e.target.checked ? 'admin' : 'crew' }))} style={{ width: 16, height: 16, cursor: 'pointer' }} />

@@ -8,6 +8,7 @@ import httpx
 from dataclasses import dataclass
 from PIL import Image, ImageEnhance, ImageFilter
 from app.config import get_settings
+from app.utils.net_guard import assert_public_http_url
 
 settings = get_settings()
 
@@ -59,6 +60,10 @@ async def preprocess_with_claid(image_bytes: bytes, filename: str) -> Preprocess
                 # Claid returns base64 output or a URL
                 output_url = result_data.get("output", {}).get("tmp_url")
                 if output_url:
+                    # SSRF guard: this URL comes from Claid's *response*, not our
+                    # code, so validate it points at a public https address before
+                    # fetching it. Never fetch whatever URL we are handed blindly.
+                    await assert_public_http_url(output_url)
                     img_response = await client.get(output_url)
                     return PreprocessResult(
                         image_bytes=img_response.content,

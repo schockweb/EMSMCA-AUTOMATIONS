@@ -160,6 +160,17 @@ if settings.APP_ENV == "development":
     cors_origins.extend(["http://localhost:5173", "http://localhost:5174", "http://localhost:3000", "http://localhost:8001"])
     cors_origins = list(set(cors_origins))  # deduplicate
 
+# Guardrail: a wildcard origin combined with credentialed requests is an
+# account-takeover-grade misconfig (any site could ride the user's cookies/token).
+# If someone sets CORS_ORIGINS="*", drop the wildcard rather than honour it — we
+# never want a wide-open, credentialed CORS policy in this app.
+if "*" in cors_origins:
+    logger.warning(
+        "CORS_ORIGINS contained '*'; refusing wildcard because allow_credentials=True. "
+        "Set explicit origins (e.g. https://portal.emsmca.co.za) instead."
+    )
+    cors_origins = [o for o in cors_origins if o != "*"]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
@@ -243,7 +254,28 @@ app.include_router(tariff_lines_router)
 # ── Static file serving — uploaded logos and assets ──────────
 _upload_dir = settings.UPLOAD_DIR or "./uploads"
 os.makedirs(_upload_dir, exist_ok=True)
-app.mount("/uploads", StaticFiles(directory=_upload_dir), name="uploads")
+
+
+class _HardenedUploads(StaticFiles):
+    """StaticFiles that neutralizes stored-XSS in user-uploaded files.
+
+    Logos may legitimately be SVG, and an SVG (or a smuggled .html) served
+    inline would otherwise run its own <script> when a victim opens the file
+    URL directly. The `sandbox` CSP directive (no `allow-scripts`) makes the
+    browser treat the response as sandboxed, so scripts never execute — while
+    `<img src="/uploads/...">` embedding from the SPA still renders normally.
+    """
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox"
+        )
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return response
+
+
+app.mount("/uploads", _HardenedUploads(directory=_upload_dir), name="uploads")
 
 # ═══════════════════════════════════════════════════════════
 # HEALTH CHECK ENDPOINTS — for container orchestration

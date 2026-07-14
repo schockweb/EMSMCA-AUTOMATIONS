@@ -42,6 +42,9 @@ class CrewMember(Base):
                 "See app.utils.hpcsa for the tier translation used by the rules + tariff engines."
     )
     phone: Mapped[Union[str, None]] = mapped_column(String(20), nullable=True)
+    # URL of the crew member's face photo (resized ~256px JPEG on disk under
+    # /uploads/crew). Only the URL string lives in the DB — image bytes never do.
+    photo_url: Mapped[Union[str, None]] = mapped_column(String(500), nullable=True)
     role: Mapped[str] = mapped_column(
         String(20), nullable=False, default="crew",
         comment="'admin' = provider admin dashboard, 'crew' = mobile PRF"
