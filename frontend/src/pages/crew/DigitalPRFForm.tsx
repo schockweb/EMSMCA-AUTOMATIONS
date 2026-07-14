@@ -3247,7 +3247,7 @@ const FadeIn = ({ children, show, delay = 0 }: { children: React.ReactNode; show
 // via React Portal, which guarantees position:fixed is relative to the viewport
 // and not broken by any parent CSS (backdrop-filter, transform, overflow, etc.).
 // This permanently prevents the mobile "cursor misalignment" bug.
-const Modal = ({ open, onClose, children }: { open: boolean; onClose: () => void; children: React.ReactNode }) => {
+const Modal = ({ open, onClose, children, dismissOnBackdrop = true }: { open: boolean; onClose: () => void; children: React.ReactNode; dismissOnBackdrop?: boolean }) => {
   useScrollLock(open);   // block scrolling of the page behind this pop-up
   if (!open) return null;
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
@@ -3265,7 +3265,7 @@ const Modal = ({ open, onClose, children }: { open: boolean; onClose: () => void
         WebkitTapHighlightColor: 'transparent',
         touchAction: 'manipulation',
       }}
-      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+      onClick={e => { if (dismissOnBackdrop && e.target === e.currentTarget) onClose(); }}
     >
       <div
         style={{
@@ -4908,6 +4908,11 @@ export default function DigitalPRFForm() {
     const addressVal: string = fd[addressKey] || '';
     const isIftDispatch = row.timeKey === 'time_dispatched' && ['IFT', 'IHT'].includes(fd.call_type);
     const handleMark = () => {
+      // A leg prompt / geo-capture is already in progress → ignore this tap.
+      // On mobile a tap on the odometer inside the Dispatch modal was leaking
+      // through to this (behind-the-modal) row cell and firing a second mark,
+      // which popped the "Confirm Location" overlay. Never mark twice.
+      if (dispatchPromptOpen || onScenePromptOpen || departPromptOpen || destinationPromptOpen || pendingMark) return;
       if (isIftDispatch) {
         setDispatchPromptOpen(true);
         window.setTimeout(() => dispatchKmRef.current?.focus(), 50);
@@ -8897,7 +8902,7 @@ export default function DigitalPRFForm() {
         </Modal>
 
         {/* ── Dispatch Time & Location/KM Prompt Overlay ── */}
-        <Modal open={dispatchPromptOpen} onClose={() => setDispatchPromptOpen(false)}>
+        <Modal open={dispatchPromptOpen} onClose={() => setDispatchPromptOpen(false)} dismissOnBackdrop={false}>
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
               <div style={{ fontSize: '1.2rem', fontWeight: 900, color: S900, letterSpacing: '-0.02em' }}>Dispatch Information</div>
@@ -8959,7 +8964,7 @@ export default function DigitalPRFForm() {
         </Modal>
 
         {/* ── Arrive On Scene Time & Location/KM Prompt Overlay ── */}
-        <Modal open={onScenePromptOpen} onClose={() => setOnScenePromptOpen(false)}>
+        <Modal open={onScenePromptOpen} onClose={() => setOnScenePromptOpen(false)} dismissOnBackdrop={false}>
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
               <div style={{ fontSize: '1.2rem', fontWeight: 900, color: S900, letterSpacing: '-0.02em' }}>Arrival Information</div>
@@ -9022,7 +9027,7 @@ export default function DigitalPRFForm() {
         </Modal>
 
         {/* ── Depart Scene Time & Location/KM Prompt Overlay ── */}
-        <Modal open={departPromptOpen} onClose={() => setDepartPromptOpen(false)}>
+        <Modal open={departPromptOpen} onClose={() => setDepartPromptOpen(false)} dismissOnBackdrop={false}>
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
               <div style={{ fontSize: '1.2rem', fontWeight: 900, color: S900, letterSpacing: '-0.02em' }}>Depart Information</div>
@@ -9088,7 +9093,7 @@ export default function DigitalPRFForm() {
         </Modal>
 
         {/* ── Arrival At Facility Time & Location/KM Prompt Overlay ── */}
-        <Modal open={destinationPromptOpen} onClose={() => setDestinationPromptOpen(false)}>
+        <Modal open={destinationPromptOpen} onClose={() => setDestinationPromptOpen(false)} dismissOnBackdrop={false}>
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
               <div style={{ fontSize: '1.2rem', fontWeight: 900, color: S900, letterSpacing: '-0.02em' }}>Arrival At Facility</div>
