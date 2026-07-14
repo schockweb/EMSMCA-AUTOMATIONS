@@ -57,7 +57,7 @@ export default function Login() {
           const keys = await caches.keys();
           await Promise.all(keys.map(k => caches.delete(k)));
         }
-        window.location.href = '/';
+        window.location.href = '/dashboard';
       }
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Login failed. Please try again.');
