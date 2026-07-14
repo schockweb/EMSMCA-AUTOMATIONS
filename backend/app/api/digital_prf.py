@@ -1377,9 +1377,19 @@ async def get_prf_by_case_for_admin(
     if not prf:
         raise HTTPException(404, "No PRF found for this case")
 
-    # Owner check for crew callers — they can only read their own PRFs.
-    if crew_member and prf.crew_member_1_id != crew_member.id:
-        raise HTTPException(403, "This PRF was not created by you")
+    # Access check for crew callers:
+    #   • provider-admin crew may read any PRF belonging to their own provider
+    #     (drives the PRF section on the client admin dashboard);
+    #   • regular crew may only read PRFs they created themselves.
+    # A cross-provider request always fails — the admin branch requires a
+    # provider match and the owner branch requires being crew_member_1.
+    if crew_member:
+        is_provider_admin = (
+            crew_member.role == "admin"
+            and prf.provider_id == crew_member.provider_id
+        )
+        if not is_provider_admin and prf.crew_member_1_id != crew_member.id:
+            raise HTTPException(403, "This PRF was not created by you")
 
     # Provider (for branding)
     provider_res = await db.execute(

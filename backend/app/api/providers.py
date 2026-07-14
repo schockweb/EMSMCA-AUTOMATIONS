@@ -35,6 +35,8 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 CREW_PHOTO_DIR = "/app/uploads/crew"
 os.makedirs(CREW_PHOTO_DIR, exist_ok=True)
+VEHICLE_PHOTO_DIR = "/app/uploads/vehicles"
+os.makedirs(VEHICLE_PHOTO_DIR, exist_ok=True)
 ALLOWED_PHOTO_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 
 
@@ -1047,6 +1049,7 @@ async def list_vehicles(
             "vehicle_type": v.vehicle_type,
             "is_active": v.is_active,
             "in_use": v.id in in_use_ids,
+            "photo_url": v.photo_url,
             "created_at": v.created_at.isoformat() if v.created_at else None,
         }
         for v in vehicles
@@ -1100,6 +1103,54 @@ async def update_vehicle(
     return {"message": "Vehicle updated", "id": str(vehicle.id)}
 
 
+@router.post("/{provider_id}/vehicles/{vehicle_id}/photo")
+async def upload_vehicle_photo(
+    provider_id: str,
+    vehicle_id: str,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    principal = Depends(get_admin_or_crew_admin),
+):
+    """Upload / replace an ambulance photo.
+
+    Centre-cropped to a square and resized to a 256×256 JPEG thumbnail
+    (~20-40KB) — only the file lands on disk, and just the URL string on the
+    row (never the image bytes)."""
+    _assert_settings_access(principal, uuid.UUID(provider_id))
+    result = await db.execute(
+        select(Vehicle).where(
+            Vehicle.id == uuid.UUID(vehicle_id),
+            Vehicle.provider_id == uuid.UUID(provider_id),
+        )
+    )
+    vehicle = result.scalar_one_or_none()
+    if not vehicle:
+        raise HTTPException(404, "Vehicle not found")
+
+    ext = (os.path.splitext(file.filename)[1] if file.filename else "").lower()
+    if ext and ext not in ALLOWED_PHOTO_EXTENSIONS:
+        raise HTTPException(400, f"Unsupported image format '{ext}'. Use PNG, JPG or WEBP.")
+
+    raw = await file.read()
+    try:
+        img = Image.open(io.BytesIO(raw)).convert("RGB")
+        # Centre-crop to a square, then resize down to a 256×256 thumbnail.
+        w, h = img.size
+        side = min(w, h)
+        left, top = (w - side) // 2, (h - side) // 2
+        img = img.crop((left, top, left + side, top + side)).resize((256, 256), Image.LANCZOS)
+    except Exception:
+        raise HTTPException(400, "Could not read the image file.")
+
+    filename = f"{vehicle.id}.jpg"
+    img.save(os.path.join(VEHICLE_PHOTO_DIR, filename), "JPEG", quality=80, optimize=True)
+
+    vehicle.photo_url = f"/uploads/vehicles/{filename}"
+    await db.commit()
+    logger.info("Uploaded vehicle photo for %s (%s)", vehicle.callsign, vehicle.id)
+    return {"photo_url": vehicle.photo_url}
+
+
 @router.delete("/{provider_id}/vehicles/{vehicle_id}")
 async def delete_vehicle(
     provider_id: str,
@@ -1133,3 +1184,92 @@ async def delete_vehicle(
     await db.commit()
     logger.info("Deleted vehicle: %s from provider %s", vehicle_id, provider_id)
     return {"message": "Vehicle deleted"}
+
+
+# ═══════════════════════════════════════════════════════════
+# SUBMITTED PRF ENDPOINTS (client admin dashboard)
+# ═══════════════════════════════════════════════════════════
+
+@router.get("/{provider_id}/prfs")
+async def list_provider_prfs(
+    provider_id: str,
+    db: AsyncSession = Depends(get_db),
+    principal = Depends(get_admin_or_crew_admin),
+):
+    """List this provider's submitted PRFs for the client admin dashboard.
+
+    Drafts are excluded — a PRF only lands here once the crew has actually
+    submitted it (SUBMITTED → PROCESSED / FAILED / CORRECTED). Selects only
+    the summary columns: full rows carry five base64 signatures each, which
+    would bloat a list response badly.
+    """
+    pid = uuid.UUID(provider_id)
+    _assert_settings_access(principal, pid)
+
+    result = await db.execute(
+        select(
+            DigitalPRF.id,
+            DigitalPRF.prf_number,
+            DigitalPRF.case_number,
+            DigitalPRF.case_id,
+            DigitalPRF.status,
+            DigitalPRF.form_data,
+            DigitalPRF.vehicle_id,
+            DigitalPRF.crew_member_1_id,
+            DigitalPRF.crew_member_2_id,
+            DigitalPRF.submitted_at,
+            DigitalPRF.created_at,
+        )
+        .where(
+            DigitalPRF.provider_id == pid,
+            DigitalPRF.status != PRFStatus.DRAFT,
+        )
+        .order_by(func.coalesce(DigitalPRF.submitted_at, DigitalPRF.created_at).desc())
+        .limit(500)
+    )
+    rows = result.all()
+
+    # Batch-resolve crew + vehicle names (two queries total, not 3 per row).
+    crew_ids = {r.crew_member_1_id for r in rows} | {r.crew_member_2_id for r in rows}
+    crew_ids.discard(None)
+    crew_names: dict[uuid.UUID, str] = {}
+    if crew_ids:
+        crew_res = await db.execute(
+            select(CrewMember.id, CrewMember.full_name).where(CrewMember.id.in_(crew_ids))
+        )
+        crew_names = {cid: name for cid, name in crew_res.all()}
+
+    vehicle_ids = {r.vehicle_id for r in rows}
+    vehicle_ids.discard(None)
+    vehicle_callsigns: dict[uuid.UUID, str] = {}
+    if vehicle_ids:
+        veh_res = await db.execute(
+            select(Vehicle.id, Vehicle.callsign).where(Vehicle.id.in_(vehicle_ids))
+        )
+        vehicle_callsigns = {vid: cs for vid, cs in veh_res.all()}
+
+    items = []
+    for r in rows:
+        fd = r.form_data if isinstance(r.form_data, dict) else {}
+        patient_name = " ".join(
+            str(part).strip()
+            for part in (fd.get("patient_name"), fd.get("patient_surname"))
+            if part
+        ).strip()
+        items.append({
+            "id": str(r.id),
+            "prf_number": r.prf_number,
+            "case_number": r.case_number,
+            # case_id is set once the billing pipeline finishes — the dashboard
+            # only enables "View" when it exists (the PRF viewer loads by case).
+            "case_id": str(r.case_id) if r.case_id else None,
+            "status": r.status.value,
+            "patient_name": patient_name or None,
+            "call_type": fd.get("call_type"),
+            "crew_1": crew_names.get(r.crew_member_1_id),
+            "crew_2": crew_names.get(r.crew_member_2_id),
+            "vehicle": vehicle_callsigns.get(r.vehicle_id),
+            "submitted_at": r.submitted_at.isoformat() if r.submitted_at else None,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        })
+    return items

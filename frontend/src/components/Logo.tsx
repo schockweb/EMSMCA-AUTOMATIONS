@@ -9,7 +9,7 @@ export default function Logo({ size = 32, showText = true, layout = 'horizontal'
 }) {
   const logoImg = (
     <img 
-      src="/ems-logo.png" 
+      src="/ems-logo-black.png"
       alt="EMS Medical Claims Administrators" 
       width={size} 
       height={size} 
@@ -22,21 +22,19 @@ export default function Logo({ size = 32, showText = true, layout = 'horizontal'
   if (layout === 'vertical') {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
-        <img 
-          src="/ems-logo.png" 
-          alt="EMS Medical Claims Administrators" 
-          width={size * 2.5} 
-          height={size * 2.5} 
-          style={{ objectFit: 'contain' }} 
+        <img
+          src="/ems-logo-black.png"
+          alt="EMS Medical Claims Administrators"
+          width={size * 2.5}
+          height={size * 2.5}
+          style={{ objectFit: 'contain' }}
         />
         <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: '2.5rem', fontWeight: 900, color: '#2D3436', letterSpacing: '-0.05em', lineHeight: 1 }}>EMS</div>
-          <div style={{ 
-            fontSize: '0.75rem', 
-            textTransform: 'uppercase', 
-            color: 'var(--text-muted)', 
-            letterSpacing: '0.25em', 
-            marginTop: 12,
+          <div style={{
+            fontSize: '0.75rem',
+            textTransform: 'uppercase',
+            color: 'var(--text-muted)',
+            letterSpacing: '0.25em',
             fontWeight: 600,
             opacity: 0.8
           }}>

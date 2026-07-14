@@ -4,6 +4,7 @@
  */
 import { useState, useEffect, useCallback } from 'react';
 import api from '../api/client';
+import { useScrollLock } from '../hooks/useScrollLock';
 
 interface Provider {
   id: string;
@@ -85,6 +86,8 @@ export default function ProviderManagement() {
   const [newVehicle, setNewVehicle] = useState({ callsign: '', registration: '', vehicle_type: 'Ambulance' });
   const [showAddCrew, setShowAddCrew] = useState(false);
   const [showAddVehicle, setShowAddVehicle] = useState(false);
+  // Lock the background page while any pop-up on this screen is open.
+  useScrollLock(showAddProvider || showEditClient || showAddCrew || showAddVehicle);
   const [tempPassword, setTempPassword] = useState('');
 
   const fetchProviders = useCallback(async () => {

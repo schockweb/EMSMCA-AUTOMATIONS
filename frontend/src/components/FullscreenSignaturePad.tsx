@@ -320,21 +320,6 @@ export function FullscreenCanvas({ label, initial, onCancel, onSave }: CanvasPro
         }}>
           {label}
         </div>
-        <button
-          type="button"
-          onClick={save}
-          disabled={!hasContent}
-          style={{
-            background: hasContent ? '#10b981' : '#475569',
-            border: 'none',
-            color: '#fff', fontSize: '0.92rem', fontWeight: 800,
-            cursor: hasContent ? 'pointer' : 'not-allowed',
-            padding: '8px 16px', borderRadius: 8,
-            flexShrink: 0,
-          }}
-        >
-          Save
-        </button>
       </div>
 
       <div ref={wrapRef} style={{ flex: 1, position: 'relative', background: '#fff', margin: 12, borderRadius: 12, overflow: 'hidden' }}>
@@ -366,7 +351,7 @@ export function FullscreenCanvas({ label, initial, onCancel, onSave }: CanvasPro
       </div>
 
       <div style={{
-        display: 'flex', justifyContent: 'center',
+        display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 12,
         padding: '10px 18px 16px',
         paddingBottom: 'calc(16px + env(safe-area-inset-bottom))',
         flexShrink: 0,
@@ -385,6 +370,20 @@ export function FullscreenCanvas({ label, initial, onCancel, onSave }: CanvasPro
           }}
         >
           Clear
+        </button>
+        <button
+          type="button"
+          onClick={save}
+          disabled={!hasContent}
+          style={{
+            background: hasContent ? '#10b981' : '#475569',
+            border: 'none',
+            color: '#fff', fontSize: '0.82rem', fontWeight: 800,
+            cursor: hasContent ? 'pointer' : 'not-allowed',
+            padding: '8px 22px', borderRadius: 8,
+          }}
+        >
+          Save
         </button>
       </div>
     </div>

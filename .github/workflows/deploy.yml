@@ -16,13 +16,16 @@
 name: Deploy
 
 on:
-  # Run after CI completes successfully on main
-  workflow_run:
-    workflows: ["CI"]
-    types: [completed]
-    branches: [main]
+  # Auto-deploy on push is DISABLED. Deploys are done MANUALLY via SSH per
+  # deploy/GO-LIVE-RUNBOOK.md — the pipeline's git-reset-hard + wrong DEPLOY_DIR
+  # was a foot-gun that could clobber the VM. Re-enable this block only once the
+  # pipeline is fully fixed and tested.
+  # workflow_run:
+  #   workflows: ["CI"]
+  #   types: [completed]
+  #   branches: [main]
 
-  # Allow manual trigger from GitHub UI
+  # Manual trigger from the GitHub UI only
   workflow_dispatch:
     inputs:
       skip_health_check:
@@ -36,7 +39,7 @@ concurrency:
 
 env:
   DEPLOY_USER: deploy
-  DEPLOY_DIR: /opt/ems-claims
+  DEPLOY_DIR: /opt/ems
 
 jobs:
   # ═══════════════════════════════════════════════════════════════════════

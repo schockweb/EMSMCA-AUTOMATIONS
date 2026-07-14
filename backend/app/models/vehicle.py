@@ -33,6 +33,9 @@ class Vehicle(Base):
         comment="Ambulance, Response Vehicle, etc."
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # URL of the ambulance photo (resized ~256px JPEG on disk under
+    # /uploads/vehicles). Only the URL string lives in the DB, not the bytes.
+    photo_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)

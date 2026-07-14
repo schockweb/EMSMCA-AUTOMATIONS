@@ -5,6 +5,7 @@
  */
 import React, { useState, useEffect, useRef, useMemo, useCallback, createContext, useContext } from 'react';
 import ReactDOM from 'react-dom';
+import { useScrollLock } from '../../hooks/useScrollLock';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from '../../api/client';
 import SignaturePad from '../../components/SignaturePad';
@@ -3091,6 +3092,12 @@ function GeoConfirmOverlay({
 }) {
   const [manualAddress, setManualAddress] = useState('');
   const gpsUnavailable = !capturing && !coords;
+  const permissionDenied = error === 'Location permission denied';
+  // iPadOS 13+ reports as "MacIntel" — the touch-points check catches it.
+  const isIOS = typeof navigator !== 'undefined' && (
+    /iP(hone|ad|od)/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+  );
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 250, background: 'rgba(0,0,0,0.55)', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
       <div style={{ background: W, borderRadius: '20px 20px 0 0', padding: 24, maxHeight: '85vh', overflowY: 'auto' }}>
@@ -3111,7 +3118,15 @@ function GeoConfirmOverlay({
             <div style={{ padding: 16, background: '#fef2f2', borderRadius: 12, border: `1.5px solid ${REDC}40`, marginBottom: 16 }}>
               <div style={{ fontSize: '0.7rem', fontWeight: 800, color: REDC, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>Location unavailable</div>
               <div style={{ fontSize: '0.85rem', color: S700, marginBottom: 6 }}>{error || 'No GPS coordinates were captured.'}</div>
-              <div style={{ fontSize: '0.75rem', color: S600 }}>Enter the address manually below, then tap <strong>Confirm &amp; Mark Time</strong> to continue.</div>
+              {permissionDenied ? (
+                <div style={{ fontSize: '0.75rem', color: S600 }}>
+                  Tap <strong>↻ Re-capture</strong> below and choose <strong>Allow</strong> when asked for location.
+                  {isIOS && <> If no prompt appears, open <strong>Settings → Privacy &amp; Security → Location Services</strong>, make sure it's <strong>On</strong> and <strong>Safari Websites</strong> is set to <strong>While Using the App</strong>, then reload this page.</>}
+                  {' '}Or enter the address manually below.
+                </div>
+              ) : (
+                <div style={{ fontSize: '0.75rem', color: S600 }}>Tap <strong>↻ Re-capture</strong> to try again, or enter the address manually below and tap <strong>Confirm &amp; Mark Time</strong>.</div>
+              )}
             </div>
 
             {/* Manual address entry when GPS fails */}
@@ -3163,12 +3178,12 @@ function GeoConfirmOverlay({
         <div style={{ marginBottom: 10 }}>
           <button
             type="button"
-            onClick={() => {
-              if (error === 'Location permission denied') {
-                alert('Location access is blocked by your browser. Please tap the lock icon (🔒) or "aA" in your address bar, go to Site Settings, and allow Location access. Then press OK to try again.');
-              }
-              onRecapture();
-            }}
+            // iOS Safari only shows the native location prompt when
+            // getCurrentPosition fires as a DIRECT result of this tap. An
+            // intervening alert() breaks that user-gesture chain and causes a
+            // silent denial, so re-request immediately with no dialog first.
+            // Guidance for the hard-denied case lives in the panel above.
+            onClick={onRecapture}
             disabled={capturing}
             style={{ width: '100%', padding: '12px 0', borderRadius: 10, fontWeight: 800, fontSize: '0.85rem', border: `2px solid ${S200}`, background: W, color: S700, cursor: capturing ? 'not-allowed' : 'pointer', opacity: capturing ? 0.5 : 1 }}
           >
@@ -3233,6 +3248,7 @@ const FadeIn = ({ children, show, delay = 0 }: { children: React.ReactNode; show
 // and not broken by any parent CSS (backdrop-filter, transform, overflow, etc.).
 // This permanently prevents the mobile "cursor misalignment" bug.
 const Modal = ({ open, onClose, children }: { open: boolean; onClose: () => void; children: React.ReactNode }) => {
+  useScrollLock(open);   // block scrolling of the page behind this pop-up
   if (!open) return null;
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
   return ReactDOM.createPortal(
@@ -6943,7 +6959,7 @@ export default function DigitalPRFForm() {
           <VoiceTxt fk="management_notes" ph="Full clinical narrative — care provided, patient response, interventions..." rows={6} />
       </>
 
-      {CTA({ label: "AT DESTINATION  →", color: "#7c3aed", onClick: () => advancePhase(5, 'time_at_destination', 'km_at_destination') })}
+      {CTA({ label: "AT DESTINATION  →", onClick: () => advancePhase(5, 'time_at_destination', 'km_at_destination') })}
     </>
   );
 

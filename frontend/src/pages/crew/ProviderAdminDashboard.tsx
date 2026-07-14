@@ -5,6 +5,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from '../../api/client';
+import { useScrollLock } from '../../hooks/useScrollLock';
 import { HPCSA_CATEGORIES, CATEGORY_META, type HpcsaCategory } from '../../data/hpcsaScope';
 
 // ── Tokens ───────────────────────────────────────────────────────
@@ -13,15 +14,18 @@ const MUT = '#6b7280';
 const LN  = '#e5e7eb';
 const LN2 = '#d1d5db';
 const BG  = '#fafafa';
-const G   = '#10b981';
-const GD  = '#059669';
+// EMSMCA brand teal replaces the former green throughout this dashboard —
+// the client's palette has no green. G = teal, GD = darker teal for borders/hover.
+const G   = '#088395';
+const GD  = '#066b7a';
+const TEAL = '#088395';   // EMSMCA brand teal — used for crew photo placeholders
 const RED = '#dc2626';
 
 function getApi() {
   return axios.create({ headers: { Authorization: `Bearer ${localStorage.getItem('crew_token')}` } });
 }
 
-type Tab = 'employees' | 'vehicles' | 'settings';
+type Tab = 'employees' | 'vehicles' | 'prfs' | 'settings';
 
 interface Employee {
   id: string;
@@ -47,6 +51,24 @@ interface Vehicle {
    *  bound to this vehicle. Drives the dashboard's In Use / Available
    *  status pill — `is_active` only reflects admin enable/disable. */
   in_use?: boolean;
+  photo_url?: string | null;
+}
+
+interface Prf {
+  id: string;
+  prf_number: number;
+  case_number: string | null;
+  /** Set once the billing pipeline finishes — the View button needs it
+   *  because the PRF viewer page loads by case id. */
+  case_id: string | null;
+  status: string;
+  patient_name: string | null;
+  call_type: string | null;
+  crew_1: string | null;
+  crew_2: string | null;
+  vehicle: string | null;
+  submitted_at: string | null;
+  created_at: string | null;
 }
 
 // Badge colour keyed by HPCSA registration tier — keeps the visual hierarchy
@@ -141,6 +163,7 @@ function SelectField({ label, value, onChange, options }: {
 
 // ── Modal ────────────────────────────────────────────────────────
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+  useScrollLock();   // block scrolling of the page behind this pop-up
   useEffect(() => {
     const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', esc);
@@ -253,6 +276,7 @@ export default function ProviderAdminDashboard() {
   // data
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [vehicles,  setVehicles]  = useState<Vehicle[]>([]);
+  const [prfs,      setPrfs]      = useState<Prf[]>([]);
   const [loading,   setLoading]   = useState(false);
 
   // modals
@@ -281,12 +305,17 @@ export default function ProviderAdminDashboard() {
   const [newVeh,    setNewVeh]    = useState(blankVeh());
   const [newVehErr, setNewVehErr] = useState('');
   const [newVehSav, setNewVehSav] = useState(false);
+  const [newVehPhoto,    setNewVehPhoto]    = useState<File | null>(null);
+  const [newVehPhotoUrl, setNewVehPhotoUrl] = useState('');
+  const resetNewVehPhoto = () => { setNewVehPhoto(null); setNewVehPhotoUrl(''); };
 
   // edit vehicle
   const [editVehId,  setEditVehId]  = useState<string | null>(null);
   const [editVeh,    setEditVeh]    = useState(blankVehEdit());
   const [editVehErr, setEditVehErr] = useState('');
   const [editVehSav, setEditVehSav] = useState(false);
+  const [editVehPhoto, setEditVehPhoto] = useState<string | null>(null);
+  const [vehPhotoBusy, setVehPhotoBusy] = useState(false);
 
   // reset-password result (shown inside the edit employee modal)
   const [pwReset,    setPwReset]    = useState<string | null>(null);
@@ -321,6 +350,14 @@ export default function ProviderAdminDashboard() {
     setLoading(false);
   }, [providerId]);
 
+  const fetchPrfs = useCallback(async () => {
+    if (!providerId) return;
+    setLoading(true);
+    try { const { data } = await getApi().get(`/api/providers/${providerId}/prfs`); setPrfs(data); }
+    catch { /* ignore */ }
+    setLoading(false);
+  }, [providerId]);
+
   const fetchSettings = useCallback(async () => {
     if (!providerId) return;
     setSettingsLoading(true); setSettingsErr(''); setSettingsOk('');
@@ -349,6 +386,7 @@ export default function ProviderAdminDashboard() {
   useEffect(() => {
     if (activeTab === 'employees') fetchEmployees();
     else if (activeTab === 'vehicles') fetchVehicles();
+    else if (activeTab === 'prfs') fetchPrfs();
     else fetchSettings();
   }, [activeTab]);
 
@@ -366,6 +404,11 @@ export default function ProviderAdminDashboard() {
     matchStatus(v.is_active) &&
     (!q || [v.callsign, v.registration, v.vehicle_type]
       .some(f => (f || '').toLowerCase().includes(q)))
+  );
+  const filteredPrfs = prfs.filter(p =>
+    !q || [String(p.prf_number), p.case_number, p.patient_name, p.call_type,
+      p.crew_1, p.crew_2, p.vehicle, p.status]
+      .some(f => (f || '').toLowerCase().includes(q))
   );
 
   // Small headline counts shown as chips beneath the title.
@@ -482,18 +525,46 @@ export default function ProviderAdminDashboard() {
     if (!providerId) { setNewVehErr('Session invalid.'); return; }
     setNewVehSav(true); setNewVehErr('');
     try {
-      await getApi().post(`/api/providers/${providerId}/vehicles`, {
+      const { data } = await getApi().post(`/api/providers/${providerId}/vehicles`, {
         callsign: newVeh.callsign.trim(),
         registration: newVeh.registration.trim(),
         vehicle_type: newVeh.vehicle_type,
       });
+      // Upload the chosen photo now that we have the new vehicle id.
+      if (newVehPhoto && data?.id) {
+        try {
+          const form = new FormData();
+          form.append('file', newVehPhoto);
+          await getApi().post(`/api/providers/${providerId}/vehicles/${data.id}/photo`, form,
+            { headers: { 'Content-Type': 'multipart/form-data' } });
+        } catch { /* photo is non-fatal — the vehicle was still created */ }
+      }
       setNewVeh(blankVeh());
+      resetNewVehPhoto();
       setAddVehOpen(false);
       fetchVehicles();
     } catch (err: any) {
       setNewVehErr(err.response?.data?.detail || 'Failed to add vehicle.');
     }
     setNewVehSav(false);
+  };
+
+  const uploadVehPhoto = async (file: File) => {
+    if (!editVehId || !providerId) return;
+    setVehPhotoBusy(true); setEditVehErr('');
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const { data } = await getApi().post(
+        `/api/providers/${providerId}/vehicles/${editVehId}/photo`, form,
+        { headers: { 'Content-Type': 'multipart/form-data' } },
+      );
+      setEditVehPhoto(data.photo_url ? `${data.photo_url}?t=${Date.now()}` : null);
+      fetchVehicles();
+    } catch (err: any) {
+      setEditVehErr(err.response?.data?.detail || 'Failed to upload photo.');
+    }
+    setVehPhotoBusy(false);
   };
 
   const deleteVehicle = async (id: string, callsign: string) => {
@@ -515,6 +586,7 @@ export default function ProviderAdminDashboard() {
       vehicle_type: v.vehicle_type,
       is_active:    v.is_active,
     });
+    setEditVehPhoto(v.photo_url || null);
     setEditVehErr('');
   };
 
@@ -623,6 +695,10 @@ export default function ProviderAdminDashboard() {
   const tdStyle: React.CSSProperties = {
     padding: '11px 14px', fontSize: '0.82rem', color: INK, verticalAlign: 'middle',
   };
+  const fmtDateTime = (iso: string | null) =>
+    iso
+      ? new Date(iso).toLocaleString('en-ZA', { day: '2-digit', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit' })
+      : '—';
   // Small headline count pill. `color` tints the dot + value; default is neutral.
   const chipStyle = (color: string = MUT): React.CSSProperties => ({
     display: 'inline-flex', alignItems: 'center', gap: 5,
@@ -721,6 +797,19 @@ export default function ProviderAdminDashboard() {
                 <circle cx="5.5" cy="18.5" r="1.5"/>
                 <circle cx="18.5" cy="18.5" r="1.5"/>
                 <path d="M7 10h3M8.5 8.5v3"/>
+              </svg>
+            ),
+          },
+          {
+            key: 'prfs',
+            label: 'PRFs',
+            tab: 'prfs' as Tab,
+            icon: (
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <path d="M14 2v6h6"/>
+                <path d="M9 13h6M9 17h6"/>
               </svg>
             ),
           },
@@ -894,6 +983,122 @@ export default function ProviderAdminDashboard() {
               </form>
             )}
           </div>
+          ) : activeTab === 'prfs' ? (
+          <>
+          {/* ── PRFs — every form submitted by this provider's crews ──
+              Title bar mirrors the Fleet layout: title left, search +
+              refresh icons right. */}
+          <div style={{
+            display: 'flex', alignItems: isMobile ? 'stretch' : 'flex-end',
+            justifyContent: 'space-between', flexDirection: isMobile ? 'column' : 'row',
+            gap: 12, marginBottom: 16,
+          }}>
+            <div>
+              <h1 style={{
+                margin: 0, fontSize: '1.05rem', fontWeight: 800, color: INK,
+                textTransform: 'uppercase', letterSpacing: '0.04em',
+              }}>
+                Patient Report Forms
+              </h1>
+              <div style={{ fontSize: '0.78rem', color: MUT, marginTop: 6, lineHeight: 1.5 }}>
+                PRFs appear here automatically as your crews submit them.
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button type="button" aria-label="Search" onClick={() => setMobileSearchOpen(o => !o)} style={iconBtn(mobileSearchOpen)}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>
+                </svg>
+              </button>
+              <button type="button" aria-label="Refresh" onClick={fetchPrfs} style={iconBtn(false)}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          {mobileSearchOpen && (
+            <div style={{ marginBottom: 14 }}>
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Search PRF #, patient, crew, vehicle…"
+                onFocus={onFc} onBlur={onBl}
+                autoComplete="off" autoFocus
+                style={{ ...inputStyle, padding: '9px 12px', width: '100%' }}
+              />
+            </div>
+          )}
+
+          {loading ? (
+            <div style={{ padding: 40, textAlign: 'center', color: MUT, fontSize: '0.84rem', background: '#fff', border: `1px solid ${LN}`, borderRadius: 6 }}>Loading…</div>
+          ) : filteredPrfs.length === 0 ? (
+            <div style={{ padding: 40, textAlign: 'center', color: MUT, fontSize: '0.84rem', background: '#fff', border: `1px solid ${LN}`, borderRadius: 6 }}>
+              {prfs.length === 0 ? 'No PRFs yet. Submitted PRFs from your crews will appear here.' : 'No PRFs match your search.'}
+            </div>
+          ) : isMobile ? (
+            /* Stacked cards — a 7-column table can't fit a phone screen. */
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {filteredPrfs.map(p => (
+                <div key={p.id} style={{ background: '#fff', border: `1px solid ${LN}`, borderRadius: 8, padding: 14 }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 10 }}>
+                    <div style={{ fontWeight: 800, fontSize: '0.95rem', fontFamily: 'ui-monospace, monospace' }}>PRF #{p.prf_number}</div>
+                    <div style={{ fontSize: '0.7rem', color: MUT, whiteSpace: 'nowrap' }}>{fmtDateTime(p.submitted_at || p.created_at)}</div>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '7px 12px', fontSize: '0.78rem', color: MUT, marginBottom: 12 }}>
+                    <div style={{ gridColumn: '1 / -1' }}><span style={{ fontWeight: 700, color: INK }}>Patient:</span> {p.patient_name || '—'}</div>
+                    <div><span style={{ fontWeight: 700, color: INK }}>Crew:</span> {[p.crew_1, p.crew_2].filter(Boolean).join(', ') || '—'}</div>
+                    <div><span style={{ fontWeight: 700, color: INK }}>Vehicle:</span> {p.vehicle || '—'}</div>
+                    <div style={{ gridColumn: '1 / -1' }}><span style={{ fontWeight: 700, color: INK }}>Case:</span> <span style={{ fontFamily: 'ui-monospace, monospace' }}>{p.case_number || '—'}</span></div>
+                  </div>
+                  {p.case_id ? (
+                    <Btn kind="primary" onClick={() => navigate(`/${providerSlug}/crew/prf-view/${p.case_id}`)} style={{ width: '100%', padding: '11px 10px', fontSize: '0.8rem' }}>View PRF</Btn>
+                  ) : (
+                    <div style={{ textAlign: 'center', fontSize: '0.72rem', color: MUT, padding: '8px 0', background: BG, borderRadius: 6 }}>
+                      {p.status === 'submitted' ? 'Processing — view available shortly.' : 'View not available.'}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ background: '#fff', border: `1px solid ${LN}`, borderRadius: 6, overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr>
+                    <th style={thStyle}>PRF #</th>
+                    <th style={thStyle}>Case Number</th>
+                    <th style={thStyle}>Patient</th>
+                    <th style={thStyle}>Crew</th>
+                    <th style={thStyle}>Vehicle</th>
+                    <th style={thStyle}>Submitted</th>
+                    <th style={{ ...thStyle, textAlign: 'right' }} aria-label="Actions"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredPrfs.map(p => (
+                    <tr key={p.id} style={{ borderBottom: `1px solid ${LN}` }}>
+                      <td style={{ ...tdStyle, fontFamily: 'ui-monospace, monospace', fontWeight: 700 }}>#{p.prf_number}</td>
+                      <td style={{ ...tdStyle, fontFamily: 'ui-monospace, monospace' }}>{p.case_number || '—'}</td>
+                      <td style={tdStyle}>{p.patient_name || '—'}</td>
+                      <td style={tdStyle}>{[p.crew_1, p.crew_2].filter(Boolean).join(', ') || '—'}</td>
+                      <td style={{ ...tdStyle, fontFamily: 'ui-monospace, monospace' }}>{p.vehicle || '—'}</td>
+                      <td style={{ ...tdStyle, whiteSpace: 'nowrap' }}>{fmtDateTime(p.submitted_at || p.created_at)}</td>
+                      <td style={{ ...tdStyle, textAlign: 'right' }}>
+                        {p.case_id ? (
+                          <Btn onClick={() => navigate(`/${providerSlug}/crew/prf-view/${p.case_id}`)} style={{ padding: '6px 12px', fontSize: '0.74rem' }}>View</Btn>
+                        ) : (
+                          <span style={{ fontSize: '0.7rem', color: MUT }}>{p.status === 'submitted' ? 'Processing…' : '—'}</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          </>
           ) : (
           <>
           {activeTab === 'employees' ? (
@@ -947,18 +1152,18 @@ export default function ProviderAdminDashboard() {
               }}>
                 Fleet
               </h1>
-              {/* Vehicles-only block — the crew tab renders the compact icon
-                  toolbar above, so this branch is reached for vehicles only. */}
-              <div style={{ display: 'flex', gap: 6, marginTop: 7, flexWrap: 'wrap' }}>
-                <span style={chipStyle()}>{vehicles.length} total</span>
-                <span style={chipStyle(GD)}>● {vehActive} active</span>
-                {vehInUse > 0 && <span style={chipStyle('#d97706')}>● {vehInUse} in use</span>}
-                {vehicles.length - vehActive > 0 && <span style={chipStyle(RED)}>● {vehicles.length - vehActive} inactive</span>}
-              </div>
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
-              <Btn onClick={fetchVehicles}
-                style={isMobile ? { flex: 1, padding: '10px 14px' } : undefined}>Refresh</Btn>
+              <button type="button" aria-label="Search" onClick={() => setMobileSearchOpen(o => !o)} style={iconBtn(mobileSearchOpen)}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>
+                </svg>
+              </button>
+              <button type="button" aria-label="Refresh" onClick={fetchVehicles} style={iconBtn(false)}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/>
+                </svg>
+              </button>
               <Btn kind="primary" onClick={() => setAddVehOpen(true)}
                 style={isMobile ? { flex: 2, padding: '10px 14px' } : undefined}>
                 + New Vehicle
@@ -966,33 +1171,19 @@ export default function ProviderAdminDashboard() {
             </div>
           </div>
 
-          {/* Toolbar — live search + status filter. Filtering is client-side
-              because the registry lists are small (tens, not thousands). */}
-          <div style={{
-            display: 'flex', gap: 8, marginBottom: 14,
-            flexDirection: isMobile ? 'column' : 'row',
-            alignItems: isMobile ? 'stretch' : 'center',
-          }}>
-            <input
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Search callsign, registration, type…"
-              onFocus={onFc} onBlur={onBl}
-              autoComplete="off"
-              style={{ ...inputStyle, padding: '9px 12px', flex: 1, minWidth: 0 }}
-            />
-            <div style={{ display: 'flex', border: `1px solid ${LN2}`, borderRadius: 4, overflow: 'hidden', flexShrink: 0 }}>
-              {(['all', 'active', 'inactive'] as const).map(s => (
-                <button key={s} type="button" onClick={() => setStatusFilter(s)} style={{
-                  padding: '9px 16px', fontSize: '0.74rem', fontWeight: 700, cursor: 'pointer',
-                  border: 'none', borderLeft: s !== 'all' ? `1px solid ${LN2}` : 'none',
-                  background: statusFilter === s ? G : '#fff',
-                  color: statusFilter === s ? '#fff' : MUT,
-                  textTransform: 'capitalize', fontFamily: 'inherit', flex: isMobile ? 1 : undefined,
-                }}>{s}</button>
-              ))}
+          {/* Search — hidden until the search icon above is pressed. */}
+          {mobileSearchOpen && (
+            <div style={{ marginBottom: 14 }}>
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Search callsign, registration, type…"
+                onFocus={onFc} onBlur={onBl}
+                autoComplete="off" autoFocus
+                style={{ ...inputStyle, padding: '9px 12px', width: '100%' }}
+              />
             </div>
-          </div>
+          )}
           </>
           )}
 
@@ -1064,9 +1255,11 @@ export default function ProviderAdminDashboard() {
                   <div key={v.id} style={{ background: '#fff', border: `1px solid ${LN}`, borderRadius: 6, padding: 12 }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8 }}>
                       <div style={{ fontWeight: 700, fontSize: '0.9rem', fontFamily: 'ui-monospace, monospace' }}>{v.callsign}</div>
-                      <div style={{ fontSize: '0.7rem', fontWeight: 700, color: !v.is_active ? RED : v.in_use ? '#d97706' : GD }}>
-                        ● {!v.is_active ? 'Inactive' : v.in_use ? 'In Use' : 'Available'}
-                      </div>
+                      {!v.is_active && (
+                        <div style={{ fontSize: '0.7rem', fontWeight: 700, color: RED }}>
+                          ● Inactive
+                        </div>
+                      )}
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 12px', fontSize: '0.76rem', color: MUT, marginBottom: 10 }}>
                       <div><span style={{ fontWeight: 700, color: INK }}>Reg:</span> <span style={{ fontFamily: 'ui-monospace, monospace' }}>{v.registration}</span></div>
@@ -1091,13 +1284,13 @@ export default function ProviderAdminDashboard() {
                     {employees.length === 0 ? <>No crew members. Click <b>New Employee</b> to register.</> : 'No crew members match your search or filter.'}
                   </div>
                 ) : filteredEmployees.map(e => (
-                  <div key={e.id} style={{ background: '#fff', border: `1px solid ${LN}`, borderRadius: 12, padding: 28, minHeight: 400, display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+                  <div key={e.id} style={{ background: '#fff', border: `1px solid ${LN}`, borderRadius: 20, padding: 30, minHeight: 470, display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', boxShadow: '0 2px 6px rgba(0,0,0,0.05)' }}>
                     {/* Profile photo — face thumbnail, or initials fallback */}
                     <div style={{
-                      width: 160, height: 160, borderRadius: '50%', overflow: 'hidden',
-                      background: G, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: '2.8rem', fontWeight: 800, fontFamily: 'ui-monospace, monospace',
-                      marginBottom: 20, flexShrink: 0, border: `2px solid ${LN}`,
+                      width: 168, height: 168, borderRadius: '50%', overflow: 'hidden',
+                      background: TEAL, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: '3rem', fontWeight: 800, fontFamily: 'ui-monospace, monospace',
+                      marginBottom: 16, flexShrink: 0, border: `3px solid ${LN}`,
                     }}>
                       {e.photo_url ? (
                         <img src={e.photo_url} alt={e.full_name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -1105,65 +1298,83 @@ export default function ProviderAdminDashboard() {
                         (e.initials || e.full_name.split(' ').map(n => n[0]).join('')).slice(0, 2).toUpperCase()
                       )}
                     </div>
-                    <div style={{ fontWeight: 700, fontSize: '0.92rem', color: INK, maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.full_name}</div>
-                    {!e.is_active && <div style={{ fontSize: '0.62rem', color: RED, fontWeight: 700, marginTop: 2, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Inactive</div>}
-                    <div style={{ fontSize: '0.76rem', color: MUT, marginTop: 8, lineHeight: 1.7 }}>
-                      <div><span style={{ fontWeight: 700, color: INK }}>HPCSA:</span> <span style={{ fontFamily: 'ui-monospace, monospace' }}>{e.hpcsa_number || '—'}</span></div>
-                      <div><span style={{ fontWeight: 700, color: INK }}>Phone:</span> {e.phone || '—'}</div>
+                    <div style={{ fontWeight: 800, fontSize: '1.1rem', color: INK, maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.full_name}</div>
+                    {/* Status pill */}
+                    <div style={{
+                      marginTop: 6, fontSize: '0.62rem', fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase',
+                      padding: '3px 12px', borderRadius: 999,
+                      background: e.is_active ? 'rgba(8,131,149,0.12)' : 'rgba(220,38,38,0.1)',
+                      color: e.is_active ? TEAL : RED,
+                    }}>
+                      {e.is_active ? 'Active' : 'Inactive'}
                     </div>
-                    <div style={{ display: 'flex', gap: 8, marginTop: 'auto', paddingTop: 16, width: '100%' }}>
-                      <Btn onClick={() => openEditEmp(e)} style={{ flex: 1, padding: '8px 10px', fontSize: '0.78rem' }}>Edit</Btn>
-                      <Btn kind="danger" onClick={() => deleteEmployee(e.id, e.full_name)} style={{ flex: 1, padding: '8px 10px', fontSize: '0.78rem' }}>Delete</Btn>
+                    {/* Details */}
+                    <div style={{ width: '100%', marginTop: 16, paddingTop: 14, borderTop: `1px solid ${LN}`, fontSize: '0.8rem', color: MUT, lineHeight: 2, textAlign: 'left' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><span style={{ fontWeight: 700, color: INK }}>HPCSA</span><span style={{ fontFamily: 'ui-monospace, monospace' }}>{e.hpcsa_number || '—'}</span></div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><span style={{ fontWeight: 700, color: INK }}>Phone</span><span>{e.phone || '—'}</span></div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><span style={{ fontWeight: 700, color: INK }}>Last login</span><span>{e.last_login ? new Date(e.last_login).toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: '2-digit' }) : '—'}</span></div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, marginTop: 'auto', paddingTop: 18, width: '100%' }}>
+                      <Btn onClick={() => openEditEmp(e)} style={{ flex: 1, padding: '9px 10px', fontSize: '0.8rem' }}>Edit</Btn>
+                      <Btn kind="danger" onClick={() => deleteEmployee(e.id, e.full_name)} style={{ flex: 1, padding: '9px 10px', fontSize: '0.8rem' }}>Delete</Btn>
                     </div>
                   </div>
                 ))}
               </div>
             ) : (
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr>
-                    <th style={thStyle}>Callsign</th>
-                    <th style={thStyle}>Registration</th>
-                    <th style={thStyle}>Type</th>
-                    <th style={thStyle}>Status</th>
-                    <th style={{ ...thStyle, textAlign: 'right' }}></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {loading ? (
-                    <tr><td colSpan={5} style={{ padding: 40, textAlign: 'center', color: MUT, fontSize: '0.82rem' }}>Loading…</td></tr>
-                  ) : filteredVehicles.length === 0 ? (
-                    <tr><td colSpan={5} style={{ padding: 48, textAlign: 'center', color: MUT, fontSize: '0.82rem' }}>
-                      {vehicles.length === 0 ? <>No vehicles. Click <b>New Vehicle</b> to register your fleet.</> : 'No vehicles match your search or filter.'}
-                    </td></tr>
-                  ) : filteredVehicles.map(v => (
-                    <tr key={v.id} style={{ borderTop: `1px solid ${LN}` }}
-                      onMouseEnter={ev => ev.currentTarget.style.background = '#fafafa'}
-                      onMouseLeave={ev => ev.currentTarget.style.background = 'transparent'}>
-                      <td style={{ ...tdStyle, fontFamily: 'ui-monospace, monospace', fontWeight: 700, letterSpacing: '0.04em' }}>
-                        {v.callsign}
-                      </td>
-                      <td style={{ ...tdStyle, fontFamily: 'ui-monospace, monospace', fontSize: '0.78rem' }}>
-                        {v.registration}
-                      </td>
-                      <td style={{ ...tdStyle, color: MUT, fontSize: '0.78rem' }}>{v.vehicle_type}</td>
-                      <td style={{ ...tdStyle, fontSize: '0.72rem', fontWeight: 700 }}>
-                        {!v.is_active ? (
-                          <span style={{ color: RED }}>● Inactive</span>
-                        ) : v.in_use ? (
-                          <span style={{ color: '#d97706' }}>● In Use</span>
-                        ) : (
-                          <span style={{ color: GD }}>● Available</span>
-                        )}
-                      </td>
-                      <td style={{ ...tdStyle, textAlign: 'right', whiteSpace: 'nowrap' }}>
-                        <Btn onClick={() => openEditVeh(v)} style={{ marginRight: 6 }}>Edit</Btn>
-                        <Btn kind="danger" onClick={() => deleteVehicle(v.id, v.callsign)}>Delete</Btn>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 20, padding: 16 }}>
+                {loading ? (
+                  <div style={{ gridColumn: '1 / -1', padding: 32, textAlign: 'center', color: MUT, fontSize: '0.82rem' }}>Loading…</div>
+                ) : filteredVehicles.length === 0 ? (
+                  <div style={{ gridColumn: '1 / -1', padding: 40, textAlign: 'center', color: MUT, fontSize: '0.82rem' }}>
+                    {vehicles.length === 0 ? <>No vehicles. Click <b>New Vehicle</b> to register your fleet.</> : 'No vehicles match your search or filter.'}
+                  </div>
+                ) : filteredVehicles.map(v => (
+                  <div key={v.id} style={{ background: '#fff', border: `1px solid ${LN}`, borderRadius: 20, padding: 30, minHeight: 470, display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', boxShadow: '0 2px 6px rgba(0,0,0,0.05)' }}>
+                    {/* Ambulance photo — thumbnail, or ambulance icon fallback */}
+                    <div style={{
+                      width: 168, height: 168, borderRadius: '50%', overflow: 'hidden',
+                      background: TEAL, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: '3.4rem', fontWeight: 800,
+                      marginBottom: 16, flexShrink: 0, border: `3px solid ${LN}`,
+                    }}>
+                      {v.photo_url ? (
+                        <img src={v.photo_url} alt={v.callsign} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      ) : (
+                        <svg width="76" height="76" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-label="Ambulance">
+                          <path d="M10 10H6"/>
+                          <path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/>
+                          <path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.62L18.3 9.38a1 1 0 0 0-.78-.38H14"/>
+                          <path d="M8 8v4"/>
+                          <path d="M9 18h6"/>
+                          <circle cx="17" cy="18" r="2"/>
+                          <circle cx="7" cy="18" r="2"/>
+                        </svg>
+                      )}
+                    </div>
+                    <div style={{ fontWeight: 800, fontSize: '1.1rem', color: INK, maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'ui-monospace, monospace', letterSpacing: '0.04em' }}>{v.callsign}</div>
+                    {/* Status pill — only flagged when inactive */}
+                    {!v.is_active && (
+                      <div style={{
+                        marginTop: 6, fontSize: '0.62rem', fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase',
+                        padding: '3px 12px', borderRadius: 999,
+                        background: 'rgba(220,38,38,0.1)', color: RED,
+                      }}>
+                        Inactive
+                      </div>
+                    )}
+                    {/* Details */}
+                    <div style={{ width: '100%', marginTop: 16, paddingTop: 14, borderTop: `1px solid ${LN}`, fontSize: '0.8rem', color: MUT, lineHeight: 2, textAlign: 'left' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><span style={{ fontWeight: 700, color: INK }}>Registration</span><span style={{ fontFamily: 'ui-monospace, monospace' }}>{v.registration || '—'}</span></div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><span style={{ fontWeight: 700, color: INK }}>Type</span><span>{v.vehicle_type || '—'}</span></div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, marginTop: 'auto', paddingTop: 18, width: '100%' }}>
+                      <Btn onClick={() => openEditVeh(v)} style={{ flex: 1, padding: '9px 10px', fontSize: '0.8rem' }}>Edit</Btn>
+                      <Btn kind="danger" onClick={() => deleteVehicle(v.id, v.callsign)} style={{ flex: 1, padding: '9px 10px', fontSize: '0.8rem' }}>Delete</Btn>
+                    </div>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
           )}
@@ -1181,7 +1392,7 @@ export default function ProviderAdminDashboard() {
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, marginBottom: 16 }}>
               <div style={{
                 width: 96, height: 96, borderRadius: '50%', overflow: 'hidden',
-                background: G, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: TEAL, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
                 fontSize: '1.6rem', fontWeight: 800, fontFamily: 'ui-monospace, monospace',
                 flexShrink: 0, border: `2px solid ${LN}`,
               }}>
@@ -1248,7 +1459,7 @@ export default function ProviderAdminDashboard() {
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, marginBottom: 16 }}>
               <div style={{
                 width: 96, height: 96, borderRadius: '50%', overflow: 'hidden',
-                background: G, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: TEAL, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
                 fontSize: '1.6rem', fontWeight: 800, fontFamily: 'ui-monospace, monospace',
                 flexShrink: 0, border: `2px solid ${LN}`,
               }}>
@@ -1320,9 +1531,44 @@ export default function ProviderAdminDashboard() {
 
       {/* Add Vehicle Modal */}
       {addVehOpen && (
-        <Modal title="Register New Vehicle" onClose={() => { setAddVehOpen(false); setNewVehErr(''); }}>
+        <Modal title="Register New Vehicle" onClose={() => { setAddVehOpen(false); setNewVehErr(''); resetNewVehPhoto(); }}>
           {newVehErr && <Alert type="error" text={newVehErr} />}
           <form onSubmit={submitNewVeh}>
+            {/* ── Ambulance photo ── */}
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+              <div style={{
+                width: 96, height: 96, borderRadius: '50%', overflow: 'hidden',
+                background: TEAL, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: '2rem', flexShrink: 0, border: `2px solid ${LN}`,
+              }}>
+                {newVehPhotoUrl ? (
+                  <img src={newVehPhotoUrl} alt="Ambulance photo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                ) : (
+                  <svg width="46" height="46" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-label="Ambulance">
+                    <path d="M10 10H6"/>
+                    <path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/>
+                    <path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.62L18.3 9.38a1 1 0 0 0-.78-.38H14"/>
+                    <path d="M8 8v4"/>
+                    <path d="M9 18h6"/>
+                    <circle cx="17" cy="18" r="2"/>
+                    <circle cx="7" cy="18" r="2"/>
+                  </svg>
+                )}
+              </div>
+              <label style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+                padding: '8px 14px', border: `1px solid ${GD}`, borderRadius: 4,
+                background: G, color: '#fff', fontSize: '0.78rem', fontWeight: 700,
+              }}>
+                {newVehPhotoUrl ? 'Change Photo of Ambulance' : 'Add Photo of Ambulance'}
+                <input type="file" accept="image/png,image/jpeg,image/webp" style={{ display: 'none' }}
+                  onChange={e => {
+                    const f = e.target.files?.[0];
+                    if (f) { if (newVehPhotoUrl) URL.revokeObjectURL(newVehPhotoUrl); setNewVehPhoto(f); setNewVehPhotoUrl(URL.createObjectURL(f)); }
+                    e.currentTarget.value = '';
+                  }} />
+              </label>
+            </div>
             <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '0 14px' }}>
               <Field label="Callsign" value={newVeh.callsign} onChange={v => setNewVeh(p => ({ ...p, callsign: v }))} placeholder="JEMS-1" required mono />
               <Field label="Registration" value={newVeh.registration} onChange={v => setNewVeh(p => ({ ...p, registration: v }))} placeholder="GP 12-34-56" required mono />
@@ -1356,6 +1602,39 @@ export default function ProviderAdminDashboard() {
         <Modal title="Edit Vehicle" onClose={() => { setEditVehId(null); setEditVehErr(''); }}>
           {editVehErr && <Alert type="error" text={editVehErr} />}
           <form onSubmit={submitEditVeh}>
+            {/* ── Ambulance photo ── */}
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+              <div style={{
+                width: 96, height: 96, borderRadius: '50%', overflow: 'hidden',
+                background: TEAL, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: '2rem', flexShrink: 0, border: `2px solid ${LN}`,
+              }}>
+                {editVehPhoto ? (
+                  <img src={editVehPhoto} alt="Ambulance photo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                ) : (
+                  <svg width="46" height="46" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-label="Ambulance">
+                    <path d="M10 10H6"/>
+                    <path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/>
+                    <path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.62L18.3 9.38a1 1 0 0 0-.78-.38H14"/>
+                    <path d="M8 8v4"/>
+                    <path d="M9 18h6"/>
+                    <circle cx="17" cy="18" r="2"/>
+                    <circle cx="7" cy="18" r="2"/>
+                  </svg>
+                )}
+              </div>
+              <label style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6, cursor: vehPhotoBusy ? 'wait' : 'pointer',
+                padding: '8px 14px', border: `1px solid ${GD}`, borderRadius: 4,
+                background: vehPhotoBusy ? '#e5e7eb' : G, color: vehPhotoBusy ? MUT : '#fff',
+                fontSize: '0.78rem', fontWeight: 700,
+              }}>
+                {vehPhotoBusy ? 'Uploading…' : (editVehPhoto ? 'Replace Photo of Ambulance' : 'Add Photo of Ambulance')}
+                <input type="file" accept="image/png,image/jpeg,image/webp" style={{ display: 'none' }}
+                  disabled={vehPhotoBusy}
+                  onChange={e => { const f = e.target.files?.[0]; if (f) uploadVehPhoto(f); e.currentTarget.value = ''; }} />
+              </label>
+            </div>
             <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '0 14px' }}>
               <Field label="Callsign" value={editVeh.callsign} onChange={v => setEditVeh(p => ({ ...p, callsign: v }))} placeholder="JEMS-1" required mono />
               <Field label="Registration" value={editVeh.registration} onChange={v => setEditVeh(p => ({ ...p, registration: v }))} placeholder="GP 12-34-56" required mono />

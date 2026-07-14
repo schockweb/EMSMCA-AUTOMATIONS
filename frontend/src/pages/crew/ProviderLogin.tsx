@@ -210,7 +210,7 @@ export default function ProviderLogin() {
   };
 
   return (
-    <div className="login-page" style={{ overflowY: 'auto' }}>
+    <div className="login-page">
       
       {/* ── BACK BUTTON ── */}
       <button
@@ -249,7 +249,7 @@ export default function ProviderLogin() {
         <span>←</span> Back
       </button>
 
-      <div className="login-card" style={{ margin: '80px 0 40px 0', width: '100%', maxWidth: '440px', boxSizing: 'border-box' }}>
+      <div className="login-card">
         
         {/* Provider Logo Header */}
         <div className="login-logo" style={{ marginBottom: '24px' }}>
