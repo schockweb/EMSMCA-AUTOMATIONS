@@ -3249,19 +3249,42 @@ const FadeIn = ({ children, show, delay = 0 }: { children: React.ReactNode; show
 // This permanently prevents the mobile "cursor misalignment" bug.
 const Modal = ({ open, onClose, children, dismissOnBackdrop = true }: { open: boolean; onClose: () => void; children: React.ReactNode; dismissOnBackdrop?: boolean }) => {
   useScrollLock(open);   // block scrolling of the page behind this pop-up
+  // Track the VISUAL viewport so the overlay follows what the user actually
+  // sees when the mobile keyboard opens. Without this, the position:fixed
+  // overlay fills the taller LAYOUT viewport while the visible area is offset,
+  // so taps land on the wrong control (e.g. Start Route instead of the odometer
+  // field). This is the Chrome-mobile "click misalignment" the crew hit.
+  const [vv, setVv] = useState<{ top: number; height: number } | null>(null);
+  useEffect(() => {
+    if (!open || typeof window === 'undefined' || !window.visualViewport) { setVv(null); return; }
+    const vp = window.visualViewport;
+    const update = () => setVv({ top: vp.offsetTop, height: vp.height });
+    update();
+    vp.addEventListener('resize', update);
+    vp.addEventListener('scroll', update);
+    return () => { vp.removeEventListener('resize', update); vp.removeEventListener('scroll', update); };
+  }, [open]);
+
   if (!open) return null;
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+  // Anchor to the visual viewport when available (keyboard-safe on mobile),
+  // otherwise fall back to filling the layout viewport.
+  const anchor = vv
+    ? { position: 'fixed' as const, top: vv.top, left: 0, width: '100%', height: vv.height }
+    : { position: 'fixed' as const, inset: 0 };
   return ReactDOM.createPortal(
     <div
       style={{
-        position: 'fixed', inset: 0, zIndex: 99999,
+        ...anchor, zIndex: 99999,
         background: 'rgba(15,23,42,0.6)',
         backdropFilter: 'blur(4px)',
         display: 'flex', flexDirection: 'column',
         justifyContent: isMobile ? 'flex-start' : 'center',
         alignItems: 'center',
         padding: 20,
-        paddingTop: isMobile ? 80 : 20,
+        paddingTop: isMobile ? 40 : 20,
+        boxSizing: 'border-box',
+        overflowY: 'auto',
         WebkitTapHighlightColor: 'transparent',
         touchAction: 'manipulation',
       }}
@@ -3271,7 +3294,7 @@ const Modal = ({ open, onClose, children, dismissOnBackdrop = true }: { open: bo
         style={{
           background: '#f8fafc', borderRadius: 24,
           padding: '24px 16px', width: '100%', maxWidth: 500,
-          maxHeight: '80vh', display: 'flex', flexDirection: 'column',
+          maxHeight: '100%', display: 'flex', flexDirection: 'column',
           boxShadow: '0 10px 40px rgba(0,0,0,0.2)',
         }}
         onClick={e => e.stopPropagation()}
