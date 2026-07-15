@@ -31,6 +31,9 @@ class CaseUpdate(BaseModel):
     dependant_code: Optional[str] = None
     dispatch_type: Optional[str] = None
     referring_doctor_pr: Optional[str] = None
+    # Manual rename override for the PRF list name. Empty string clears the
+    # override and reverts to the computed "{PREFIX}{prf} PRF {scheme} {call}".
+    custom_display_name: Optional[str] = None
 
 
 class CaseResponse(BaseModel):

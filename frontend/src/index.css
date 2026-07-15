@@ -165,6 +165,11 @@ a:hover {
   top: 0;
   z-index: 100;
   backdrop-filter: blur(12px);
+  /* PWA safe area: on iOS installed apps (black-translucent status bar) the
+     web view fills the whole screen, so pad the header down past the notch /
+     status bar. env() is 0 on devices without an overlap, so this is a no-op
+     elsewhere. The header background fills the notch area for a clean look. */
+  padding-top: env(safe-area-inset-top);
 }
 
 .navbar-inner {
@@ -1560,6 +1565,14 @@ tr:hover td {
   /* Login page mobile adjustments */
   .login-page {
     padding: 20px;
+  }
+
+  /* Push the back button clear of the status bar / notch on phones. The inline
+     style already adds env(safe-area-inset-top); this bumps the base offset so
+     it also clears the browser chrome in a plain mobile tab (where the inset
+     reports 0). !important overrides the inline `top`. */
+  .provider-back-btn {
+    top: calc(env(safe-area-inset-top, 0px) + 44px) !important;
   }
 
   .login-card {

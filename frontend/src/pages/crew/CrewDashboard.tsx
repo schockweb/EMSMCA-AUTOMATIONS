@@ -6,6 +6,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import axios from '../../api/client';
+import { useScrollLock } from '../../hooks/useScrollLock';
 
 const G = '#10b981';
 const GD = '#059669';
@@ -157,6 +158,11 @@ export default function CrewDashboard() {
   const [vehicleSearch, setVehicleSearch] = useState('');
   const [step, setStep] = useState<Step>(token ? null : 'vehicle');
   const [selectedVehicle, setSelectedVehicle] = useState<Vehicle | null>(savedVehicle);
+
+  // Freeze the background page while the shift-start modal is open so it can't
+  // be scrolled under a finger on mobile (position:fixed lock — plain
+  // overflow:hidden doesn't stop touch scrolling on iOS Safari).
+  useScrollLock(!!step);
 
   // Crew roster for the name-dropdown. Populated from
   // /api/providers/{slug}/public-crew when the dashboard mounts so the
@@ -548,7 +554,7 @@ export default function CrewDashboard() {
 
   return (
     <div style={{
-      minHeight: '100vh', background: BL, color: T,
+      minHeight: '100vh', background: BL, color: T, paddingTop: 'env(safe-area-inset-top)',
       fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
     }}>
 

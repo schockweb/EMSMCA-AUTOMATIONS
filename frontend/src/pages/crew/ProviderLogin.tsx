@@ -6,6 +6,7 @@ import { useState, useEffect } from 'react';
 import type { FormEvent } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from '../../api/client';
+import { useScrollLock } from '../../hooks/useScrollLock';
 
 interface ProviderInfo {
   name: string;
@@ -60,6 +61,13 @@ export default function ProviderLogin() {
       document.body.style.overflow = prevBody;
     };
   }, []);
+
+  // The mount lock above uses overflow:hidden, which iOS Safari ignores for
+  // touch scrolling — so the page behind the Start-Shift wizard could still be
+  // scrolled with a finger on phones, stealing scroll from the modal. This
+  // robust lock (position:fixed) engages while the wizard is open and fully
+  // freezes the background on mobile.
+  useScrollLock(showShiftForm);
 
   // Pre-load provider logo/name
   useEffect(() => {
@@ -215,9 +223,14 @@ export default function ProviderLogin() {
       {/* ── BACK BUTTON ── */}
       <button
         onClick={() => navigate('/login')}
+        className="provider-back-btn"
         style={{
           position: 'absolute',
-          top: '24px',
+          // Offset below the device status bar / notch on mobile (the page is
+          // rendered viewport-fit=cover, so without this the button is clipped
+          // at the top edge on phones). Falls back to 24px on desktop where the
+          // safe-area inset is 0.
+          top: 'calc(env(safe-area-inset-top, 0px) + 24px)',
           left: '24px',
           background: 'rgba(255, 255, 255, 0.8)',
           backdropFilter: 'blur(10px)',

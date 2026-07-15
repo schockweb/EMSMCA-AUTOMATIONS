@@ -60,6 +60,11 @@ class Case(Base):
         Text, nullable=True,
         comment="Reason for flagging e.g. 'No API config found for scheme: XYZ Medical'"
     )
+    custom_display_name: Mapped[Union[str, None]] = mapped_column(
+        String(255), nullable=True,
+        comment="Manual override for the PRF list name (rename dialog). "
+                "When set, takes precedence over the computed PRF display name."
+    )
     assigned_provider_id: Mapped[Union[uuid.UUID, None]] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
     )

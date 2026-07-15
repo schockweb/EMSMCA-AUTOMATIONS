@@ -1,12 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
+import { useScrollLock } from '../hooks/useScrollLock';
 
 interface Case {
   id: string;
   file_name?: string;
   original_filename?: string;
   display_name?: string;
+  custom_display_name?: string;
   extracted_data?: Record<string, any>;
   patient_name: string;
   patient_id_number?: string;
@@ -46,6 +48,9 @@ export default function Cases() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
+
+  // Rename dialog state
+  const [renameCase, setRenameCase] = useState<Case | null>(null);
 
   // RFI Queue State
   const [showRfiQueue, setShowRfiQueue] = useState(false);
@@ -108,7 +113,18 @@ export default function Cases() {
     }
   };
 
-  const filteredCases = cases.filter(c => 
+  const saveRename = async (caseId: string, newName: string) => {
+    const cleaned = newName.trim();
+    // Persist the override; empty string clears it and reverts to the computed name.
+    const res = await api.patch(`/api/cases/${caseId}`, { custom_display_name: cleaned });
+    const updated = res.data as Case;
+    setCases(prev => prev.map(c => c.id === caseId
+      ? { ...c, custom_display_name: updated.custom_display_name, display_name: updated.display_name }
+      : c));
+    setRenameCase(null);
+  };
+
+  const filteredCases = cases.filter(c =>
     getPrfDisplayName(c).toLowerCase().includes(searchTerm.toLowerCase()) ||
     c.original_filename?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     c.medical_scheme_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -135,10 +151,9 @@ export default function Cases() {
         .cases-in { animation: casesFadeUp 0.4s ease-out forwards; }
         .cases-th { cursor:pointer; user-select:none; white-space:nowrap; }
         .cases-th:hover { color: var(--brand-teal); }
-        .cases-table tbody tr:hover td { background: rgba(8,131,149,0.025); }
-        .cases-table td, .cases-table th { padding: 12px 14px; }
-        .cases-table th { font-size:0.72rem; font-weight:700; text-transform:uppercase; letter-spacing:0.07em; color:var(--text-muted); background:var(--surface-50); border-bottom:1px solid var(--glass-border); }
-        .cases-table td { border-bottom:1px solid var(--surface-100); vertical-align:middle; }
+        .cases-table tbody tr:hover td { background: rgba(8,131,149,0.03); }
+        .cases-table th { padding: 12px 16px; font-size:0.8rem; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted); background:var(--surface-50); border-bottom:1px solid var(--glass-border); }
+        .cases-table td { padding: 13px 16px; border-bottom:1px solid var(--surface-100); vertical-align:middle; }
         .cases-table tbody tr:last-child td { border-bottom:none; }
       `}</style>
 
@@ -257,18 +272,14 @@ export default function Cases() {
             <tbody>
               {sortedCases.map(c => (
                 <tr key={c.id}
-                  style={{
-                    background: c.auth_flag ? 'rgba(245,124,0,0.03)' : undefined,
-                    animation: c.auth_flag ? 'casesRowPulse 3s ease-in-out infinite' : 'none',
-                  }}
+                  style={{ background: c.auth_flag ? 'rgba(245,124,0,0.04)' : undefined }}
                 >
 
                   {/* Patient / PRF */}
                   <td style={{ maxWidth: 340 }}>
-                    <div style={{ fontWeight: 600, fontSize: '0.88rem', color: 'var(--text-primary)', cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
-                      onClick={() => navigate(`/cases/${c.id}/prf`)}
-                      onMouseEnter={e => (e.currentTarget as HTMLElement).style.textDecoration = 'underline'}
-                      onMouseLeave={e => (e.currentTarget as HTMLElement).style.textDecoration = 'none'}>
+                    <div style={{ fontWeight: 600, fontSize: '1.02rem', color: 'var(--text-primary)', cursor: 'text', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', userSelect: 'none' }}
+                      title="Double-click to rename"
+                      onDoubleClick={() => setRenameCase(c)}>
                       {getPrfDisplayName(c)}
                     </div>
                   </td>
@@ -279,15 +290,15 @@ export default function Cases() {
                       <button onClick={() => navigate(`/cases/${c.id}/prf`)}
                         title="View PRF (branded for scheme submission)"
                         style={{
-                          padding: '6px 14px', borderRadius: 8, border: '1px solid rgba(8,131,149,0.35)', cursor: 'pointer',
-                          fontSize: '0.78rem', fontWeight: 800, color: 'var(--brand-teal)',
-                          background: 'white',
-                          transition: 'all 0.15s',
-                          display: 'flex', alignItems: 'center', gap: 6,
+                          padding: '7px 12px', borderRadius: 7, border: 'none', cursor: 'pointer',
+                          fontSize: '0.92rem', fontWeight: 700, color: 'var(--brand-teal)',
+                          background: 'transparent',
+                          transition: 'background 0.15s',
+                          display: 'inline-flex', alignItems: 'center', gap: 5,
                         }}
                         onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(8,131,149,0.08)'; }}
-                        onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'white'; }}>
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>
+                        onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}>
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>
                         View PRF
                       </button>
                     </div>
@@ -317,9 +328,116 @@ export default function Cases() {
         </div>
       )}
 
+      {renameCase && (
+        <RenameModal
+          key={renameCase.id}
+          initialName={getPrfDisplayName(renameCase)}
+          onCancel={() => setRenameCase(null)}
+          onSave={(name) => saveRename(renameCase.id, name)}
+        />
+      )}
+
       {showRfiQueue && (
         <RfiQueueModal rfis={activeRfis} loading={rfiLoading} onClose={() => setShowRfiQueue(false)} onReload={loadRFIs} />
       )}
+    </div>
+  );
+}
+
+function RenameModal({ initialName, onSave, onCancel }: {
+  initialName: string;
+  onSave: (name: string) => Promise<void> | void;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState(initialName);
+  const [saving, setSaving] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  useScrollLock(true);
+
+  useEffect(() => {
+    // Focus + select the whole name so the user can retype immediately.
+    const t = setTimeout(() => { inputRef.current?.focus(); inputRef.current?.select(); }, 30);
+    return () => clearTimeout(t);
+  }, []);
+
+  const submit = async () => {
+    if (saving) return;
+    setSaving(true);
+    try {
+      await onSave(name);
+    } catch {
+      setSaving(false);
+      alert('Failed to rename. Please try again.');
+    }
+  };
+
+  return (
+    <div
+      onClick={onCancel}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 200,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: 'rgba(15,23,42,0.45)', padding: 20,
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          width: 460, maxWidth: '94vw', background: 'white', borderRadius: 16,
+          boxShadow: '0 24px 60px rgba(0,0,0,0.22)', overflow: 'hidden',
+        }}
+      >
+        <div style={{ padding: '20px 22px 8px' }}>
+          <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+            Rename PRF
+          </h3>
+          <p style={{ margin: '6px 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+            Edit the name shown in the list. Leave blank to reset to the default name.
+          </p>
+        </div>
+        <div style={{ padding: '10px 22px 4px' }}>
+          <input
+            ref={inputRef}
+            value={name}
+            onChange={e => setName(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter') { e.preventDefault(); submit(); }
+              if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
+            }}
+            placeholder="PRF name"
+            style={{
+              width: '100%', boxSizing: 'border-box', padding: '11px 13px',
+              fontSize: '1rem', borderRadius: 9, border: '1px solid var(--surface-200, #d1d5db)',
+              outline: 'none',
+            }}
+            onFocus={e => (e.currentTarget.style.borderColor = 'var(--brand-teal)')}
+            onBlur={e => (e.currentTarget.style.borderColor = 'var(--surface-200, #d1d5db)')}
+          />
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, padding: '16px 22px 20px' }}>
+          <button
+            onClick={onCancel}
+            disabled={saving}
+            style={{
+              padding: '9px 16px', borderRadius: 9, border: '1px solid var(--surface-200, #d1d5db)',
+              background: 'white', color: 'var(--text-primary)', fontWeight: 600, cursor: 'pointer',
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={submit}
+            disabled={saving}
+            style={{
+              padding: '9px 18px', borderRadius: 9, border: 'none',
+              background: 'var(--brand-teal)', color: 'white', fontWeight: 700,
+              cursor: saving ? 'default' : 'pointer', opacity: saving ? 0.7 : 1,
+            }}
+          >
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

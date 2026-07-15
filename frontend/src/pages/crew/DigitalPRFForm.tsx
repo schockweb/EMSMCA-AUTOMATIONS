@@ -3357,6 +3357,9 @@ const CTA = ({ label, color = '#0f172a', onClick }: { label: string; color?: str
 const EnRouteOverlay = ({ dispatchedAt, onDoubleTap }: { dispatchedAt: string; onDoubleTap: () => void }) => {
   const [, tick] = useState(0);
   const lastTapRef = useRef<number>(0);
+  // A double-tap can happen by accident (phone in a pocket, a fumbled tap), so
+  // we confirm the arrival was intentional before actually marking On Scene.
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   useEffect(() => {
     const id = setInterval(() => tick(t => t + 1), 1000);
@@ -3368,9 +3371,10 @@ const EnRouteOverlay = ({ dispatchedAt, onDoubleTap }: { dispatchedAt: string; o
   const secs = elapsed % 60;
 
   const handleTap = () => {
+    if (confirmOpen) return;   // ignore background taps while confirming
     const now = Date.now();
     if (now - lastTapRef.current < 400) {
-      onDoubleTap();
+      setConfirmOpen(true);
     }
     lastTapRef.current = now;
   };
@@ -3394,6 +3398,55 @@ const EnRouteOverlay = ({ dispatchedAt, onDoubleTap }: { dispatchedAt: string; o
         <div style={{ width: 10, height: 10, borderRadius: 5, background: '#5b8def' }} />
         Double tap anywhere when on scene
       </div>
+
+      {/* Purposeful-action confirmation — guards against an accidental double-tap
+          marking arrival on scene before the crew actually arrived. */}
+      {confirmOpen && (
+        <div
+          onClick={e => e.stopPropagation()}
+          style={{
+            position: 'absolute', inset: 0, zIndex: 1,
+            background: 'rgba(15,23,42,0.72)', backdropFilter: 'blur(2px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+          }}
+        >
+          <div style={{
+            width: '100%', maxWidth: 360, background: '#ffffff', borderRadius: 16,
+            padding: 24, textAlign: 'center', boxShadow: '0 24px 60px rgba(0,0,0,0.45)',
+          }}>
+            <div style={{ fontSize: '1.15rem', fontWeight: 900, color: '#0f172a', marginBottom: 8 }}>
+              Arrived on scene?
+            </div>
+            <div style={{ fontSize: '0.9rem', color: '#475569', lineHeight: 1.5, marginBottom: 20 }}>
+              Confirm you meant to mark arrival — a double-tap can happen by accident.
+            </div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                type="button"
+                onClick={() => setConfirmOpen(false)}
+                style={{
+                  flex: 1, padding: '12px 14px', borderRadius: 10,
+                  border: '1.5px solid #cbd5e1', background: '#fff', color: '#334155',
+                  fontSize: '0.9rem', fontWeight: 800, cursor: 'pointer', touchAction: 'manipulation',
+                }}
+              >
+                Not yet
+              </button>
+              <button
+                type="button"
+                onClick={onDoubleTap}
+                style={{
+                  flex: 1, padding: '12px 14px', borderRadius: 10, border: 'none',
+                  background: '#5b8def', color: '#fff',
+                  fontSize: '0.9rem', fontWeight: 800, cursor: 'pointer', touchAction: 'manipulation',
+                }}
+              >
+                Yes, we've arrived
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -5363,22 +5416,28 @@ export default function DigitalPRFForm() {
   // ── Phase 0: DISPATCH ─────────────────────────────────────────────────────
   const P0 = () => {
     const startExamBtn = (
-      <button
-        type="button"
-        onClick={() => {
-          setStartedExam(true);
-          if (!fd.treating_practitioner_category) {
-            setCrewPicker({ phase: 'select', kind: 'treating' });
-          }
-        }}
-        style={{
-          width: '100%', padding: '14px 16px', borderRadius: 12,
-          background: '#eff6ff', color: '#1d4ed8', border: '1.5px dashed #93c5fd',
-          fontWeight: 800, fontSize: '0.9rem', cursor: 'pointer', marginTop: 16,
-        }}
-      >
-        Start Examination ↓
-      </button>
+      <>
+        <style>{`@keyframes startExamSlideIn { from { transform: translateY(32px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }`}</style>
+        <button
+          type="button"
+          id="start-exam-button"
+          onClick={() => {
+            setStartedExam(true);
+            if (!fd.treating_practitioner_category) {
+              setCrewPicker({ phase: 'select', kind: 'treating' });
+            }
+          }}
+          style={{
+            width: '100%', padding: '14px 16px', borderRadius: 12,
+            background: '#eff6ff', color: '#1d4ed8', border: '1.5px dashed #93c5fd',
+            fontWeight: 800, fontSize: '0.9rem', cursor: 'pointer', marginTop: 16,
+            // Slides up into view when it appears after On Scene time is marked.
+            animation: 'startExamSlideIn 0.45s cubic-bezier(0.22, 1, 0.36, 1)',
+          }}
+        >
+          Start Examination ↓
+        </button>
+      </>
     );
 
     const isMobileView = typeof window !== 'undefined' && window.innerWidth < 768;
@@ -7971,7 +8030,7 @@ export default function DigitalPRFForm() {
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <FormContext.Provider value={{ fd, sf, inArr, toggleArr, profile, prfMeta, renderDispatchTimes: () => TimeTable({ rows: ALL_TIME_ROWS.filter(r => r.phase === 0 || r.phase === 2) }) }}>
-      <div style={{ minHeight: '100vh', maxWidth: '100vw', overflowX: 'clip', background: S50, color: S900, paddingBottom: 100, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }}>
+      <div style={{ minHeight: '100vh', maxWidth: '100vw', overflowX: 'clip', background: S50, color: S900, paddingTop: 'env(safe-area-inset-top)', paddingBottom: 100, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }}>
 
         {/* ── Sticky header — fancy journey-phase bar ──
           Gradient backdrop, glossy nodes with subtle inner highlight, active
@@ -7981,7 +8040,7 @@ export default function DigitalPRFForm() {
           Now shown on brand-new PRFs (phase 0 / Dispatch) as well. */}
         {phase >= 0 && (
         <div style={{
-          position: 'sticky', top: 8, zIndex: 50,
+          position: 'sticky', top: 'calc(8px + env(safe-area-inset-top))', zIndex: 50,
           width: isScrolled ? 'min(400px, calc(100% - 64px))' : 'min(760px, calc(100% - 32px))', margin: '12px auto 0',
           background: 'linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(248,250,252,0.96) 100%)',
           backdropFilter: 'blur(14px)',
@@ -8521,11 +8580,11 @@ export default function DigitalPRFForm() {
                           style={{
                             display: 'flex', alignItems: 'center', gap: 14,
                             textAlign: 'left', cursor: 'pointer', width: '100%',
-                            background: isOn ? '#f0fdf4' : '#f8fafc',
+                            background: isOn ? '#fff' : '#f8fafc',
                             border: `1.5px solid ${isOn ? G : S200}`,
                             borderRadius: 14, padding: '13px 14px',
                             transition: 'all 0.15s ease',
-                            boxShadow: isOn ? `0 2px 10px ${G}25` : 'none',
+                            boxShadow: isOn ? '0 2px 10px rgba(15,23,42,0.08)' : 'none',
                           }}
                         >
                           {/* Avatar circle */}
@@ -9036,6 +9095,15 @@ export default function DigitalPRFForm() {
                 setOnScenePromptOpen(false);
                 if (hasError) return;
                 runMarkTime();
+                // On mobile the Start Examination button renders below the fold
+                // once On Scene time is marked. Slide the page down to the button
+                // (block:'end' brings it to the bottom of the view) so the crew
+                // can see it. The button also plays its slide-in animation.
+                if (window.innerWidth < 768) {
+                  window.setTimeout(() => {
+                    document.getElementById('start-exam-button')?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+                  }, 150);
+                }
               }}
               style={{
                 flex: 2, padding: '12px 24px', borderRadius: 12, fontSize: '0.9rem',
@@ -9220,12 +9288,6 @@ export default function DigitalPRFForm() {
             BLS / ILS / ALS selection only — no other options. ────────────── */}
         {assessmentModalOpen && (() => {
           const LEVELS = fd.call_type === 'RESUS' ? (['ILS', 'ALS'] as const) : (['BLS', 'ILS', 'ALS'] as const);
-          type Level = typeof LEVELS[number];
-          const DESC: Record<Level, string> = {
-            BLS: 'Basic Life Support — primary care & stabilisation',
-            ILS: 'Intermediate Life Support — advanced assessment',
-            ALS: 'Advanced Life Support — critical care & ALS procedures',
-          };
           return (
             <Modal open={true} onClose={() => setAssessmentModalOpen(false)}>
               <div style={{ padding: '0 4px 0px', borderBottom: `1px solid ${S100}`, marginBottom: 14 }}>
@@ -9233,7 +9295,7 @@ export default function DigitalPRFForm() {
                   Assessment Level
                 </div>
                 <div style={{ fontSize: '0.78rem', color: S400, marginTop: 3, marginBottom: 12 }}>
-                  Select the level at which this patient was assessed
+                  Select the level at which this patient is being assessed
                 </div>
               </div>
 
@@ -9260,10 +9322,9 @@ export default function DigitalPRFForm() {
                         touchAction: 'manipulation',
                       }}
                     >
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 800, fontSize: '0.96rem', color: isOn ? GDK : S900 }}>{lvl}</div>
-                        <div style={{ fontSize: '0.72rem', color: isOn ? GDK : S400, marginTop: 2, lineHeight: 1.4 }}>{DESC[lvl]}</div>
-                      </div>
+                      {/* Left spacer balances the checkbox so the level label sits truly centred */}
+                      <div style={{ width: 22, flexShrink: 0 }} />
+                      <div style={{ flex: 1, minWidth: 0, textAlign: 'center', fontWeight: 800, fontSize: '0.96rem', color: isOn ? GDK : S900 }}>{lvl}</div>
                       <div style={{
                         width: 22, height: 22, borderRadius: 11, flexShrink: 0,
                         border: `2px solid ${isOn ? G : S200}`,

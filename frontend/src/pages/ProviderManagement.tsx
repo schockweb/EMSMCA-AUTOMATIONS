@@ -47,11 +47,57 @@ interface Vehicle {
 const teal = '#088395';
 const rose = '#C2185B';
 
-// ── Gear / Settings SVG Icon ──
-const GearIcon = ({ size = 16 }: { size?: number }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+// ── Inline SVG icons (stroke = currentColor so they inherit text color) ──
+type IconProps = { size?: number };
+const svgBase = (size: number) => ({
+  width: size, height: size, viewBox: '0 0 24 24', fill: 'none',
+  stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const,
+});
+const GearIcon = ({ size = 16 }: IconProps) => (
+  <svg {...svgBase(size)}>
     <circle cx="12" cy="12" r="3" />
     <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+  </svg>
+);
+const BackIcon = ({ size = 18 }: IconProps) => (
+  <svg {...svgBase(size)}><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
+);
+const UsersIcon = ({ size = 16 }: IconProps) => (
+  <svg {...svgBase(size)}>
+    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" />
+    <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
+  </svg>
+);
+const AmbulanceIcon = ({ size = 16 }: IconProps) => (
+  <svg {...svgBase(size)}>
+    <path d="M10 10H6M8 8v4" />
+    <path d="M4 17V7a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v3h3.5a1 1 0 0 1 .8.4l2.5 3.3a1 1 0 0 1 .2.6V17a1 1 0 0 1-1 1h-1" />
+    <circle cx="7.5" cy="18" r="2" /><circle cx="17.5" cy="18" r="2" /><path d="M9.5 18h6M4 18H3" />
+  </svg>
+);
+const TrashIcon = ({ size = 16 }: IconProps) => (
+  <svg {...svgBase(size)}>
+    <path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m2 0v14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V6" />
+    <path d="M10 11v6M14 11v6" />
+  </svg>
+);
+const UploadIcon = ({ size = 16 }: IconProps) => (
+  <svg {...svgBase(size)}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" /></svg>
+);
+const WarnIcon = ({ size = 16 }: IconProps) => (
+  <svg {...svgBase(size)}>
+    <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+    <path d="M12 9v4M12 17h.01" />
+  </svg>
+);
+const HospitalIcon = ({ size = 16 }: IconProps) => (
+  <svg {...svgBase(size)}>
+    <path d="M3 21h18M5 21V7l7-4 7 4v14" /><path d="M12 8v6M9 11h6" />
+  </svg>
+);
+const SpinnerIcon = ({ size = 16 }: IconProps) => (
+  <svg {...svgBase(size)} style={{ animation: 'pm-spin 0.8s linear infinite' }}>
+    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
   </svg>
 );
 
@@ -478,6 +524,11 @@ export default function ProviderManagement() {
   // ── Provider Detail View (Crew + Vehicles) ──
   return (
     <div style={{ maxWidth: 900, margin: '0 auto' }}>
+      <style>{`
+        @keyframes pm-spin { to { transform: rotate(360deg); } }
+        .pm-row { transition: background 0.12s; }
+        .pm-row:hover { background: rgba(8,131,149,0.035); }
+      `}</style>
       {/* Edit Client Modal */}
       {showEditClient && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
@@ -503,7 +554,7 @@ export default function ProviderManagement() {
                     {logoPreview ? (
                       <img src={logoPreview} alt="logo preview" style={{ width: '100%', height: '100%', objectFit: 'contain', padding: 4 }} />
                     ) : (
-                      <span style={{ fontSize: '1.6rem' }}>🏥</span>
+                      <span style={{ color: 'var(--text-muted)' }}><HospitalIcon size={26} /></span>
                     )}
                   </div>
                   <div style={{ flex: 1 }}>
@@ -517,11 +568,15 @@ export default function ProviderManagement() {
                       color: logoUploading ? 'var(--text-muted)' : '#fff',
                       fontSize: '0.78rem', fontWeight: 700, cursor: logoUploading ? 'wait' : 'pointer',
                     }}>
-                      {logoUploading ? '⏳ Uploading…' : '📤 Upload Logo'}
+                      {logoUploading ? <SpinnerIcon size={14} /> : <UploadIcon size={14} />}
+                      {logoUploading ? 'Uploading…' : 'Upload Logo'}
                       <input type="file" accept="image/png,image/jpeg,image/svg+xml,image/webp" style={{ display: 'none' }} onChange={handleLogoUpload} disabled={logoUploading} />
                     </label>
                     {logoPreview && (
-                      <p style={{ fontSize: '0.68rem', color: '#4caf50', margin: '6px 0 0', fontWeight: 600 }}>✓ Logo uploaded</p>
+                      <p style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: '0.68rem', color: '#4caf50', margin: '6px 0 0', fontWeight: 600 }}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+                        Logo uploaded
+                      </p>
                     )}
                   </div>
                 </div>
@@ -624,9 +679,9 @@ export default function ProviderManagement() {
                 <div style={{ display: 'flex', gap: 8, justifyContent: 'space-between', alignItems: 'center' }}>
                   <button
                     onClick={() => { setShowDeleteConfirm(true); setDeleteConfirmText(''); }}
-                    style={{ background: 'none', border: '1px solid #e53e3e', borderRadius: 8, color: '#e53e3e', padding: '8px 14px', fontSize: '0.78rem', fontWeight: 700, cursor: 'pointer' }}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: 'none', border: '1px solid #e53e3e', borderRadius: 8, color: '#e53e3e', padding: '8px 14px', fontSize: '0.78rem', fontWeight: 700, cursor: 'pointer' }}
                   >
-                    🗑 Delete Client
+                    <TrashIcon size={14} /> Delete Client
                   </button>
                   <div style={{ display: 'flex', gap: 8 }}>
                     <button style={{ ...btnPrimary, background: 'var(--surface-200)', color: 'var(--text)' }} onClick={() => setShowEditClient(false)}>Cancel</button>
@@ -637,7 +692,7 @@ export default function ProviderManagement() {
                 </div>
               ) : (
                 <div style={{ background: 'rgba(229,62,62,0.06)', border: '1px solid rgba(229,62,62,0.3)', borderRadius: 10, padding: '16px' }}>
-                  <p style={{ fontSize: '0.82rem', fontWeight: 700, color: '#e53e3e', margin: '0 0 4px' }}>⚠️ This will permanently delete this client and ALL their crew, vehicles, and PRFs.</p>
+                  <p style={{ display: 'flex', alignItems: 'flex-start', gap: 7, fontSize: '0.82rem', fontWeight: 700, color: '#e53e3e', margin: '0 0 4px' }}><span style={{ flexShrink: 0, marginTop: 1 }}><WarnIcon size={15} /></span> This will permanently delete this client and ALL their crew, vehicles, and PRFs.</p>
                   <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: '0 0 12px' }}>Type <strong>{selectedProvider?.name}</strong> to confirm:</p>
                   <input
                     style={{ ...inputStyle, marginBottom: 12, borderColor: 'rgba(229,62,62,0.4)' }}
@@ -664,7 +719,7 @@ export default function ProviderManagement() {
 
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-        <button onClick={() => { setSelectedProvider(null); fetchProviders(); }} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.2rem', color: teal }}>←</button>
+        <button onClick={() => { setSelectedProvider(null); fetchProviders(); }} title="Back to clients" style={{ background: 'none', border: 'none', cursor: 'pointer', color: teal, display: 'inline-flex', alignItems: 'center', padding: 4 }}><BackIcon size={20} /></button>
         <div style={{ flex: 1 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <h1 style={{ fontSize: '1.3rem', fontWeight: 800, margin: 0, color: 'var(--text)' }}>{selectedProvider.name}</h1>
@@ -700,12 +755,15 @@ export default function ProviderManagement() {
       <div style={{ display: 'flex', gap: 4, marginBottom: 16, borderBottom: '2px solid var(--surface-100)', paddingBottom: 0 }}>
         {(['crew', 'vehicles'] as const).map(tab => (
           <button key={tab} onClick={() => setActiveTab(tab)} style={{
+            display: 'inline-flex', alignItems: 'center', gap: 8,
             padding: '8px 20px', fontSize: '0.82rem', fontWeight: 700, cursor: 'pointer',
             border: 'none', borderBottom: activeTab === tab ? `2px solid ${teal}` : '2px solid transparent',
             background: 'transparent', color: activeTab === tab ? teal : 'var(--text-muted)',
             textTransform: 'uppercase', letterSpacing: '0.06em',
           }}>
-            {tab === 'crew' ? `👥 Crew (${crew.length})` : `🚑 Vehicles (${vehicles.length})`}
+            {tab === 'crew'
+              ? <><UsersIcon size={15} /> Crew ({crew.length})</>
+              : <><AmbulanceIcon size={16} /> Vehicles ({vehicles.length})</>}
           </button>
         ))}
       </div>
@@ -757,45 +815,51 @@ export default function ProviderManagement() {
 
           {/* Crew Table */}
           <div style={{ ...cardStyle, padding: 0, overflow: 'hidden' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.86rem' }}>
               <thead>
                 <tr style={{ background: 'var(--surface-100)', textAlign: 'left' }}>
-                  <th style={{ padding: '10px 14px', fontWeight: 700, fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Name</th>
-                  <th style={{ padding: '10px 14px', fontWeight: 700, fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)' }}>HPCSA #</th>
-                  <th style={{ padding: '10px 14px', fontWeight: 700, fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Qual</th>
-                  <th style={{ padding: '10px 14px', fontWeight: 700, fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Email</th>
-                  <th style={{ padding: '10px 14px', fontWeight: 700, fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Status</th>
-                  <th style={{ padding: '10px 14px', fontWeight: 700, fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)', textAlign: 'right' }}>Actions</th>
+                  <th style={{ padding: '12px 18px', fontWeight: 700, fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)' }}>Crew Member</th>
+                  <th style={{ padding: '12px 18px', fontWeight: 700, fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)' }}>HPCSA #</th>
+                  <th style={{ padding: '12px 18px', fontWeight: 700, fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', textAlign: 'right' }} />
                 </tr>
               </thead>
               <tbody>
                 {crew.map(c => (
-                  <tr key={c.id} style={{ borderBottom: '1px solid var(--surface-100)' }}>
-                    <td style={{ padding: '10px 14px', fontWeight: 600 }}>{c.full_name}</td>
-                    <td style={{ padding: '10px 14px', fontFamily: 'monospace', fontSize: '0.8rem' }}>{c.hpcsa_number || '—'}</td>
-                    <td style={{ padding: '10px 14px' }}>
-                      <span style={{ padding: '2px 8px', borderRadius: 99, fontSize: '0.7rem', fontWeight: 700,
-                        background: c.qualification === 'ALS' ? 'rgba(194,24,91,0.1)' : 'rgba(8,131,149,0.1)',
-                        color: c.qualification === 'ALS' ? rose : teal }}>
-                        {c.qualification}
-                      </span>
+                  <tr key={c.id} className="pm-row" style={{ borderBottom: '1px solid var(--surface-100)' }}>
+                    <td style={{ padding: '12px 18px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <span style={{
+                          width: 38, height: 38, borderRadius: '50%', flexShrink: 0,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          background: 'rgba(8,131,149,0.1)', color: teal,
+                          fontSize: '0.82rem', fontWeight: 800, letterSpacing: '0.02em',
+                        }}>
+                          {(c.initials || c.full_name.split(' ').map(p => p[0]).join('').slice(0, 2) || '—').toUpperCase()}
+                        </span>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontWeight: 700, color: 'var(--text)', fontSize: '0.9rem' }}>{c.full_name}</div>
+                          {c.phone && (
+                            <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: 1 }}>{c.phone}</div>
+                          )}
+                        </div>
+                      </div>
                     </td>
-                    <td style={{ padding: '10px 14px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>{c.email}</td>
-                    <td style={{ padding: '10px 14px' }}>
-                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: c.is_active ? '#4caf50' : '#e53e3e', display: 'inline-block' }} />
-                    </td>
-                    <td style={{ padding: '10px 14px', textAlign: 'right' }}>
-                      <button 
+                    <td style={{ padding: '12px 18px', fontFamily: 'monospace', fontSize: '0.82rem', color: 'var(--text-muted)' }}>{c.hpcsa_number || '—'}</td>
+                    <td style={{ padding: '12px 18px', textAlign: 'right' }}>
+                      <button
                         onClick={() => handleDeleteCrew(c.id)}
-                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: rose, fontSize: '0.75rem', fontWeight: 700 }}
+                        title="Delete crew member"
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'inline-flex', padding: 6, borderRadius: 8, transition: 'all 0.15s' }}
+                        onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = rose; (e.currentTarget as HTMLButtonElement).style.background = 'rgba(194,24,91,0.08)'; }}
+                        onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-muted)'; (e.currentTarget as HTMLButtonElement).style.background = 'none'; }}
                       >
-                        Delete
+                        <TrashIcon size={16} />
                       </button>
                     </td>
                   </tr>
                 ))}
                 {crew.length === 0 && (
-                  <tr><td colSpan={6} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>No crew members yet</td></tr>
+                  <tr><td colSpan={3} style={{ padding: 28, textAlign: 'center', color: 'var(--text-muted)' }}>No crew members yet</td></tr>
                 )}
               </tbody>
             </table>
@@ -832,28 +896,35 @@ export default function ProviderManagement() {
 
           {/* Vehicle Table */}
           <div style={{ ...cardStyle, padding: 0, overflow: 'hidden' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.86rem' }}>
               <thead>
                 <tr style={{ background: 'var(--surface-100)', textAlign: 'left' }}>
-                  <th style={{ padding: '10px 14px', fontWeight: 700, fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Callsign</th>
-                  <th style={{ padding: '10px 14px', fontWeight: 700, fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Registration</th>
-                  <th style={{ padding: '10px 14px', fontWeight: 700, fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Type</th>
-                  <th style={{ padding: '10px 14px', fontWeight: 700, fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Status</th>
+                  <th style={{ padding: '12px 18px', fontWeight: 700, fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)' }}>Callsign</th>
+                  <th style={{ padding: '12px 18px', fontWeight: 700, fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)' }}>Registration</th>
+                  <th style={{ padding: '12px 18px', fontWeight: 700, fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)' }}>Type</th>
                 </tr>
               </thead>
               <tbody>
                 {vehicles.map(v => (
-                  <tr key={v.id} style={{ borderBottom: '1px solid var(--surface-100)' }}>
-                    <td style={{ padding: '10px 14px', fontWeight: 700 }}>🚑 {v.callsign}</td>
-                    <td style={{ padding: '10px 14px', fontFamily: 'monospace' }}>{v.registration}</td>
-                    <td style={{ padding: '10px 14px' }}>{v.vehicle_type}</td>
-                    <td style={{ padding: '10px 14px' }}>
-                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: v.is_active ? '#4caf50' : '#e53e3e', display: 'inline-block' }} />
+                  <tr key={v.id} className="pm-row" style={{ borderBottom: '1px solid var(--surface-100)' }}>
+                    <td style={{ padding: '12px 18px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <span style={{
+                          width: 38, height: 38, borderRadius: 10, flexShrink: 0,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          background: 'rgba(230,81,0,0.1)', color: '#E65100',
+                        }}>
+                          <AmbulanceIcon size={20} />
+                        </span>
+                        <span style={{ fontWeight: 700, color: 'var(--text)' }}>{v.callsign}</span>
+                      </div>
                     </td>
+                    <td style={{ padding: '12px 18px', fontFamily: 'monospace', color: 'var(--text-muted)' }}>{v.registration}</td>
+                    <td style={{ padding: '12px 18px', color: 'var(--text-muted)' }}>{v.vehicle_type}</td>
                   </tr>
                 ))}
                 {vehicles.length === 0 && (
-                  <tr><td colSpan={4} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>No vehicles yet</td></tr>
+                  <tr><td colSpan={3} style={{ padding: 28, textAlign: 'center', color: 'var(--text-muted)' }}>No vehicles yet</td></tr>
                 )}
               </tbody>
             </table>

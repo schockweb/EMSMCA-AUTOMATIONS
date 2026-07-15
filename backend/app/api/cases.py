@@ -156,7 +156,8 @@ async def list_cases(
     result = await db.execute(query.offset(skip).limit(limit))
     cases = result.scalars().all()
     names = await _display_names_for(db, [c.id for c in cases])
-    return [_case_to_response(c, names.get(c.id)) for c in cases]
+    # Manual rename override (custom_display_name) wins over the computed name.
+    return [_case_to_response(c, (c.custom_display_name or names.get(c.id))) for c in cases]
 
 
 @router.get("/{case_id}", response_model=CaseResponse)
@@ -175,7 +176,7 @@ async def get_case(
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
     names = await _display_names_for(db, [case.id])
-    return _case_to_response(case, names.get(case.id))
+    return _case_to_response(case, (case.custom_display_name or names.get(case.id)))
 
 
 @router.patch("/{case_id}", response_model=CaseResponse)
@@ -198,12 +199,17 @@ async def update_case(
     for field, value in body.model_dump(exclude_unset=True).items():
         if field == "preauth_status" and value is not None:
             setattr(case, field, PreAuthStatus(value))
+        elif field == "custom_display_name":
+            # Explicit rename. Empty/whitespace clears the override (revert to computed).
+            cleaned = (value or "").strip()
+            case.custom_display_name = cleaned or None
         elif value is not None:
             setattr(case, field, value)
 
     await db.commit()
     await db.refresh(case)
-    return _case_to_response(case)
+    names = await _display_names_for(db, [case.id])
+    return _case_to_response(case, (case.custom_display_name or names.get(case.id)))
 
 
 @router.delete("/all", status_code=status.HTTP_204_NO_CONTENT)
