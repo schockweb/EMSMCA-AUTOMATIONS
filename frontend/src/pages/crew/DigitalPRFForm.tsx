@@ -579,8 +579,8 @@ const VS_FULL = [
   { label: 'ECG / Rhythm', key: 'ecg', opts: ['NSR', 'Sinus Tachy', 'Sinus Brady', 'AF', 'SVT', 'VT', 'VF', 'Paced', 'Asystole', 'PEA', 'Other'] },
   { label: 'Cap Refill (sec)', key: 'cap_refill', opts: ['< 2sec', '> 2sec'] },
   { label: 'Perfusion Colour', key: 'perfusion', opts: ['Well Perfused', 'Pale', 'Cyanosed', 'Mottled'] },
-  { label: 'Pupil Size L', key: 'pupil_size_l', placeholder: 'e.g. 3' },
-  { label: 'Pupil Size R', key: 'pupil_size_r', placeholder: 'e.g. 3' },
+  { label: 'Pupil Size L', key: 'pupil_size_l', type: 'number', placeholder: 'e.g. 3' },
+  { label: 'Pupil Size R', key: 'pupil_size_r', type: 'number', placeholder: 'e.g. 3' },
   { label: 'Pupil Reaction L/R', key: 'pupil_react', opts: ['Equal/Reactive', 'Unequal', 'Sluggish', 'Fixed/Dilated'] },
   { label: 'Neuro Deficit', key: 'neuro_def', opts: ['Yes', 'No'] },
   { label: 'HGT (mmol/L)', key: 'hgt', type: 'number', placeholder: 'mmol/L' },
@@ -3265,8 +3265,24 @@ const Modal = ({ open, onClose, children, dismissOnBackdrop = true }: { open: bo
     return () => { vp.removeEventListener('resize', update); vp.removeEventListener('scroll', update); };
   }, [open]);
 
+  // Auto-focus the first text field so the keyboard comes up without an extra
+  // tap (Android/desktop raise it immediately; on iOS the field is focused and
+  // ready — iOS's user-gesture rule may still want one tap to lift the keyboard).
+  const contentRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const t = setTimeout(() => {
+      contentRef.current?.querySelector<HTMLElement>('input:not([type="hidden"]), textarea')?.focus();
+    }, 80);
+    return () => clearTimeout(t);
+  }, [open]);
+
   if (!open) return null;
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+  // Keyboard is up when the visual viewport is much shorter than the layout
+  // viewport — then anchor the tile to the BOTTOM of the visible area so it sits
+  // right above the keyboard instead of floating at the top with a big gap.
+  const keyboardOpen = !!vv && typeof window !== 'undefined' && (window.innerHeight - vv.height) > 120;
   // Anchor to the visual viewport when available (keyboard-safe on mobile),
   // otherwise fall back to filling the layout viewport.
   const anchor = vv
@@ -3279,10 +3295,11 @@ const Modal = ({ open, onClose, children, dismissOnBackdrop = true }: { open: bo
         background: 'rgba(15,23,42,0.6)',
         backdropFilter: 'blur(4px)',
         display: 'flex', flexDirection: 'column',
-        justifyContent: isMobile ? 'flex-start' : 'center',
+        justifyContent: isMobile ? (keyboardOpen ? 'flex-end' : 'flex-start') : 'center',
         alignItems: 'center',
         padding: 20,
-        paddingTop: isMobile ? 40 : 20,
+        paddingTop: keyboardOpen ? 12 : (isMobile ? 40 : 20),
+        paddingBottom: keyboardOpen ? 12 : 20,
         boxSizing: 'border-box',
         overflowY: 'auto',
         WebkitTapHighlightColor: 'transparent',
@@ -3291,6 +3308,7 @@ const Modal = ({ open, onClose, children, dismissOnBackdrop = true }: { open: bo
       onClick={e => { if (dismissOnBackdrop && e.target === e.currentTarget) onClose(); }}
     >
       <div
+        ref={contentRef}
         style={{
           background: '#f8fafc', borderRadius: 24,
           padding: '24px 16px', width: '100%', maxWidth: 500,
@@ -3541,6 +3559,12 @@ export default function DigitalPRFForm() {
 
   useEffect(() => {
     const handleScroll = () => {
+      // Don't collapse/expand the sticky journey header while an input is
+      // focused. On mobile the keyboard scrolls the page around the 40px
+      // threshold, and resizing the header mid-type reflows the layout — that's
+      // the "page jumps up and down while typing in the vitals set" bug.
+      const ae = document.activeElement as HTMLElement | null;
+      if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT')) return;
       setIsScrolled(window.scrollY > 40);
     };
     window.addEventListener('scroll', handleScroll, { passive: true });
@@ -8030,7 +8054,7 @@ export default function DigitalPRFForm() {
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <FormContext.Provider value={{ fd, sf, inArr, toggleArr, profile, prfMeta, renderDispatchTimes: () => TimeTable({ rows: ALL_TIME_ROWS.filter(r => r.phase === 0 || r.phase === 2) }) }}>
-      <div style={{ minHeight: '100vh', maxWidth: '100vw', overflowX: 'clip', background: S50, color: S900, paddingTop: 'env(safe-area-inset-top)', paddingBottom: 100, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }}>
+      <div style={{ minHeight: '100vh', maxWidth: '100vw', overflowX: 'clip', background: S50, color: S900, paddingTop: 'var(--app-safe-top, env(safe-area-inset-top))', paddingBottom: 100, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }}>
 
         {/* ── Sticky header — fancy journey-phase bar ──
           Gradient backdrop, glossy nodes with subtle inner highlight, active
@@ -8040,7 +8064,7 @@ export default function DigitalPRFForm() {
           Now shown on brand-new PRFs (phase 0 / Dispatch) as well. */}
         {phase >= 0 && (
         <div style={{
-          position: 'sticky', top: 'calc(8px + env(safe-area-inset-top))', zIndex: 50,
+          position: 'sticky', top: 'calc(8px + var(--app-safe-top, env(safe-area-inset-top)))', zIndex: 50,
           width: isScrolled ? 'min(400px, calc(100% - 64px))' : 'min(760px, calc(100% - 32px))', margin: '12px auto 0',
           background: 'linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(248,250,252,0.96) 100%)',
           backdropFilter: 'blur(14px)',
@@ -9290,7 +9314,7 @@ export default function DigitalPRFForm() {
           const LEVELS = fd.call_type === 'RESUS' ? (['ILS', 'ALS'] as const) : (['BLS', 'ILS', 'ALS'] as const);
           return (
             <Modal open={true} onClose={() => setAssessmentModalOpen(false)}>
-              <div style={{ padding: '0 4px 0px', borderBottom: `1px solid ${S100}`, marginBottom: 14 }}>
+              <div style={{ padding: '0 4px 0px', borderBottom: `1px solid ${S100}`, marginBottom: 14, textAlign: 'center' }}>
                 <div style={{ fontSize: '1.1rem', fontWeight: 900, color: S900, letterSpacing: '-0.01em' }}>
                   Assessment Level
                 </div>

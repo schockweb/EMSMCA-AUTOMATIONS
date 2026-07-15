@@ -554,7 +554,7 @@ export default function CrewDashboard() {
 
   return (
     <div style={{
-      minHeight: '100vh', background: BL, color: T, paddingTop: 'env(safe-area-inset-top)',
+      minHeight: '100vh', background: BL, color: T, paddingTop: 'var(--app-safe-top, env(safe-area-inset-top))',
       fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
     }}>
 

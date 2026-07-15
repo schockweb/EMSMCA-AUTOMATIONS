@@ -125,6 +125,12 @@ body {
   width: 100%;
 }
 
+/* Top inset for the crew screens. With the iOS status-bar style set to "black"
+   (not black-translucent), iOS insets content below the status bar natively —
+   like Android — so this resolves to 0 there. Kept as a safe-area fallback for
+   any device/config that genuinely overlaps the top. */
+:root { --app-safe-top: env(safe-area-inset-top); }
+
 a {
   text-decoration: none;
   color: var(--primary-400);
