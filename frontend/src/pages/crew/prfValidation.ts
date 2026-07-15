@@ -239,7 +239,14 @@ export const RULES: ValidationRule[] = [
     // motivation prompt: once the crew records a shortfall motivation it
     // justifies the lower count, so this rule is satisfied and never raises a
     // separate blocking alert.
-    check: (d, ctx) => ctx.vitalsCount >= 3 || has(d, 'vitals_shortfall_motivation'),
+    check: (d, ctx) => {
+      // Declaration of Death and RHT (refused transport) are exempt: a deceased
+      // or refusing patient won't have 3 timed vital sets, and handleSubmit
+      // already skips the shortfall-motivation prompt for them — so leaving this
+      // rule blocking made DOD/RHT impossible to submit.
+      if (d.call_type === 'RHT' || !!d.med_aid_dec_death) return true;
+      return ctx.vitalsCount >= 3 || has(d, 'vitals_shortfall_motivation');
+    },
     message:
       'At least 3 sets of vital signs must be recorded with timestamps. Use the floating "+ VITALS" button to add another set.',
     source: 'Netcare CMG §3.7 — A minimum of 3 (three) sets of vital signs must be submitted on the PRF',

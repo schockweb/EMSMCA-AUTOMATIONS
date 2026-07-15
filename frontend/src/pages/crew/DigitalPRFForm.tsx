@@ -7470,6 +7470,377 @@ export default function DigitalPRFForm() {
           {submitting ? 'Submitting PRF...' : 'Complete & Submit PRF'}
         </button>
 
+      </>
+    );
+  };
+
+  const RENDERERS = [P0, P1, P2, P3, P4, P5, P6];
+
+  // ── Vitals reminder timestamp ────────────────────────────────────────────
+  // Convert the most recent vital set's HH:mm into an absolute epoch on the
+  // PRF's incident date. We anchor on `time_dispatched` so that if the shift
+  // crosses midnight the latest vital is still placed on the correct
+  // calendar day. Returns null until at least one vital set has been
+  // recorded — that's the trigger for the reminder pill to appear.
+  const lastVitalAt = useMemo<number | null>(() => {
+    // Only count vital sets that are fully completed (not currently being edited)
+    const completedVitals = vitals.filter((_, i) => i !== editVital);
+    if (!completedVitals.length) return null;
+    const last = completedVitals[completedVitals.length - 1];
+    if (!last?.time) return null;
+    const [hh, mm] = String(last.time).split(':').map((s: string) => parseInt(s, 10));
+    if (Number.isNaN(hh) || Number.isNaN(mm)) return null;
+    const anchor = timestamps.time_dispatched
+      ? new Date(timestamps.time_dispatched)
+      : new Date();
+    const d = new Date(anchor);
+    d.setHours(hh, mm, 0, 0);
+    // If anchor is later in the day than the recorded vital, the vital must
+    // belong to the next calendar day (shift crossed midnight).
+    if (d.getTime() < anchor.getTime() - 12 * 60 * 60 * 1000) {
+      d.setDate(d.getDate() + 1);
+    }
+    return d.getTime();
+  }, [vitals, editVital, timestamps.time_dispatched]);
+
+  // Tap-to-jump: route the crew straight to the Clinical phase (vitals live
+  // there) and scroll the vitals heading into view on the next paint.
+  const jumpToVitals = useCallback(() => {
+    setPhase(3);
+    setTimeout(() => {
+      const el = document.getElementById('vitals-section-anchor');
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      else window.scrollTo({ top: 0, behavior: 'smooth' });
+    }, 60);
+  }, []);
+
+  // ── Loading ───────────────────────────────────────────────────────────────
+  if (loadError) {
+    return (
+      <div style={{
+        minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: S50, padding: 20,
+      }}>
+        <div style={{
+          background: W, borderRadius: 16, padding: '28px 24px',
+          maxWidth: 360, width: '100%', textAlign: 'center',
+          boxShadow: '0 8px 28px rgba(15,23,42,0.08)',
+          border: `1px solid ${S200}`,
+        }}>
+          <div style={{
+            width: 48, height: 48, borderRadius: 24, background: '#fef2f2',
+            color: REDC, fontSize: '1.4rem', fontWeight: 800,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            margin: '0 auto 14px',
+          }}>!</div>
+          <div style={{ fontSize: '1rem', fontWeight: 800, color: S900, marginBottom: 6 }}>
+            Couldn't load the PRF
+          </div>
+          <div style={{ fontSize: '0.84rem', color: S600, lineHeight: 1.5, marginBottom: 18 }}>
+            {loadError}
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              type="button"
+              onClick={() => navigate(-1)}
+              style={{
+                flex: 1, padding: '12px 0', borderRadius: 10,
+                fontSize: '0.86rem', fontWeight: 700,
+                border: `2px solid ${S200}`, background: W, color: S600,
+                cursor: 'pointer',
+              }}
+            >
+              Back
+            </button>
+            <button
+              type="button"
+              onClick={() => { setLoading(true); setLoadError(null); loadPrf(); }}
+              style={{
+                flex: 2, padding: '12px 0', borderRadius: 10,
+                fontSize: '0.86rem', fontWeight: 800,
+                border: 'none', background: `linear-gradient(135deg,${G},${GDK})`,
+                color: W, cursor: 'pointer',
+                boxShadow: `0 4px 14px ${G}30`,
+              }}
+            >
+              Try Again
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  if (loading) {
+    return (
+      <div style={{
+        minHeight: '100vh', display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center',
+        background: S50, color: S600, fontWeight: 500, gap: 14, padding: 20,
+      }}>
+        <div style={{
+          width: 32, height: 32, borderRadius: '50%',
+          border: `3px solid ${S200}`, borderTopColor: G,
+          animation: 'spin 0.7s linear infinite',
+        }} />
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        <div style={{ fontSize: '0.9rem' }}>{retrying ? 'Reconnecting…' : 'Loading PRF…'}</div>
+        {retrying && (
+          <button
+            type="button"
+            onClick={() => navigate(-1)}
+            style={{
+              marginTop: 8, padding: '10px 22px', borderRadius: 10,
+              fontSize: '0.78rem', fontWeight: 700,
+              border: `1px solid ${S200}`, background: W, color: S600,
+              cursor: 'pointer',
+            }}
+          >
+            Cancel
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  const renderPhase = RENDERERS[phase];
+
+  // ── Render ────────────────────────────────────────────────────────────────
+  return (
+    <FormContext.Provider value={{ fd, sf, inArr, toggleArr, profile, prfMeta, renderDispatchTimes: () => TimeTable({ rows: ALL_TIME_ROWS.filter(r => r.phase === 0 || r.phase === 2) }) }}>
+      <div style={{ minHeight: '100vh', maxWidth: '100vw', overflowX: 'clip', background: S50, color: S900, paddingTop: 'var(--app-safe-top, env(safe-area-inset-top))', paddingBottom: 100, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }}>
+
+        {/* ── Sticky header — fancy journey-phase bar ──
+          Gradient backdrop, glossy nodes with subtle inner highlight, active
+          step lifted with a brand-green halo ring, completed steps filled
+          with a green→teal gradient and a checkmark, connectors blend
+          smoothly between filled and pending states.
+          Now shown on brand-new PRFs (phase 0 / Dispatch) as well. */}
+        {phase >= 0 && (
+        <div style={{
+          position: 'sticky', top: 'calc(8px + var(--app-safe-top, env(safe-area-inset-top)))', zIndex: 50,
+          width: isScrolled ? 'min(400px, calc(100% - 64px))' : 'min(760px, calc(100% - 32px))', margin: '12px auto 0',
+          background: 'linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(248,250,252,0.96) 100%)',
+          backdropFilter: 'blur(14px)',
+          WebkitBackdropFilter: 'blur(14px)',
+          border: `1px solid ${S200}`,
+          borderRadius: isScrolled ? 999 : 16,
+          boxShadow: isScrolled ? '0 4px 12px rgba(15,23,42,0.06)' : '0 6px 24px rgba(15,23,42,0.08)',
+          transition: 'all 0.3s ease',
+        }}>
+          <div style={{ padding: isScrolled ? '6px 16px' : '14px 18px 10px', transition: 'padding 0.3s ease' }}>
+            {/* Nodes + connectors row */}
+            <div style={{ display: 'flex', alignItems: 'center', position: 'relative' }}>
+              {(() => {
+                // Declaration of Death: deceased patients don't have an
+                // En Route, Clinical, or Handover leg, so those nodes are
+                // dropped from the bar. The original phase indices are
+                // preserved so `phase` state and `setPhase()` calls keep
+                // working unchanged.
+                // PRIMARY calls drop En Route and Clinical from the bar —
+                // the clinical section renders inline in Dispatch, so the
+                // standalone Clinical node would just duplicate it.
+                // En Route (1) and Clinical (3) are hidden universally —
+                // GO MOBILE jumps straight to On Scene, and DEPART SCENE
+                // jumps straight to Transport, so neither node ever
+                // represents a visited step.
+                const hidden = fd.med_aid_dec_death
+                  ? new Set([1, 3, 4, 5, 6])
+                  : fd.call_type === 'RESUS'
+                  ? new Set([1, 3, 6])
+                  : fd.call_type === 'PRIMARY'
+                  ? new Set([1, 3, 6])
+                  : fd.call_type === 'RHT'
+                  ? new Set([1, 3, 4, 5, 6])
+                  : new Set<number>([1, 3, 6]);
+                const visible = PHASES.map((_p, i) => i).filter(i => !hidden.has(i) && i <= maxPhase);
+                return visible.map((origIdx, viewIdx) => {
+                  const _p = PHASES[origIdx];
+                  const i = origIdx;
+                  const done = phase > i;
+                  const active = phase === i;
+                  const nodeFill = done || active
+                    ? `linear-gradient(135deg, ${G} 0%, ${GDK} 100%)`
+                    : '#ffffff';
+                  const nodeBorder = done || active ? GDK : '#cbd5e1';
+                  const nodeColor = done || active ? '#ffffff' : '#94a3b8';
+                  const nodeShadow = active
+                    ? `0 0 0 5px ${G}1f, 0 4px 12px ${G}40`
+                    : done
+                      ? `0 2px 6px ${G}30`
+                      : '0 1px 2px rgba(15,23,42,0.06)';
+                  const connectorFill = phase > i
+                    ? `linear-gradient(90deg, ${G}, ${GDK})`
+                    : S200;
+
+                  return (
+                    <div key={_p.id} style={{
+                      display: 'flex', alignItems: 'center',
+                      flex: viewIdx < visible.length - 1 ? '1 1 0' : (visible.length === 1 ? '1' : 'none'),
+                      justifyContent: visible.length === 1 ? 'center' : 'flex-start',
+                    }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        // Backward / same-phase navigation: always allowed (the
+                        // crew may want to review or amend an earlier leg).
+                        // Forward navigation: must clear the same leave-phase
+                        // gates the CTA buttons enforce, so jumping directly to
+                        // a later phase node can't bypass the odometer / pre-auth
+                        // requirement on the current phase.
+                        if (i <= phase) { setPhase(i); return; }
+                        const blockers = collectLeavePhaseBlockers(phase);
+                        if (blockers.length > 0) { showBlockerBanner(blockers); return; }
+                        setPhase(i);
+                      }}
+                      aria-label={`Go to ${_p.label}`}
+                      style={{
+                        width: isScrolled ? 26 : 34, height: isScrolled ? 26 : 34, borderRadius: 999, flexShrink: 0,
+                        background: nodeFill,
+                        border: `1.5px solid ${nodeBorder}`,
+                        color: nodeColor,
+                        fontSize: isScrolled ? '0.65rem' : '0.74rem', fontWeight: 900,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        cursor: 'pointer',
+                        boxShadow: nodeShadow,
+                        transition: 'all 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
+                        transform: active ? 'scale(1.08)' : 'scale(1)',
+                        padding: 0,
+                      }}
+                    >
+                      {done ? (
+                        <svg width={isScrolled ? 12 : 14} height={isScrolled ? 12 : 14} viewBox="0 0 24 24" fill="none"
+                          stroke="currentColor" strokeWidth="3.2"
+                          strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                      ) : (
+                        viewIdx + 1
+                      )}
+                    </button>
+                    {viewIdx < visible.length - 1 && (
+                      <div style={{
+                        flex: 1, height: 3, margin: '0 4px', borderRadius: 999,
+                        background: connectorFill,
+                        transition: 'background 0.4s ease',
+                      }} />
+                    )}
+                  </div>
+                );
+                });
+              })()}
+            </div>
+
+            {/* Labels row */}
+            <div style={{ 
+              display: 'flex', 
+              marginTop: isScrolled ? 0 : 8, 
+              maxHeight: isScrolled ? 0 : 20, 
+              opacity: isScrolled ? 0 : 1, 
+              overflow: 'hidden', 
+              transition: 'all 0.3s ease' 
+            }}>
+              {(() => {
+                const hidden = fd.med_aid_dec_death
+                  ? new Set([1, 3, 4, 5, 6])
+                  : fd.call_type === 'RESUS'
+                  ? new Set([1, 3, 6])
+                  : fd.call_type === 'PRIMARY'
+                  ? new Set([1, 3, 6])
+                  : fd.call_type === 'RHT'
+                  ? new Set([1, 3, 4, 5, 6])
+                  : new Set<number>([1, 3, 6]);
+                const visible = PHASES.map((_p, i) => i).filter(i => !hidden.has(i) && i <= maxPhase);
+                return visible.map(origIdx => {
+                  const p = PHASES[origIdx];
+                  const i = origIdx;
+                  const done = phase > i, active = phase === i;
+                  return (
+                    <div key={p.id} style={{
+                      flex: 1, textAlign: 'center',
+                      fontSize: '0.6rem',
+                      fontWeight: active ? 900 : 600,
+                      color: active ? GDK : done ? G : '#94a3b8',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.1em',
+                      transition: 'color 0.25s',
+                      whiteSpace: 'nowrap',
+                    }}>
+                      {p.short}
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+          </div>
+        </div>
+        )}
+
+        <div style={{ paddingTop: isMobileView ? 72 : 110 }}>
+          {/* ── Validation banner (rule findings from prfValidation.ts) ── */}
+          {findings.length > 0 && (
+            <div id="prf-validation-banner" style={{ padding: '0 18px 16px', maxWidth: 640, margin: '0 auto' }}>
+              {validationBlockers(findings).length > 0 && (
+                <div style={{
+                  background: '#fee2e2', border: `2px solid #ef4444`, borderRadius: 12,
+                  padding: '14px 15px', marginBottom: 8,
+                  boxShadow: '0 4px 18px rgba(239,68,68,0.32)',
+                }}>
+                  <div style={{ fontSize: '0.88rem', fontWeight: 900, color: '#dc2626', marginBottom: 7, letterSpacing: '0.02em' }}>
+                    ⚠️ {validationBlockers(findings).length} required item{validationBlockers(findings).length === 1 ? '' : 's'} missing
+                  </div>
+                  <ul style={{ margin: 0, paddingLeft: 18, fontSize: '0.78rem', color: '#7f1d1d', lineHeight: 1.5 }}>
+                    {validationBlockers(findings).map(f => (
+                      <li
+                        key={f.id}
+                        onClick={() => jumpToField(f.field)}
+                        style={{ marginBottom: 4, cursor: f.field ? 'pointer' : 'default', textDecoration: f.field ? 'underline dotted' : 'none' }}
+                      >
+                        {f.message}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {validationWarnings(findings).length > 0 && (
+                <div style={{
+                  background: '#fffbeb', border: `1px solid #fde68a`, borderRadius: 12,
+                  padding: '12px 14px', marginBottom: 8,
+                }}>
+                  <div style={{ fontSize: '0.78rem', fontWeight: 800, color: '#92400e', marginBottom: 6, letterSpacing: '0.02em' }}>
+                    {validationWarnings(findings).length} warning{validationWarnings(findings).length === 1 ? '' : 's'} — claim may be rejected if not addressed
+                  </div>
+                  <ul style={{ margin: 0, paddingLeft: 18, fontSize: '0.78rem', color: '#78350f', lineHeight: 1.5 }}>
+                    {validationWarnings(findings).map(f => (
+                      <li
+                        key={f.id}
+                        onClick={() => jumpToField(f.field)}
+                        style={{ marginBottom: 4, cursor: f.field ? 'pointer' : 'default', textDecoration: f.field ? 'underline dotted' : 'none' }}
+                      >
+                        {f.message}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => setFindings([])}
+                style={{
+                  fontSize: '0.7rem', fontWeight: 600, color: S600, background: 'transparent',
+                  border: 'none', cursor: 'pointer', padding: '4px 0', textDecoration: 'underline',
+                }}
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
+          {/* ── Phase content ── */}
+          <div style={{ padding: '0 18px 20px', maxWidth: 640, margin: '0 auto', overflowAnchor: 'none' }}>
+            {renderPhase()}
+          </div>
+        </div>
+
         {/* Motivation prompt — shown when submitting with fewer than 3 vital sets. */}
         {vitalsMotivationOpen && (
           <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(15,23,42,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
@@ -7923,376 +8294,6 @@ export default function DigitalPRFForm() {
             </div>
           );
         })()}
-      </>
-    );
-  };
-
-  const RENDERERS = [P0, P1, P2, P3, P4, P5, P6];
-
-  // ── Vitals reminder timestamp ────────────────────────────────────────────
-  // Convert the most recent vital set's HH:mm into an absolute epoch on the
-  // PRF's incident date. We anchor on `time_dispatched` so that if the shift
-  // crosses midnight the latest vital is still placed on the correct
-  // calendar day. Returns null until at least one vital set has been
-  // recorded — that's the trigger for the reminder pill to appear.
-  const lastVitalAt = useMemo<number | null>(() => {
-    // Only count vital sets that are fully completed (not currently being edited)
-    const completedVitals = vitals.filter((_, i) => i !== editVital);
-    if (!completedVitals.length) return null;
-    const last = completedVitals[completedVitals.length - 1];
-    if (!last?.time) return null;
-    const [hh, mm] = String(last.time).split(':').map((s: string) => parseInt(s, 10));
-    if (Number.isNaN(hh) || Number.isNaN(mm)) return null;
-    const anchor = timestamps.time_dispatched
-      ? new Date(timestamps.time_dispatched)
-      : new Date();
-    const d = new Date(anchor);
-    d.setHours(hh, mm, 0, 0);
-    // If anchor is later in the day than the recorded vital, the vital must
-    // belong to the next calendar day (shift crossed midnight).
-    if (d.getTime() < anchor.getTime() - 12 * 60 * 60 * 1000) {
-      d.setDate(d.getDate() + 1);
-    }
-    return d.getTime();
-  }, [vitals, editVital, timestamps.time_dispatched]);
-
-  // Tap-to-jump: route the crew straight to the Clinical phase (vitals live
-  // there) and scroll the vitals heading into view on the next paint.
-  const jumpToVitals = useCallback(() => {
-    setPhase(3);
-    setTimeout(() => {
-      const el = document.getElementById('vitals-section-anchor');
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      else window.scrollTo({ top: 0, behavior: 'smooth' });
-    }, 60);
-  }, []);
-
-  // ── Loading ───────────────────────────────────────────────────────────────
-  if (loadError) {
-    return (
-      <div style={{
-        minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: S50, padding: 20,
-      }}>
-        <div style={{
-          background: W, borderRadius: 16, padding: '28px 24px',
-          maxWidth: 360, width: '100%', textAlign: 'center',
-          boxShadow: '0 8px 28px rgba(15,23,42,0.08)',
-          border: `1px solid ${S200}`,
-        }}>
-          <div style={{
-            width: 48, height: 48, borderRadius: 24, background: '#fef2f2',
-            color: REDC, fontSize: '1.4rem', fontWeight: 800,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            margin: '0 auto 14px',
-          }}>!</div>
-          <div style={{ fontSize: '1rem', fontWeight: 800, color: S900, marginBottom: 6 }}>
-            Couldn't load the PRF
-          </div>
-          <div style={{ fontSize: '0.84rem', color: S600, lineHeight: 1.5, marginBottom: 18 }}>
-            {loadError}
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button
-              type="button"
-              onClick={() => navigate(-1)}
-              style={{
-                flex: 1, padding: '12px 0', borderRadius: 10,
-                fontSize: '0.86rem', fontWeight: 700,
-                border: `2px solid ${S200}`, background: W, color: S600,
-                cursor: 'pointer',
-              }}
-            >
-              Back
-            </button>
-            <button
-              type="button"
-              onClick={() => { setLoading(true); setLoadError(null); loadPrf(); }}
-              style={{
-                flex: 2, padding: '12px 0', borderRadius: 10,
-                fontSize: '0.86rem', fontWeight: 800,
-                border: 'none', background: `linear-gradient(135deg,${G},${GDK})`,
-                color: W, cursor: 'pointer',
-                boxShadow: `0 4px 14px ${G}30`,
-              }}
-            >
-              Try Again
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-  if (loading) {
-    return (
-      <div style={{
-        minHeight: '100vh', display: 'flex', flexDirection: 'column',
-        alignItems: 'center', justifyContent: 'center',
-        background: S50, color: S600, fontWeight: 500, gap: 14, padding: 20,
-      }}>
-        <div style={{
-          width: 32, height: 32, borderRadius: '50%',
-          border: `3px solid ${S200}`, borderTopColor: G,
-          animation: 'spin 0.7s linear infinite',
-        }} />
-        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-        <div style={{ fontSize: '0.9rem' }}>{retrying ? 'Reconnecting…' : 'Loading PRF…'}</div>
-        {retrying && (
-          <button
-            type="button"
-            onClick={() => navigate(-1)}
-            style={{
-              marginTop: 8, padding: '10px 22px', borderRadius: 10,
-              fontSize: '0.78rem', fontWeight: 700,
-              border: `1px solid ${S200}`, background: W, color: S600,
-              cursor: 'pointer',
-            }}
-          >
-            Cancel
-          </button>
-        )}
-      </div>
-    );
-  }
-
-  const renderPhase = RENDERERS[phase];
-
-  // ── Render ────────────────────────────────────────────────────────────────
-  return (
-    <FormContext.Provider value={{ fd, sf, inArr, toggleArr, profile, prfMeta, renderDispatchTimes: () => TimeTable({ rows: ALL_TIME_ROWS.filter(r => r.phase === 0 || r.phase === 2) }) }}>
-      <div style={{ minHeight: '100vh', maxWidth: '100vw', overflowX: 'clip', background: S50, color: S900, paddingTop: 'var(--app-safe-top, env(safe-area-inset-top))', paddingBottom: 100, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }}>
-
-        {/* ── Sticky header — fancy journey-phase bar ──
-          Gradient backdrop, glossy nodes with subtle inner highlight, active
-          step lifted with a brand-green halo ring, completed steps filled
-          with a green→teal gradient and a checkmark, connectors blend
-          smoothly between filled and pending states.
-          Now shown on brand-new PRFs (phase 0 / Dispatch) as well. */}
-        {phase >= 0 && (
-        <div style={{
-          position: 'sticky', top: 'calc(8px + var(--app-safe-top, env(safe-area-inset-top)))', zIndex: 50,
-          width: isScrolled ? 'min(400px, calc(100% - 64px))' : 'min(760px, calc(100% - 32px))', margin: '12px auto 0',
-          background: 'linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(248,250,252,0.96) 100%)',
-          backdropFilter: 'blur(14px)',
-          WebkitBackdropFilter: 'blur(14px)',
-          border: `1px solid ${S200}`,
-          borderRadius: isScrolled ? 999 : 16,
-          boxShadow: isScrolled ? '0 4px 12px rgba(15,23,42,0.06)' : '0 6px 24px rgba(15,23,42,0.08)',
-          transition: 'all 0.3s ease',
-        }}>
-          <div style={{ padding: isScrolled ? '6px 16px' : '14px 18px 10px', transition: 'padding 0.3s ease' }}>
-            {/* Nodes + connectors row */}
-            <div style={{ display: 'flex', alignItems: 'center', position: 'relative' }}>
-              {(() => {
-                // Declaration of Death: deceased patients don't have an
-                // En Route, Clinical, or Handover leg, so those nodes are
-                // dropped from the bar. The original phase indices are
-                // preserved so `phase` state and `setPhase()` calls keep
-                // working unchanged.
-                // PRIMARY calls drop En Route and Clinical from the bar —
-                // the clinical section renders inline in Dispatch, so the
-                // standalone Clinical node would just duplicate it.
-                // En Route (1) and Clinical (3) are hidden universally —
-                // GO MOBILE jumps straight to On Scene, and DEPART SCENE
-                // jumps straight to Transport, so neither node ever
-                // represents a visited step.
-                const hidden = fd.med_aid_dec_death
-                  ? new Set([1, 3, 4, 5, 6])
-                  : fd.call_type === 'RESUS'
-                  ? new Set([1, 3, 6])
-                  : fd.call_type === 'PRIMARY'
-                  ? new Set([1, 3, 6])
-                  : fd.call_type === 'RHT'
-                  ? new Set([1, 3, 4, 5, 6])
-                  : new Set<number>([1, 3, 6]);
-                const visible = PHASES.map((_p, i) => i).filter(i => !hidden.has(i) && i <= maxPhase);
-                return visible.map((origIdx, viewIdx) => {
-                  const _p = PHASES[origIdx];
-                  const i = origIdx;
-                  const done = phase > i;
-                  const active = phase === i;
-                  const nodeFill = done || active
-                    ? `linear-gradient(135deg, ${G} 0%, ${GDK} 100%)`
-                    : '#ffffff';
-                  const nodeBorder = done || active ? GDK : '#cbd5e1';
-                  const nodeColor = done || active ? '#ffffff' : '#94a3b8';
-                  const nodeShadow = active
-                    ? `0 0 0 5px ${G}1f, 0 4px 12px ${G}40`
-                    : done
-                      ? `0 2px 6px ${G}30`
-                      : '0 1px 2px rgba(15,23,42,0.06)';
-                  const connectorFill = phase > i
-                    ? `linear-gradient(90deg, ${G}, ${GDK})`
-                    : S200;
-
-                  return (
-                    <div key={_p.id} style={{
-                      display: 'flex', alignItems: 'center',
-                      flex: viewIdx < visible.length - 1 ? '1 1 0' : (visible.length === 1 ? '1' : 'none'),
-                      justifyContent: visible.length === 1 ? 'center' : 'flex-start',
-                    }}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        // Backward / same-phase navigation: always allowed (the
-                        // crew may want to review or amend an earlier leg).
-                        // Forward navigation: must clear the same leave-phase
-                        // gates the CTA buttons enforce, so jumping directly to
-                        // a later phase node can't bypass the odometer / pre-auth
-                        // requirement on the current phase.
-                        if (i <= phase) { setPhase(i); return; }
-                        const blockers = collectLeavePhaseBlockers(phase);
-                        if (blockers.length > 0) { showBlockerBanner(blockers); return; }
-                        setPhase(i);
-                      }}
-                      aria-label={`Go to ${_p.label}`}
-                      style={{
-                        width: isScrolled ? 26 : 34, height: isScrolled ? 26 : 34, borderRadius: 999, flexShrink: 0,
-                        background: nodeFill,
-                        border: `1.5px solid ${nodeBorder}`,
-                        color: nodeColor,
-                        fontSize: isScrolled ? '0.65rem' : '0.74rem', fontWeight: 900,
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        cursor: 'pointer',
-                        boxShadow: nodeShadow,
-                        transition: 'all 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
-                        transform: active ? 'scale(1.08)' : 'scale(1)',
-                        padding: 0,
-                      }}
-                    >
-                      {done ? (
-                        <svg width={isScrolled ? 12 : 14} height={isScrolled ? 12 : 14} viewBox="0 0 24 24" fill="none"
-                          stroke="currentColor" strokeWidth="3.2"
-                          strokeLinecap="round" strokeLinejoin="round">
-                          <polyline points="20 6 9 17 4 12" />
-                        </svg>
-                      ) : (
-                        viewIdx + 1
-                      )}
-                    </button>
-                    {viewIdx < visible.length - 1 && (
-                      <div style={{
-                        flex: 1, height: 3, margin: '0 4px', borderRadius: 999,
-                        background: connectorFill,
-                        transition: 'background 0.4s ease',
-                      }} />
-                    )}
-                  </div>
-                );
-                });
-              })()}
-            </div>
-
-            {/* Labels row */}
-            <div style={{ 
-              display: 'flex', 
-              marginTop: isScrolled ? 0 : 8, 
-              maxHeight: isScrolled ? 0 : 20, 
-              opacity: isScrolled ? 0 : 1, 
-              overflow: 'hidden', 
-              transition: 'all 0.3s ease' 
-            }}>
-              {(() => {
-                const hidden = fd.med_aid_dec_death
-                  ? new Set([1, 3, 4, 5, 6])
-                  : fd.call_type === 'RESUS'
-                  ? new Set([1, 3, 6])
-                  : fd.call_type === 'PRIMARY'
-                  ? new Set([1, 3, 6])
-                  : fd.call_type === 'RHT'
-                  ? new Set([1, 3, 4, 5, 6])
-                  : new Set<number>([1, 3, 6]);
-                const visible = PHASES.map((_p, i) => i).filter(i => !hidden.has(i) && i <= maxPhase);
-                return visible.map(origIdx => {
-                  const p = PHASES[origIdx];
-                  const i = origIdx;
-                  const done = phase > i, active = phase === i;
-                  return (
-                    <div key={p.id} style={{
-                      flex: 1, textAlign: 'center',
-                      fontSize: '0.6rem',
-                      fontWeight: active ? 900 : 600,
-                      color: active ? GDK : done ? G : '#94a3b8',
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.1em',
-                      transition: 'color 0.25s',
-                      whiteSpace: 'nowrap',
-                    }}>
-                      {p.short}
-                    </div>
-                  );
-                });
-              })()}
-            </div>
-          </div>
-        </div>
-        )}
-
-        <div style={{ paddingTop: isMobileView ? 72 : 110 }}>
-          {/* ── Validation banner (rule findings from prfValidation.ts) ── */}
-          {findings.length > 0 && (
-            <div id="prf-validation-banner" style={{ padding: '0 18px 16px', maxWidth: 640, margin: '0 auto' }}>
-              {validationBlockers(findings).length > 0 && (
-                <div style={{
-                  background: '#fee2e2', border: `2px solid #ef4444`, borderRadius: 12,
-                  padding: '14px 15px', marginBottom: 8,
-                  boxShadow: '0 4px 18px rgba(239,68,68,0.32)',
-                }}>
-                  <div style={{ fontSize: '0.88rem', fontWeight: 900, color: '#dc2626', marginBottom: 7, letterSpacing: '0.02em' }}>
-                    ⚠️ {validationBlockers(findings).length} required item{validationBlockers(findings).length === 1 ? '' : 's'} missing
-                  </div>
-                  <ul style={{ margin: 0, paddingLeft: 18, fontSize: '0.78rem', color: '#7f1d1d', lineHeight: 1.5 }}>
-                    {validationBlockers(findings).map(f => (
-                      <li
-                        key={f.id}
-                        onClick={() => jumpToField(f.field)}
-                        style={{ marginBottom: 4, cursor: f.field ? 'pointer' : 'default', textDecoration: f.field ? 'underline dotted' : 'none' }}
-                      >
-                        {f.message}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              {validationWarnings(findings).length > 0 && (
-                <div style={{
-                  background: '#fffbeb', border: `1px solid #fde68a`, borderRadius: 12,
-                  padding: '12px 14px', marginBottom: 8,
-                }}>
-                  <div style={{ fontSize: '0.78rem', fontWeight: 800, color: '#92400e', marginBottom: 6, letterSpacing: '0.02em' }}>
-                    {validationWarnings(findings).length} warning{validationWarnings(findings).length === 1 ? '' : 's'} — claim may be rejected if not addressed
-                  </div>
-                  <ul style={{ margin: 0, paddingLeft: 18, fontSize: '0.78rem', color: '#78350f', lineHeight: 1.5 }}>
-                    {validationWarnings(findings).map(f => (
-                      <li
-                        key={f.id}
-                        onClick={() => jumpToField(f.field)}
-                        style={{ marginBottom: 4, cursor: f.field ? 'pointer' : 'default', textDecoration: f.field ? 'underline dotted' : 'none' }}
-                      >
-                        {f.message}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              <button
-                type="button"
-                onClick={() => setFindings([])}
-                style={{
-                  fontSize: '0.7rem', fontWeight: 600, color: S600, background: 'transparent',
-                  border: 'none', cursor: 'pointer', padding: '4px 0', textDecoration: 'underline',
-                }}
-              >
-                Dismiss
-              </button>
-            </div>
-          )}
-
-          {/* ── Phase content ── */}
-          <div style={{ padding: '0 18px 20px', maxWidth: 640, margin: '0 auto', overflowAnchor: 'none' }}>
-            {renderPhase()}
-          </div>
-        </div>
 
         {/* ── Floating quick-vitals button (clinical & transport phases) ── */}
         {(phase === 3 || phase === 4) && !quickVital && (
