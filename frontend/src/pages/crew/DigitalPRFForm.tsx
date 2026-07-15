@@ -6229,9 +6229,12 @@ export default function DigitalPRFForm() {
             </div>
 
             <Lbl t="Patient / Responsible Person" />
-            <Inp fk="rht_waiver_signatory_name" ph="Full name" />
-            <div style={{ marginBottom: 14 }}>
-              <SignaturePad
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+              <div style={{ flex: 1 }}>
+                <Inp fk="rht_waiver_signatory_name" ph="Full name" noMic />
+              </div>
+              <FullscreenSignaturePad
+                compact
                 label="Patient / Responsible Person Signature"
                 value={sigs.patient_signature}
                 onChange={v => { setSigs(p => ({ ...p, patient_signature: v })); dirtyRef.current = true; }}
@@ -6239,9 +6242,12 @@ export default function DigitalPRFForm() {
             </div>
 
             <Lbl t="Witness" />
-            <Inp fk="rht_waiver_witness_name" ph="Witness full name" />
-            <div style={{ marginBottom: 14 }}>
-              <SignaturePad
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+              <div style={{ flex: 1 }}>
+                <Inp fk="rht_waiver_witness_name" ph="Witness full name" noMic />
+              </div>
+              <FullscreenSignaturePad
+                compact
                 label="Witness Signature"
                 value={sigs.witness_signature}
                 onChange={v => { setSigs(p => ({ ...p, witness_signature: v })); dirtyRef.current = true; }}
@@ -8228,11 +8234,12 @@ export default function DigitalPRFForm() {
             <div id="prf-validation-banner" style={{ padding: '0 18px 16px', maxWidth: 640, margin: '0 auto' }}>
               {validationBlockers(findings).length > 0 && (
                 <div style={{
-                  background: '#fef2f2', border: `1px solid #fecaca`, borderRadius: 12,
-                  padding: '12px 14px', marginBottom: 8,
+                  background: '#fee2e2', border: `2px solid #ef4444`, borderRadius: 12,
+                  padding: '14px 15px', marginBottom: 8,
+                  boxShadow: '0 4px 18px rgba(239,68,68,0.32)',
                 }}>
-                  <div style={{ fontSize: '0.78rem', fontWeight: 800, color: REDC, marginBottom: 6, letterSpacing: '0.02em' }}>
-                    {validationBlockers(findings).length} required item{validationBlockers(findings).length === 1 ? '' : 's'} missing
+                  <div style={{ fontSize: '0.88rem', fontWeight: 900, color: '#dc2626', marginBottom: 7, letterSpacing: '0.02em' }}>
+                    ⚠️ {validationBlockers(findings).length} required item{validationBlockers(findings).length === 1 ? '' : 's'} missing
                   </div>
                   <ul style={{ margin: 0, paddingLeft: 18, fontSize: '0.78rem', color: '#7f1d1d', lineHeight: 1.5 }}>
                     {validationBlockers(findings).map(f => (

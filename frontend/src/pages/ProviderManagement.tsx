@@ -126,7 +126,7 @@ export default function ProviderManagement() {
   const [crewLoading, setCrewLoading] = useState(false);
 
   // Add forms
-  const [newProvider, setNewProvider] = useState({ name: '', phone: '', email: '', prNumber: '', ptyRegNumber: '', address: '', clientEmail: '', clientPassword: '', adminEmail: '', adminPassword: '' });
+  const [newProvider, setNewProvider] = useState({ name: '', phone: '', email: '', prNumber: '', ptyRegNumber: '', address: '', prfNumber: '', clientEmail: '', clientPassword: '', adminEmail: '', adminPassword: '' });
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [newCrew, setNewCrew] = useState({ full_name: '', email: '', initials: '', hpcsa_number: '', qualification: 'ILS', phone: '' });
   const [newVehicle, setNewVehicle] = useState({ callsign: '', registration: '', vehicle_type: 'Ambulance' });
@@ -260,6 +260,7 @@ export default function ProviderManagement() {
         pr_number: newProvider.prNumber || undefined,
         pty_reg_number: newProvider.ptyRegNumber || undefined,
         address: newProvider.address || undefined,
+        current_prf_number: newProvider.prfNumber.trim() ? parseInt(newProvider.prfNumber, 10) : undefined,
         portal_login_email: newProvider.clientEmail || undefined,
         portal_login_password: newProvider.clientPassword || undefined,
         admin_email: newProvider.adminEmail || undefined,
@@ -277,7 +278,7 @@ export default function ProviderManagement() {
       }
 
       setShowAddProvider(false);
-      setNewProvider({ name: '', phone: '', email: '', prNumber: '', ptyRegNumber: '', address: '', clientEmail: '', clientPassword: '', adminEmail: '', adminPassword: '' });
+      setNewProvider({ name: '', phone: '', email: '', prNumber: '', ptyRegNumber: '', address: '', prfNumber: '', clientEmail: '', clientPassword: '', adminEmail: '', adminPassword: '' });
       setLogoFile(null);
       fetchProviders();
     } catch (e: any) {
@@ -413,6 +414,21 @@ export default function ProviderManagement() {
                   <div>
                     <label style={labelStyle}>PTY Reg Number</label>
                     <input style={inputStyle} placeholder="e.g. 2020/123456/07" value={newProvider.ptyRegNumber} onChange={e => setNewProvider({ ...newProvider, ptyRegNumber: e.target.value })} />
+                  </div>
+                </div>
+
+                <div>
+                  <label style={labelStyle}>Latest PRF Number</label>
+                  <input
+                    style={inputStyle}
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="e.g. 1500"
+                    value={newProvider.prfNumber}
+                    onChange={e => setNewProvider({ ...newProvider, prfNumber: e.target.value.replace(/[^0-9]/g, '') })}
+                  />
+                  <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: 4 }}>
+                    The last PRF number this client has already processed. New PRFs continue from here (next PRF = this + 1). Leave blank to start at 1.
                   </div>
                 </div>
 
