@@ -837,7 +837,10 @@ const Inp = ({ fk, type = 'text', onBlur, noMic }: { fk: string; ph?: string; ty
   // â”€â”€ Voice dictation for text fields â”€â”€
   // Exclude: number, tel, date, time, email types + ID/passport/phone field keys
   const excludedTypes = ['number', 'tel', 'date', 'time', 'email'];
-  const excludedKeyPatterns = /(id_number|passport|phone|_id$|_dob$|dependant_code|med_aid_number|postal_code)/i;
+  // Voice dictation is unreliable/unwanted for identity + code fields, so the
+  // mic is hidden for names, surnames, practitioner numbers, IDs, passports,
+  // relationship, etc. (applies app-wide).
+  const excludedKeyPatterns = /(id_number|passport|phone|_id$|_dob$|dependant_code|med_aid_number|postal_code|surname|_name$|hpcsa|relationship|identified_by)/i;
   const showMic = !noMic && !!SpeechRecognitionAPI && !excludedTypes.includes(type) && !excludedKeyPatterns.test(fk);
 
   const [recording, setRecording] = useState(false);
@@ -2540,6 +2543,8 @@ const DodFormBody = () => {
     }
   }, []);
 
+  const [declarationOpen, setDeclarationOpen] = useState(false);
+
   return (
     <>
       <DodG2>
@@ -2570,12 +2575,12 @@ const DodFormBody = () => {
 
       <DodSubHdr t="Particulars of healthcare professional" />
       <DodG2>
-        <div><Lbl t="Surname" /><Inp fk="med_aid_dec_death_hcp_surname" ph="Surname" /></div>
-        <div><Lbl t="First Name" /><Inp fk="med_aid_dec_death_hcp_first_name" ph="First name" /></div>
+        <div><Lbl t="Surname" /><Inp fk="med_aid_dec_death_hcp_surname" ph="Surname" noMic /></div>
+        <div><Lbl t="First Name" /><Inp fk="med_aid_dec_death_hcp_first_name" ph="First name" noMic /></div>
       </DodG2>
       <DodG2>
-        <div><Lbl t="Station" /><Inp fk="med_aid_dec_death_hcp_station" ph="Station / base" /></div>
-        <div><Lbl t="Qualification" /><Inp fk="med_aid_dec_death_hcp_qualification" ph="e.g. ALS, Dr" /></div>
+        <div><Lbl t="Station" /><Inp fk="med_aid_dec_death_hcp_station" ph="Station / base" noMic /></div>
+        <div><Lbl t="Qualification" /><Inp fk="med_aid_dec_death_hcp_qualification" ph="e.g. ALS, Dr" noMic /></div>
       </DodG2>
       <DodG2>
         <div><Lbl t="ID No" /><Inp fk="med_aid_dec_death_hcp_id" ph="ID number" /></div>
@@ -2605,103 +2610,136 @@ const DodFormBody = () => {
       </DodG2>
 
       <DodSubHdr t="Declaration" />
-      <div style={{
-        padding: '16px 18px',
-        background: 'linear-gradient(135deg, rgba(245,158,11,0.12), rgba(225,29,72,0.08))',
-        border: '2px solid #f59e0b',
-        borderRadius: 12,
-        marginBottom: 18,
-        boxShadow: '0 4px 14px rgba(245,158,11,0.18)',
-        color: '#7c2d12',
-        lineHeight: 1.55,
-        position: 'relative',
-      }}>
+      {/* The declaration warning + signatory fields now live in a pop-up opened
+          by this button, so the crew reads and signs deliberately. */}
+      <button
+        type="button"
+        onClick={() => setDeclarationOpen(true)}
+        style={{
+          width: '100%', padding: '15px 16px', borderRadius: 12,
+          border: `2px solid ${fd.med_aid_dec_death_signature ? '#16a34a' : '#f59e0b'}`,
+          background: '#ffffff',
+          color: fd.med_aid_dec_death_signature ? '#15803d' : '#b45309',
+          fontWeight: 900, fontSize: '0.98rem', cursor: 'pointer', letterSpacing: '0.02em',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+          marginBottom: 18,
+        }}
+      >
+        {fd.med_aid_dec_death_signature ? '✓ Declaration — Signed (tap to review)' : '⚠ Declaration — Tap to Read & Sign'}
+      </button>
+
+      <Modal open={declarationOpen} onClose={() => setDeclarationOpen(false)}>
+        <div style={{ fontSize: '1.05rem', fontWeight: 900, color: '#0f172a', marginBottom: 14 }}>Declaration</div>
+
         <div style={{
-          display: 'flex', alignItems: 'center', gap: 8,
-          fontSize: '0.72rem', fontWeight: 900, letterSpacing: '0.12em',
-          textTransform: 'uppercase', color: '#b45309',
-          marginBottom: 10,
+          padding: '16px 18px',
+          background: 'linear-gradient(135deg, rgba(245,158,11,0.12), rgba(225,29,72,0.08))',
+          border: '2px solid #f59e0b',
+          borderRadius: 12,
+          marginBottom: 18,
+          boxShadow: '0 4px 14px rgba(245,158,11,0.18)',
+          color: '#7c2d12',
+          lineHeight: 1.55,
         }}>
-          <span style={{ fontSize: '1rem' }}>⚠</span> Read Before Signing
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            fontSize: '0.72rem', fontWeight: 900, letterSpacing: '0.12em',
+            textTransform: 'uppercase', color: '#b45309',
+            marginBottom: 10,
+          }}>
+            <span style={{ fontSize: '1rem' }}>⚠</span> Read Before Signing
+          </div>
+          <div style={{ fontSize: '0.92rem', fontWeight: 700, marginBottom: 8 }}>
+            I, undersigned, hereby declare that the deceased sustained no further harm while in my care.
+          </div>
+          <div style={{ fontSize: '0.92rem', fontWeight: 700 }}>
+            I, undersigned, hereby confirm that the above facts are to the best of my knowledge, true and correct.
+          </div>
         </div>
-        <div style={{ fontSize: '0.92rem', fontWeight: 700, marginBottom: 8 }}>
-          I, undersigned, hereby declare that the deceased sustained no further harm while in my care.
-        </div>
-        <div style={{ fontSize: '0.92rem', fontWeight: 700 }}>
-          I, undersigned, hereby confirm that the above facts are to the best of my knowledge, true and correct.
-        </div>
-      </div>
 
-      <Lbl t="Full name" />
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-        <div style={{ flex: 1 }}>
-          <input
-            type="text"
-            value={fd.med_aid_dec_death_signatory_name ?? ''}
-            onChange={e => sf('med_aid_dec_death_signatory_name', e.target.value)}
-            onFocus={onF}
-            onBlur={onB}
-            placeholder=""
-            autoComplete="off"
-            style={{ ...base, marginBottom: 0, borderColor: '#e2e8f0' }}
+        <Lbl t="Full name" />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+          <div style={{ flex: 1 }}>
+            <input
+              type="text"
+              value={fd.med_aid_dec_death_signatory_name ?? ''}
+              onChange={e => sf('med_aid_dec_death_signatory_name', e.target.value)}
+              onFocus={onF}
+              onBlur={onB}
+              placeholder=""
+              autoComplete="off"
+              style={{ ...base, marginBottom: 0, borderColor: '#e2e8f0' }}
+            />
+          </div>
+          <FullscreenSignaturePad
+            compact
+            label="Signature"
+            value={fd.med_aid_dec_death_signature}
+            onChange={v => sf('med_aid_dec_death_signature', v)}
           />
         </div>
-        <FullscreenSignaturePad
-          compact
-          label="Signature"
-          value={fd.med_aid_dec_death_signature}
-          onChange={v => sf('med_aid_dec_death_signature', v)}
-        />
-      </div>
 
-      <Lbl t="Crew Member 2" />
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-        <div style={{ flex: 1 }}>
-          <input
-            type="text"
-            value={fd.med_aid_dec_death_crew_attended_name ?? ''}
-            onChange={e => sf('med_aid_dec_death_crew_attended_name', e.target.value)}
-            onFocus={onF}
-            onBlur={onB}
-            placeholder=""
-            autoComplete="off"
-            style={{ ...base, marginBottom: 0, borderColor: '#e2e8f0' }}
+        <Lbl t="Crew Member 2" />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+          <div style={{ flex: 1 }}>
+            <input
+              type="text"
+              value={fd.med_aid_dec_death_crew_attended_name ?? ''}
+              onChange={e => sf('med_aid_dec_death_crew_attended_name', e.target.value)}
+              onFocus={onF}
+              onBlur={onB}
+              placeholder=""
+              autoComplete="off"
+              style={{ ...base, marginBottom: 0, borderColor: '#e2e8f0' }}
+            />
+          </div>
+          <FullscreenSignaturePad
+            compact
+            label="Crew Signature"
+            value={fd.med_aid_dec_death_crew_attended_signature}
+            onChange={v => sf('med_aid_dec_death_crew_attended_signature', v)}
           />
         </div>
-        <FullscreenSignaturePad
-          compact
-          label="Crew Signature"
-          value={fd.med_aid_dec_death_crew_attended_signature}
-          onChange={v => sf('med_aid_dec_death_crew_attended_signature', v)}
-        />
-      </div>
 
-      <DodG2>
-        <div><Lbl t="Date" /><Inp fk="med_aid_dec_death_signature_date" ph="YYYY-MM-DD" type="date" /></div>
-        <div><Lbl t="Place" /><Inp fk="med_aid_dec_death_signature_place" ph="Place" /></div>
-      </DodG2>
+        <DodG2>
+          <div><Lbl t="Date" /><Inp fk="med_aid_dec_death_signature_date" ph="YYYY-MM-DD" type="date" /></div>
+          <div><Lbl t="Place" /><Inp fk="med_aid_dec_death_signature_place" ph="Place" /></div>
+        </DodG2>
 
-      <Lbl t="Witness name" />
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-        <div style={{ flex: 1 }}>
-          <input
-            type="text"
-            value={fd.med_aid_dec_death_witness_name ?? ''}
-            onChange={e => sf('med_aid_dec_death_witness_name', e.target.value)}
-            onFocus={onF}
-            onBlur={onB}
-            placeholder=""
-            autoComplete="off"
-            style={{ ...base, marginBottom: 0, borderColor: '#e2e8f0' }}
+        <Lbl t="Witness name" />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+          <div style={{ flex: 1 }}>
+            <input
+              type="text"
+              value={fd.med_aid_dec_death_witness_name ?? ''}
+              onChange={e => sf('med_aid_dec_death_witness_name', e.target.value)}
+              onFocus={onF}
+              onBlur={onB}
+              placeholder=""
+              autoComplete="off"
+              style={{ ...base, marginBottom: 0, borderColor: '#e2e8f0' }}
+            />
+          </div>
+          <FullscreenSignaturePad
+            compact
+            label="Witness Signature"
+            value={fd.med_aid_dec_death_witness_signature}
+            onChange={v => sf('med_aid_dec_death_witness_signature', v)}
           />
         </div>
-        <FullscreenSignaturePad
-          compact
-          label="Witness Signature"
-          value={fd.med_aid_dec_death_witness_signature}
-          onChange={v => sf('med_aid_dec_death_witness_signature', v)}
-        />
-      </div>
+
+        <button
+          type="button"
+          onClick={() => setDeclarationOpen(false)}
+          style={{
+            width: '100%', padding: 14, borderRadius: 12, fontWeight: 800, fontSize: '0.95rem',
+            border: 'none', background: 'linear-gradient(135deg,#16a34a,#15803d)', color: '#fff',
+            cursor: 'pointer', marginTop: 6,
+          }}
+        >
+          Done
+        </button>
+      </Modal>
 
       <DodSubHdr t="Supporting Documents" />
       <DocumentsCapture
