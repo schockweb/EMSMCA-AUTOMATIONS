@@ -40,7 +40,10 @@ function isAndroid(): boolean {
   return /Android/i.test(window.navigator.userAgent);
 }
 
-export default function InstallAppButton() {
+// `hidden` lets the host page suppress the corner icon while its own pop-up is
+// open (the icon is portaled to <body>, so it would otherwise float above a
+// modal like the Start Shift wizard).
+export default function InstallAppButton({ hidden = false }: { hidden?: boolean }) {
   const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(null);
   const [installed, setInstalled] = useState(isStandalone());
   const [sheet, setSheet] = useState<null | 'ios' | 'android'>(null);
@@ -62,8 +65,8 @@ export default function InstallAppButton() {
     };
   }, []);
 
-  // Already installed → nothing to offer.
-  if (installed) return null;
+  // Already installed → nothing to offer. Or the host page has a pop-up open.
+  if (installed || hidden) return null;
 
   const ios = isIOS();
   const android = isAndroid();

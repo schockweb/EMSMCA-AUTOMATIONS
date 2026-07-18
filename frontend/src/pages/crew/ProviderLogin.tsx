@@ -330,8 +330,9 @@ export default function ProviderLogin() {
             </div>
 
             {/* Install-as-app affordance — renders only when installable and
-                not already running as an installed PWA. */}
-            <InstallAppButton />
+                not already running as an installed PWA. Hidden while the Start
+                Shift wizard is open so the portaled icon doesn't float over it. */}
+            <InstallAppButton hidden={showShiftForm} />
 
           </div>
 
