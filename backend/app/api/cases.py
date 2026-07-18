@@ -21,12 +21,12 @@ router = APIRouter(prefix="/api/cases", tags=["Cases"])
 
 def _prf_display_name(provider_name, prf_number, form_data) -> Optional[str]:
     """Canonical PRF name — "{PREFIX}{prf_number} PRF {scheme} {call_type}",
-    e.g. "TES106 PRF Discovery Health IHT". Kept in sync with the exported-PDF
-    filename (buildPrfFileName in PRFView.tsx). Prefix = first 3 alphanumerics
-    of the provider name, uppercased. Empty parts are dropped; returns None when
-    there's nothing meaningful to show."""
+    e.g. "JEMS EMERGENCY106 PRF Discovery Health IHT". Kept in sync with the
+    exported-PDF filename (buildPrfFileName in PRFView.tsx). Prefix = full
+    provider name (alphanumerics + spaces), uppercased. Empty parts are dropped;
+    returns None when there's nothing meaningful to show."""
     fd = form_data or {}
-    prefix = "".join(ch for ch in str(provider_name or "") if ch.isalnum())[:3].upper()
+    prefix = "".join(ch for ch in str(provider_name or "") if ch.isalnum() or ch == " ").strip().upper()
     head = f"{prefix}{prf_number}".strip() if prf_number is not None else prefix.strip()
     tail = [str(fd.get("medical_scheme") or "").strip(), str(fd.get("call_type") or "").strip()]
     tail = [t for t in tail if t]

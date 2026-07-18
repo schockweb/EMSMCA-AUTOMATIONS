@@ -2795,7 +2795,10 @@ const DodFormBody = ({ showDeclaration = true }: { showDeclaration?: boolean }) 
         >
           Done
         </button>
-      </Modal>
+        </div>
+      )}
+      </>
+      )}
 
       <DodSubHdr t="Supporting Documents" />
       <DocumentsCapture
@@ -5902,7 +5905,9 @@ export default function DigitalPRFForm() {
               background: W,
               boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
             }}>
-              <DodFormBody />
+              {/* Dispatch screen: DOD form WITHOUT the declaration — the crew
+                  signs the declaration once, on the final phase. */}
+              <DodFormBody showDeclaration={false} />
               {/* Patient Information CTA sits at the bottom of the DOD form */}
               <div style={{ marginTop: 20 }}>
                 {CTA({ label: 'Patient Information  →', onClick: () => advancePhase(2) })}
@@ -7655,11 +7660,13 @@ export default function DigitalPRFForm() {
                 );
               })()}
               <div style={{ marginTop: 8 }}>
-                <FullscreenSignaturePad
-                  label="Patient / Representative Signature"
-                  value={fd.tc_patient_signature}
-                  onChange={v => { sf('tc_patient_signature', v); setSigs(p => ({ ...p, patient_signature: v })); }}
-                />
+                {fd.call_type !== 'DOD' && (
+                  <FullscreenSignaturePad
+                    label="Patient / Representative Signature"
+                    value={fd.tc_patient_signature}
+                    onChange={v => { sf('tc_patient_signature', v); setSigs(p => ({ ...p, patient_signature: v })); }}
+                  />
+                )}
                 <FullscreenSignaturePad
                   label="Witness Signature"
                   value={fd.tc_witness_signature}

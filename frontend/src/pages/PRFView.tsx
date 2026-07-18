@@ -217,7 +217,7 @@ const SubBlock = ({ title, rows }: { title: string; rows: Array<[string, any, nu
 };
 
 // Filename for the exported / shared PDF, e.g. "JEM690 PRF Discovery IHT.pdf".
-//   • prefix  — first 3 alphanumerics of the provider name, uppercased (JEMS → JEM)
+//   • prefix  — full provider name (alphanumerics + spaces), uppercased (JEMS Emergency → JEMS EMERGENCY)
 //   • number  — the provider-scoped PRF number
 //   • scheme  — medical scheme from the form data
 //   • call    — call type (Primary / IHT / …)
@@ -225,7 +225,7 @@ const SubBlock = ({ title, rows }: { title: string; rows: Array<[string, any, nu
 const buildPrfFileName = (prf: any): string => {
   const prov = prf?.provider || {};
   const fd = prf?.form_data || {};
-  const prefix = String(prov.name || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 3).toUpperCase();
+  const prefix = String(prov.name || '').replace(/[^A-Za-z0-9 ]/g, '').trim().toUpperCase();
   const parts = [
     `${prefix}${prf?.prf_number ?? ''}`.trim(),
     'PRF',
@@ -1303,17 +1303,19 @@ export default function PRFView() {
               // "Not captured" boxes don't clutter the form.
               return (
                 <div style={{ display: 'flex', flexDirection: 'column', borderTop: `1px solid ${LN}` }}>
-                  <div style={{ padding: '5px 7px', borderBottom: (witnessSig || nokSig) ? `1px solid ${LN}` : 'none' }}>
-                    <div style={sigLabel}>Patient / Rep.</div>
-                    <SignatureBox src={fd.tc_patient_signature || prf.signatures?.patient_signature} minHeight={80} />
-                  </div>
-                  {witnessSig && (
-                    <div style={{ padding: '5px 7px', borderBottom: nokSig ? `1px solid ${LN}` : 'none' }}>
+                  {fd.call_type !== 'DOD' && (
+                    <div style={{ padding: '5px 7px', borderBottom: (witnessSig || nokSig || fd.call_type === 'DOD') ? `1px solid ${LN}` : 'none' }}>
+                      <div style={sigLabel}>Patient / Rep.</div>
+                      <SignatureBox src={fd.tc_patient_signature || prf.signatures?.patient_signature} minHeight={80} />
+                    </div>
+                  )}
+                  {(witnessSig || fd.call_type === 'DOD') && (
+                    <div style={{ padding: '5px 7px', borderBottom: (nokSig || fd.call_type === 'DOD') ? `1px solid ${LN}` : 'none' }}>
                       <div style={sigLabel}>Witness</div>
                       <SignatureBox src={witnessSig} minHeight={80} />
                     </div>
                   )}
-                  {nokSig && (
+                  {(nokSig || fd.call_type === 'DOD') && (
                     <div style={{ padding: '5px 7px' }}>
                       <div style={sigLabel}>Next of Kin</div>
                       <SignatureBox src={nokSig} minHeight={70} />
