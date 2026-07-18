@@ -281,9 +281,12 @@ function billingGroup(billingType: string, tag: string): { fd: Record<string, an
         ],
       };
     case 'IOD': // injury-on-duty / WCA compensation
+      // The crew form models this as the WCA_IOD *call type*, which auto-sets
+      // billing_type to the canonical 'WCA / IOD' — that's the value PRFView's
+      // billing block keys off, so the fixture must store it, not bare 'IOD'.
       return {
         fd: {
-          billing_type: 'IOD',
+          billing_type: 'WCA / IOD',
           compensation_reference: `IodRef-${tag}`,
           wca_employer: `IodEmployer-${tag}`,
           wca_employee_number: `IodEmpNo-${tag}`,
@@ -459,11 +462,16 @@ describe('PRF PDF field coverage — every call-type × billing-type', () => {
           currentPrf = built.prf;
           renderPrfView();
           await screen.findByText((c) => c.includes(built.fd.patient_name));
-          // billing-type chip (e.g. "MED AID") — appears in the Billing Type section
-          expect(screen.queryAllByText(billingType).length).toBeGreaterThan(0);
-          // call-type chip(s)
+          // billing-type chip (e.g. "MED AID") — appears in the Billing Type
+          // section. Substring match so "IOD" still matches the canonical
+          // "WCA / IOD" label that the form stores.
+          expect(screen.queryAllByText((c) => c.includes(billingType)).length).toBeGreaterThan(0);
+          // call-type chip(s). PRFView renders transfer subtypes as a single
+          // combined label (e.g. "Transfer — IHT"), so match by substring
+          // rather than exact text.
           built.chips.forEach(chip => {
-            expect(screen.queryAllByText(chip).length, `call chip "${chip}" missing`).toBeGreaterThan(0);
+            const matches = screen.queryAllByText((c) => c.includes(chip));
+            expect(matches.length, `call chip "${chip}" missing`).toBeGreaterThan(0);
           });
         });
 

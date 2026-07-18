@@ -374,7 +374,9 @@ describe('PRF PDF render — PRIMARY call, MED AID billing', () => {
   it('marks attachments and renders each on its own page', async () => {
     renderPrfView();
     await screen.findByText(/Sipho-Sentinel/);
-    expect(screen.getByText(/Documents Attached/i)).toBeInTheDocument();
+    // Each attachment renders on its own page, headed
+    // "Patient Documents (Attachments) - <label>".
+    expect(screen.getAllByText(/Patient Documents \(Attachments\)/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/Attachments\) - Hospital Sticker/)).toBeInTheDocument();
     expect(screen.getByText(/Attachments\) - Medical Aid Card/)).toBeInTheDocument();
   });

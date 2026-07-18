@@ -988,6 +988,7 @@ export default function PRFView() {
           <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
             <SectionHead label="Call Information" />
             <FieldRow label="Incident Add"  value={fd.incident_location} />
+            <FieldRow label="Suburb / Ward" value={fd.suburb_ward} />
             <FieldRow label="Dest Facility" value={fd.receiving_facility} />
             <FieldRow label="Ward"          value={fd.ward} />
             <FieldRow label={fd.call_type === 'COURTESY' ? "Receiving Dr/Person" : "Receiving Dr"}  value={fd.receiving_doctor} />
