@@ -2689,7 +2689,7 @@ const DodFormBody = () => {
 
         <Lbl t="Full name" />
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-          <div style={{ flex: 1 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
             <input
               type="text"
               value={fd.med_aid_dec_death_signatory_name ?? ''}
@@ -2711,7 +2711,7 @@ const DodFormBody = () => {
 
         <Lbl t="Crew Member 2" />
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-          <div style={{ flex: 1 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
             <input
               type="text"
               value={fd.med_aid_dec_death_crew_attended_name ?? ''}
@@ -2738,7 +2738,7 @@ const DodFormBody = () => {
 
         <Lbl t="Witness name" />
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-          <div style={{ flex: 1 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
             <input
               type="text"
               value={fd.med_aid_dec_death_witness_name ?? ''}
@@ -3386,7 +3386,18 @@ const Modal = ({ open, onClose, children, dismissOnBackdrop = true, centerOnMobi
         style={{
           background: '#f8fafc', borderRadius: 24,
           padding: '24px 16px', width: '100%', maxWidth: 500,
+          // border-box so width:100% + padding doesn't exceed the container and
+          // push content sideways.
+          boxSizing: 'border-box',
           maxHeight: '100%', display: 'flex', flexDirection: 'column',
+          // Let tall modal content (e.g. the Declaration-of-Death form: warning
+          // + fields + signature pad) scroll INSIDE the card instead of
+          // overflowing off the bottom of the pop-up on short mobile screens.
+          // Lock the horizontal axis: overflow-y:auto would otherwise promote
+          // overflow-x to auto too, letting the user throw fields left/right.
+          overflowY: 'auto',
+          overflowX: 'hidden',
+          WebkitOverflowScrolling: 'touch',
           boxShadow: '0 10px 40px rgba(0,0,0,0.2)',
         }}
         onClick={e => e.stopPropagation()}
