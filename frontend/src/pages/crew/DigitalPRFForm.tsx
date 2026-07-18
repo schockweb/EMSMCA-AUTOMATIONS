@@ -2560,7 +2560,10 @@ const DodDispatchTimesEmbed = () => {
 // MedAidMore (for calls that started as DoD) and inline at the bottom of
 // the clinical section on a Resus call that fails. State is shared via
 // FormContext so it doesn't matter which mount point captures the data.
-const DodFormBody = () => {
+// `showDeclaration` toggles the Declaration sub-section (button + inline
+// sign-off fields). It's hidden on the Dispatch screen so the declaration is
+// only signed once, on the final phase where the DOD form is completed.
+const DodFormBody = ({ showDeclaration = true }: { showDeclaration?: boolean }) => {
   const { fd, sf } = useContext(FormContext);
 
   useEffect(() => {
@@ -2658,12 +2661,14 @@ const DodFormBody = () => {
         <div><Lbl t="Contact No" /><Inp fk="med_aid_dec_death_handover_contact" ph="Phone number" type="tel" /></div>
       </DodG2>
 
+      {showDeclaration && (
+      <>
       <DodSubHdr t="Declaration" />
-      {/* The declaration warning + signatory fields now live in a pop-up opened
-          by this button, so the crew reads and signs deliberately. */}
+      {/* Tapping this button expands the declaration warning + signatory fields
+          inline (populates down) so the crew reads and signs in place. */}
       <button
         type="button"
-        onClick={() => setDeclarationOpen(true)}
+        onClick={() => setDeclarationOpen(v => !v)}
         style={{
           width: '100%', padding: '15px 16px', borderRadius: 12,
           border: `2px solid ${fd.med_aid_dec_death_signature ? '#16a34a' : '#f59e0b'}`,
@@ -2677,9 +2682,11 @@ const DodFormBody = () => {
         {fd.med_aid_dec_death_signature ? '✓ Declaration — Signed (tap to review)' : '⚠ Declaration — Tap to Read & Sign'}
       </button>
 
-      <Modal open={declarationOpen} onClose={() => setDeclarationOpen(false)}>
-        <div style={{ fontSize: '1.05rem', fontWeight: 900, color: '#0f172a', marginBottom: 14 }}>Declaration</div>
-
+      {declarationOpen && (
+        <div style={{
+          background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12,
+          padding: '16px 14px', marginBottom: 18,
+        }}>
         <div style={{
           padding: '16px 18px',
           background: 'linear-gradient(135deg, rgba(245,158,11,0.12), rgba(225,29,72,0.08))',
@@ -5525,9 +5532,51 @@ export default function DigitalPRFForm() {
 
     // Call-type-specific extras
     if (callType === 'DOD') {
+      // Declaration of Death — populate the full current field set so a
+      // QA-filled DOD renders complete on its dedicated PDF page. (The old
+      // `declared_by` / bare `hpcsa` keys were retired when the DOD form was
+      // expanded, so they're replaced by the hcp_* + deceased_* fields below.)
       base.med_aid_dec_death_time = '09:45';
-      base.med_aid_dec_death_declared_by = 'Dr Test';
-      base.med_aid_dec_death_hpcsa = 'PHC123';
+      base.med_aid_dec_death_case_no = 'DOD-TEST-001';
+      base.med_aid_dec_death_location = 'Bedroom, 34 Test Residence Ave';
+      base.med_aid_dec_death_identified_by = 'Test Patient (per SA ID)';
+      // Particulars of deceased (same person as the Patient Information above)
+      base.med_aid_dec_death_deceased_gender = 'Male';
+      base.med_aid_dec_death_deceased_first_name = 'Test';
+      base.med_aid_dec_death_deceased_surname = 'Patient';
+      base.med_aid_dec_death_deceased_id = '9001015800086';
+      base.med_aid_dec_death_deceased_dob = '1990-01-01';
+      base.med_aid_dec_death_deceased_age = '36';
+      base.med_aid_dec_death_deceased_cell = '0820000001';
+      base.med_aid_dec_death_deceased_tel_home = '0310000001';
+      base.med_aid_dec_death_deceased_tel_work = '0310000002';
+      base.med_aid_dec_death_deceased_address = '34 Test Residence Ave';
+      base.med_aid_dec_death_deceased_suburb = 'Testville';
+      base.med_aid_dec_death_deceased_postal_code = '4001';
+      // Healthcare professional
+      base.med_aid_dec_death_hcp_surname = 'Medic';
+      base.med_aid_dec_death_hcp_first_name = 'Test';
+      base.med_aid_dec_death_hcp_station = 'Test Base 1';
+      base.med_aid_dec_death_hcp_qualification = 'ALS';
+      base.med_aid_dec_death_hcp_id = '8501015800088';
+      base.med_aid_dec_death_hcp_hpcsa = 'PHC123';
+      // Confirmation of death
+      base.med_aid_dec_death_med_carotid = 'Confirmed';
+      base.med_aid_dec_death_med_heart_sounds = 'Confirmed';
+      base.med_aid_dec_death_med_respiratory = 'Confirmed';
+      base.med_aid_dec_death_med_ecg = 'Asystole';
+      base.med_aid_dec_death_med_pupils = 'Fixed & dilated';
+      // Deceased handed over to
+      base.med_aid_dec_death_handover_surname = 'Undertaker';
+      base.med_aid_dec_death_handover_first_name = 'Test';
+      base.med_aid_dec_death_handover_relationship = 'Undertaker';
+      base.med_aid_dec_death_handover_contact = '0829999999';
+      // Declaration
+      base.med_aid_dec_death_signatory_name = 'Test Medic';
+      base.med_aid_dec_death_signature_date = '2026-07-18';
+      base.med_aid_dec_death_signature_place = 'Testville';
+      base.med_aid_dec_death_crew_attended_name = 'Test Crew 2';
+      base.med_aid_dec_death_witness_name = 'Test Witness';
     }
     if (callType === 'RESUS') {
       base.med_aid_resus_level = 'ALS';
@@ -8269,13 +8318,15 @@ export default function DigitalPRFForm() {
                   display: 'flex', flexDirection: 'column',
                   gap: 4, padding: '8px 2px',
                   borderBottom: ii < section.items.length - 1 ? `1px solid ${S50}` : 'none',
+                  minWidth: 0, overflow: 'hidden',
                 }}>
                   <div style={{ fontSize: '0.72rem', fontWeight: 600, color: S500, textTransform: 'uppercase' }}>
                     {item.label}
                   </div>
                   <div style={{
                     fontSize: '0.85rem', fontWeight: 700, color: S900,
-                    wordBreak: 'break-word', lineHeight: 1.4, minWidth: 0
+                    wordBreak: 'break-all', overflowWrap: 'anywhere',
+                    lineHeight: 1.4, minWidth: 0, maxWidth: '100%',
                   }}>
                     {item.value}
                   </div>
@@ -8340,25 +8391,29 @@ export default function DigitalPRFForm() {
                   onTouchEnd={handleTouchEnd}
                   style={{
                     overflow: 'hidden', padding: '0 16px 8px',
-                    minHeight: 280,
+                    minHeight: 280, minWidth: 0,
                   }}
                 >
                   <div style={{
                     display: 'flex', transition: 'transform 0.35s cubic-bezier(0.4,0,0.2,1)',
                     transform: `translateX(-${activeCard * 100}%)`,
+                    minWidth: 0,
                   }}>
                     {cards.map((card, ci) => (
                       <div key={ci} style={{
                         width: '100%', flexShrink: 0,
                         padding: '0 4px',
+                        minWidth: 0, overflow: 'hidden',
                       }}>
                         <div style={{
                           background: W, borderRadius: 14,
                           border: `1.5px solid ${ci === activeCard ? card.color + '40' : S100}`,
                           padding: '14px 14px 10px',
-                          maxHeight: '52vh', overflowY: 'auto', overscrollBehavior: 'contain',
+                          maxHeight: '52vh', overflowY: 'auto', overflowX: 'hidden',
+                          overscrollBehavior: 'contain',
                           boxShadow: ci === activeCard ? `0 4px 20px ${card.color}15` : 'none',
                           transition: 'border-color 0.3s, box-shadow 0.3s',
+                          minWidth: 0,
                         }}>
                           {card.sections.length > 0 ? (
                             card.sections.map((s, si) => renderSection(s, si))
@@ -8399,6 +8454,7 @@ export default function DigitalPRFForm() {
                 background: S50, borderRadius: 22, width: '100%', maxWidth: 440,
                 boxShadow: '0 16px 56px rgba(0,0,0,0.3)', overflow: 'hidden',
                 maxHeight: '90vh', display: 'flex', flexDirection: 'column',
+                minWidth: 0,
               }}
                 onClick={e => e.stopPropagation()}
               >

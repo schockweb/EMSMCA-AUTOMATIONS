@@ -138,6 +138,11 @@ export default function ProviderManagement() {
   const [newVehicle, setNewVehicle] = useState({ callsign: '', registration: '', vehicle_type: 'Ambulance' });
   const [showAddCrew, setShowAddCrew] = useState(false);
   const [showAddVehicle, setShowAddVehicle] = useState(false);
+
+  const [showEditVehicle, setShowEditVehicle] = useState(false);
+  const [editingVehicleId, setEditingVehicleId] = useState<string | null>(null);
+  const [editVehicleForm, setEditVehicleForm] = useState({ callsign: '', registration: '', vehicle_type: 'Ambulance' });
+  const [editVehicleSaving, setEditVehicleSaving] = useState(false);
   
   const [showEditCrew, setShowEditCrew] = useState(false);
   const [editingCrewId, setEditingCrewId] = useState<string | null>(null);
@@ -145,7 +150,7 @@ export default function ProviderManagement() {
   const [editCrewSaving, setEditCrewSaving] = useState(false);
 
   // Lock the background page while any pop-up on this screen is open.
-  useScrollLock(showAddProvider || showEditClient || showAddCrew || showEditCrew || showAddVehicle);
+  useScrollLock(showAddProvider || showEditClient || showAddCrew || showEditCrew || showAddVehicle || showEditVehicle);
   const [tempPassword, setTempPassword] = useState('');
 
   const fetchProviders = useCallback(async () => {
@@ -342,6 +347,45 @@ export default function ProviderManagement() {
     setNewVehicle({ callsign: '', registration: '', vehicle_type: 'Ambulance' });
   };
 
+  const handleDeleteVehicle = async (vehicleId: string) => {
+    if (!selectedProvider) return;
+    if (!window.confirm('Are you sure you want to delete this vehicle?')) return;
+    try {
+      await api.delete(`/api/providers/${selectedProvider.id}/vehicles/${vehicleId}`);
+      fetchProviderDetails(selectedProvider);
+    } catch (e: any) {
+      alert(e.response?.data?.detail || 'Failed to delete vehicle');
+    }
+  };
+
+  const openEditVehicle = (vehicle: Vehicle) => {
+    setEditingVehicleId(vehicle.id);
+    setEditVehicleForm({
+      callsign: vehicle.callsign,
+      registration: vehicle.registration,
+      vehicle_type: vehicle.vehicle_type || 'Ambulance',
+    });
+    setShowEditVehicle(true);
+  };
+
+  const closeEditVehicle = () => {
+    setShowEditVehicle(false);
+    setEditingVehicleId(null);
+  };
+
+  const handleSaveVehicle = async () => {
+    if (!selectedProvider || !editingVehicleId) return;
+    setEditVehicleSaving(true);
+    try {
+      await api.patch(`/api/providers/${selectedProvider.id}/vehicles/${editingVehicleId}`, editVehicleForm);
+      closeEditVehicle();
+      fetchProviderDetails(selectedProvider);
+    } catch (e: any) {
+      alert(e.response?.data?.detail || 'Failed to update vehicle');
+    }
+    setEditVehicleSaving(false);
+  };
+
   const handleDeleteCrew = async (crewId: string) => {
     if (!selectedProvider) return;
     if (!window.confirm('Are you sure you want to delete this crew member?')) return;
@@ -409,9 +453,10 @@ export default function ProviderManagement() {
     fontSize: '0.84rem',
     padding: '8px 12px',
     borderRadius: 8,
-    border: '1px solid var(--surface-200)',
-    background: 'var(--bg)',
+    border: '1.5px solid #94a3b8',
+    background: '#ffffff',
     color: 'var(--text)',
+    boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.02)',
     marginBottom: 8,
     boxSizing: 'border-box',
   };
@@ -1098,6 +1143,39 @@ export default function ProviderManagement() {
             </div>
           )}
 
+          {showEditVehicle && (
+            <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+              <div style={{ ...cardStyle, width: '100%', maxWidth: 450, padding: 0, display: 'flex', flexDirection: 'column', maxHeight: '90vh' }}>
+                <div style={{ padding: '20px 26px 16px', borderBottom: '1px solid var(--surface-100)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <h3 style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--text)' }}>Edit Vehicle</h3>
+                  <button onClick={closeEditVehicle} style={{ background: 'none', border: 'none', fontSize: '1.4rem', color: 'var(--text-muted)', cursor: 'pointer', lineHeight: 1 }}>&times;</button>
+                </div>
+                
+                <div style={{ padding: '20px 26px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  <div><label style={labelStyle}>Callsign *</label><input style={inputStyle} value={editVehicleForm.callsign} onChange={e => setEditVehicleForm({ ...editVehicleForm, callsign: e.target.value })} /></div>
+                  <div><label style={labelStyle}>Registration *</label><input style={inputStyle} value={editVehicleForm.registration} onChange={e => setEditVehicleForm({ ...editVehicleForm, registration: e.target.value })} /></div>
+                  <div>
+                    <label style={labelStyle}>Vehicle Type</label>
+                    <select style={inputStyle} value={editVehicleForm.vehicle_type} onChange={e => setEditVehicleForm({ ...editVehicleForm, vehicle_type: e.target.value })}>
+                      <option value="Ambulance">Ambulance</option>
+                      <option value="Response Vehicle">Response Vehicle</option>
+                      <option value="Rescue Vehicle">Rescue Vehicle</option>
+                      <option value="Helicopter">Helicopter</option>
+                      <option value="Fixed Wing">Fixed Wing</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: 10, padding: '16px 26px 22px' }}>
+                  <button style={{ ...btnPrimary, background: 'var(--surface-100)', color: 'var(--text)', flex: 1, padding: '10px 18px' }} onClick={closeEditVehicle}>Cancel</button>
+                  <button style={{ ...btnPrimary, flex: 2, padding: '10px 18px' }} onClick={handleSaveVehicle} disabled={editVehicleSaving}>
+                    {editVehicleSaving ? 'Saving...' : 'Save Changes'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Vehicle Table */}
           <div style={{ ...cardStyle, padding: 0, overflow: 'hidden' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.86rem' }}>
@@ -1106,6 +1184,7 @@ export default function ProviderManagement() {
                   <th style={{ padding: '12px 18px', fontWeight: 700, fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)' }}>Callsign</th>
                   <th style={{ padding: '12px 18px', fontWeight: 700, fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)' }}>Registration</th>
                   <th style={{ padding: '12px 18px', fontWeight: 700, fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)' }}>Type</th>
+                  <th style={{ padding: '12px 18px', fontWeight: 700, fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', textAlign: 'right' }} />
                 </tr>
               </thead>
               <tbody>
@@ -1125,10 +1204,30 @@ export default function ProviderManagement() {
                     </td>
                     <td style={{ padding: '12px 18px', fontFamily: 'monospace', color: 'var(--text-muted)' }}>{v.registration}</td>
                     <td style={{ padding: '12px 18px', color: 'var(--text-muted)' }}>{v.vehicle_type}</td>
+                    <td style={{ padding: '12px 18px', textAlign: 'right' }}>
+                      <button
+                        onClick={() => openEditVehicle(v)}
+                        title="Edit vehicle"
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'inline-flex', padding: 6, borderRadius: 8, transition: 'all 0.15s', marginRight: 4 }}
+                        onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = '#E65100'; (e.currentTarget as HTMLButtonElement).style.background = 'rgba(230,81,0,0.08)'; }}
+                        onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-muted)'; (e.currentTarget as HTMLButtonElement).style.background = 'none'; }}
+                      >
+                        <EditIcon size={16} />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteVehicle(v.id)}
+                        title="Delete vehicle"
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'inline-flex', padding: 6, borderRadius: 8, transition: 'all 0.15s' }}
+                        onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = rose; (e.currentTarget as HTMLButtonElement).style.background = 'rgba(194,24,91,0.08)'; }}
+                        onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-muted)'; (e.currentTarget as HTMLButtonElement).style.background = 'none'; }}
+                      >
+                        <TrashIcon size={16} />
+                      </button>
+                    </td>
                   </tr>
                 ))}
                 {vehicles.length === 0 && (
-                  <tr><td colSpan={3} style={{ padding: 28, textAlign: 'center', color: 'var(--text-muted)' }}>No vehicles yet</td></tr>
+                  <tr><td colSpan={4} style={{ padding: 28, textAlign: 'center', color: 'var(--text-muted)' }}>No vehicles yet</td></tr>
                 )}
               </tbody>
             </table>
