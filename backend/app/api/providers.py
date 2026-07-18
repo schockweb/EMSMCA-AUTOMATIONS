@@ -117,6 +117,10 @@ class ProviderUpdate(BaseModel):
     # Admin crew credentials
     admin_email: str | None = None
     admin_password: str | None = None
+    # PRF numbering baseline — the last PRF number already used. Only applied
+    # when the admin actually enters a value; a blank field (None) leaves the
+    # existing counter untouched so re-saving other fields never resets it.
+    current_prf_number: int | None = None
 
 class CrewMemberCreate(BaseModel):
     full_name: str
@@ -496,6 +500,14 @@ async def update_provider(
     for key, val in body.model_dump(exclude_unset=True).items():
         if key in standard_fields:
             setattr(provider, key, val)
+
+    # PRF numbering baseline. Only touched when the admin entered a value — a
+    # blank field (None) leaves the existing counter untouched. The next digital
+    # PRF continues from this value + 1 (see `_next_prf_number`).
+    if body.current_prf_number is not None:
+        if body.current_prf_number < 0:
+            raise HTTPException(400, "Current PRF number cannot be negative.")
+        provider.prf_start_number = body.current_prf_number
 
     # EMSMCA Client Login (portal_login_email / portal_login_password_hash on ServiceProvider)
     if body.portal_login_username is not None:

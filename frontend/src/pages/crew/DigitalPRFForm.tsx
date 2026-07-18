@@ -3,7 +3,7 @@
  * Follows the EMS call from dispatch to completion as a step-by-step journey.
  * Each phase mirrors the real-world call flow so crew always know where they are.
  */
-import React, { useState, useEffect, useRef, useMemo, useCallback, createContext, useContext } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, createContext, useContext } from 'react';
 import ReactDOM from 'react-dom';
 import { useScrollLock } from '../../hooks/useScrollLock';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -827,6 +827,48 @@ const SpeechRecognitionAPI: any =
   (typeof window !== 'undefined' &&
     ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition)) || null;
 
+// ── Robust incremental dictation builder ──────────────────────────────────
+// Fixes the Android "duplicate words" bug. Some mobile SpeechRecognition
+// engines re-emit an already-finalised segment — either as a second final
+// entry in the same event, or as a lingering interim copy — which the old
+// "rebuild from index 0 every event" logic double-counted, so a spoken phrase
+// showed up twice. Here each final result is committed exactly once (tracked by
+// a high-water mark), an exact repeat of the segment we just committed is
+// dropped, and interim words are layered on top transiently (never persisted).
+type DictationState = { committed: string; finalCount: number; lastFinal: string };
+
+const newDictationState = (baseline: string): DictationState => ({
+  // Trailing space so the first dictated word doesn't butt against typed text.
+  committed: baseline && !/\s$/.test(baseline) ? baseline + ' ' : baseline,
+  finalCount: 0,
+  lastFinal: '',
+});
+
+const applyDictation = (e: any, st: DictationState): string => {
+  let interim = '';
+  for (let i = 0; i < e.results.length; i++) {
+    const res = e.results[i];
+    const seg: string = res[0]?.transcript ?? '';
+    if (res.isFinal) {
+      // Commit each final index only once (guards against re-emission).
+      if (i >= st.finalCount) {
+        const norm = seg.trim();
+        if (norm && norm.toLowerCase() !== st.lastFinal.toLowerCase()) {
+          const needSpace = st.committed && !/\s$/.test(st.committed);
+          st.committed += (needSpace ? ' ' : '') + norm;
+          st.lastFinal = norm;
+        }
+        st.finalCount = i + 1;
+      }
+    } else {
+      interim += seg;
+    }
+  }
+  const it = interim.trim();
+  const needSpace = st.committed && it && !/\s$/.test(st.committed);
+  return (st.committed + (needSpace ? ' ' : '') + it);
+};
+
 const Inp = ({ fk, type = 'text', onBlur, noMic }: { fk: string; ph?: string; type?: string; req?: boolean; noMic?: boolean; onBlur?: (e: React.FocusEvent<HTMLInputElement>) => void }) => {
   const { fd, sf } = useContext(FormContext);
   // PRF data is unique per patient, so browser form-history suggestions (e.g.
@@ -847,7 +889,7 @@ const Inp = ({ fk, type = 'text', onBlur, noMic }: { fk: string; ph?: string; ty
   const recogRef = useRef<any>(null);
   const fdRef = useRef(fd);
   fdRef.current = fd;
-  const baselineRef = useRef<string>('');
+  const dictRef = useRef<DictationState>(newDictationState(''));
 
   useEffect(() => () => {
     try { recogRef.current?.stop?.(); } catch { /* ignore */ }
@@ -860,22 +902,9 @@ const Inp = ({ fk, type = 'text', onBlur, noMic }: { fk: string; ph?: string; ty
     recog.lang = 'en-ZA';
     recog.continuous = true;
     recog.interimResults = true;
-    const existing: string = fdRef.current[fk] || '';
-    baselineRef.current = existing && !/\s$/.test(existing) ? existing + ' ' : existing;
+    dictRef.current = newDictationState(fdRef.current[fk] || '');
     recog.onresult = (e: any) => {
-      let finalText = '';
-      let interimText = '';
-      for (let i = 0; i < e.results.length; i++) {
-        const t = e.results[i][0].transcript;
-        if (e.results[i].isFinal) finalText += t;
-        else interimText += t;
-      }
-      const live = (
-        finalText.trim() +
-        (finalText && interimText ? ' ' : '') +
-        interimText.trim()
-      ).trim();
-      sf(fk, baselineRef.current + live);
+      sf(fk, applyDictation(e, dictRef.current));
     };
     recog.onend = () => { setRecording(false); recogRef.current = null; };
     recog.onerror = () => { setRecording(false); recogRef.current = null; };
@@ -1897,11 +1926,24 @@ const VoiceTxt = ({ fk, rows = 3 }: { fk: string; ph?: string; rows?: number }) 
   const fdRef = useRef(fd);
   fdRef.current = fd;
   const supported = !!SpeechRecognitionAPI;
-  // Snapshot of the field's value at the moment recording started. Live
-  // transcript (final + interim) is rendered on top of this baseline on
-  // every onresult event so the textarea reflects dictation in real time
-  // without compounding into itself.
-  const baselineRef = useRef<string>('');
+  // Incremental dictation state (baseline + committed finals). Interim words are
+  // layered on transiently; see applyDictation for the duplicate-word guard.
+  const dictRef = useRef<DictationState>(newDictationState(''));
+  const taRef = useRef<HTMLTextAreaElement>(null);
+  // Floor height = the natural `rows` height, captured before we ever set an
+  // explicit height, so the field never shrinks below its default size.
+  const minHRef = useRef<number>(0);
+
+  const autoGrow = () => {
+    const el = taRef.current;
+    if (!el) return;
+    if (!minHRef.current) minHRef.current = el.offsetHeight;
+    el.style.height = 'auto';
+    el.style.height = Math.max(el.scrollHeight, minHRef.current) + 'px';
+  };
+  // Grow the textarea to fit its content so dictated words wrap and expand
+  // downward instead of scrolling out of view.
+  useLayoutEffect(() => { autoGrow(); }, [fd[fk]]);
 
   useEffect(() => () => {
     // Make sure we tear down any active recogniser if the field unmounts
@@ -1920,25 +1962,10 @@ const VoiceTxt = ({ fk, rows = 3 }: { fk: string; ph?: string; rows?: number }) 
     // Capture what the crew already typed as the immutable prefix.
     // Streaming dictation appends on top — any manual edits made before
     // tapping the mic survive the session.
-    const existing: string = fdRef.current[fk] || '';
-    baselineRef.current = existing && !/\s$/.test(existing) ? existing + ' ' : existing;
+    dictRef.current = newDictationState(fdRef.current[fk] || '');
 
     recog.onresult = (e: any) => {
-      // The results array is cumulative for the session — iterate from 0
-      // each time so we always rebuild the live transcript from source.
-      let finalText = '';
-      let interimText = '';
-      for (let i = 0; i < e.results.length; i++) {
-        const t = e.results[i][0].transcript;
-        if (e.results[i].isFinal) finalText += t;
-        else interimText += t;
-      }
-      const live = (
-        finalText.trim() +
-        (finalText && interimText ? ' ' : '') +
-        interimText.trim()
-      ).trim();
-      sf(fk, baselineRef.current + live);
+      sf(fk, applyDictation(e, dictRef.current));
     };
     recog.onend = () => { setRecording(false); recogRef.current = null; };
     recog.onerror = () => { setRecording(false); recogRef.current = null; };
@@ -1946,6 +1973,7 @@ const VoiceTxt = ({ fk, rows = 3 }: { fk: string; ph?: string; rows?: number }) 
     try {
       recog.start();
       setRecording(true);
+      requestAnimationFrame(() => taRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
     } catch {
       setRecording(false);
       recogRef.current = null;
@@ -1961,15 +1989,17 @@ const VoiceTxt = ({ fk, rows = 3 }: { fk: string; ph?: string; rows?: number }) 
     <div style={{ position: 'relative', marginBottom: 14 }}>
       <textarea
         id={`prf-field-${fk}`}
+        ref={taRef}
         value={fd[fk] ?? ''}
-        onChange={e => sf(fk, e.target.value)}
+        onChange={e => { sf(fk, e.target.value); autoGrow(); }}
         onFocus={onF}
         onBlur={onB}
         placeholder=""
         rows={rows}
         style={{
           ...base,
-          resize: 'vertical',
+          resize: 'none',
+          overflow: 'hidden',
           marginBottom: 0,
           fontFamily: 'inherit',
           paddingRight: supported ? 60 : (base as any).padding,
@@ -3285,7 +3315,7 @@ const FadeIn = ({ children, show, delay = 0 }: { children: React.ReactNode; show
 // via React Portal, which guarantees position:fixed is relative to the viewport
 // and not broken by any parent CSS (backdrop-filter, transform, overflow, etc.).
 // This permanently prevents the mobile "cursor misalignment" bug.
-const Modal = ({ open, onClose, children, dismissOnBackdrop = true }: { open: boolean; onClose: () => void; children: React.ReactNode; dismissOnBackdrop?: boolean }) => {
+const Modal = ({ open, onClose, children, dismissOnBackdrop = true, centerOnMobile = false }: { open: boolean; onClose: () => void; children: React.ReactNode; dismissOnBackdrop?: boolean; centerOnMobile?: boolean }) => {
   useScrollLock(open);   // block scrolling of the page behind this pop-up
   // Track the VISUAL viewport so the overlay follows what the user actually
   // sees when the mobile keyboard opens. Without this, the position:fixed
@@ -3333,7 +3363,13 @@ const Modal = ({ open, onClose, children, dismissOnBackdrop = true }: { open: bo
         background: 'rgba(15,23,42,0.6)',
         backdropFilter: 'blur(4px)',
         display: 'flex', flexDirection: 'column',
-        justifyContent: isMobile ? (keyboardOpen ? 'flex-end' : 'flex-start') : 'center',
+        // Mobile modals normally anchor to the top so a keyboard-driven field
+        // (e.g. odometer) stays put; centerOnMobile opts a keyboard-less card
+        // (e.g. Assessment Level) into vertical centering so it isn't cramped
+        // against the top of the screen.
+        justifyContent: isMobile
+          ? (keyboardOpen ? 'flex-end' : (centerOnMobile ? 'center' : 'flex-start'))
+          : 'center',
         alignItems: 'center',
         padding: 20,
         paddingTop: keyboardOpen ? 12 : (isMobile ? 40 : 20),
@@ -9359,7 +9395,7 @@ export default function DigitalPRFForm() {
         {assessmentModalOpen && (() => {
           const LEVELS = fd.call_type === 'RESUS' ? (['ILS', 'ALS'] as const) : (['BLS', 'ILS', 'ALS'] as const);
           return (
-            <Modal open={true} onClose={() => setAssessmentModalOpen(false)}>
+            <Modal open={true} onClose={() => setAssessmentModalOpen(false)} centerOnMobile>
               <div style={{ padding: '0 4px 0px', borderBottom: `1px solid ${S100}`, marginBottom: 14, textAlign: 'center' }}>
                 <div style={{ fontSize: '1.1rem', fontWeight: 900, color: S900, letterSpacing: '-0.01em' }}>
                   Assessment Level

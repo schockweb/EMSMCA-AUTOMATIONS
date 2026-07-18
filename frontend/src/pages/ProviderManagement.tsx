@@ -112,7 +112,7 @@ export default function ProviderManagement() {
 
   // Edit client modal state
   const [showEditClient, setShowEditClient] = useState(false);
-  const [editForm, setEditForm] = useState({ name: '', pr_number: '', phone: '', email: '', address: '', is_active: true, portal_username: '', portal_password: '', admin_email: '', admin_password: '' });
+  const [editForm, setEditForm] = useState({ name: '', pr_number: '', phone: '', email: '', address: '', is_active: true, portal_username: '', portal_password: '', admin_email: '', admin_password: '', prfNumber: '' });
   const [editSaving, setEditSaving] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -175,6 +175,9 @@ export default function ProviderManagement() {
       portal_password: '',  // never pre-fill passwords
       admin_email: selectedProvider.admin_email || '',
       admin_password: '',
+      // Always blank on load — the baseline is write-only. Pre-filling it would
+      // let a re-save silently reset the provider's PRF sequence.
+      prfNumber: '',
     });
     setLogoPreview(selectedProvider.logo_url || null);
     setShowEditClient(true);
@@ -197,6 +200,9 @@ export default function ProviderManagement() {
         portal_login_password: editForm.portal_password.trim() || undefined,
         admin_email: editForm.admin_email.trim() || undefined,
         admin_password: editForm.admin_password.trim() || undefined,
+        // PRF baseline — only sent when the admin typed a value, so a blank
+        // field leaves the existing counter untouched.
+        current_prf_number: editForm.prfNumber.trim() !== '' ? Number(editForm.prfNumber) : undefined,
       });
       const updated = { ...selectedProvider, ...editForm };
       setSelectedProvider(updated);
@@ -296,6 +302,14 @@ export default function ProviderManagement() {
     } catch (e: any) {
       alert(e.response?.data?.detail || 'Failed to add crew member');
     }
+  };
+
+  // Close the Add-Crew modal and reset transient state so a re-open starts
+  // clean (no lingering generated password, no half-typed fields).
+  const closeAddCrew = () => {
+    setShowAddCrew(false);
+    setTempPassword('');
+    setNewCrew({ full_name: '', email: '', initials: '', hpcsa_number: '', qualification: 'ILS', phone: '' });
   };
 
   const handleAddVehicle = async () => {
@@ -427,9 +441,6 @@ export default function ProviderManagement() {
                     value={newProvider.prfNumber}
                     onChange={e => setNewProvider({ ...newProvider, prfNumber: e.target.value.replace(/[^0-9]/g, '') })}
                   />
-                  <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: 4 }}>
-                    The last PRF number this client has already processed. New PRFs continue from here (next PRF = this + 1). Leave blank to start at 1.
-                  </div>
                 </div>
 
                 <div>
@@ -574,9 +585,6 @@ export default function ProviderManagement() {
                     )}
                   </div>
                   <div style={{ flex: 1 }}>
-                    <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: '0 0 8px' }}>
-                      Shown on the client's login portal and on all PRF PDFs sent to schemes.
-                    </p>
                     <label style={{
                       display: 'inline-flex', alignItems: 'center', gap: 6,
                       padding: '7px 14px', borderRadius: 7,
@@ -620,6 +628,17 @@ export default function ProviderManagement() {
                 <label style={labelStyle}>Physical Address</label>
                 <input style={inputStyle} value={editForm.address} onChange={e => setEditForm({ ...editForm, address: e.target.value })} placeholder="123 Main Rd, Johannesburg" />
               </div>
+              <div>
+                <label style={labelStyle}>Latest PRF Number</label>
+                <input
+                  style={inputStyle}
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="e.g. 1500"
+                  value={editForm.prfNumber}
+                  onChange={e => setEditForm({ ...editForm, prfNumber: e.target.value.replace(/[^0-9]/g, '') })}
+                />
+              </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 8, background: 'var(--surface-100)', border: '1px solid var(--surface-200)' }}>
                 <input
                   id="edit-is-active"
@@ -631,13 +650,11 @@ export default function ProviderManagement() {
                 <label htmlFor="edit-is-active" style={{ fontSize: '0.83rem', fontWeight: 600, color: 'var(--text)', cursor: 'pointer', margin: 0 }}>
                   Client is Active
                 </label>
-                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginLeft: 4 }}>(Inactive clients cannot log in to the portal)</span>
               </div>
 
               {/* ── EMSMCA Client Login ── */}
               <div style={{ background: 'var(--surface-50)', padding: '14px 16px', borderRadius: 10, border: '1px solid var(--surface-200)' }}>
                 <div style={{ fontSize: '0.7rem', fontWeight: 800, color: teal, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>EMSMCA Client Login</div>
-                <p style={{ fontSize: '0.71rem', color: 'var(--text-muted)', margin: '0 0 10px' }}>Shared credentials ALL staff use to access the portal. Leave blank to keep existing.</p>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                   <div>
                     <label style={labelStyle}>Username</label>
@@ -664,7 +681,6 @@ export default function ProviderManagement() {
               {/* ── Portal Admin Login ── */}
               <div style={{ background: 'var(--surface-50)', padding: '14px 16px', borderRadius: 10, border: '1px solid var(--surface-200)' }}>
                 <div style={{ fontSize: '0.7rem', fontWeight: 800, color: '#2563eb', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>Portal Admin Login</div>
-                <p style={{ fontSize: '0.71rem', color: 'var(--text-muted)', margin: '0 0 10px' }}>Admin's personal login credentials. Leave blank to keep existing.</p>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                   <div>
                     <label style={labelStyle}>Admin Email</label>
@@ -794,37 +810,74 @@ export default function ProviderManagement() {
           </div>
 
           {showAddCrew && (
-            <div style={cardStyle}>
-              <h3 style={{ fontSize: '0.85rem', fontWeight: 700, color: teal, marginBottom: 10 }}>Add Crew Member</h3>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                <div><label style={labelStyle}>Full Name *</label><input style={inputStyle} placeholder="e.g. A. Ishwar" value={newCrew.full_name} onChange={e => setNewCrew({ ...newCrew, full_name: e.target.value })} /></div>
-                <div><label style={labelStyle}>Email *</label><input style={inputStyle} placeholder="crew@email.com" value={newCrew.email} onChange={e => setNewCrew({ ...newCrew, email: e.target.value })} /></div>
-                <div><label style={labelStyle}>Initials</label><input style={inputStyle} placeholder="A.I." value={newCrew.initials} onChange={e => setNewCrew({ ...newCrew, initials: e.target.value })} /></div>
-                <div><label style={labelStyle}>HPCSA Number</label><input style={inputStyle} placeholder="0049530" value={newCrew.hpcsa_number} onChange={e => setNewCrew({ ...newCrew, hpcsa_number: e.target.value })} /></div>
-                <div>
-                  <label style={labelStyle}>Qualification</label>
-                  <select style={inputStyle} value={newCrew.qualification} onChange={e => setNewCrew({ ...newCrew, qualification: e.target.value })}>
-                    <option value="BLS">BLS</option>
-                    <option value="ILS">ILS</option>
-                    <option value="ALS">ALS</option>
-                    <option value="AEA">AEA</option>
-                    <option value="BAA">BAA</option>
-                    <option value="ECP">ECP</option>
-                    <option value="ART">ART</option>
-                  </select>
+            <div
+              style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: 16 }}
+              onClick={e => { if (e.target === e.currentTarget) closeAddCrew(); }}
+            >
+              <div style={{
+                background: 'var(--surface-50)', borderRadius: 16,
+                border: '1px solid var(--surface-100)',
+                boxShadow: '0 24px 60px rgba(0,0,0,0.28), 0 4px 14px rgba(0,0,0,0.12)',
+                width: '100%', maxWidth: 480, maxHeight: '90vh', overflowY: 'auto',
+                position: 'relative',
+              }}>
+                {/* Header */}
+                <div style={{ padding: '22px 26px 16px', borderBottom: '1px solid var(--surface-100)' }}>
+                  <div style={{ fontSize: '1.02rem', fontWeight: 800, color: 'var(--text)', letterSpacing: '-0.01em' }}>Add Crew Member</div>
+                  <button
+                    onClick={closeAddCrew}
+                    aria-label="Close"
+                    style={{
+                      position: 'absolute', top: 16, right: 18,
+                      width: 30, height: 30, borderRadius: 8,
+                      border: '1px solid var(--surface-200)', background: 'var(--bg)',
+                      color: 'var(--text-muted)', fontSize: '1.15rem', lineHeight: 1,
+                      cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
+                    }}
+                  >&times;</button>
                 </div>
-                <div><label style={labelStyle}>Phone</label><input style={inputStyle} placeholder="082 123 4567" value={newCrew.phone} onChange={e => setNewCrew({ ...newCrew, phone: e.target.value })} /></div>
-              </div>
-              {tempPassword && (
-                <div style={{ padding: '10px 14px', borderRadius: 8, background: 'rgba(8,131,149,0.08)', border: `1px solid rgba(8,131,149,0.2)`, marginTop: 10 }}>
-                  <div style={{ fontSize: '0.72rem', fontWeight: 700, color: teal, textTransform: 'uppercase' }}>Temporary Password</div>
-                  <div style={{ fontSize: '1rem', fontWeight: 800, fontFamily: 'monospace', color: 'var(--text)', marginTop: 4 }}>{tempPassword}</div>
-                  <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Share this securely with the crew member.</div>
+
+                {/* Body */}
+                <div style={{ padding: '20px 26px 4px' }}>
+                  <div style={{ marginBottom: 4 }}>
+                    <label style={labelStyle}>Full Name *</label>
+                    <input style={inputStyle} placeholder="e.g. A. Ishwar" value={newCrew.full_name} onChange={e => setNewCrew({ ...newCrew, full_name: e.target.value })} />
+                  </div>
+                  <div style={{ marginBottom: 4 }}>
+                    <label style={labelStyle}>Email *</label>
+                    <input style={inputStyle} placeholder="crew@email.com" value={newCrew.email} onChange={e => setNewCrew({ ...newCrew, email: e.target.value })} />
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 14px' }}>
+                    <div><label style={labelStyle}>Initials</label><input style={inputStyle} placeholder="A.I." value={newCrew.initials} onChange={e => setNewCrew({ ...newCrew, initials: e.target.value })} /></div>
+                    <div><label style={labelStyle}>HPCSA Number</label><input style={inputStyle} placeholder="0049530" value={newCrew.hpcsa_number} onChange={e => setNewCrew({ ...newCrew, hpcsa_number: e.target.value })} /></div>
+                    <div>
+                      <label style={labelStyle}>Qualification</label>
+                      <select style={inputStyle} value={newCrew.qualification} onChange={e => setNewCrew({ ...newCrew, qualification: e.target.value })}>
+                        <option value="BLS">BLS</option>
+                        <option value="ILS">ILS</option>
+                        <option value="ALS">ALS</option>
+                        <option value="AEA">AEA</option>
+                        <option value="BAA">BAA</option>
+                        <option value="ECP">ECP</option>
+                        <option value="ART">ART</option>
+                      </select>
+                    </div>
+                    <div><label style={labelStyle}>Phone</label><input style={inputStyle} placeholder="082 123 4567" value={newCrew.phone} onChange={e => setNewCrew({ ...newCrew, phone: e.target.value })} /></div>
+                  </div>
+
+                  {tempPassword && (
+                    <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(8,131,149,0.08)', border: `1px solid rgba(8,131,149,0.2)`, marginTop: 8 }}>
+                      <div style={{ fontSize: '0.68rem', fontWeight: 800, color: teal, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Temporary Password</div>
+                      <div style={{ fontSize: '1.05rem', fontWeight: 800, fontFamily: 'monospace', color: 'var(--text)', marginTop: 4 }}>{tempPassword}</div>
+                    </div>
+                  )}
                 </div>
-              )}
-              <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-                <button style={btnPrimary} onClick={handleAddCrew}>Add Crew Member</button>
-                <button style={{ ...btnPrimary, background: 'var(--surface-200)', color: 'var(--text)' }} onClick={() => setShowAddCrew(false)}>Close</button>
+
+                {/* Footer */}
+                <div style={{ display: 'flex', gap: 10, padding: '16px 26px 22px' }}>
+                  <button style={{ ...btnPrimary, background: 'var(--surface-100)', color: 'var(--text)', flex: 1, padding: '10px 18px' }} onClick={closeAddCrew}>Cancel</button>
+                  <button style={{ ...btnPrimary, flex: 2, padding: '10px 18px' }} onClick={handleAddCrew}>Add Crew Member</button>
+                </div>
               </div>
             </div>
           )}
