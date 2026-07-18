@@ -184,15 +184,13 @@ app.add_middleware(
 from fastapi.middleware.gzip import GZipMiddleware
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
-# 2. Rate Limiting — per-IP sliding window
-# auth_limit: 30 login attempts/min per IP (was 10 — too aggressive for dev/shift-change bursts)
-# Local Docker IPs (172.x, 192.168.x) bypass rate limiting entirely — see rate_limit.py
-app.add_middleware(
-    RateLimitMiddleware,
-    auth_limit=30,     # 30 login attempts per minute per IP
-    api_limit=300,     # 300 API calls per minute per IP
-    window=60,
-)
+# 2. Rate Limiting — DISABLED (was blocking legitimate login attempts)
+# app.add_middleware(
+#     RateLimitMiddleware,
+#     auth_limit=30,
+#     api_limit=300,
+#     window=60,
+# )
 
 # 3. XSS Protection — query param scanning + security headers
 app.add_middleware(XSSProtectionMiddleware)

@@ -6393,6 +6393,7 @@ export default function DigitalPRFForm() {
 
       {fd.med_aid_dec_death ? (
         <>
+          {renderTermsAndConditions()}
           {/* Capture the crew's "Available" time before submitting so the
               shift's end-of-call timestamp is on the PRF. The same row
               normally lives on the Complete phase, which is hidden for DoD. */}
@@ -7566,6 +7567,59 @@ export default function DigitalPRFForm() {
     </>
   );
 
+  // ── Terms & Conditions ───────────────────────────────────────────────────
+  const renderTermsAndConditions = () => {
+    return (
+      <>
+        <SHdr t="Terms and Conditions" />
+        <Card>
+          {(() => {
+            const company = profile?.provider_name || 'the Service Provider';
+            const clauses: Array<[string, string]> = [
+              ['Acknowledgment of Treatment & Financial Responsibility',
+                `I, the person whose name appears on this form as the patient, patient's parent, patient's guardian, or authorized representative, hereby acknowledge that the treatment and/or transportation noted on this document was received by the patient. I accept full responsibility for all payments associated with such treatment and/or transport as recorded on this document, irrespective of whether I am covered by a medical aid scheme or not.`],
+              ['Authorization for Data Disclosure & Debt Collection',
+                `I hereby authorize ${company} to disclose any patient details in this document to third parties (for example, the Road Accident Fund, Compensation Commissioner, or collection agencies) and to trace any details not contained in this document to assist in the collection of any overdue or outstanding amounts due in respect of the treatment or transport provided to the patient by ${company}.`],
+              ['Assumption of Risk',
+                `I hereby accept all risks associated with the emergency medical treatment and/or transportation provided or to be provided by ${company}.`],
+              ['Indemnity & Release of Liability',
+                `I hereby release ${company} (including its directors, employees, agents, and representatives) from any liability, and indemnify and hold ${company} harmless against all loss, damages, or claims arising from or related to the emergency medical treatment and/or transportation provided or to be provided by ${company} as noted in this form.`],
+            ];
+            return (
+              <div style={{ fontSize: '0.8rem', color: S700, lineHeight: 1.5 }}>
+                {clauses.map(([h, b], idx) => (
+                  <div key={idx} style={{ marginBottom: 10 }}>
+                    <div style={{ fontWeight: 800, color: S900, marginBottom: 2 }}>{idx + 1}. {h}</div>
+                    <div>{b}</div>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+          <div style={{ marginTop: 8 }}>
+            {fd.call_type !== 'DOD' && (
+              <FullscreenSignaturePad
+                label="Patient / Representative Signature"
+                value={fd.tc_patient_signature}
+                onChange={v => { sf('tc_patient_signature', v); setSigs(p => ({ ...p, patient_signature: v })); }}
+              />
+            )}
+            <FullscreenSignaturePad
+              label="Witness Signature"
+              value={fd.tc_witness_signature}
+              onChange={v => { sf('tc_witness_signature', v); setSigs(p => ({ ...p, witness_signature: v })); }}
+            />
+            <FullscreenSignaturePad
+              label="Next of Kin Signature"
+              value={fd.next_of_kin_signature}
+              onChange={v => { sf('next_of_kin_signature', v); }}
+            />
+          </div>
+        </Card>
+      </>
+    );
+  };
+
   // ── Phase 6: COMPLETE ─────────────────────────────────────────────────────
   const P6 = () => {
     const crew2 = prfMeta.crew_member_2 || null;
@@ -7633,52 +7687,7 @@ export default function DigitalPRFForm() {
                 treatment, financial responsibility, data disclosure, assumption
                 of risk and indemnity. Company name is the crew's provider. */}
 
-
-            <SHdr t="Terms and Conditions" />
-            <Card>
-              {(() => {
-                const company = profile?.provider_name || 'the Service Provider';
-                const clauses: Array<[string, string]> = [
-                  ['Acknowledgment of Treatment & Financial Responsibility',
-                    `I, the person whose name appears on this form as the patient, patient's parent, patient's guardian, or authorized representative, hereby acknowledge that the treatment and/or transportation noted on this document was received by the patient. I accept full responsibility for all payments associated with such treatment and/or transport as recorded on this document, irrespective of whether I am covered by a medical aid scheme or not.`],
-                  ['Authorization for Data Disclosure & Debt Collection',
-                    `I hereby authorize ${company} to disclose any patient details in this document to third parties (for example, the Road Accident Fund, Compensation Commissioner, or collection agencies) and to trace any details not contained in this document to assist in the collection of any overdue or outstanding amounts due in respect of the treatment or transport provided to the patient by ${company}.`],
-                  ['Assumption of Risk',
-                    `I hereby accept all risks associated with the emergency medical treatment and/or transportation provided or to be provided by ${company}.`],
-                  ['Indemnity & Release of Liability',
-                    `I hereby release ${company} (including its directors, employees, agents, and representatives) from any liability, and indemnify and hold ${company} harmless against all loss, damages, or claims arising from or related to the emergency medical treatment and/or transportation provided or to be provided by ${company} as noted in this form.`],
-                ];
-                return (
-                  <div style={{ fontSize: '0.8rem', color: S700, lineHeight: 1.5 }}>
-                    {clauses.map(([h, b], idx) => (
-                      <div key={idx} style={{ marginBottom: 10 }}>
-                        <div style={{ fontWeight: 800, color: S900, marginBottom: 2 }}>{idx + 1}. {h}</div>
-                        <div>{b}</div>
-                      </div>
-                    ))}
-                  </div>
-                );
-              })()}
-              <div style={{ marginTop: 8 }}>
-                {fd.call_type !== 'DOD' && (
-                  <FullscreenSignaturePad
-                    label="Patient / Representative Signature"
-                    value={fd.tc_patient_signature}
-                    onChange={v => { sf('tc_patient_signature', v); setSigs(p => ({ ...p, patient_signature: v })); }}
-                  />
-                )}
-                <FullscreenSignaturePad
-                  label="Witness Signature"
-                  value={fd.tc_witness_signature}
-                  onChange={v => { sf('tc_witness_signature', v); setSigs(p => ({ ...p, witness_signature: v })); }}
-                />
-                <FullscreenSignaturePad
-                  label="Next of Kin Signature"
-                  value={fd.next_of_kin_signature}
-                  onChange={v => { sf('next_of_kin_signature', v); }}
-                />
-              </div>
-            </Card>
+            {renderTermsAndConditions()}
           </>
         )}
 
