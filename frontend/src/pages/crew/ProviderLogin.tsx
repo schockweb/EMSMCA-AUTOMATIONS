@@ -7,6 +7,7 @@ import type { FormEvent } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from '../../api/client';
 import { useScrollLock } from '../../hooks/useScrollLock';
+import InstallAppButton from '../../components/InstallAppButton';
 
 interface ProviderInfo {
   name: string;
@@ -327,6 +328,10 @@ export default function ProviderLogin() {
                 Start Shift
               </button>
             </div>
+
+            {/* Install-as-app affordance — renders only when installable and
+                not already running as an installed PWA. */}
+            <InstallAppButton />
 
           </div>
 

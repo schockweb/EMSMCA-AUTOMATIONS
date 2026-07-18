@@ -20,6 +20,7 @@ import EmployeeManagement from './pages/EmployeeManagement';
 import SystemHealth from './pages/SystemHealth';
 import Logo from './components/Logo';
 import ErrorBoundary from './components/ErrorBoundary';
+import PWAUpdatePrompt from './components/PWAUpdatePrompt';
 import ProviderManagement from './pages/ProviderManagement';
 import RateSchemas from './pages/RateSchemas';
 import TariffBilling from './pages/TariffBilling';
@@ -157,6 +158,7 @@ function LayoutRoute({ children }: { children: React.ReactNode }) {
 export default function App() {
   return (
     <ErrorBoundary>
+    <PWAUpdatePrompt />
     <BrowserRouter>
       <AuthProvider>
         <Routes>

@@ -6,12 +6,18 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
+      // 'prompt' (not 'autoUpdate'): a new version is downloaded in the
+      // background but NOT applied until the user taps "Update" in the in-app
+      // banner (see PWAUpdatePrompt). This is deliberate for an EMS app — a
+      // silent reload mid-PRF would interrupt a crew member on a live call.
+      registerType: 'prompt',
       includeAssets: ['favicon.svg', 'ems-logo.png', 'jems_logo.png'],
       manifest: false,  // We provide our own manifest.json in public/
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
-        skipWaiting: true,
+        // skipWaiting must be false so the freshly-built service worker waits
+        // in the background until the user explicitly confirms the update.
+        skipWaiting: false,
         clientsClaim: true,
         runtimeCaching: [
           {
