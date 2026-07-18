@@ -41,7 +41,8 @@
       "Bash(break)",
       "PowerShell(cd \"C:\\\\Users\\\\USER-PC\\\\Desktop\\\\New EMS AUTOMATIONS\\\\frontend\"; npx tsc -b 2>&1 | Select-Object -First 20; echo \"TSC-EXIT $LASTEXITCODE\")",
       "Bash(curl -s -o /dev/null -w \"localhost:5173 -> HTTP %{http_code}\\\\n\" --max-time 15 http://localhost:5173/)",
-      "PowerShell(cd \"C:\\\\Users\\\\USER-PC\\\\Desktop\\\\New EMS AUTOMATIONS\\\\frontend\"; $out = npx tsc -b 2>&1; echo \"=== ProviderAdminDashboard errors ===\"; $out | Select-String \"ProviderAdminDashboard\"; echo \"=== full error count / other files ===\"; $out | Select-Object -First 15; echo \"TSC-EXIT $LASTEXITCODE\")"
+      "PowerShell(cd \"C:\\\\Users\\\\USER-PC\\\\Desktop\\\\New EMS AUTOMATIONS\\\\frontend\"; $out = npx tsc -b 2>&1; echo \"=== ProviderAdminDashboard errors ===\"; $out | Select-String \"ProviderAdminDashboard\"; echo \"=== full error count / other files ===\"; $out | Select-Object -First 15; echo \"TSC-EXIT $LASTEXITCODE\")",
+      "Bash(git rev-list *)"
     ]
   }
 }

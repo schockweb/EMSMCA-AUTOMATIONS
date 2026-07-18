@@ -2537,7 +2537,7 @@ const DodG2 = ({ children }: { children: React.ReactNode }) => {
     <div style={{
       display: 'grid',
       gridTemplateColumns: narrow ? '1fr' : '1fr 1fr',
-      gap: narrow ? 0 : '0 12px',
+      gap: narrow ? '14px 0' : '0 12px',
     }}>{children}</div>
   );
 };
@@ -2591,17 +2591,36 @@ const DodFormBody = () => {
       <Lbl t="Deceased Identified by (Full Name and Surname)" />
       <Inp fk="med_aid_dec_death_identified_by" ph="Identifier's full name and surname" />
 
+      {/* Particulars of deceased — mirrors the Patient Information section's
+          field set and layout so the deceased's demographics are captured to
+          the same standard as a living patient. Uses deceased-specific keys
+          (billing still reads the separate patient_* fields). Fields are left
+          optional here because a DOD may involve an unidentified body. */}
       <DodSubHdr t="Particulars of deceased" />
+      <Lbl t="Gender" />
+      <Toggle fk="med_aid_dec_death_deceased_gender" opts={['Male', 'Female', 'Other']} />
       <DodG2>
-        <div><Lbl t="Surname" /><Inp fk="med_aid_dec_death_deceased_surname" ph="Surname" /></div>
         <div><Lbl t="First Name" /><Inp fk="med_aid_dec_death_deceased_first_name" ph="First name" /></div>
+        <div><Lbl t="Surname" /><Inp fk="med_aid_dec_death_deceased_surname" ph="Surname" /></div>
       </DodG2>
       <DodG2>
-        <div><Lbl t="ID or Passport No" /><Inp fk="med_aid_dec_death_deceased_id" ph="ID or passport" /></div>
-        <div><Lbl t="Sex" /><Toggle fk="med_aid_dec_death_deceased_sex" opts={['M', 'F']} size="sm" /></div>
+        <div><Lbl t="ID Number" /><Inp fk="med_aid_dec_death_deceased_id" ph="13-digit SA ID" /></div>
+        <div><Lbl t="Passport Number" /><Inp fk="med_aid_dec_death_deceased_passport" ph="For foreign nationals" /></div>
       </DodG2>
-      <Lbl t="Date of Birth (or approximate age if DOB unknown)" />
-      <Inp fk="med_aid_dec_death_deceased_dob" ph="YYYY-MM-DD or approx. age" />
+      <DodG2>
+        <div><Lbl t="Date of Birth" /><DateInp fk="med_aid_dec_death_deceased_dob" /></div>
+        <div><Lbl t="Age" /><Inp fk="med_aid_dec_death_deceased_age" ph="Age" type="number" /></div>
+      </DodG2>
+      <DodG2>
+        <div><Lbl t="Cell" /><Inp fk="med_aid_dec_death_deceased_cell" ph="Cell" type="tel" /></div>
+        <div><Lbl t="Tel (H)" /><Inp fk="med_aid_dec_death_deceased_tel_home" ph="Home" type="tel" /></div>
+      </DodG2>
+      <Lbl t="Tel (W)" /><Inp fk="med_aid_dec_death_deceased_tel_work" ph="Work number" type="tel" />
+      <Lbl t="Residential Address" /><AddrInp fk="med_aid_dec_death_deceased_address" ph="Street address" suburbKey="med_aid_dec_death_deceased_suburb" />
+      <DodG2>
+        <div><Lbl t="Suburb" /><Inp fk="med_aid_dec_death_deceased_suburb" ph="Suburb" /></div>
+        <div><Lbl t="Code" /><Inp fk="med_aid_dec_death_deceased_postal_code" ph="Code" /></div>
+      </DodG2>
 
       <DodSubHdr t="Particulars of healthcare professional" />
       <DodG2>
@@ -4176,6 +4195,62 @@ export default function DigitalPRFForm() {
 
   useEffect(() => { autofillAgeFromDob(fd.patient_dob, 'age'); }, [fd.patient_dob]);
   useEffect(() => { autofillAgeFromDob(fd.debtor_dob, 'debtor_age'); }, [fd.debtor_dob]);
+
+  // ── DOD: mirror "Particulars of deceased" → Patient Information ──────────
+  // On a Declaration of Death the deceased IS the patient, and both the
+  // Patient Information section and the billing pipeline read the patient_*
+  // keys — not the deceased-specific ones. As the crew fills (or corrects) the
+  // deceased particulars, copy each non-empty value into its matching patient
+  // field so Patient Information auto-populates. One-way and DOD-only; a blank
+  // deceased field never wipes the patient side. Runs whenever any deceased
+  // field changes so later corrections propagate too.
+  useEffect(() => {
+    if (!fd.med_aid_dec_death) return;
+    const MAP: [string, string][] = [
+      ['med_aid_dec_death_deceased_gender',      'gender'],
+      ['med_aid_dec_death_deceased_first_name',  'patient_name'],
+      ['med_aid_dec_death_deceased_surname',     'patient_surname'],
+      ['med_aid_dec_death_deceased_id',          'patient_id_number'],
+      ['med_aid_dec_death_deceased_passport',    'patient_passport_number'],
+      ['med_aid_dec_death_deceased_dob',         'patient_dob'],
+      ['med_aid_dec_death_deceased_age',         'age'],
+      ['med_aid_dec_death_deceased_cell',        'patient_phone_cell'],
+      ['med_aid_dec_death_deceased_tel_home',    'patient_phone_home'],
+      ['med_aid_dec_death_deceased_tel_work',    'patient_phone_work'],
+      ['med_aid_dec_death_deceased_address',     'patient_address'],
+      ['med_aid_dec_death_deceased_suburb',      'patient_suburb'],
+      ['med_aid_dec_death_deceased_postal_code', 'patient_postal_code'],
+    ];
+    setFd(prev => {
+      let changed = false;
+      const next = { ...prev };
+      for (const [src, dst] of MAP) {
+        const v = prev[src];
+        if (v != null && String(v).trim() !== '' && prev[dst] !== v) {
+          next[dst] = v;
+          changed = true;
+        }
+      }
+      if (changed) dirtyRef.current = true;
+      return changed ? next : prev;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    fd.med_aid_dec_death,
+    fd.med_aid_dec_death_deceased_gender,
+    fd.med_aid_dec_death_deceased_first_name,
+    fd.med_aid_dec_death_deceased_surname,
+    fd.med_aid_dec_death_deceased_id,
+    fd.med_aid_dec_death_deceased_passport,
+    fd.med_aid_dec_death_deceased_dob,
+    fd.med_aid_dec_death_deceased_age,
+    fd.med_aid_dec_death_deceased_cell,
+    fd.med_aid_dec_death_deceased_tel_home,
+    fd.med_aid_dec_death_deceased_tel_work,
+    fd.med_aid_dec_death_deceased_address,
+    fd.med_aid_dec_death_deceased_suburb,
+    fd.med_aid_dec_death_deceased_postal_code,
+  ]);
 
   const sf = (k: string, v: any) => { setFd(p => ({ ...p, [k]: v })); dirtyRef.current = true; };
   const toggleArr = (k: string, v: string) => {
@@ -8274,7 +8349,7 @@ export default function DigitalPRFForm() {
                   }}>
                     {cards.map((card, ci) => (
                       <div key={ci} style={{
-                        minWidth: '100%', flexShrink: 0,
+                        width: '100%', flexShrink: 0,
                         padding: '0 4px',
                       }}>
                         <div style={{

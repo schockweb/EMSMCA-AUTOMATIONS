@@ -1203,13 +1203,10 @@ export default function PRFView() {
                 ['Fee (R)', fd.med_aid_resus_fee],
               ]} />
             )}
-            {fd.med_aid_dec_death && (
-              <SubBlock title="Declaration of Death" rows={[
-                ['Time',        fd.med_aid_dec_death_time],
-                ['Declared By', fd.med_aid_dec_death_declared_by],
-                ['Practitioner Number',    fd.med_aid_dec_death_hpcsa],
-              ]} />
-            )}
+            {/* Declaration of Death is no longer squeezed into this billing
+                column — when present it renders on its own dedicated A4 page
+                (see the "Declaration of Death" page further below) so all its
+                fields have room. */}
             {fd.med_aid_quoted && (
               <SubBlock title="Quoted (Med-Aid Decline)" rows={[
                 ['Amount (R)', fd.med_aid_quoted_amount],
@@ -1813,6 +1810,136 @@ export default function PRFView() {
             </div>
 
             <div style={{ flex: 1 }} />
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════ DECLARATION OF DEATH ═══════════════════
+          Rendered on its own dedicated A4-landscape sheet, and ONLY when a
+          Declaration of Death was actually completed on the PRF. Previously
+          these fields were crammed into the narrow Billing-Information column;
+          giving them a full page lets every field (particulars of deceased,
+          healthcare professional, medical confirmation, handover, and the
+          signed declaration) render legibly. Picked up by the PDF/print
+          pipeline via the shared .prf-page selector. */}
+      {fd.med_aid_dec_death && (
+        <div className="prf-print-frame">
+          <div className="prf-page" style={{
+            width: 1220, minHeight: 862,
+            margin: '28px auto 0', background: '#fff', color: INK,
+            border: `2px solid ${LN}`, boxShadow: '0 6px 24px rgba(0,0,0,0.1)',
+            display: 'flex', flexDirection: 'column',
+          }}>
+            {/* Mini header so the sheet is identifiable on its own */}
+            <div style={{
+              display: 'grid', gridTemplateColumns: '1.3fr 2.4fr 2fr',
+              borderBottom: `2px solid ${LN}`,
+            }}>
+              <div style={{ padding: '10px 12px', borderRight: `1px solid ${LN}`, display: 'flex', alignItems: 'center' }}>
+                <ProviderLogo prov={prov} height={30} />
+              </div>
+              <div style={{
+                padding: '10px 12px', borderRight: `1px solid ${LN}`, display: 'flex', alignItems: 'center',
+                fontSize: '0.78rem', fontWeight: 800, color: INK, letterSpacing: '0.08em', textTransform: 'uppercase',
+              }}>
+                Declaration of Death
+              </div>
+              <div style={{
+                padding: '10px 12px', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 18,
+                fontSize: '0.68rem', color: MUT,
+              }}>
+                {prf.case_number && <span>Case: <b style={{ color: INK, fontFamily: 'ui-monospace, monospace' }}>{prf.case_number}</b></span>}
+              </div>
+            </div>
+
+            {/* Body — three columns of grouped fields */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', borderTop: `1px solid ${LN}` }}>
+              {/* Column 1 — event + deceased */}
+              <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
+                <SectionHead label="Declaration of Death" />
+                <FieldRow label="Date"                 value={fd.med_aid_dec_death_date} />
+                <FieldRow label="Time of Death"        value={fd.med_aid_dec_death_time} />
+                <FieldRow label="Case No."             value={fd.med_aid_dec_death_case_no} />
+                <FieldRow label="Location of Body"     value={fd.med_aid_dec_death_location} />
+                <FieldRow label="Identified By"        value={fd.med_aid_dec_death_identified_by} />
+
+                <SectionHead label="Particulars of Deceased" />
+                <FieldRow label="Gender"       value={fd.med_aid_dec_death_deceased_gender} />
+                <FieldRow label="First Name"   value={fd.med_aid_dec_death_deceased_first_name} />
+                <FieldRow label="Surname"      value={fd.med_aid_dec_death_deceased_surname} />
+                <FieldRow label="ID Number"    value={fd.med_aid_dec_death_deceased_id} />
+                <FieldRow label="Passport No"  value={fd.med_aid_dec_death_deceased_passport} />
+                <FieldRow label="Date of Birth" value={fd.med_aid_dec_death_deceased_dob} />
+                <FieldRow label="Age"          value={fd.med_aid_dec_death_deceased_age} />
+                <FieldRow label="Cell"         value={fd.med_aid_dec_death_deceased_cell} />
+                <FieldRow label="Tel (H)"      value={fd.med_aid_dec_death_deceased_tel_home} />
+                <FieldRow label="Tel (W)"      value={fd.med_aid_dec_death_deceased_tel_work} />
+                <FieldRow label="Res. Address" value={fd.med_aid_dec_death_deceased_address} />
+                <FieldRow label="Suburb"       value={fd.med_aid_dec_death_deceased_suburb} />
+                <FieldRow label="Code"         value={fd.med_aid_dec_death_deceased_postal_code} />
+              </div>
+
+              {/* Column 2 — practitioner + medical confirmation + handover */}
+              <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
+                <SectionHead label="Healthcare Professional" />
+                <FieldRow label="Surname"        value={fd.med_aid_dec_death_hcp_surname} />
+                <FieldRow label="First Name"     value={fd.med_aid_dec_death_hcp_first_name} />
+                <FieldRow label="Station"        value={fd.med_aid_dec_death_hcp_station} />
+                <FieldRow label="Qualification"  value={fd.med_aid_dec_death_hcp_qualification} />
+                <FieldRow label="ID No"          value={fd.med_aid_dec_death_hcp_id} />
+                <FieldRow label="Practitioner No" value={fd.med_aid_dec_death_hcp_hpcsa} />
+
+                <SectionHead label="Confirmation of Death" />
+                <FieldRow label="Absent Carotid Pulse"   value={fd.med_aid_dec_death_med_carotid} />
+                <FieldRow label="Absent Heart Sounds"    value={fd.med_aid_dec_death_med_heart_sounds} />
+                <FieldRow label="Absent Resp. Activity"  value={fd.med_aid_dec_death_med_respiratory} />
+                <FieldRow label="ECG Asystole (I/II/III)" value={fd.med_aid_dec_death_med_ecg} />
+                <FieldRow label="Fixed/Dilated Pupils"   value={fd.med_aid_dec_death_med_pupils} />
+
+                <SectionHead label="Deceased Handed Over To" />
+                <FieldRow label="Surname"       value={fd.med_aid_dec_death_handover_surname} />
+                <FieldRow label="First Name"    value={fd.med_aid_dec_death_handover_first_name} />
+                <FieldRow label="Relationship"  value={fd.med_aid_dec_death_handover_relationship} />
+                <FieldRow label="Contact No"    value={fd.med_aid_dec_death_handover_contact} />
+              </div>
+
+              {/* Column 3 — the signed declaration */}
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <SectionHead label="Declaration" />
+                <div style={{
+                  padding: '6px 8px', borderTop: `1px solid ${LN}`,
+                  fontSize: '0.62rem', color: INK, lineHeight: 1.5, background: SOFT_BG,
+                }}>
+                  I, the undersigned, hereby declare that the deceased sustained no further harm while in my care, and
+                  that the above facts are, to the best of my knowledge, true and correct.
+                </div>
+                <FieldRow label="Date"  value={fd.med_aid_dec_death_signature_date} />
+                <FieldRow label="Place" value={fd.med_aid_dec_death_signature_place} />
+
+                {/* Signatory */}
+                <FieldRow label="Full Name" value={fd.med_aid_dec_death_signatory_name} />
+                <div style={{ padding: '6px 8px', borderTop: `1px solid ${LN}` }}>
+                  <div style={{ fontSize: '0.52rem', fontWeight: 800, color: MUT, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Signature</div>
+                  <SignatureBox src={fd.med_aid_dec_death_signature} minHeight={64} />
+                </div>
+
+                {/* Crew member 2 */}
+                <FieldRow label="Crew Member 2" value={fd.med_aid_dec_death_crew_attended_name} />
+                <div style={{ padding: '6px 8px', borderTop: `1px solid ${LN}` }}>
+                  <div style={{ fontSize: '0.52rem', fontWeight: 800, color: MUT, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Crew Signature</div>
+                  <SignatureBox src={fd.med_aid_dec_death_crew_attended_signature} minHeight={64} />
+                </div>
+
+                {/* Witness */}
+                <FieldRow label="Witness Name" value={fd.med_aid_dec_death_witness_name} />
+                <div style={{ padding: '6px 8px', borderTop: `1px solid ${LN}` }}>
+                  <div style={{ fontSize: '0.52rem', fontWeight: 800, color: MUT, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Witness Signature</div>
+                  <SignatureBox src={fd.med_aid_dec_death_witness_signature} minHeight={64} />
+                </div>
+              </div>
+            </div>
+
+            <div style={{ flex: 1, borderTop: `1px solid ${LN}` }} />
           </div>
         </div>
       )}

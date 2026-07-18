@@ -81,6 +81,12 @@ const TrashIcon = ({ size = 16 }: IconProps) => (
     <path d="M10 11v6M14 11v6" />
   </svg>
 );
+const EditIcon = ({ size = 16 }: IconProps) => (
+  <svg {...svgBase(size)}>
+    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+  </svg>
+);
 const UploadIcon = ({ size = 16 }: IconProps) => (
   <svg {...svgBase(size)}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" /></svg>
 );
@@ -132,8 +138,14 @@ export default function ProviderManagement() {
   const [newVehicle, setNewVehicle] = useState({ callsign: '', registration: '', vehicle_type: 'Ambulance' });
   const [showAddCrew, setShowAddCrew] = useState(false);
   const [showAddVehicle, setShowAddVehicle] = useState(false);
+  
+  const [showEditCrew, setShowEditCrew] = useState(false);
+  const [editingCrewId, setEditingCrewId] = useState<string | null>(null);
+  const [editCrewForm, setEditCrewForm] = useState({ full_name: '', email: '', initials: '', hpcsa_number: '', qualification: 'ILS', phone: '' });
+  const [editCrewSaving, setEditCrewSaving] = useState(false);
+
   // Lock the background page while any pop-up on this screen is open.
-  useScrollLock(showAddProvider || showEditClient || showAddCrew || showAddVehicle);
+  useScrollLock(showAddProvider || showEditClient || showAddCrew || showEditCrew || showAddVehicle);
   const [tempPassword, setTempPassword] = useState('');
 
   const fetchProviders = useCallback(async () => {
@@ -324,6 +336,12 @@ export default function ProviderManagement() {
     }
   };
 
+  // Close the Add-Vehicle modal and reset the form so a re-open starts clean.
+  const closeAddVehicle = () => {
+    setShowAddVehicle(false);
+    setNewVehicle({ callsign: '', registration: '', vehicle_type: 'Ambulance' });
+  };
+
   const handleDeleteCrew = async (crewId: string) => {
     if (!selectedProvider) return;
     if (!window.confirm('Are you sure you want to delete this crew member?')) return;
@@ -333,6 +351,37 @@ export default function ProviderManagement() {
     } catch (e: any) {
       alert(e.response?.data?.detail || 'Failed to delete crew member');
     }
+  };
+
+  const openEditCrew = (member: CrewMember) => {
+    setEditingCrewId(member.id);
+    setEditCrewForm({
+      full_name: member.full_name,
+      email: member.email,
+      initials: member.initials || '',
+      hpcsa_number: member.hpcsa_number || '',
+      qualification: member.qualification || 'ILS',
+      phone: member.phone || '',
+    });
+    setShowEditCrew(true);
+  };
+
+  const closeEditCrew = () => {
+    setShowEditCrew(false);
+    setEditingCrewId(null);
+  };
+
+  const handleSaveCrew = async () => {
+    if (!selectedProvider || !editingCrewId) return;
+    setEditCrewSaving(true);
+    try {
+      await api.patch(`/api/providers/${selectedProvider.id}/crew/${editingCrewId}`, editCrewForm);
+      closeEditCrew();
+      fetchProviderDetails(selectedProvider);
+    } catch (e: any) {
+      alert(e.response?.data?.detail || 'Failed to update crew member');
+    }
+    setEditCrewSaving(false);
   };
 
   const cardStyle: React.CSSProperties = {
@@ -405,29 +454,29 @@ export default function ProviderManagement() {
               <div style={{ display: 'grid', gap: 16 }}>
                 <div>
                   <label style={labelStyle}>Company Name *</label>
-                  <input style={inputStyle} placeholder="e.g. JEMS Medical Services" value={newProvider.name} onChange={e => setNewProvider({ ...newProvider, name: e.target.value })} />
+                  <input style={inputStyle} value={newProvider.name} onChange={e => setNewProvider({ ...newProvider, name: e.target.value })} />
                 </div>
 
                 {/* Company details — auto-filled into the top-left corner of every PDF PRF (mirrors Company Settings). */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                   <div>
                     <label style={labelStyle}>Phone Number</label>
-                    <input style={inputStyle} placeholder="e.g. 011 123 4567" value={newProvider.phone} onChange={e => setNewProvider({ ...newProvider, phone: e.target.value })} />
+                    <input style={inputStyle} value={newProvider.phone} onChange={e => setNewProvider({ ...newProvider, phone: e.target.value })} />
                   </div>
                   <div>
                     <label style={labelStyle}>Email Address</label>
-                    <input style={inputStyle} type="email" placeholder="e.g. info@company.co.za" value={newProvider.email} onChange={e => setNewProvider({ ...newProvider, email: e.target.value })} />
+                    <input style={inputStyle} type="email" value={newProvider.email} onChange={e => setNewProvider({ ...newProvider, email: e.target.value })} />
                   </div>
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                   <div>
                     <label style={labelStyle}>PR Number</label>
-                    <input style={inputStyle} placeholder="e.g. PR-1234" value={newProvider.prNumber} onChange={e => setNewProvider({ ...newProvider, prNumber: e.target.value })} />
+                    <input style={inputStyle} value={newProvider.prNumber} onChange={e => setNewProvider({ ...newProvider, prNumber: e.target.value })} />
                   </div>
                   <div>
                     <label style={labelStyle}>PTY Reg Number</label>
-                    <input style={inputStyle} placeholder="e.g. 2020/123456/07" value={newProvider.ptyRegNumber} onChange={e => setNewProvider({ ...newProvider, ptyRegNumber: e.target.value })} />
+                    <input style={inputStyle} value={newProvider.ptyRegNumber} onChange={e => setNewProvider({ ...newProvider, ptyRegNumber: e.target.value })} />
                   </div>
                 </div>
 
@@ -437,7 +486,7 @@ export default function ProviderManagement() {
                     style={inputStyle}
                     type="text"
                     inputMode="numeric"
-                    placeholder="e.g. 1500"
+                   
                     value={newProvider.prfNumber}
                     onChange={e => setNewProvider({ ...newProvider, prfNumber: e.target.value.replace(/[^0-9]/g, '') })}
                   />
@@ -445,7 +494,7 @@ export default function ProviderManagement() {
 
                 <div>
                   <label style={labelStyle}>Address</label>
-                  <textarea style={{ ...inputStyle, minHeight: 70, resize: 'vertical', fontFamily: 'inherit' }} placeholder="Company address" value={newProvider.address} onChange={e => setNewProvider({ ...newProvider, address: e.target.value })} />
+                  <textarea style={{ ...inputStyle, minHeight: 70, resize: 'vertical', fontFamily: 'inherit' }} value={newProvider.address} onChange={e => setNewProvider({ ...newProvider, address: e.target.value })} />
                 </div>
 
                 <div>
@@ -608,25 +657,25 @@ export default function ProviderManagement() {
 
               <div>
                 <label style={labelStyle}>Company Name *</label>
-                <input style={inputStyle} value={editForm.name} onChange={e => setEditForm({ ...editForm, name: e.target.value })} placeholder="Company Name" />
+                <input style={inputStyle} value={editForm.name} onChange={e => setEditForm({ ...editForm, name: e.target.value })} />
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div>
                   <label style={labelStyle}>PR Number</label>
-                  <input style={inputStyle} value={editForm.pr_number} onChange={e => setEditForm({ ...editForm, pr_number: e.target.value })} placeholder="e.g. PR-1234" />
+                  <input style={inputStyle} value={editForm.pr_number} onChange={e => setEditForm({ ...editForm, pr_number: e.target.value })} />
                 </div>
                 <div>
                   <label style={labelStyle}>Phone</label>
-                  <input style={inputStyle} value={editForm.phone} onChange={e => setEditForm({ ...editForm, phone: e.target.value })} placeholder="e.g. 011 123 4567" />
+                  <input style={inputStyle} value={editForm.phone} onChange={e => setEditForm({ ...editForm, phone: e.target.value })} />
                 </div>
               </div>
               <div>
                 <label style={labelStyle}>Email</label>
-                <input style={inputStyle} type="email" value={editForm.email} onChange={e => setEditForm({ ...editForm, email: e.target.value })} placeholder="billing@company.co.za" />
+                <input style={inputStyle} type="email" value={editForm.email} onChange={e => setEditForm({ ...editForm, email: e.target.value })} />
               </div>
               <div>
                 <label style={labelStyle}>Physical Address</label>
-                <input style={inputStyle} value={editForm.address} onChange={e => setEditForm({ ...editForm, address: e.target.value })} placeholder="123 Main Rd, Johannesburg" />
+                <input style={inputStyle} value={editForm.address} onChange={e => setEditForm({ ...editForm, address: e.target.value })} />
               </div>
               <div>
                 <label style={labelStyle}>Latest PRF Number</label>
@@ -634,7 +683,7 @@ export default function ProviderManagement() {
                   style={inputStyle}
                   type="text"
                   inputMode="numeric"
-                  placeholder="e.g. 1500"
+                 
                   value={editForm.prfNumber}
                   onChange={e => setEditForm({ ...editForm, prfNumber: e.target.value.replace(/[^0-9]/g, '') })}
                 />
@@ -841,15 +890,15 @@ export default function ProviderManagement() {
                 <div style={{ padding: '20px 26px 4px' }}>
                   <div style={{ marginBottom: 4 }}>
                     <label style={labelStyle}>Full Name *</label>
-                    <input style={inputStyle} placeholder="e.g. A. Ishwar" value={newCrew.full_name} onChange={e => setNewCrew({ ...newCrew, full_name: e.target.value })} />
+                    <input style={inputStyle} value={newCrew.full_name} onChange={e => setNewCrew({ ...newCrew, full_name: e.target.value })} />
                   </div>
                   <div style={{ marginBottom: 4 }}>
                     <label style={labelStyle}>Email *</label>
-                    <input style={inputStyle} placeholder="crew@email.com" value={newCrew.email} onChange={e => setNewCrew({ ...newCrew, email: e.target.value })} />
+                    <input style={inputStyle} value={newCrew.email} onChange={e => setNewCrew({ ...newCrew, email: e.target.value })} />
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 14px' }}>
-                    <div><label style={labelStyle}>Initials</label><input style={inputStyle} placeholder="A.I." value={newCrew.initials} onChange={e => setNewCrew({ ...newCrew, initials: e.target.value })} /></div>
-                    <div><label style={labelStyle}>HPCSA Number</label><input style={inputStyle} placeholder="0049530" value={newCrew.hpcsa_number} onChange={e => setNewCrew({ ...newCrew, hpcsa_number: e.target.value })} /></div>
+                    <div><label style={labelStyle}>Initials</label><input style={inputStyle} value={newCrew.initials} onChange={e => setNewCrew({ ...newCrew, initials: e.target.value })} /></div>
+                    <div><label style={labelStyle}>HPCSA Number</label><input style={inputStyle} value={newCrew.hpcsa_number} onChange={e => setNewCrew({ ...newCrew, hpcsa_number: e.target.value })} /></div>
                     <div>
                       <label style={labelStyle}>Qualification</label>
                       <select style={inputStyle} value={newCrew.qualification} onChange={e => setNewCrew({ ...newCrew, qualification: e.target.value })}>
@@ -862,7 +911,7 @@ export default function ProviderManagement() {
                         <option value="ART">ART</option>
                       </select>
                     </div>
-                    <div><label style={labelStyle}>Phone</label><input style={inputStyle} placeholder="082 123 4567" value={newCrew.phone} onChange={e => setNewCrew({ ...newCrew, phone: e.target.value })} /></div>
+                    <div><label style={labelStyle}>Phone</label><input style={inputStyle} value={newCrew.phone} onChange={e => setNewCrew({ ...newCrew, phone: e.target.value })} /></div>
                   </div>
 
                   {tempPassword && (
@@ -877,6 +926,48 @@ export default function ProviderManagement() {
                 <div style={{ display: 'flex', gap: 10, padding: '16px 26px 22px' }}>
                   <button style={{ ...btnPrimary, background: 'var(--surface-100)', color: 'var(--text)', flex: 1, padding: '10px 18px' }} onClick={closeAddCrew}>Cancel</button>
                   <button style={{ ...btnPrimary, flex: 2, padding: '10px 18px' }} onClick={handleAddCrew}>Add Crew Member</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {showEditCrew && (
+            <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+              <div style={{ ...cardStyle, width: '100%', maxWidth: 500, padding: 0, display: 'flex', flexDirection: 'column', maxHeight: '90vh' }}>
+                <div style={{ padding: '20px 26px 16px', borderBottom: '1px solid var(--surface-100)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <h3 style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--text)' }}>Edit Crew Member</h3>
+                  <button onClick={closeEditCrew} style={{ background: 'none', border: 'none', fontSize: '1.4rem', color: 'var(--text-muted)', cursor: 'pointer', lineHeight: 1 }}>&times;</button>
+                </div>
+                
+                <div style={{ padding: '20px 26px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 14px' }}>
+                    <div style={{ gridColumn: '1 / -1' }}><label style={labelStyle}>Full Name *</label><input style={inputStyle} value={editCrewForm.full_name} onChange={e => setEditCrewForm({ ...editCrewForm, full_name: e.target.value })} /></div>
+                    <div style={{ gridColumn: '1 / -1' }}><label style={labelStyle}>Email (for Portal Login) *</label><input style={inputStyle} value={editCrewForm.email} onChange={e => setEditCrewForm({ ...editCrewForm, email: e.target.value })} /></div>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 14px' }}>
+                    <div><label style={labelStyle}>Initials</label><input style={inputStyle} value={editCrewForm.initials} onChange={e => setEditCrewForm({ ...editCrewForm, initials: e.target.value })} /></div>
+                    <div><label style={labelStyle}>HPCSA Number</label><input style={inputStyle} value={editCrewForm.hpcsa_number} onChange={e => setEditCrewForm({ ...editCrewForm, hpcsa_number: e.target.value })} /></div>
+                    <div>
+                      <label style={labelStyle}>Qualification</label>
+                      <select style={inputStyle} value={editCrewForm.qualification} onChange={e => setEditCrewForm({ ...editCrewForm, qualification: e.target.value })}>
+                        <option value="BLS">BLS</option>
+                        <option value="ILS">ILS</option>
+                        <option value="ALS">ALS</option>
+                        <option value="AEA">AEA</option>
+                        <option value="BAA">BAA</option>
+                        <option value="ECP">ECP</option>
+                        <option value="ART">ART</option>
+                      </select>
+                    </div>
+                    <div><label style={labelStyle}>Phone</label><input style={inputStyle} value={editCrewForm.phone} onChange={e => setEditCrewForm({ ...editCrewForm, phone: e.target.value })} /></div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: 10, padding: '16px 26px 22px' }}>
+                  <button style={{ ...btnPrimary, background: 'var(--surface-100)', color: 'var(--text)', flex: 1, padding: '10px 18px' }} onClick={closeEditCrew}>Cancel</button>
+                  <button style={{ ...btnPrimary, flex: 2, padding: '10px 18px' }} onClick={handleSaveCrew} disabled={editCrewSaving}>
+                    {editCrewSaving ? 'Saving...' : 'Save Changes'}
+                  </button>
                 </div>
               </div>
             </div>
@@ -916,6 +1007,15 @@ export default function ProviderManagement() {
                     <td style={{ padding: '12px 18px', fontFamily: 'monospace', fontSize: '0.82rem', color: 'var(--text-muted)' }}>{c.hpcsa_number || '—'}</td>
                     <td style={{ padding: '12px 18px', textAlign: 'right' }}>
                       <button
+                        onClick={() => openEditCrew(c)}
+                        title="Edit crew member"
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'inline-flex', padding: 6, borderRadius: 8, transition: 'all 0.15s', marginRight: 4 }}
+                        onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = teal; (e.currentTarget as HTMLButtonElement).style.background = 'rgba(8,131,149,0.08)'; }}
+                        onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-muted)'; (e.currentTarget as HTMLButtonElement).style.background = 'none'; }}
+                      >
+                        <EditIcon size={16} />
+                      </button>
+                      <button
                         onClick={() => handleDeleteCrew(c.id)}
                         title="Delete crew member"
                         style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'inline-flex', padding: 6, borderRadius: 8, transition: 'all 0.15s' }}
@@ -942,23 +1042,58 @@ export default function ProviderManagement() {
           </div>
 
           {showAddVehicle && (
-            <div style={cardStyle}>
-              <h3 style={{ fontSize: '0.85rem', fontWeight: 700, color: '#E65100', marginBottom: 10 }}>Add Vehicle</h3>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
-                <div><label style={labelStyle}>Callsign *</label><input style={inputStyle} placeholder="e.g. ALPHA 12" value={newVehicle.callsign} onChange={e => setNewVehicle({ ...newVehicle, callsign: e.target.value })} /></div>
-                <div><label style={labelStyle}>Registration *</label><input style={inputStyle} placeholder="e.g. GP 123-456" value={newVehicle.registration} onChange={e => setNewVehicle({ ...newVehicle, registration: e.target.value })} /></div>
-                <div>
-                  <label style={labelStyle}>Type</label>
-                  <select style={inputStyle} value={newVehicle.vehicle_type} onChange={e => setNewVehicle({ ...newVehicle, vehicle_type: e.target.value })}>
-                    <option value="Ambulance">Ambulance</option>
-                    <option value="Response Vehicle">Response Vehicle</option>
-                    <option value="Helicopter">Helicopter</option>
-                  </select>
+            <div
+              style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: 16 }}
+              onClick={e => { if (e.target === e.currentTarget) closeAddVehicle(); }}
+            >
+              <div style={{
+                background: 'var(--surface-50)', borderRadius: 16,
+                border: '1px solid var(--surface-100)',
+                boxShadow: '0 24px 60px rgba(0,0,0,0.28), 0 4px 14px rgba(0,0,0,0.12)',
+                width: '100%', maxWidth: 480, maxHeight: '90vh', overflowY: 'auto',
+                position: 'relative',
+              }}>
+                {/* Header */}
+                <div style={{ padding: '22px 26px 16px', borderBottom: '1px solid var(--surface-100)' }}>
+                  <div style={{ fontSize: '1.02rem', fontWeight: 800, color: 'var(--text)', letterSpacing: '-0.01em' }}>Add Vehicle</div>
+                  <button
+                    onClick={closeAddVehicle}
+                    aria-label="Close"
+                    style={{
+                      position: 'absolute', top: 16, right: 18,
+                      width: 30, height: 30, borderRadius: 8,
+                      border: '1px solid var(--surface-200)', background: 'var(--bg)',
+                      color: 'var(--text-muted)', fontSize: '1.15rem', lineHeight: 1,
+                      cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
+                    }}
+                  >&times;</button>
                 </div>
-              </div>
-              <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-                <button style={btnPrimary} onClick={handleAddVehicle}>Add Vehicle</button>
-                <button style={{ ...btnPrimary, background: 'var(--surface-200)', color: 'var(--text)' }} onClick={() => setShowAddVehicle(false)}>Cancel</button>
+
+                {/* Body */}
+                <div style={{ padding: '20px 26px 4px' }}>
+                  <div style={{ marginBottom: 4 }}>
+                    <label style={labelStyle}>Callsign *</label>
+                    <input style={inputStyle} value={newVehicle.callsign} onChange={e => setNewVehicle({ ...newVehicle, callsign: e.target.value })} />
+                  </div>
+                  <div style={{ marginBottom: 4 }}>
+                    <label style={labelStyle}>Registration *</label>
+                    <input style={inputStyle} value={newVehicle.registration} onChange={e => setNewVehicle({ ...newVehicle, registration: e.target.value })} />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Type</label>
+                    <select style={inputStyle} value={newVehicle.vehicle_type} onChange={e => setNewVehicle({ ...newVehicle, vehicle_type: e.target.value })}>
+                      <option value="Ambulance">Ambulance</option>
+                      <option value="Response Vehicle">Response Vehicle</option>
+                      <option value="Helicopter">Helicopter</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Footer */}
+                <div style={{ display: 'flex', gap: 10, padding: '16px 26px 22px' }}>
+                  <button style={{ ...btnPrimary, background: 'var(--surface-100)', color: 'var(--text)', flex: 1, padding: '10px 18px' }} onClick={closeAddVehicle}>Cancel</button>
+                  <button style={{ ...btnPrimary, flex: 2, padding: '10px 18px' }} onClick={handleAddVehicle}>Add Vehicle</button>
+                </div>
               </div>
             </div>
           )}
