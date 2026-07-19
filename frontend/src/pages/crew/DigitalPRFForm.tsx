@@ -2352,11 +2352,14 @@ const CallTypePicker = ({ onPick }: { onPick?: (o: string) => void }) => {
 // Billing Type picker — same UX as CallTypePicker. Full grid until first pick,
 // then non-selected chips slide toward the top-left while the chosen chip
 // highlights, finally collapsing to a single pill that opens a dropdown.
-const BILLING_TYPE_OPTS = ['MED AID', 'RAF', 'PVT', 'EVENT', 'CALL OUT FEE'] as const;
+const BILLING_TYPE_OPTS = ['MED AID', 'RAF', 'PVT', 'CALL OUT FEE'] as const;
 
 const BillingTypePicker = () => {
   const { fd, sf } = useContext(FormContext);
-  const selected: string = fd.billing_type || '';
+  let selected: string = fd.billing_type || '';
+  // The 'EVENT' billing type was deprecated and removed. If a legacy record
+  // still carries it, treat it as unselected to force the crew to pick a valid one.
+  if (selected === 'EVENT') selected = '';
   const [animating, setAnimating] = useState(false);
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -2367,7 +2370,7 @@ const BillingTypePicker = () => {
   // Declaration of Death call-outs cannot bill third-party payers (no live
   // patient to bill, no incident exposure) — strip RAF.
   // Resus calls are restricted to MED AID and PVT only.
-  const baseOpts = BILLING_TYPE_OPTS.filter(o => o !== 'EVENT' && o !== 'CALL OUT FEE');
+  const baseOpts = BILLING_TYPE_OPTS.filter(o => o !== 'CALL OUT FEE');
   const billingOpts = fd.call_type === 'DOD'
     ? baseOpts.filter(o => o !== 'RAF')
     : fd.call_type === 'RESUS'
@@ -2885,18 +2888,11 @@ const MedAidMore = () => {
             </div>
           )}
 
-          {/* Declaration of Death — only surfaced when the call type is DOD.
-              The manual Sub-toggle has been removed so the DoD form can
-              never appear under MED AID for IFT/IHT/RHT/PRIMARY/etc; the
-              call-type pick is the sole entry point. For RESUS the DoD
-              form is surfaced inline at the bottom of the clinical
-              section instead (so the crew never has to scroll back to
-              the billing card mid-flow). */}
-          {fd.call_type === 'DOD' && (
-            <div>
-              <DodFormBody />
-            </div>
-          )}
+          {/* Declaration of Death is NOT rendered here anymore. For a DOD call
+              type the certificate is its own top-level "Declaration of Death"
+              section on the PT-INFO phase (split out from this Debtor / medical-
+              aid card so the two aren't visually merged). For RESUS the DoD form
+              is surfaced inline at the bottom of the clinical section. */}
 
           {/* Quoted is captured as an IFT/IHT subtype on the Call Type
               picker — not repeated here. */}
@@ -3705,6 +3701,7 @@ export default function DigitalPRFForm() {
   // Crew sign-off gate — on Submit, every crew member must sign before the PRF
   // can go through. Signatures are stored in fd.crew_signoff_sigs keyed by crew.
   const [crewSignOffOpen, setCrewSignOffOpen] = useState(false);
+  const [undertakerOpen, setUndertakerOpen] = useState(false);
   // Summary review gate — before crew sign-off, show all entered data so crew
   // can spot typos or missing info. The modal's "Looks Good" continues to submit.
   const [summaryReviewOpen, setSummaryReviewOpen] = useState(false);
@@ -3772,6 +3769,9 @@ export default function DigitalPRFForm() {
   const [crewPicker, setCrewPicker] = useState<CrewPickerState | null>(null);
   const [dismissedTreating, setDismissedTreating] = useState(false);
   const [startedExam, setStartedExam] = useState(false);
+  // Phase-2 (PT INFO) Declaration of Death form: collapsed behind a button until
+  // the crew opens it, so the DOD certificate doesn't crowd the billing fields.
+  const [dodFormOpen, setDodFormOpen] = useState(false);
   const [transferSubtypeOpen, setTransferSubtypeOpen] = useState(false);
   const [quotedAmountModalOpen, setQuotedAmountModalOpen] = useState(false);
   const [preauthModalOpen, setPreauthModalOpen] = useState(false);
@@ -5614,9 +5614,7 @@ export default function DigitalPRFForm() {
       case 'PVT':
         Object.assign(base, { pvt_payment_method: 'EFT', pvt_account_holder: 'Test Holder', pvt_account_holder_id: '9001015800086', pvt_account_holder_phone: '0820000009', pvt_account_holder_address: '34 Test Ave' });
         break;
-      case 'EVENT':
-        Object.assign(base, { event_name: 'Test Event', event_organiser: 'Test Org', event_date: '2026-06-12', event_booking_ref: 'BK-1', event_contact_person: 'Test Contact' });
-        break;
+
       case 'CALL OUT FEE':
         Object.assign(base, { callout_requested_by: 'Test Requester', callout_authorisation: 'AUTH-1', callout_standdown_reason: 'Stood down on arrival' });
         break;
@@ -6048,6 +6046,12 @@ export default function DigitalPRFForm() {
         </>
       )}
 
+      {/* Patient Information — hidden for a Declaration of Death: the deceased's
+          details are captured once in the DOD form's "Particulars of deceased"
+          section, and a mirror effect copies them into the patient_* fields, so
+          repeating the section here would be duplicate data entry. */}
+      {fd.call_type !== 'DOD' && (
+      <>
       <SHdr t="Patient Information" />
       <Card>
         <Lbl t="Gender" />
@@ -6069,6 +6073,8 @@ export default function DigitalPRFForm() {
           <div><Lbl t="Code" /><Inp fk="patient_postal_code" ph="Code" /></div>
         </G2>
       </Card>
+      </>
+      )}
 
       {/* ── Billing details ────────────────────────────────────────────────
           The Billing Type selector and all channel-specific detail cards
@@ -6090,13 +6096,17 @@ export default function DigitalPRFForm() {
           <Card>
             <Lbl t="Payment Method" req />
             <Toggle fk="pvt_payment_method" opts={['Cash', 'Card', 'EFT', 'Account', 'Indigent']} />
-            <Lbl t="Amount Quoted (R)" /><Inp fk="pvt_amount_quoted" ph="e.g. 1500.00" type="number" />
-            <Lbl t="Account Holder Full Name" req /><Inp fk="pvt_account_holder" ph="Person responsible for payment" req />
-            <G2>
-              <div><Lbl t="Account Holder ID Number" /><Inp fk="pvt_account_holder_id" ph="13-digit SA ID" /></div>
-              <div><Lbl t="Contact Number" req /><Inp fk="pvt_account_holder_phone" type="tel" ph="082 ..." req /></div>
-            </G2>
-            <Lbl t="Billing Address" /><AddrInp fk="pvt_account_holder_address" ph="For invoice delivery" />
+            {fd.pvt_payment_method !== 'Indigent' && (
+              <>
+                <Lbl t="Amount Quoted (R)" /><Inp fk="pvt_amount_quoted" ph="e.g. 1500.00" type="number" />
+                <Lbl t="Account Holder Full Name" req /><Inp fk="pvt_account_holder" ph="Person responsible for payment" req />
+                <G2>
+                  <div><Lbl t="Account Holder ID Number" /><Inp fk="pvt_account_holder_id" ph="13-digit SA ID" /></div>
+                  <div><Lbl t="Contact Number" req /><Inp fk="pvt_account_holder_phone" type="tel" ph="082 ..." req /></div>
+                </G2>
+                <Lbl t="Billing Address" /><AddrInp fk="pvt_account_holder_address" ph="For invoice delivery" />
+              </>
+            )}
           </Card>
 
           {/* Cash payment verification — only shown when Cash is selected */}
@@ -6181,7 +6191,7 @@ export default function DigitalPRFForm() {
             <Lbl t="Main Member ID" /><Inp fk="main_member_id" ph="13-digit SA ID" />
             <PostAuthField />
 
-            {fd.call_type !== 'RESUS' && <MedAidMore />}
+            {fd.call_type !== 'RESUS' && fd.call_type !== 'DOD' && <MedAidMore />}
           </Card>
         )}
 
@@ -6298,17 +6308,7 @@ export default function DigitalPRFForm() {
           </Card>
         )}
 
-        {fd.billing_type === 'EVENT' && (
-          <Card>
-            <Lbl t="Event Name" req /><Inp fk="event_name" ph="e.g. Comrades Marathon 2026" req />
-            <G2>
-              <div><Lbl t="Organiser / Client" req /><Inp fk="event_organiser" ph="Hosting company" req /></div>
-              <div><Lbl t="Event Date" /><Inp fk="event_date" type="date" /></div>
-            </G2>
-            <Lbl t="Booking Reference" /><Inp fk="event_booking_ref" ph="Standby / event contract no." />
-            <Lbl t="On-Site Contact" /><Inp fk="event_contact_person" ph="Name of organiser rep on scene" />
-          </Card>
-        )}
+
 
         {fd.billing_type === 'CALL OUT FEE' && (
           <Card>
@@ -6352,6 +6352,66 @@ export default function DigitalPRFForm() {
         </>
       )}
 
+      {/* Declaration of Death — its own section, split out from the Debtor
+          Information / medical-aid card above so the deceased's certificate is
+          no longer visually merged with the billing fields. Shown for a DOD
+          call type regardless of billing type (MED AID or PVT); the crew signs
+          the declaration here (the dispatch-screen copy omits it). */}
+      {fd.call_type === 'DOD' && (
+        <>
+          <SHdr t="Declaration of Death" />
+          <div style={{ marginBottom: 20 }}>
+            {/* Toggle button — the certificate is long, so it stays collapsed
+                until the crew taps to reveal it. Neutral system style. */}
+            <button
+              type="button"
+              onClick={() => setDodFormOpen(o => !o)}
+              aria-pressed={dodFormOpen}
+              aria-expanded={dodFormOpen}
+              style={{
+                width: '100%', padding: '14px 16px',
+                borderRadius: dodFormOpen ? '12px 12px 0 0' : 12,
+                fontSize: '0.88rem', fontWeight: 800,
+                cursor: 'pointer', textAlign: 'left',
+                border: `1.5px solid ${dodFormOpen ? S300 : S200}`,
+                borderBottom: `1.5px solid ${S200}`,
+                background: dodFormOpen ? S50 : W,
+                color: S800,
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                gap: 12, transition: 'all 0.2s ease',
+                boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
+              }}
+            >
+              <span style={{ fontWeight: 800 }}>Declaration of Death Form</span>
+              <div style={{
+                width: 26, height: 26, borderRadius: 7, flexShrink: 0,
+                background: S100,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: '0.72rem', color: S600,
+                transform: dodFormOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+                transition: 'transform 0.25s ease',
+              }}>
+                ▼
+              </div>
+            </button>
+
+            {/* Expanded certificate body */}
+            {dodFormOpen && (
+              <div style={{
+                border: `1.5px solid ${S200}`,
+                borderTop: 'none',
+                borderRadius: '0 0 12px 12px',
+                padding: '20px 16px',
+                background: W,
+                boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+              }}>
+                <DodFormBody />
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
       {/* Declaration of Death short-circuits the Clinical phase — the
           patient is deceased so there's no assessment / vitals / meds to
           record. The Undertaker handover happens at the scene, so the
@@ -6359,41 +6419,60 @@ export default function DigitalPRFForm() {
       {fd.med_aid_dec_death && (
         <>
           <SHdr t="Undertaker" />
-          <Card>
-            <Lbl t="Undertaker Name" req />
-            <Inp fk="undertaker_name" ph="e.g. Doves Funeral Services" req />
+          <button
+            type="button"
+            onClick={() => setUndertakerOpen(v => !v)}
+            style={{
+              width: '100%', padding: '16px 20px', borderRadius: 12,
+              border: `1px solid ${fd.undertaker_name && fd.undertaker_collector_signature ? '#16a34a' : '#cbd5e1'}`,
+              background: fd.undertaker_name && fd.undertaker_collector_signature ? '#f0fdf4' : '#f8fafc',
+              color: fd.undertaker_name && fd.undertaker_collector_signature ? '#16a34a' : '#334155',
+              fontWeight: 700, fontSize: '0.95rem', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              marginBottom: 18,
+              boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+              transition: 'all 0.2s',
+            }}
+          >
+            {fd.undertaker_name && fd.undertaker_collector_signature ? 'Undertaker Details Captured' : 'Enter Undertaker Details'}
+          </button>
 
-            <Lbl t="Phone Number" />
-            <Inp fk="undertaker_phone" ph="Phone number" type="tel" />
+          {undertakerOpen && (
+            <Card>
+              <Lbl t="Undertaker Name" req />
+              <Inp fk="undertaker_name" ph="e.g. Doves Funeral Services" req />
 
-            <Lbl t="Person Collecting Deceased" />
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-              <div style={{ flex: 1 }}>
-                <input
-                  type="text"
-                  value={fd.undertaker_collector_name ?? ''}
-                  onChange={e => sf('undertaker_collector_name', e.target.value)}
-                  onFocus={onF}
-                  onBlur={onB}
-                  placeholder="Full name of person collecting"
-                  autoComplete="off"
-                  style={{ ...base, marginBottom: 0, borderColor: '#e2e8f0' }}
+              <Lbl t="Phone Number" />
+              <Inp fk="undertaker_phone" ph="Phone number" type="tel" />
+
+              <Lbl t="Person Collecting Deceased" />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+                <div style={{ flex: 1 }}>
+                  <input
+                    type="text"
+                    value={fd.undertaker_collector_name ?? ''}
+                    onChange={e => sf('undertaker_collector_name', e.target.value)}
+                    onFocus={onF}
+                    onBlur={onB}
+                    placeholder="Full name of person collecting"
+                    autoComplete="off"
+                    style={{ ...base, marginBottom: 0, borderColor: '#e2e8f0' }}
+                  />
+                </div>
+                <FullscreenSignaturePad
+                  compact
+                  label="Collector Signature"
+                  value={fd.undertaker_collector_signature}
+                  onChange={v => sf('undertaker_collector_signature', v)}
                 />
               </div>
-              <FullscreenSignaturePad
-                compact
-                label="Collector Signature"
-                value={fd.undertaker_collector_signature}
-                onChange={v => sf('undertaker_collector_signature', v)}
-              />
-            </div>
-          </Card>
+            </Card>
+          )}
         </>
       )}
 
       {fd.med_aid_dec_death ? (
         <>
-          {renderTermsAndConditions()}
           {/* Capture the crew's "Available" time before submitting so the
               shift's end-of-call timestamp is on the PRF. The same row
               normally lives on the Complete phase, which is hidden for DoD. */}

@@ -65,9 +65,10 @@ function toggleArr(fd: Fd, key: string, value: string): Fd {
 }
 
 /** Mirror the billing options filter from BillingTypePicker */
-const ALL_BILLING_OPTS = ['MED AID', 'PVT', 'RAF', 'WCA', 'EVENT', 'CALL OUT FEE'];
+const ALL_BILLING_OPTS = ['MED AID', 'PVT', 'RAF', 'WCA', 'CALL OUT FEE'];
+
 function availableBillingOpts(callType: string): string[] {
-  const base = ALL_BILLING_OPTS.filter(o => o !== 'EVENT' && o !== 'CALL OUT FEE');
+  const base = ALL_BILLING_OPTS.filter(o => o !== 'CALL OUT FEE');
   if (callType === 'DOD') return base.filter(o => o !== 'RAF');
   if (callType === 'RESUS') return base.filter(o => o === 'MED AID' || o === 'PVT');
   return base;

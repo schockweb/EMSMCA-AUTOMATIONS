@@ -654,8 +654,10 @@ export default function PRFView() {
   const timeRows = [
     { label: 'Call Disp',           t: 'time_dispatched',     k: 'km_dispatched'     },
     { label: 'Scene',               t: 'time_on_scene',       k: 'km_on_scene'       },
-    { label: 'Depart',              t: 'time_depart_scene',   k: 'km_depart_scene'   },
-    { label: 'Arrival At Facility', t: 'time_at_destination', k: 'km_at_destination' },
+    ...(fd.call_type !== 'DOD' ? [
+      { label: 'Depart', t: 'time_depart_scene', k: 'km_depart_scene' },
+      { label: 'Arrival At Facility', t: 'time_at_destination', k: 'km_at_destination' }
+    ] : []),
     { label: 'Available',           t: 'time_available',      k: 'km_available'      },
   ];
 
@@ -968,7 +970,7 @@ export default function PRFView() {
             <FieldRow label="Case No" value={prf.case_number} />
             {fd.rht_call_out_fee && <FieldRow label="Call-Out Fee" value={fd.rht_call_out_fee} />}
             {/* Assessment level + Billing Type */}
-            <FieldRow label="Assessment"   value={fd.assessment_level} />
+            {fd.call_type !== 'DOD' && <FieldRow label="Assessment"   value={fd.assessment_level} />}
             <FieldRow label="Billing Type" value={fd.billing_type} />
             {/* Call type — rendered as a standard labelled field row; flex:1
                 stretches it to fill the remaining column height. */}
@@ -990,11 +992,15 @@ export default function PRFView() {
             <FieldRow label="Incident Add"  value={fd.incident_location} />
             <FieldRow label="Suburb / Ward" value={fd.suburb_ward} />
             <FieldRow label="Dest Facility" value={fd.receiving_facility} />
-            <FieldRow label="Ward"          value={fd.ward} />
-            <FieldRow label={fd.call_type === 'COURTESY' ? "Receiving Dr/Person" : "Receiving Dr"}  value={fd.receiving_doctor} />
-            <FieldRow label="Qualification" value={fd.handover_qualification} />
-            <FieldRow label="Condition" value={fd.handover_notes} valueMin={24} />
-            <FieldRow label="Receiving Facility Email" value={fd.handover_doctor_email} />
+            {fd.call_type !== 'DOD' && (
+              <>
+                <FieldRow label="Ward"          value={fd.ward} />
+                <FieldRow label={fd.call_type === 'COURTESY' ? "Receiving Dr/Person" : "Receiving Dr"}  value={fd.receiving_doctor} />
+                <FieldRow label="Qualification" value={fd.handover_qualification} />
+                <FieldRow label="Condition" value={fd.handover_notes} valueMin={24} />
+                <FieldRow label="Receiving Facility Email" value={fd.handover_doctor_email} />
+              </>
+            )}
             <div style={{ flex: 1, borderTop: `1px solid ${LN}`, background: GREEN_TINT }} />
           </div>
 
@@ -1047,15 +1053,121 @@ export default function PRFView() {
           </div>
         </div>
 
-        {/* ── BAND B — Patient │ Clinical summary │ Medical Aid │ Channel + Return Trip ──
-             Patient column is 1.64fr (not 1.7) so its right border lines up
-             vertically with Band A's Call Type left border (1.95/7.6). The
-             0.06fr goes to Debtor, so only the Patient/Debtor border moves. */}
+        {/* ── BAND B — For DOD calls the Declaration of Death renders first ── */}
+        {fd.call_type === 'DOD' && fd.med_aid_dec_death && (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', borderTop: `2px solid ${LN}` }}>
+            {/* Column 1 — event + deceased */}
+            <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
+              <SectionHead label="Declaration of Death" />
+              <FieldRow label="Date"                 value={fd.med_aid_dec_death_date} />
+              <FieldRow label="Time of Death"        value={fd.med_aid_dec_death_time} />
+              <FieldRow label="Case No."             value={fd.med_aid_dec_death_case_no} />
+              <FieldRow label="Location of Body"     value={fd.med_aid_dec_death_location} />
+              <FieldRow label="Identified By"        value={fd.med_aid_dec_death_identified_by} />
+
+              <SectionHead label="Particulars of Deceased" />
+              <FieldRow label="Gender"       value={fd.med_aid_dec_death_deceased_gender} />
+              <FieldRow label="First Name"   value={fd.med_aid_dec_death_deceased_first_name} />
+              <FieldRow label="Surname"      value={fd.med_aid_dec_death_deceased_surname} />
+              <FieldRow label="ID Number"    value={fd.med_aid_dec_death_deceased_id} />
+              <FieldRow label="Passport No"  value={fd.med_aid_dec_death_deceased_passport} />
+              <FieldRow label="Date of Birth" value={fd.med_aid_dec_death_deceased_dob} />
+              <FieldRow label="Age"          value={fd.med_aid_dec_death_deceased_age} />
+              <FieldRow label="Cell"         value={fd.med_aid_dec_death_deceased_cell} />
+              <FieldRow label="Tel (H)"      value={fd.med_aid_dec_death_deceased_tel_home} />
+              <FieldRow label="Tel (W)"      value={fd.med_aid_dec_death_deceased_tel_work} />
+              <FieldRow label="Res. Address" value={fd.med_aid_dec_death_deceased_address} />
+              <FieldRow label="Suburb"       value={fd.med_aid_dec_death_deceased_suburb} />
+              <FieldRow label="Code"         value={fd.med_aid_dec_death_deceased_postal_code} />
+            </div>
+
+            {/* Column 2 — practitioner + medical confirmation + handover */}
+            <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
+              <SectionHead label="Healthcare Professional" />
+              <FieldRow label="Surname"        value={fd.med_aid_dec_death_hcp_surname} />
+              <FieldRow label="First Name"     value={fd.med_aid_dec_death_hcp_first_name} />
+              <FieldRow label="Station"        value={fd.med_aid_dec_death_hcp_station} />
+              <FieldRow label="Qualification"  value={fd.med_aid_dec_death_hcp_qualification} />
+              <FieldRow label="ID No"          value={fd.med_aid_dec_death_hcp_id} />
+              <FieldRow label="Practitioner No" value={fd.med_aid_dec_death_hcp_hpcsa} />
+
+              <SectionHead label="Confirmation of Death" />
+              <FieldRow label="Absent Carotid Pulse"   value={fd.med_aid_dec_death_med_carotid} />
+              <FieldRow label="Absent Heart Sounds"    value={fd.med_aid_dec_death_med_heart_sounds} />
+              <FieldRow label="Absent Resp. Activity"  value={fd.med_aid_dec_death_med_respiratory} />
+              <FieldRow label="ECG Asystole (I/II/III)" value={fd.med_aid_dec_death_med_ecg} />
+              <FieldRow label="Fixed/Dilated Pupils"   value={fd.med_aid_dec_death_med_pupils} />
+
+              <SectionHead label="Deceased Handed Over To" />
+              <FieldRow label="Surname"       value={fd.med_aid_dec_death_handover_surname} />
+              <FieldRow label="First Name"    value={fd.med_aid_dec_death_handover_first_name} />
+              <FieldRow label="Relationship"  value={fd.med_aid_dec_death_handover_relationship} />
+              <FieldRow label="Contact No"    value={fd.med_aid_dec_death_handover_contact} />
+              
+              {!fd.undertaker_name && !fd.undertaker_collector_signature && (
+                <div style={{ padding: '6px 8px', borderTop: `1px solid ${LN}` }}>
+                  <div style={{ fontSize: '0.52rem', fontWeight: 800, color: MUT, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Recipient Signature</div>
+                  <SignatureBox src={prf.signatures?.handover_signature} minHeight={64} />
+                </div>
+              )}
+
+              {(fd.undertaker_name || fd.undertaker_collector_signature) && (
+                <>
+                  <SectionHead label="Undertaker Details" />
+                  <FieldRow label="Company Name" value={fd.undertaker_name} />
+                  <FieldRow label="Phone No" value={fd.undertaker_phone} />
+                  <FieldRow label="Collector" value={fd.undertaker_collector_name} />
+                  <div style={{ padding: '6px 8px', borderTop: `1px solid ${LN}` }}>
+                    <div style={{ fontSize: '0.52rem', fontWeight: 800, color: MUT, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Undertaker Signature</div>
+                    <SignatureBox src={fd.undertaker_collector_signature} minHeight={64} />
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Column 3 — the signed declaration */}
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <SectionHead label="Declaration" />
+              <div style={{
+                padding: '6px 8px', borderTop: `1px solid ${LN}`,
+                fontSize: '0.62rem', color: INK, lineHeight: 1.5, background: SOFT_BG,
+              }}>
+                I, the undersigned, hereby declare that the deceased sustained no further harm while in my care, and
+                that the above facts are, to the best of my knowledge, true and correct.
+              </div>
+              <FieldRow label="Date"  value={fd.med_aid_dec_death_signature_date} />
+              <FieldRow label="Place" value={fd.med_aid_dec_death_signature_place} />
+
+              {/* Signatory */}
+              <FieldRow label="Full Name" value={fd.med_aid_dec_death_signatory_name} />
+              <div style={{ padding: '6px 8px', borderTop: `1px solid ${LN}` }}>
+                <div style={{ fontSize: '0.52rem', fontWeight: 800, color: MUT, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Signature</div>
+                <SignatureBox src={fd.med_aid_dec_death_signature} minHeight={64} />
+              </div>
+
+              {/* Crew member 2 */}
+              <FieldRow label="Crew Member 2" value={fd.med_aid_dec_death_crew_attended_name} />
+              <div style={{ padding: '6px 8px', borderTop: `1px solid ${LN}` }}>
+                <div style={{ fontSize: '0.52rem', fontWeight: 800, color: MUT, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Crew Signature</div>
+                <SignatureBox src={fd.med_aid_dec_death_crew_attended_signature} minHeight={64} />
+              </div>
+
+              {/* Witness */}
+              <FieldRow label="Witness Name" value={fd.med_aid_dec_death_witness_name} />
+              <div style={{ padding: '6px 8px', borderTop: `1px solid ${LN}` }}>
+                <div style={{ fontSize: '0.52rem', fontWeight: 800, color: MUT, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Witness Signature</div>
+                <SignatureBox src={fd.med_aid_dec_death_witness_signature} minHeight={64} />
+              </div>
+            </div>
+          </div>
+        )}
+        
         <div style={{
-          display: 'grid', gridTemplateColumns: '1.64fr 1.36fr 1.8fr 1.6fr',
+          display: 'grid', gridTemplateColumns: (fd.call_type === 'DOD' && fd.med_aid_dec_death) ? '1fr 1fr' : '1.64fr 1.36fr 1.8fr 1.6fr',
           borderTop: `2px solid ${LN}`, flex: 1, minHeight: 0,
         }}>
           {/* Patient Information — all populated fields rendered (16 max) */}
+          {!(fd.call_type === 'DOD' && fd.med_aid_dec_death) && (
           <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
             <SectionHead label="Patient Information" />
             {(([
@@ -1079,22 +1191,27 @@ export default function PRFView() {
             ] as Array<[string, any]>)
               .filter(([, v]) => !isBlank(v)))
               .map(([label, v]) => <FieldRow key={label} label={label} value={v} />)}
-            <SectionHead label="Mechanism" />
-            {(() => {
-              const selected = Array.isArray(fd.mechanism)
-                ? fd.mechanism.filter(Boolean)
-                : (fd.mechanism ? [fd.mechanism] : []);
-              if (selected.length === 0) return <FieldRow label="Mechanism" value="" />;
-              return selected.map((m: string) => <Chk key={m} label={m} checked />);
-            })()}
-            {fd.mechanism_other && (
-              <FieldRow label="Detail" value={fd.mechanism_other} valueMin={24} />
+            {fd.call_type !== 'DOD' && (
+              <>
+                <SectionHead label="Mechanism" />
+                {(() => {
+                  const selected = Array.isArray(fd.mechanism)
+                    ? fd.mechanism.filter(Boolean)
+                    : (fd.mechanism ? [fd.mechanism] : []);
+                  if (selected.length === 0) return <FieldRow label="Mechanism" value="" />;
+                  return selected.map((m: string) => <Chk key={m} label={m} checked />);
+                })()}
+                {fd.mechanism_other && (
+                  <FieldRow label="Detail" value={fd.mechanism_other} valueMin={24} />
+                )}
+                
+                <SectionHead label="Patient Priority" />
+                <FieldRow label="Priority" value={fd.priority || '—'} />
+              </>
             )}
-            
-            <SectionHead label="Patient Priority" />
-            <FieldRow label="Priority" value={fd.priority || '—'} />
             <div style={{ flex: 1, borderTop: `1px solid ${LN}` }} />
           </div>
+          )}
 
           {/* Debtor Information — grouped here alongside Patient + Medical Aid. */}
           <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
@@ -1163,18 +1280,29 @@ export default function PRFView() {
             ) : billingType === 'PVT' ? (
               <>
                 <FieldRow label="Method"    value={fd.pvt_payment_method} />
-                <FieldRow label="Holder"    value={fd.pvt_account_holder} />
-                <FieldRow label="Holder ID" value={fd.pvt_account_holder_id} />
-                <FieldRow label="Contact"   value={fd.pvt_account_holder_phone} />
-                <FieldRow label="Address"   value={fd.pvt_account_holder_address} valueMin={24} />
-              </>
-            ) : billingType === 'EVENT' ? (
-              <>
-                <FieldRow label="Event"        value={fd.event_name} />
-                <FieldRow label="Organiser"    value={fd.event_organiser} />
-                <FieldRow label="Event Date"   value={fd.event_date} />
-                <FieldRow label="Booking Ref"  value={fd.event_booking_ref} />
-                <FieldRow label="On-Site Cont" value={fd.event_contact_person} />
+                {fd.pvt_payment_method !== 'Indigent' && (
+                  <>
+                    <FieldRow label="Holder"    value={fd.pvt_account_holder} />
+                    <FieldRow label="Holder ID" value={fd.pvt_account_holder_id} />
+                    <FieldRow label="Contact"   value={fd.pvt_account_holder_phone} />
+                    <FieldRow label="Address"   value={fd.pvt_account_holder_address} valueMin={24} />
+                  </>
+                )}
+                {fd.pvt_payment_method === 'Cash' && (
+                  <>
+                    <SectionHead label="Cash Verification" />
+                    <FieldRow label="Amount Paid" value={fd.pvt_cash_amount_paid ? `R ${fd.pvt_cash_amount_paid}` : ''} />
+                    <div style={{ padding: '4px 6px', borderTop: `1px solid ${LN}` }}>
+                      <div style={{ fontSize: '0.48rem', fontWeight: 800, color: MUT, textTransform: 'uppercase', marginBottom: 2 }}>Payer Signature</div>
+                      <SignatureBox src={fd.pvt_cash_payer_signature} minHeight={40} />
+                    </div>
+                    <FieldRow label="Crew Received" value={fd.pvt_cash_crew_received ? `R ${fd.pvt_cash_crew_received}` : ''} />
+                    <div style={{ padding: '4px 6px', borderTop: `1px solid ${LN}` }}>
+                      <div style={{ fontSize: '0.48rem', fontWeight: 800, color: MUT, textTransform: 'uppercase', marginBottom: 2 }}>Crew Signature</div>
+                      <SignatureBox src={fd.pvt_cash_crew_signature} minHeight={40} />
+                    </div>
+                  </>
+                )}
               </>
             ) : billingType === 'CALL OUT FEE' ? (
               <>
@@ -1212,47 +1340,56 @@ export default function PRFView() {
                 ['Amount (R)', fd.med_aid_quoted_amount],
               ]} />
             )}
-            {/* Handover Signature — moved here per user request */}
-            <SectionHead label="Handover Signature" />
-            <div style={{ padding: '6px 8px', borderTop: `1px solid ${LN}`, flexShrink: 0 }}>
-              <SignatureBox src={prf.signatures?.handover_signature} minHeight={80} />
-            </div>
+            {/* Handover Signature — moved here per user request, but hidden for DOD since it is in the DOD block */}
+            {!(fd.call_type === 'DOD' && fd.med_aid_dec_death) && (
+              <>
+                <SectionHead label="Handover Signature" />
+                <div style={{ padding: '6px 8px', borderTop: `1px solid ${LN}`, flexShrink: 0 }}>
+                  <SignatureBox src={prf.signatures?.handover_signature} minHeight={80} />
+                </div>
+              </>
+            )}
 
             {/* Hospital Sticker — dedicated placeholder, now positioned beneath
                 Medical Aid Information. Shows the captured sticker inline when
                 present, otherwise a reserved "affix here" box so the slot is
                 always visible on the printed / exported PRF. */}
-            <SectionHead label="Hospital Sticker" />
-            <div style={{
-              borderTop: `1px solid ${LN}`, padding: 6,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              flex: 1,
-            }}>
-              <div style={{
-                width: '96%', minHeight: 120,
-                border: `1.6px dashed ${MUT}`, borderRadius: 4,
-                background: SOFT_BG,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                padding: 6, overflow: 'hidden',
-              }}>
-                {fd.hospital_sticker ? (
-                  <img src={fd.hospital_sticker} alt="hospital sticker"
-                       style={{ maxWidth: '100%', maxHeight: 200, objectFit: 'contain' }} />
-                ) : (
+            {!(fd.call_type === 'DOD' && fd.med_aid_dec_death) && (
+              <>
+                <SectionHead label="Hospital Sticker" />
+                <div style={{
+                  borderTop: `1px solid ${LN}`, padding: 6,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  flex: 1,
+                }}>
                   <div style={{
-                    fontSize: '0.62rem', fontWeight: 700, color: DIM,
-                    textTransform: 'uppercase', letterSpacing: '0.08em', textAlign: 'center',
-                    lineHeight: 1.6,
-                  }}>Affix hospital sticker here</div>
-                )}
-              </div>
-            </div>
+                    width: '96%', minHeight: 120,
+                    border: `1.6px dashed ${MUT}`, borderRadius: 4,
+                    background: SOFT_BG,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    padding: 6, overflow: 'hidden',
+                  }}>
+                    {fd.hospital_sticker ? (
+                      <img src={fd.hospital_sticker} alt="hospital sticker"
+                           style={{ maxWidth: '100%', maxHeight: 200, objectFit: 'contain' }} />
+                    ) : (
+                      <div style={{
+                        fontSize: '0.62rem', fontWeight: 700, color: DIM,
+                        textTransform: 'uppercase', letterSpacing: '0.08em', textAlign: 'center',
+                        lineHeight: 1.6,
+                      }}>Affix hospital sticker here</div>
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Channel-specific + Return Trip (when present) + Terms & Conditions.
               The T&C live in this right-hand column next to Medical Aid
               Information, matching the JEMS paper form. This column always
               renders so the T&C are on every PRF. */}
+          {!(fd.call_type === 'DOD' && fd.med_aid_dec_death) && (
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             {/* "Channel Detail" section removed per request. The return-trip
                 times are retained below for inter-facility transfers. */}
@@ -1269,63 +1406,68 @@ export default function PRFView() {
             )}
 
             {/* Terms & Conditions (page-1 right column, like the paper form) */}
-            <SectionHead label="Terms and Conditions" />
-            {(() => {
-              const company = prov?.name || 'the Service Provider';
-              const clauses: Array<[string, string]> = [
-                ['Acknowledgment of Treatment & Financial Responsibility',
-                  `I, the person whose name appears on this form as the patient, patient's parent, patient's guardian, or authorized representative, hereby acknowledge that the treatment and/or transportation noted on this document was received by the patient. I accept full responsibility for all payments associated with such treatment and/or transport as recorded on this document, irrespective of whether I am covered by a medical aid scheme or not.`],
-                ['Authorization for Data Disclosure & Debt Collection',
-                  `I hereby authorize ${company} to disclose any patient details in this document to third parties (for example, the Road Accident Fund, Compensation Commissioner, or collection agencies) and to trace any details not contained in this document to assist in the collection of any overdue or outstanding amounts due in respect of the treatment or transport provided to the patient by ${company}.`],
-                ['Assumption of Risk',
-                  `I hereby accept all risks associated with the emergency medical treatment and/or transportation provided or to be provided by ${company}.`],
-                ['Indemnity & Release of Liability',
-                  `I hereby release ${company} (including its directors, employees, agents, and representatives) from any liability, and indemnify and hold ${company} harmless against all loss, damages, or claims arising from or related to the emergency medical treatment and/or transportation provided or to be provided by ${company} as noted in this form.`],
-              ];
-              return (
-                <div style={{ padding: '5px 8px', borderTop: `1px solid ${LN}`, fontSize: '0.46rem', lineHeight: 1.3, color: INK }}>
-                  {clauses.map(([h, b], idx) => (
-                    <div key={idx} style={{ marginBottom: 5 }}>
-                      <div style={{ fontWeight: 800, color: GREEN_DK, marginBottom: 1 }}>{idx + 1}. {h}</div>
-                      <div>{b}</div>
+            {fd.call_type !== 'DOD' && (
+              <>
+                <SectionHead label="Terms and Conditions" />
+                {(() => {
+                  const company = prov?.name || 'the Service Provider';
+                  const clauses: Array<[string, string]> = [
+                    ['Acknowledgment of Treatment & Financial Responsibility',
+                      `I, the person whose name appears on this form as the patient, patient's parent, patient's guardian, or authorized representative, hereby acknowledge that the treatment and/or transportation noted on this document was received by the patient. I accept full responsibility for all payments associated with such treatment and/or transport as recorded on this document, irrespective of whether I am covered by a medical aid scheme or not.`],
+                    ['Authorization for Data Disclosure & Debt Collection',
+                      `I hereby authorize ${company} to disclose any patient details in this document to third parties (for example, the Road Accident Fund, Compensation Commissioner, or collection agencies) and to trace any details not contained in this document to assist in the collection of any overdue or outstanding amounts due in respect of the treatment or transport provided to the patient by ${company}.`],
+                    ['Assumption of Risk',
+                      `I hereby accept all risks associated with the emergency medical treatment and/or transportation provided or to be provided by ${company}.`],
+                    ['Indemnity & Release of Liability',
+                      `I hereby release ${company} (including its directors, employees, agents, and representatives) from any liability, and indemnify and hold ${company} harmless against all loss, damages, or claims arising from or related to the emergency medical treatment and/or transportation provided or to be provided by ${company} as noted in this form.`],
+                  ];
+                  return (
+                    <div style={{ padding: '5px 8px', borderTop: `1px solid ${LN}`, fontSize: '0.46rem', lineHeight: 1.3, color: INK }}>
+                      {clauses.map(([h, b], idx) => (
+                        <div key={idx} style={{ marginBottom: 5 }}>
+                          <div style={{ fontWeight: 800, color: GREEN_DK, marginBottom: 1 }}>{idx + 1}. {h}</div>
+                          <div>{b}</div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              );
-            })()}
-            <SectionHead label="Signatures" />
-            {(() => {
-              const sigLabel: React.CSSProperties = { fontSize: '0.65rem', fontWeight: 900, color: MUT, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 };
-              const witnessSig = fd.tc_witness_signature || prf.signatures?.witness_signature;
-              const nokSig      = fd.next_of_kin_signature || prf.signatures?.next_of_kin_signature;
-              // Patient / Rep always shows (it's a mandatory signature). Witness
-              // and Next of Kin only render when actually captured, so empty
-              // "Not captured" boxes don't clutter the form.
-              return (
-                <div style={{ display: 'flex', flexDirection: 'column', borderTop: `1px solid ${LN}` }}>
-                  {fd.call_type !== 'DOD' && (
-                    <div style={{ padding: '5px 7px', borderBottom: (witnessSig || nokSig || fd.call_type === 'DOD') ? `1px solid ${LN}` : 'none' }}>
-                      <div style={sigLabel}>Patient / Rep.</div>
-                      <SignatureBox src={fd.tc_patient_signature || prf.signatures?.patient_signature} minHeight={80} />
+                  );
+                })()}
+                <SectionHead label="Signatures" />
+                {(() => {
+                  const sigLabel: React.CSSProperties = { fontSize: '0.65rem', fontWeight: 900, color: MUT, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 };
+                  const witnessSig = fd.tc_witness_signature || prf.signatures?.witness_signature;
+                  const nokSig      = fd.next_of_kin_signature || prf.signatures?.next_of_kin_signature;
+                  // Patient / Rep always shows (it's a mandatory signature). Witness
+                  // and Next of Kin only render when actually captured, so empty
+                  // "Not captured" boxes don't clutter the form.
+                  return (
+                    <div style={{ display: 'flex', flexDirection: 'column', borderTop: `1px solid ${LN}` }}>
+                      {fd.call_type !== 'DOD' && (
+                        <div style={{ padding: '5px 7px', borderBottom: (witnessSig || nokSig || fd.call_type === 'DOD') ? `1px solid ${LN}` : 'none' }}>
+                          <div style={sigLabel}>Patient / Rep.</div>
+                          <SignatureBox src={fd.tc_patient_signature || prf.signatures?.patient_signature} minHeight={80} />
+                        </div>
+                      )}
+                      {(witnessSig || fd.call_type === 'DOD') && (
+                        <div style={{ padding: '5px 7px', borderBottom: (nokSig || fd.call_type === 'DOD') ? `1px solid ${LN}` : 'none' }}>
+                          <div style={sigLabel}>Witness</div>
+                          <SignatureBox src={witnessSig} minHeight={80} />
+                        </div>
+                      )}
+                      {(nokSig || fd.call_type === 'DOD') && (
+                        <div style={{ padding: '5px 7px' }}>
+                          <div style={sigLabel}>Next of Kin</div>
+                          <SignatureBox src={nokSig} minHeight={70} />
+                        </div>
+                      )}
                     </div>
-                  )}
-                  {(witnessSig || fd.call_type === 'DOD') && (
-                    <div style={{ padding: '5px 7px', borderBottom: (nokSig || fd.call_type === 'DOD') ? `1px solid ${LN}` : 'none' }}>
-                      <div style={sigLabel}>Witness</div>
-                      <SignatureBox src={witnessSig} minHeight={80} />
-                    </div>
-                  )}
-                  {(nokSig || fd.call_type === 'DOD') && (
-                    <div style={{ padding: '5px 7px' }}>
-                      <div style={sigLabel}>Next of Kin</div>
-                      <SignatureBox src={nokSig} minHeight={70} />
-                    </div>
-                  )}
-                </div>
-              );
-            })()}
+                  );
+                })()}
+              </>
+            )}
             <div style={{ flex: 1, borderTop: `1px solid ${LN}` }} />
           </div>
+          )}
         </div>
 
         {/* ── BAND C — Closeout: Valuables + Handover sig │ Crew sign-off (×2) │
@@ -1334,7 +1476,8 @@ export default function PRFView() {
               Valuables is 1.54fr so the Crew · Assessed By left border lines up
               vertically with Band B's Patient/Debtor border (1.64/6.4). The
               freed width goes to Motivation, widening it. */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1.54fr 1.5fr 1.5fr 1.46fr', borderTop: `2px solid ${LN}` }}>
+        {fd.call_type !== 'DOD' && (
+          <div style={{ display: 'grid', gridTemplateColumns: '1.54fr 1.5fr 1.5fr 1.46fr', borderTop: `2px solid ${LN}` }}>
           {/* Valuables + Handover Signature (+ RAF sketch if any) */}
           <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
             <SectionHead label="Valuables" />
@@ -1422,7 +1565,8 @@ export default function PRFView() {
             )}
           </div>
 
-        </div>
+          </div>
+        )}
       </div>
 
       </div>{/* /prf-print-frame (page 1) */}
@@ -1430,7 +1574,10 @@ export default function PRFView() {
       {/* ═══════════════════ PAGE 2 — Clinical ═══════════════════
           Same A4-landscape aspect lock as page 1. Top = mini header +
           crew details table. Bottom = 3-col clinical grid (short
-          checks | history narrative | vitals + IV + meds + management). */}
+          checks | history narrative | vitals + IV + meds + management).
+          Hidden entirely for Declaration of Death calls — no vitals needed. */}
+      {fd.call_type !== 'DOD' && (
+      <>
       <div className="prf-print-frame">
       <div className="prf-page" style={{
         width: 1220, minHeight: 862,
@@ -1710,9 +1857,10 @@ export default function PRFView() {
         </div>
 
 
-      </div>
+      </div>{/* /prf-page (page 2) */}
       </div>{/* /prf-print-frame (page 2) */}
-
+      </>
+      )}
       {/* ═══════════════════ PAGE 3 — Vitals Continuation ═══════════════════
           Rendered only when more than VITALS_PER_PAGE (3) vital sets were
           captured. Same A4-landscape frame as the earlier pages so the print
@@ -1824,7 +1972,7 @@ export default function PRFView() {
           healthcare professional, medical confirmation, handover, and the
           signed declaration) render legibly. Picked up by the PDF/print
           pipeline via the shared .prf-page selector. */}
-      {fd.med_aid_dec_death && (
+      {fd.med_aid_dec_death && fd.call_type !== 'DOD' && (
         <div className="prf-print-frame">
           <div className="prf-page" style={{
             width: 1220, minHeight: 862,
@@ -1832,32 +1980,42 @@ export default function PRFView() {
             border: `2px solid ${LN}`, boxShadow: '0 6px 24px rgba(0,0,0,0.1)',
             display: 'flex', flexDirection: 'column',
           }}>
-            {/* Mini header so the sheet is identifiable on its own */}
-            <div style={{
-              display: 'grid', gridTemplateColumns: '1.3fr 2.4fr 2fr',
-              borderBottom: `2px solid ${LN}`,
-            }}>
-              <div style={{ padding: '10px 12px', borderRight: `1px solid ${LN}`, display: 'flex', alignItems: 'center' }}>
-                <ProviderLogo prov={prov} height={30} />
-              </div>
-              <div style={{
-                padding: '10px 12px', borderRight: `1px solid ${LN}`, display: 'flex', alignItems: 'center',
-                fontSize: '0.78rem', fontWeight: 800, color: INK, letterSpacing: '0.08em', textTransform: 'uppercase',
-              }}>
-                Declaration of Death
-              </div>
-              <div style={{
-                padding: '10px 12px', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 18,
-                fontSize: '0.68rem', color: MUT,
-              }}>
-                {prf.case_number && <span>Case: <b style={{ color: INK, fontFamily: 'ui-monospace, monospace' }}>{prf.case_number}</b></span>}
-              </div>
-            </div>
-
-            {/* Body — three columns of grouped fields */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', borderTop: `1px solid ${LN}` }}>
-              {/* Column 1 — event + deceased */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 2.4fr 2fr', flex: 1 }}>
+              {/* Column 1 — company + event + deceased */}
               <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
+                <div style={{ padding: 12, borderBottom: `2px solid ${LN}`, display: 'flex', flexDirection: 'column', gap: 6, minHeight: 140 }}>
+                  <div style={{
+                    border: `1.5px solid ${LN}`, borderRadius: 6, background: '#fff',
+                    height: 60, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    padding: '4px 10px', overflow: 'hidden', marginBottom: 4
+                  }}>
+                    <ProviderLogo prov={prov} height={48} />
+                  </div>
+                  {prov.phone && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+                      <span style={{ fontSize: '0.5rem', fontWeight: 800, color: MUT, textTransform: 'uppercase', letterSpacing: '0.09em' }}>Phone</span>
+                      <span style={{ fontSize: '0.9rem', fontWeight: 900, color: INK, fontFamily: 'ui-monospace, monospace' }}>{prov.phone}</span>
+                    </div>
+                  )}
+                  {prov.pr_number && (
+                    <div style={{ fontSize: '0.7rem', fontWeight: 700, color: MUT }}>
+                      PR No: <span style={{ fontFamily: 'ui-monospace, monospace', color: INK, fontWeight: 800 }}>{prov.pr_number}</span>
+                    </div>
+                  )}
+                  {prov.pty_reg_number && (
+                    <div style={{ fontSize: '0.7rem', fontWeight: 700, color: MUT }}>
+                      PTY Reg: <span style={{ fontFamily: 'ui-monospace, monospace', color: INK, fontWeight: 800 }}>{prov.pty_reg_number}</span>
+                    </div>
+                  )}
+                  {prov.address && (
+                    <div style={{ marginTop: 2, fontSize: '0.7rem', fontWeight: 600, color: INK, whiteSpace: 'pre-wrap', lineHeight: 1.2 }}>
+                      {prov.address}
+                    </div>
+                  )}
+                  {prov.email && (
+                    <div style={{ fontSize: '0.65rem', fontWeight: 700, color: GREEN_DK, wordBreak: 'break-word' }}>{prov.email}</div>
+                  )}
+                </div>
                 <SectionHead label="Declaration of Death" />
                 <FieldRow label="Date"                 value={fd.med_aid_dec_death_date} />
                 <FieldRow label="Time of Death"        value={fd.med_aid_dec_death_time} />
@@ -1881,8 +2039,14 @@ export default function PRFView() {
                 <FieldRow label="Code"         value={fd.med_aid_dec_death_deceased_postal_code} />
               </div>
 
-              {/* Column 2 — practitioner + medical confirmation + handover */}
+              {/* Column 2 — title + practitioner + medical confirmation + handover */}
               <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
+                <div style={{
+                  padding: '20px', borderBottom: `2px solid ${LN}`, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: '1.6rem', fontWeight: 900, color: INK, letterSpacing: '0.12em', textTransform: 'uppercase', textAlign: 'center', minHeight: 140
+                }}>
+                  Declaration of Death
+                </div>
                 <SectionHead label="Healthcare Professional" />
                 <FieldRow label="Surname"        value={fd.med_aid_dec_death_hcp_surname} />
                 <FieldRow label="First Name"     value={fd.med_aid_dec_death_hcp_first_name} />
@@ -1905,7 +2069,7 @@ export default function PRFView() {
                 <FieldRow label="Contact No"    value={fd.med_aid_dec_death_handover_contact} />
               </div>
 
-              {/* Column 3 — the signed declaration */}
+              {/* Column 3 — the signed declaration + undertaker */}
               <div style={{ display: 'flex', flexDirection: 'column' }}>
                 <SectionHead label="Declaration" />
                 <div style={{
@@ -1938,10 +2102,22 @@ export default function PRFView() {
                   <div style={{ fontSize: '0.52rem', fontWeight: 800, color: MUT, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Witness Signature</div>
                   <SignatureBox src={fd.med_aid_dec_death_witness_signature} minHeight={64} />
                 </div>
+
+                {/* Undertaker Details added underneath declaration for RESUS DOD */}
+                {(fd.undertaker_name || fd.undertaker_collector_signature) && (
+                  <>
+                    <SectionHead label="Undertaker Details" />
+                    <FieldRow label="Company Name" value={fd.undertaker_name} />
+                    <FieldRow label="Phone No" value={fd.undertaker_phone} />
+                    <FieldRow label="Collector" value={fd.undertaker_collector_name} />
+                    <div style={{ padding: '6px 8px', borderTop: `1px solid ${LN}` }}>
+                      <div style={{ fontSize: '0.52rem', fontWeight: 800, color: MUT, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Undertaker Signature</div>
+                      <SignatureBox src={fd.undertaker_collector_signature} minHeight={64} />
+                    </div>
+                  </>
+                )}
               </div>
             </div>
-
-            <div style={{ flex: 1, borderTop: `1px solid ${LN}` }} />
           </div>
         </div>
       )}
@@ -1979,7 +2155,16 @@ export default function PRFView() {
         ...(Array.isArray(fd.nursing_notes) ? fd.nursing_notes : []).map((n: any, i: number) => ({
           label: `Nursing Note #${i + 1}`,
           val: n.data_url
-        }))
+        })),
+        ...(Array.isArray(fd.med_aid_dec_death_documents) ? fd.med_aid_dec_death_documents : []).map((n: any, i: number) => ({
+          label: `Declaration of Death Document #${i + 1}`,
+          val: n.data_url
+        })),
+        ...(fd.raf_oar_report_pdf ? [{
+          label: `RAF OAR Report: ${fd.raf_oar_report_pdf.name || 'PDF'}`,
+          val: fd.raf_oar_report_pdf.data_url,
+          isPdf: true
+        }] : [])
       ].filter(d => d.val).map((doc, i) => (
         <div key={`attachment-${i}`} className="prf-print-frame">
           <div className="prf-page" style={{
@@ -1992,7 +2177,11 @@ export default function PRFView() {
               Patient Documents (Attachments) - {doc.label}
             </div>
             <div style={{ flex: 1, padding: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', background: SOFT_BG, overflow: 'hidden' }}>
-              <img src={doc.val} alt={doc.label} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', border: `1px solid ${LN}`, borderRadius: 8 }} />
+              {(doc as any).isPdf ? (
+                <iframe src={doc.val} title={doc.label} style={{ width: '100%', height: '100%', border: `1px solid ${LN}`, borderRadius: 8 }} />
+              ) : (
+                <img src={doc.val} alt={doc.label} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', border: `1px solid ${LN}`, borderRadius: 8 }} />
+              )}
             </div>
           </div>
         </div>
