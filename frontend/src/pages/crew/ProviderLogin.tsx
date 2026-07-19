@@ -5,7 +5,10 @@
 import { useState, useEffect } from 'react';
 import type { FormEvent } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import axios from '../../api/client';
+// Raw axios — the provider login / shift-start flow issues crew_token requests
+// and must not run through the admin api/client interceptor (which would treat a
+// wrong-password 401 as an expired admin session and redirect to /login).
+import axios from 'axios';
 import { useScrollLock } from '../../hooks/useScrollLock';
 import InstallAppButton from '../../components/InstallAppButton';
 

@@ -4,7 +4,9 @@
  */
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import axios from '../../api/client';
+// Raw axios — this client-portal dashboard authenticates with crew_token via
+// getApi() and must stay off the admin api/client interceptor.
+import axios from 'axios';
 import { useScrollLock } from '../../hooks/useScrollLock';
 import { HPCSA_CATEGORIES, CATEGORY_META, type HpcsaCategory } from '../../data/hpcsaScope';
 

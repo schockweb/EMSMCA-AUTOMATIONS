@@ -7,7 +7,9 @@ import React, { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallba
 import ReactDOM from 'react-dom';
 import { useScrollLock } from '../../hooks/useScrollLock';
 import { useParams, useNavigate } from 'react-router-dom';
-import axios from '../../api/client';
+// Raw axios — the PRF form builds its own crew_token-authenticated instance via
+// api() below; it must not inherit the admin api/client interceptor.
+import axios from 'axios';
 import SignaturePad from '../../components/SignaturePad';
 import FullscreenSignaturePad, { FullscreenCanvas } from '../../components/FullscreenSignaturePad';
 import PatientDocumentsCapture from '../../components/PatientDocumentsCapture';

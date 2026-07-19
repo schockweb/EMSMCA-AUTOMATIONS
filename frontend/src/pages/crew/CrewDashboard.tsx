@@ -5,7 +5,12 @@
  */
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import axios from '../../api/client';
+// Use the RAW axios here, NOT the admin api/client. The crew/client portal has
+// its own token (crew_token, passed explicitly as a Bearer header on each call)
+// and must never go through the admin interceptor — that interceptor would
+// overwrite the crew token with the admin access_token and, on a 401, redirect
+// to the admin /login instead of the provider login.
+import axios from 'axios';
 import { useScrollLock } from '../../hooks/useScrollLock';
 
 const G = '#10b981';
