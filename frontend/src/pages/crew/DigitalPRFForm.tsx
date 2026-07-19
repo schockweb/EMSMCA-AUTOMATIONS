@@ -8420,8 +8420,9 @@ export default function DigitalPRFForm() {
                   </div>
                   <div style={{
                     fontSize: '0.85rem', fontWeight: 700, color: S900,
-                    wordBreak: 'break-all', overflowWrap: 'anywhere',
+                    wordBreak: 'break-word', overflowWrap: 'anywhere',
                     lineHeight: 1.4, minWidth: 0, maxWidth: '100%',
+                    display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical', overflow: 'hidden'
                   }}>
                     {item.value}
                   </div>
