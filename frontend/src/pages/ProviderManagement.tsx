@@ -11,6 +11,7 @@ interface Provider {
   name: string;
   slug: string;
   pr_number: string | null;
+  prf_name?: string | null;
   phone: string | null;
   email: string | null;
   address: string | null;
@@ -118,7 +119,7 @@ export default function ProviderManagement() {
 
   // Edit client modal state
   const [showEditClient, setShowEditClient] = useState(false);
-  const [editForm, setEditForm] = useState({ name: '', pr_number: '', phone: '', email: '', address: '', is_active: true, portal_username: '', portal_password: '', admin_email: '', admin_password: '', prfNumber: '' });
+  const [editForm, setEditForm] = useState({ name: '', pr_number: '', prf_name: '', phone: '', email: '', address: '', is_active: true, portal_username: '', portal_password: '', admin_email: '', admin_password: '', prfNumber: '' });
   const [editSaving, setEditSaving] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -132,7 +133,7 @@ export default function ProviderManagement() {
   const [crewLoading, setCrewLoading] = useState(false);
 
   // Add forms
-  const [newProvider, setNewProvider] = useState({ name: '', phone: '', email: '', prNumber: '', ptyRegNumber: '', address: '', prfNumber: '', clientEmail: '', clientPassword: '', adminEmail: '', adminPassword: '' });
+  const [newProvider, setNewProvider] = useState({ name: '', phone: '', email: '', prNumber: '', ptyRegNumber: '', prfName: '', address: '', prfNumber: '', clientEmail: '', clientPassword: '', adminEmail: '', adminPassword: '' });
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [newCrew, setNewCrew] = useState({ full_name: '', email: '', initials: '', hpcsa_number: '', qualification: 'ILS', phone: '' });
   const [newVehicle, setNewVehicle] = useState({ callsign: '', registration: '', vehicle_type: 'Ambulance' });
@@ -184,6 +185,7 @@ export default function ProviderManagement() {
     setEditForm({
       name: selectedProvider.name || '',
       pr_number: selectedProvider.pr_number || '',
+      prf_name: selectedProvider.prf_name || '',
       phone: selectedProvider.phone || '',
       email: selectedProvider.email || '',
       address: selectedProvider.address || '',
@@ -208,6 +210,9 @@ export default function ProviderManagement() {
       await api.patch(`/api/providers/${selectedProvider.id}`, {
         name: editForm.name || undefined,
         pr_number: editForm.pr_number || undefined,
+        // Always sent — an explicit null clears the override so file naming
+        // falls back to the company name.
+        prf_name: editForm.prf_name.trim() || null,
         phone: editForm.phone || undefined,
         email: editForm.email || undefined,
         address: editForm.address || undefined,
@@ -282,6 +287,7 @@ export default function ProviderManagement() {
         email: newProvider.email || undefined,
         pr_number: newProvider.prNumber || undefined,
         pty_reg_number: newProvider.ptyRegNumber || undefined,
+        prf_name: newProvider.prfName.trim() || undefined,
         address: newProvider.address || undefined,
         current_prf_number: newProvider.prfNumber.trim() ? parseInt(newProvider.prfNumber, 10) : undefined,
         portal_login_email: newProvider.clientEmail || undefined,
@@ -301,7 +307,7 @@ export default function ProviderManagement() {
       }
 
       setShowAddProvider(false);
-      setNewProvider({ name: '', phone: '', email: '', prNumber: '', ptyRegNumber: '', address: '', prfNumber: '', clientEmail: '', clientPassword: '', adminEmail: '', adminPassword: '' });
+      setNewProvider({ name: '', phone: '', email: '', prNumber: '', ptyRegNumber: '', prfName: '', address: '', prfNumber: '', clientEmail: '', clientPassword: '', adminEmail: '', adminPassword: '' });
       setLogoFile(null);
       fetchProviders();
     } catch (e: any) {
@@ -531,10 +537,22 @@ export default function ProviderManagement() {
                     style={inputStyle}
                     type="text"
                     inputMode="numeric"
-                   
+
                     value={newProvider.prfNumber}
                     onChange={e => setNewProvider({ ...newProvider, prfNumber: e.target.value.replace(/[^0-9]/g, '') })}
                   />
+                </div>
+
+                <div>
+                  <label style={labelStyle}>PRF Name</label>
+                  <input
+                    style={inputStyle}
+                    value={newProvider.prfName}
+                    onChange={e => setNewProvider({ ...newProvider, prfName: e.target.value })}
+                  />
+                  <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: '4px 0 0' }}>
+                    Used to name PRF files, e.g. "JEM" → JEM691 PRF. Leave blank to use the company name.
+                  </p>
                 </div>
 
                 <div>
@@ -728,10 +746,21 @@ export default function ProviderManagement() {
                   style={inputStyle}
                   type="text"
                   inputMode="numeric"
-                 
+
                   value={editForm.prfNumber}
                   onChange={e => setEditForm({ ...editForm, prfNumber: e.target.value.replace(/[^0-9]/g, '') })}
                 />
+              </div>
+              <div>
+                <label style={labelStyle}>PRF Name</label>
+                <input
+                  style={inputStyle}
+                  value={editForm.prf_name}
+                  onChange={e => setEditForm({ ...editForm, prf_name: e.target.value })}
+                />
+                <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: '4px 0 0' }}>
+                  Used to name PRF files, e.g. "JEM" → JEM691 PRF. Leave blank to use the company name.
+                </p>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 8, background: 'var(--surface-100)', border: '1px solid var(--surface-200)' }}>
                 <input

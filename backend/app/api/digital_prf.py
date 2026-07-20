@@ -1466,6 +1466,7 @@ async def get_prf_by_case_for_admin(
         },
         "provider": {
             "name": provider.name if provider else None,
+            "prf_name": provider.prf_name if provider else None,
             "slug": provider.slug if provider else None,
             "pr_number": provider.pr_number if provider else None,
             "pty_reg_number": provider.pty_reg_number if provider else None,

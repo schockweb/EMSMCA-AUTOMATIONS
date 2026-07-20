@@ -22,8 +22,9 @@ router = APIRouter(prefix="/api/cases", tags=["Cases"])
 def _prf_display_name(provider_name, prf_number, form_data) -> Optional[str]:
     """Canonical PRF name — "{PREFIX}{prf_number} PRF {scheme} {call_type}",
     e.g. "JEMS EMERGENCY106 PRF Discovery Health IHT". Kept in sync with the
-    exported-PDF filename (buildPrfFileName in PRFView.tsx). Prefix = full
-    provider name (alphanumerics + spaces), uppercased. Empty parts are dropped;
+    exported-PDF filename (buildPrfFileName in PRFView.tsx). Prefix = the
+    provider's admin-chosen `prf_name` when set, else the full provider name
+    (alphanumerics + spaces), uppercased. Empty parts are dropped;
     returns None when there's nothing meaningful to show."""
     fd = form_data or {}
     prefix = "".join(ch for ch in str(provider_name or "") if ch.isalnum() or ch == " ").strip().upper()
@@ -48,7 +49,10 @@ async def _display_names_for(db: AsyncSession, case_ids: list) -> dict:
     )).scalars().all()
     names: dict = {}
     for p in rows:
-        nm = _prf_display_name(p.provider.name if p.provider else None, p.prf_number, p.form_data)
+        nm = _prf_display_name(
+            (p.provider.prf_name or p.provider.name) if p.provider else None,
+            p.prf_number, p.form_data,
+        )
         if nm:
             names[p.case_id] = nm  # asc order → later (newer) row overwrites
     return names

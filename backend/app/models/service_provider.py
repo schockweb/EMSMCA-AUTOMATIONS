@@ -33,6 +33,10 @@ class ServiceProvider(Base):
         String(50), nullable=True,
         comment="PTY Registration Number"
     )
+    prf_name: Mapped[Union[str, None]] = mapped_column(
+        String(100), nullable=True,
+        comment="Admin-chosen prefix for PRF file/display names; falls back to `name` when unset"
+    )
     phone: Mapped[Union[str, None]] = mapped_column(String(20), nullable=True)
     email: Mapped[Union[str, None]] = mapped_column(String(255), nullable=True)
     address: Mapped[Union[str, None]] = mapped_column(Text, nullable=True)

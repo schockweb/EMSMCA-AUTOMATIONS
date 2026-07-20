@@ -217,15 +217,17 @@ const SubBlock = ({ title, rows }: { title: string; rows: Array<[string, any, nu
 };
 
 // Filename for the exported / shared PDF, e.g. "JEM690 PRF Discovery IHT.pdf".
-//   • prefix  — full provider name (alphanumerics + spaces), uppercased (JEMS Emergency → JEMS EMERGENCY)
+//   • prefix  — the admin-chosen PRF Name (provider.prf_name) when set, else the
+//               full provider name; alphanumerics + spaces, uppercased
 //   • number  — the provider-scoped PRF number
 //   • scheme  — medical scheme from the form data
 //   • call    — call type (Primary / IHT / …)
 // Empty parts are dropped and filename-illegal characters stripped.
+// Mirrored by _prf_display_name in backend api/cases.py — keep in sync.
 const buildPrfFileName = (prf: any): string => {
   const prov = prf?.provider || {};
   const fd = prf?.form_data || {};
-  const prefix = String(prov.name || '').replace(/[^A-Za-z0-9 ]/g, '').trim().toUpperCase();
+  const prefix = String(prov.prf_name || prov.name || '').replace(/[^A-Za-z0-9 ]/g, '').trim().toUpperCase();
   const parts = [
     `${prefix}${prf?.prf_number ?? ''}`.trim(),
     'PRF',

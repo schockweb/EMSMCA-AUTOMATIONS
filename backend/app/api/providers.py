@@ -89,6 +89,9 @@ class ProviderCreate(BaseModel):
     slug: str | None = None
     pr_number: str | None = None
     pty_reg_number: str | None = None
+    # PRF file/display naming prefix — replaces the automatic provider-name
+    # prefix in exported-PDF filenames when set; blank keeps automatic naming.
+    prf_name: str | None = None
     phone: str | None = None
     email: str | None = None
     address: str | None = None
@@ -106,6 +109,9 @@ class ProviderUpdate(BaseModel):
     name: str | None = None
     pr_number: str | None = None
     pty_reg_number: str | None = None
+    # PRF naming prefix. Sent as an explicit null to clear back to automatic
+    # provider-name naming (unlike credentials, which are omit-to-keep).
+    prf_name: str | None = None
     phone: str | None = None
     email: str | None = None
     address: str | None = None
@@ -346,6 +352,7 @@ async def list_providers(
             "slug": p.slug,
             "pr_number": p.pr_number,
             "pty_reg_number": p.pty_reg_number,
+            "prf_name": p.prf_name,
             "phone": p.phone,
             "email": p.email,
             "address": p.address,
@@ -390,6 +397,7 @@ async def create_provider(
         slug=slug,
         pr_number=body.pr_number,
         pty_reg_number=body.pty_reg_number,
+        prf_name=(body.prf_name or "").strip() or None,
         phone=body.phone,
         email=body.email,
         address=body.address,
@@ -471,6 +479,7 @@ async def get_provider(
         "slug": provider.slug,
         "pr_number": provider.pr_number,
         "pty_reg_number": provider.pty_reg_number,
+        "prf_name": provider.prf_name,
         "phone": provider.phone,
         "email": provider.email,
         "address": provider.address,
@@ -496,9 +505,11 @@ async def update_provider(
         raise HTTPException(404, "Provider not found")
 
     # Standard fields — set directly on the model
-    standard_fields = {"name", "pr_number", "pty_reg_number", "phone", "email", "address", "logo_url", "is_active"}
+    standard_fields = {"name", "pr_number", "pty_reg_number", "prf_name", "phone", "email", "address", "logo_url", "is_active"}
     for key, val in body.model_dump(exclude_unset=True).items():
         if key in standard_fields:
+            if key == "prf_name":
+                val = (val or "").strip() or None
             setattr(provider, key, val)
 
     # PRF numbering baseline. Only touched when the admin entered a value — a
@@ -598,6 +609,8 @@ class ProviderSettingsUpdate(BaseModel):
     name: str | None = None
     pr_number: str | None = None
     pty_reg_number: str | None = None
+    # PRF naming prefix — explicit null/blank clears back to automatic naming.
+    prf_name: str | None = None
     phone: str | None = None
     email: str | None = None
     address: str | None = None
@@ -652,6 +665,7 @@ async def get_provider_settings(
         "slug": provider.slug,
         "pr_number": provider.pr_number,
         "pty_reg_number": provider.pty_reg_number,
+        "prf_name": provider.prf_name,
         "phone": provider.phone,
         "email": provider.email,
         "address": provider.address,
@@ -674,7 +688,7 @@ async def update_provider_settings(
     provider = await _load_provider(db, pid)
 
     data = body.model_dump(exclude_unset=True)
-    for key in ("name", "pr_number", "pty_reg_number", "phone", "email", "address"):
+    for key in ("name", "pr_number", "pty_reg_number", "prf_name", "phone", "email", "address"):
         if key in data:
             val = (data[key] or "").strip() or None
             if key == "name":
