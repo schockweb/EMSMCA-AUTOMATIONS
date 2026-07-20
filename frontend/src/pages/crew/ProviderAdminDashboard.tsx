@@ -3,7 +3,7 @@
  * Dense tables, modal-driven forms. No gradients, no soft shadows.
  */
 import { useState, useEffect, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 // Raw axios — this client-portal dashboard authenticates with crew_token via
 // getApi() and must stay off the admin api/client interceptor.
 import axios from 'axios';
@@ -241,7 +241,13 @@ export default function ProviderAdminDashboard() {
   const profile    = JSON.parse(localStorage.getItem('crew_profile') || '{}');
   const providerId = profile.provider_id || null;
 
-  const [activeTab, setActiveTab] = useState<Tab>('employees');
+  // Open on the tab named in the URL (?tab=prfs) so returning from the PRF
+  // viewer lands back on the Patient Report Forms list, not the default tab.
+  const [searchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState<Tab>(() => {
+    const t = searchParams.get('tab');
+    return t === 'prfs' || t === 'vehicles' || t === 'employees' ? t : 'employees';
+  });
 
   // search + status filter (reset on tab switch)
   const [search,       setSearch]       = useState('');
@@ -799,7 +805,7 @@ export default function ProviderAdminDashboard() {
                     <div style={{ gridColumn: '1 / -1' }}><span style={{ fontWeight: 700, color: INK }}>Case:</span> <span style={{ fontFamily: 'ui-monospace, monospace' }}>{p.case_number || '—'}</span></div>
                   </div>
                   {p.case_id ? (
-                    <Btn kind="primary" onClick={() => navigate(`/${providerSlug}/crew/prf-view/${p.case_id}`)} style={{ width: '100%', padding: '11px 10px', fontSize: '0.8rem' }}>View PRF</Btn>
+                    <Btn kind="primary" onClick={() => navigate(`/${providerSlug}/crew/prf-view/${p.case_id}?from=admin`)} style={{ width: '100%', padding: '11px 10px', fontSize: '0.8rem' }}>View PRF</Btn>
                   ) : (
                     <div style={{ textAlign: 'center', fontSize: '0.72rem', color: MUT, padding: '8px 0', background: BG, borderRadius: 6 }}>
                       {p.status === 'submitted' ? 'Processing — view available shortly.' : 'View not available.'}
@@ -833,7 +839,7 @@ export default function ProviderAdminDashboard() {
                       <td style={{ ...tdStyle, whiteSpace: 'nowrap' }}>{fmtDateTime(p.submitted_at || p.created_at)}</td>
                       <td style={{ ...tdStyle, textAlign: 'right' }}>
                         {p.case_id ? (
-                          <Btn onClick={() => navigate(`/${providerSlug}/crew/prf-view/${p.case_id}`)} style={{ padding: '6px 12px', fontSize: '0.74rem' }}>View</Btn>
+                          <Btn onClick={() => navigate(`/${providerSlug}/crew/prf-view/${p.case_id}?from=admin`)} style={{ padding: '6px 12px', fontSize: '0.74rem' }}>View</Btn>
                         ) : (
                           <span style={{ fontSize: '0.7rem', color: MUT }}>{p.status === 'submitted' ? 'Processing…' : '—'}</span>
                         )}
