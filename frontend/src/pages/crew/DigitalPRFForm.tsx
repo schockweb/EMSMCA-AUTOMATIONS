@@ -2590,8 +2590,6 @@ const DodFormBody = ({ showDeclaration = true }: { showDeclaration?: boolean }) 
         <div><Lbl t="Time Of Death" /><Inp fk="med_aid_dec_death_time" ph="HH:MM" type="time" /></div>
       </DodG2>
 
-      <Lbl t="Case No." />
-      <Inp fk="med_aid_dec_death_case_no" ph="Case number" />
 
       <Lbl t="Precise location of body" />
       <Inp fk="med_aid_dec_death_location" ph="Where the body is located" />
@@ -6101,7 +6099,7 @@ export default function DigitalPRFForm() {
             {fd.pvt_payment_method !== 'Indigent' && (
               <>
                 <Lbl t="Amount Quoted (R)" /><Inp fk="pvt_amount_quoted" ph="e.g. 1500.00" type="number" />
-                <Lbl t="Account Holder Full Name" req /><Inp fk="pvt_account_holder" ph="Person responsible for payment" req />
+                <Lbl t="Account Holder Full Name" req /><Inp fk="pvt_account_holder" ph="Person responsible for payment" req noMic />
                 <G2>
                   <div><Lbl t="Account Holder ID Number" /><Inp fk="pvt_account_holder_id" ph="13-digit SA ID" /></div>
                   <div><Lbl t="Contact Number" req /><Inp fk="pvt_account_holder_phone" type="tel" ph="082 ..." req /></div>

@@ -976,13 +976,13 @@ export default function PRFView() {
                 stretches it to fill the remaining column height. */}
             {(() => {
               const ct = (fd.call_type || '').toUpperCase();
-              const cells: string[] = [];
-              if (!isTransfer) cells.push('Primary');
-              else {
-                cells.push('Transfer');
-                if (['IHT', 'IFT', 'RHT', 'COURTESY'].includes(ct)) cells.push(ct);
-              }
-              return <FieldRow label="Call Type" value={cells.join(' — ')} flex={1} />;
+              let display = 'Primary';
+              if (ct === 'RESUS') display = 'Resus';
+              else if (ct === 'DOD') display = 'DOD';
+              else if (ct === 'WCA_IOD') display = 'WCA / IOD';
+              else if (['IHT', 'IFT', 'RHT', 'COURTESY'].includes(ct)) display = `Transfer — ${ct}`;
+              else if (ct && ct !== 'PRIMARY') display = ct;
+              return <FieldRow label="Call Type" value={display} flex={1} />;
             })()}
           </div>
 
@@ -1061,7 +1061,6 @@ export default function PRFView() {
               <SectionHead label="Declaration of Death" />
               <FieldRow label="Date"                 value={fd.med_aid_dec_death_date} />
               <FieldRow label="Time of Death"        value={fd.med_aid_dec_death_time} />
-              <FieldRow label="Case No."             value={fd.med_aid_dec_death_case_no} />
               <FieldRow label="Location of Body"     value={fd.med_aid_dec_death_location} />
               <FieldRow label="Identified By"        value={fd.med_aid_dec_death_identified_by} />
 
@@ -2019,7 +2018,6 @@ export default function PRFView() {
                 <SectionHead label="Declaration of Death" />
                 <FieldRow label="Date"                 value={fd.med_aid_dec_death_date} />
                 <FieldRow label="Time of Death"        value={fd.med_aid_dec_death_time} />
-                <FieldRow label="Case No."             value={fd.med_aid_dec_death_case_no} />
                 <FieldRow label="Location of Body"     value={fd.med_aid_dec_death_location} />
                 <FieldRow label="Identified By"        value={fd.med_aid_dec_death_identified_by} />
 
