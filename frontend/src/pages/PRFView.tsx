@@ -1094,6 +1094,25 @@ export default function PRFView() {
               <FieldRow label="Res. Address" value={fd.med_aid_dec_death_deceased_address} />
               <FieldRow label="Suburb"       value={fd.med_aid_dec_death_deceased_suburb} />
               <FieldRow label="Code"         value={fd.med_aid_dec_death_deceased_postal_code} />
+
+              {/* Crew sign-off — the pre-submit Crew Sign-Off modal signatures,
+                  mirrored from the standard layout's crew columns so the DOD
+                  certificate carries the attending crew's details too. */}
+              {([
+                { c: prf.crew_1, sig: fd.crew_signoff_sigs?.c1 || prf.signatures?.crew_signature,   fbName: fd.assessed_by, fbQual: fd.assessor_qualifications },
+                { c: prf.crew_2, sig: fd.crew_signoff_sigs?.c2 || prf.signatures?.crew_2_signature, fbName: fd.managed_by,  fbQual: fd.manager_qualifications  },
+              ]).filter(({ c, sig, fbName }) => c || sig || fbName).map(({ c, sig, fbName, fbQual }, i) => (
+                <div key={i} style={{ display: 'flex', flexDirection: 'column' }}>
+                  <SectionHead label={`Crew ${i + 1} Sign-Off`} />
+                  <FieldRow label="Name"  value={c?.full_name || fbName} />
+                  <FieldRow label="Qual"  value={c?.qualification || fbQual} />
+                  <FieldRow label="HPCSA" value={c?.hpcsa_number} />
+                  <div style={{ padding: '6px 8px', borderTop: `1px solid ${LN}` }}>
+                    <div style={{ fontSize: '0.52rem', fontWeight: 800, color: MUT, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Signature</div>
+                    <SignatureBox src={sig} minHeight={56} />
+                  </div>
+                </div>
+              ))}
             </div>
 
             {/* Column 2 — practitioner + medical confirmation + handover */}
