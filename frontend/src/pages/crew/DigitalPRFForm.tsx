@@ -2629,7 +2629,7 @@ const DodDispatchTimesEmbed = () => {
 // sign-off fields). It's hidden on the Dispatch screen so the declaration is
 // only signed once, on the final phase where the DOD form is completed.
 const DodFormBody = ({ showDeclaration = true }: { showDeclaration?: boolean }) => {
-  const { fd, sf } = useContext(FormContext);
+  const { fd, sf, sigs, setSig } = useContext(FormContext);
 
   useEffect(() => {
     if (!fd['med_aid_dec_death_date']) {
@@ -2723,6 +2723,22 @@ const DodFormBody = ({ showDeclaration = true }: { showDeclaration?: boolean }) 
         <div><Lbl t="Relationship to deceased" /><Inp fk="med_aid_dec_death_handover_relationship" ph="e.g. Spouse, Undertaker" /></div>
         <div><Lbl t="Contact No" /><Inp fk="med_aid_dec_death_handover_contact" ph="Phone number" type="tel" /></div>
       </DodG2>
+      {/* Recipient signature — stored in the PRF-level `handover_signature`
+          column, which is what the certificate's "Recipient Signature" box
+          renders. Only offered when the context provides the signature state
+          (it always does from the main form mount). */}
+      {typeof setSig === 'function' && (
+        <>
+          <Lbl t="Recipient Signature" />
+          <div style={{ marginBottom: 14 }}>
+            <FullscreenSignaturePad
+              label="Recipient Signature — Deceased Handed Over"
+              value={sigs?.handover_signature}
+              onChange={(v: string | null) => setSig('handover_signature', v)}
+            />
+          </div>
+        </>
+      )}
 
       {showDeclaration && (
       <>
@@ -7970,7 +7986,13 @@ export default function DigitalPRFForm() {
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <FormContext.Provider value={{ fd, sf, inArr, toggleArr, profile, prfMeta, renderDispatchTimes: () => TimeTable({ rows: ALL_TIME_ROWS.filter(r => r.phase === 0 || r.phase === 2) }) }}>
+    <FormContext.Provider value={{ fd, sf, inArr, toggleArr, profile, prfMeta,
+      // Signature columns (PRF-level, not form_data) — exposed so DodFormBody
+      // can capture the recipient signature into `handover_signature`, the key
+      // the DOD certificate's "Recipient Signature" box reads.
+      sigs,
+      setSig: (k: string, v: string | null) => { setSigs(p => ({ ...p, [k]: v })); dirtyRef.current = true; },
+      renderDispatchTimes: () => TimeTable({ rows: ALL_TIME_ROWS.filter(r => r.phase === 0 || r.phase === 2) }) }}>
       <div style={{ minHeight: '100vh', maxWidth: '100vw', overflowX: 'clip', background: S50, color: S900, paddingTop: 'var(--app-safe-top, env(safe-area-inset-top))', paddingBottom: 100, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }}>
 
         {/* ── Sticky header — fancy journey-phase bar ──
