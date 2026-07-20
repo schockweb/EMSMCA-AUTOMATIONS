@@ -538,7 +538,6 @@ export default function ProviderManagement() {
                   <input
                     style={inputStyle}
                     type="text"
-                    placeholder="e.g. 30 or EL30"
                     value={newProvider.prfNumber}
                     onChange={e => setNewProvider({ ...newProvider, prfNumber: e.target.value })}
                   />
@@ -548,7 +547,6 @@ export default function ProviderManagement() {
                   <label style={labelStyle}>PRF Name</label>
                   <input
                     style={inputStyle}
-                    placeholder="e.g. EL"
                     value={newProvider.prfName}
                     onChange={e => setNewProvider({ ...newProvider, prfName: e.target.value })}
                   />
@@ -745,7 +743,6 @@ export default function ProviderManagement() {
                 <input
                   style={inputStyle}
                   type="text"
-                  placeholder="e.g. 30 or EL30"
                   value={editForm.prfNumber}
                   onChange={e => setEditForm({ ...editForm, prfNumber: e.target.value })}
                 />
@@ -754,7 +751,6 @@ export default function ProviderManagement() {
                 <label style={labelStyle}>PRF Name</label>
                 <input
                   style={inputStyle}
-                  placeholder="e.g. EL"
                   value={editForm.prf_name}
                   onChange={e => setEditForm({ ...editForm, prf_name: e.target.value })}
                 />
