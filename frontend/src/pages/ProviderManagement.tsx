@@ -534,25 +534,25 @@ export default function ProviderManagement() {
 
                 <div>
                   <label style={labelStyle}>Latest PRF Number</label>
-                  {/* Alphanumeric — the backend seeds the counter from the digits (JEM0690 → 690). */}
-                  <input
-                    style={inputStyle}
-                    type="text"
-                    placeholder="e.g. 690 or JEM0690"
-                    value={newProvider.prfNumber}
-                    onChange={e => setNewProvider({ ...newProvider, prfNumber: e.target.value })}
-                  />
-                </div>
-
-                <div>
-                  <label style={labelStyle}>PRF Name</label>
-                  <input
-                    style={inputStyle}
-                    value={newProvider.prfName}
-                    onChange={e => setNewProvider({ ...newProvider, prfName: e.target.value })}
-                  />
+                  {/* Keyword prefix (stored as prf_name, prefixes PRF file names) + last used number (seeds the counter). */}
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <input
+                      style={{ ...inputStyle, width: 90, flexShrink: 0 }}
+                      placeholder="EL"
+                      value={newProvider.prfName}
+                      onChange={e => setNewProvider({ ...newProvider, prfName: e.target.value })}
+                    />
+                    <input
+                      style={{ ...inputStyle, flex: 1 }}
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="30"
+                      value={newProvider.prfNumber}
+                      onChange={e => setNewProvider({ ...newProvider, prfNumber: e.target.value.replace(/[^0-9]/g, '') })}
+                    />
+                  </div>
                   <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: '4px 0 0' }}>
-                    Used to name PRF files, e.g. "JEM" → JEM691 PRF. Leave blank to use the company name.
+                    Keyword + last used number, e.g. EL + 30 continues at EL31. The keyword names the PRF files; leave it blank to use the company name.
                   </p>
                 </div>
 
@@ -743,24 +743,25 @@ export default function ProviderManagement() {
               </div>
               <div>
                 <label style={labelStyle}>Latest PRF Number</label>
-                {/* Alphanumeric — the backend seeds the counter from the digits (JEM0690 → 690). */}
-                <input
-                  style={inputStyle}
-                  type="text"
-                  placeholder="e.g. 690 or JEM0690"
-                  value={editForm.prfNumber}
-                  onChange={e => setEditForm({ ...editForm, prfNumber: e.target.value })}
-                />
-              </div>
-              <div>
-                <label style={labelStyle}>PRF Name</label>
-                <input
-                  style={inputStyle}
-                  value={editForm.prf_name}
-                  onChange={e => setEditForm({ ...editForm, prf_name: e.target.value })}
-                />
+                {/* Keyword prefix (stored as prf_name, prefixes PRF file names) + last used number (seeds the counter). */}
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input
+                    style={{ ...inputStyle, width: 90, flexShrink: 0 }}
+                    placeholder="EL"
+                    value={editForm.prf_name}
+                    onChange={e => setEditForm({ ...editForm, prf_name: e.target.value })}
+                  />
+                  <input
+                    style={{ ...inputStyle, flex: 1 }}
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="30"
+                    value={editForm.prfNumber}
+                    onChange={e => setEditForm({ ...editForm, prfNumber: e.target.value.replace(/[^0-9]/g, '') })}
+                  />
+                </div>
                 <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: '4px 0 0' }}>
-                  Used to name PRF files, e.g. "JEM" → JEM691 PRF. Leave blank to use the company name.
+                  Keyword + last used number, e.g. EL + 30 continues at EL31. The keyword names the PRF files; leave it blank to use the company name. A blank number keeps the current count.
                 </p>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 8, background: 'var(--surface-100)', border: '1px solid var(--surface-200)' }}>
