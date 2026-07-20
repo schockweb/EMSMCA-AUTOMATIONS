@@ -97,7 +97,8 @@ class ProviderCreate(BaseModel):
     address: str | None = None
     # PRF numbering baseline — the last PRF number already used; new PRFs for this
     # provider start after it. Same semantics as `current_prf_number` in settings.
-    current_prf_number: int | None = None
+    # Accepts alphanumeric values like "JEM0690" — the numeric part seeds the counter.
+    current_prf_number: int | str | None = None
 
     # New Client Onboarding fields
     portal_login_email: str | None = None
@@ -126,7 +127,8 @@ class ProviderUpdate(BaseModel):
     # PRF numbering baseline — the last PRF number already used. Only applied
     # when the admin actually enters a value; a blank field (None) leaves the
     # existing counter untouched so re-saving other fields never resets it.
-    current_prf_number: int | None = None
+    # Accepts alphanumeric values like "JEM0690" — the numeric part seeds the counter.
+    current_prf_number: int | str | None = None
 
 class CrewMemberCreate(BaseModel):
     full_name: str
@@ -177,6 +179,27 @@ class VehicleUpdate(BaseModel):
     registration: str | None = None
     vehicle_type: str | None = None
     is_active: bool | None = None
+
+
+def _coerce_prf_baseline(value: int | str | None) -> int | None:
+    """Normalise the admin-entered "Latest PRF Number" to the integer that
+    seeds the per-provider counter. The field accepts alphanumeric values
+    like "JEM0690" or "PRF-690" — the LAST run of digits is the number
+    (prefixes/labels before it are tolerated and discarded). Returns None
+    for a blank field (leave the counter untouched); raises 400 when a
+    non-blank value contains no digits at all."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        if not value.strip():
+            return None
+        runs = re.findall(r"\d+", value)
+        if not runs:
+            raise HTTPException(400, "Latest PRF Number must contain a number, e.g. 690 or JEM0690.")
+        value = int(runs[-1])
+    if value < 0:
+        raise HTTPException(400, "Current PRF number cannot be negative.")
+    return value
 
 
 def _slugify(name: str) -> str:
@@ -401,7 +424,7 @@ async def create_provider(
         phone=body.phone,
         email=body.email,
         address=body.address,
-        prf_start_number=body.current_prf_number,
+        prf_start_number=_coerce_prf_baseline(body.current_prf_number),
         portal_login_email=portal_email,
         portal_login_password_hash=hash_password(body.portal_login_password) if body.portal_login_password else None,
     )
@@ -513,12 +536,11 @@ async def update_provider(
             setattr(provider, key, val)
 
     # PRF numbering baseline. Only touched when the admin entered a value — a
-    # blank field (None) leaves the existing counter untouched. The next digital
+    # blank field leaves the existing counter untouched. The next digital
     # PRF continues from this value + 1 (see `_next_prf_number`).
-    if body.current_prf_number is not None:
-        if body.current_prf_number < 0:
-            raise HTTPException(400, "Current PRF number cannot be negative.")
-        provider.prf_start_number = body.current_prf_number
+    baseline = _coerce_prf_baseline(body.current_prf_number)
+    if baseline is not None:
+        provider.prf_start_number = baseline
 
     # EMSMCA Client Login (portal_login_email / portal_login_password_hash on ServiceProvider)
     if body.portal_login_username is not None:
@@ -623,7 +645,8 @@ class ProviderSettingsUpdate(BaseModel):
     # PRF numbering baseline — count of PRFs completed so far at onboarding.
     # Only sent when the admin fills the field; the next digital PRF continues
     # from here. Never echoed back on GET (the field stays blank on return).
-    current_prf_number: int | None = None
+    # Accepts alphanumeric values like "JEM0690" — the numeric part seeds the counter.
+    current_prf_number: int | str | None = None
 
 
 def _assert_settings_access(principal, provider_id: uuid.UUID) -> None:
@@ -715,13 +738,12 @@ async def update_provider_settings(
         provider.portal_login_password_hash = hash_password(body.portal_login_password)
 
     # PRF numbering baseline. Only touched when the admin actually entered a
-    # value — a blank field (None) leaves the existing counter untouched, so
+    # value — a blank field leaves the existing counter untouched, so
     # re-saving other settings never resets the sequence. The next digital PRF
     # will be this value + 1 (see `_next_prf_number`).
-    if body.current_prf_number is not None:
-        if body.current_prf_number < 0:
-            raise HTTPException(400, "Current PRF number cannot be negative.")
-        provider.prf_start_number = body.current_prf_number
+    baseline = _coerce_prf_baseline(body.current_prf_number)
+    if baseline is not None:
+        provider.prf_start_number = baseline
 
     # Portal Admin Login (admin crew member)
     if body.admin_email or (body.admin_password and body.admin_password.strip()):

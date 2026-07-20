@@ -223,8 +223,9 @@ export default function ProviderManagement() {
         admin_email: editForm.admin_email.trim() || undefined,
         admin_password: editForm.admin_password.trim() || undefined,
         // PRF baseline — only sent when the admin typed a value, so a blank
-        // field leaves the existing counter untouched.
-        current_prf_number: editForm.prfNumber.trim() !== '' ? Number(editForm.prfNumber) : undefined,
+        // field leaves the existing counter untouched. Sent as-typed; the
+        // backend extracts the digits (JEM0690 → 690).
+        current_prf_number: editForm.prfNumber.trim() || undefined,
       });
       const updated = { ...selectedProvider, ...editForm };
       setSelectedProvider(updated);
@@ -289,7 +290,7 @@ export default function ProviderManagement() {
         pty_reg_number: newProvider.ptyRegNumber || undefined,
         prf_name: newProvider.prfName.trim() || undefined,
         address: newProvider.address || undefined,
-        current_prf_number: newProvider.prfNumber.trim() ? parseInt(newProvider.prfNumber, 10) : undefined,
+        current_prf_number: newProvider.prfNumber.trim() || undefined,
         portal_login_email: newProvider.clientEmail || undefined,
         portal_login_password: newProvider.clientPassword || undefined,
         admin_email: newProvider.adminEmail || undefined,
@@ -533,13 +534,13 @@ export default function ProviderManagement() {
 
                 <div>
                   <label style={labelStyle}>Latest PRF Number</label>
+                  {/* Alphanumeric — the backend seeds the counter from the digits (JEM0690 → 690). */}
                   <input
                     style={inputStyle}
                     type="text"
-                    inputMode="numeric"
-
+                    placeholder="e.g. 690 or JEM0690"
                     value={newProvider.prfNumber}
-                    onChange={e => setNewProvider({ ...newProvider, prfNumber: e.target.value.replace(/[^0-9]/g, '') })}
+                    onChange={e => setNewProvider({ ...newProvider, prfNumber: e.target.value })}
                   />
                 </div>
 
@@ -742,13 +743,13 @@ export default function ProviderManagement() {
               </div>
               <div>
                 <label style={labelStyle}>Latest PRF Number</label>
+                {/* Alphanumeric — the backend seeds the counter from the digits (JEM0690 → 690). */}
                 <input
                   style={inputStyle}
                   type="text"
-                  inputMode="numeric"
-
+                  placeholder="e.g. 690 or JEM0690"
                   value={editForm.prfNumber}
-                  onChange={e => setEditForm({ ...editForm, prfNumber: e.target.value.replace(/[^0-9]/g, '') })}
+                  onChange={e => setEditForm({ ...editForm, prfNumber: e.target.value })}
                 />
               </div>
               <div>
