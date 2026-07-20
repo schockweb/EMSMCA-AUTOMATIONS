@@ -23,17 +23,18 @@
 // Category codes
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** HPCSA registration categories (six recognised tiers). */
+/** HPCSA registration categories (six recognised tiers) + Doctor. */
 export type HpcsaCategory =
   | 'BAA'  // Basic Ambulance Assistant         (BLS tier)
   | 'AEA'  // Ambulance Emergency Assistant     (ILS tier)
   | 'ECT'  // Emergency Care Technician         (own tier)
   | 'ECA'  // Emergency Care Assistant          (own tier)
   | 'ANT'  // CCA — Critical Care Assistant     (ALS tier)
-  | 'ECP'; // Emergency Care Practitioner       (ALS tier)
+  | 'ECP'  // Emergency Care Practitioner       (ALS tier)
+  | 'DR';  // Doctor — highest profession; authorised for every PRF action
 
 export const HPCSA_CATEGORIES: readonly HpcsaCategory[] = [
-  'BAA', 'AEA', 'ECT', 'ECA', 'ANT', 'ECP',
+  'BAA', 'AEA', 'ECT', 'ECA', 'ANT', 'ECP', 'DR',
 ] as const;
 
 /** Display metadata for each category — used by pickers and badges. */
@@ -44,6 +45,7 @@ export const CATEGORY_META: Record<HpcsaCategory, { label: string; tier: 'BLS' |
   ECA: { label: 'Emergency Care Assistant',      tier: 'ECA' },
   ANT: { label: 'Critical Care Assistant',       tier: 'ALS' },
   ECP: { label: 'Emergency Care Practitioner',   tier: 'ALS' },
+  DR:  { label: 'Doctor',                        tier: 'ALS' },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1124,6 +1126,8 @@ const LEGACY_TIER_TO_CATEGORY: Readonly<Record<string, HpcsaCategory>> = {
   'EMT-P':   'ECP',
   CCA:       'ANT',
   BASIC:     'BAA',
+  DOCTOR:    'DR',
+  MD:        'DR',
 };
 
 /**
@@ -1158,7 +1162,7 @@ export function normaliseHpcsaCategory(input: string | undefined | null): HpcsaC
  */
 export function medicationNamesForCategory(category: string | undefined | null): readonly string[] {
   const normalised = normaliseHpcsaCategory(category);
-  if (!normalised) return MEDICATION_NAMES;
+  if (!normalised || normalised === 'DR') return MEDICATION_NAMES;
   return medications.capabilities
     .filter(c => c.authorised.includes(normalised))
     .map(c => c.label);
@@ -1273,6 +1277,9 @@ export function isAuthorised(category: HpcsaCategory, capabilityKey: string): bo
   const cap = CAPABILITY_INDEX.get(capabilityKey);
   if (!cap) throw new Error(`HPCSA scope: unknown capability key "${capabilityKey}"`);
   if (cap.forbidden) return false;
+  // Doctor: full scope — authorised for every capability the matrix offers.
+  // (The per-capability `authorised` arrays stay six-category EMS taxonomy.)
+  if (category === 'DR') return true;
   return cap.authorised.includes(category);
 }
 

@@ -48,7 +48,7 @@ logger = logging.getLogger("ems.hpcsa")
 # ── Categories ───────────────────────────────────────────────────────────────
 
 HPCSA_CATEGORIES: frozenset[str] = frozenset({
-    "BAA", "AEA", "ECT", "ECA", "ANT", "ECP",
+    "BAA", "AEA", "ECT", "ECA", "ANT", "ECP", "DR",
 })
 
 DEFAULT_CATEGORY = "AEA"
@@ -60,6 +60,7 @@ CATEGORY_TIER: dict[str, str] = {
     "ECA": "ILS",
     "ANT": "ALS",
     "ECP": "ALS",
+    "DR":  "ALS",   # Doctor — highest profession; bills at the top tier.
 }
 
 # Human labels — kept in sync with `CATEGORY_META` in
@@ -71,6 +72,7 @@ CATEGORY_LABELS: dict[str, str] = {
     "ECA": "Emergency Care Assistant",
     "ANT": "Critical Care Assistant",
     "ECP": "Emergency Care Practitioner",
+    "DR":  "Doctor",
 }
 
 # ── Translation helpers ──────────────────────────────────────────────────────
@@ -90,6 +92,8 @@ _LEGACY_TO_CATEGORY: dict[str, str] = {
     "EMT-P":      "ECP",
     "CCA":        "ANT",
     "BASIC":      "BAA",
+    "DOCTOR":     "DR",
+    "MD":         "DR",
 }
 
 
@@ -206,6 +210,10 @@ def is_authorised(category: str, capability_key: str) -> bool:
         return False
     if cap.get("forbidden"):
         return False
+    # Doctor: full scope — the generated JSON's `authorised` arrays stay
+    # six-category EMS taxonomy; DR bypasses them (mirrors the frontend).
+    if category == "DR":
+        return True
     return category in cap.get("authorised", ())
 
 
