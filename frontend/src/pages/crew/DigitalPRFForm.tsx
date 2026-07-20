@@ -6536,22 +6536,25 @@ export default function DigitalPRFForm() {
           <SHdr t="Available" />
           {TimeTable({ rows: ALL_TIME_ROWS.filter(r => r.timeKey === 'time_available') })}
 
+          {/* Submit stays disabled until a Billing Type is picked — a DOD PRF
+              submitted without one renders "—" on the certificate and can't be
+              billed. Affordance-disable only (no error banner). */}
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={submitting}
+            disabled={submitting || !fd.billing_type}
             style={{
               width: '100%', padding: 18, borderRadius: 14,
               fontSize: '1.05rem', fontWeight: 800, border: 'none',
-              cursor: submitting ? 'wait' : 'pointer',
-              background: submitting ? S400 : `linear-gradient(135deg,${ROSE},#be123c)`,
+              cursor: submitting ? 'wait' : !fd.billing_type ? 'not-allowed' : 'pointer',
+              background: (submitting || !fd.billing_type) ? S400 : `linear-gradient(135deg,${ROSE},#be123c)`,
               color: W,
-              boxShadow: submitting ? 'none' : `0 6px 24px rgba(225,29,72,0.3)`,
+              boxShadow: (submitting || !fd.billing_type) ? 'none' : `0 6px 24px rgba(225,29,72,0.3)`,
               letterSpacing: '0.04em',
               marginTop: 8,
             }}
           >
-            {submitting ? 'Submitting PRF...' : 'Complete & Submit'}
+            {submitting ? 'Submitting PRF...' : !fd.billing_type ? 'Select Billing Type to Submit' : 'Complete & Submit'}
           </button>
         </>
       ) : fd.call_type === 'DOD' ? (

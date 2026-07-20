@@ -240,7 +240,7 @@ const buildPrfFileName = (prf: any): string => {
 
 // ── Component ────────────────────────────────────────────────────────
 export default function PRFView() {
-  const { caseId } = useParams<{ caseId: string }>();
+  const { providerSlug, caseId } = useParams<{ providerSlug: string; caseId: string }>();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [prf, setPrf] = useState<any>(null);
@@ -748,7 +748,16 @@ export default function PRFView() {
         maxWidth: 1220, margin: '0 auto 20px', display: 'flex',
         justifyContent: 'space-between', alignItems: 'center', padding: '0 16px',
       }}>
-        <button onClick={() => navigate(-1)} style={{
+        <button onClick={() => {
+          // When opened from the admin dashboard (?from=admin), return to the
+          // Patient Report Forms tab rather than relying on browser history
+          // (which would reset the dashboard to its default tab).
+          if (searchParams.get('from') === 'admin' && providerSlug) {
+            navigate(`/${providerSlug}/admin/dashboard?tab=prfs`);
+          } else {
+            navigate(-1);
+          }
+        }} style={{
           padding: '9px 16px', border: `1px solid #cbd5e1`, background: '#fff', color: INK,
           fontSize: '0.84rem', fontWeight: 700, cursor: 'pointer', borderRadius: 6,
           boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
@@ -971,9 +980,14 @@ export default function PRFView() {
             <FieldRow label="Date" value={fmtDate(ts.time_call_received || prf.submitted_at)} />
             <FieldRow label="Case No" value={prf.case_number} />
             {fd.rht_call_out_fee && <FieldRow label="Call-Out Fee" value={fd.rht_call_out_fee} />}
-            {/* Assessment level + Billing Type */}
+            {/* Assessment level + Billing Type. PVT shows its payment method
+                too ("PVT — Cash") so cash settlements are visible at a glance. */}
             {fd.call_type !== 'DOD' && <FieldRow label="Assessment"   value={fd.assessment_level} />}
-            <FieldRow label="Billing Type" value={fd.billing_type} />
+            <FieldRow label="Billing Type" value={
+              fd.billing_type === 'PVT' && fd.pvt_payment_method
+                ? `PVT — ${fd.pvt_payment_method}`
+                : fd.billing_type
+            } />
             {/* Call type — rendered as a standard labelled field row; flex:1
                 stretches it to fill the remaining column height. */}
             {(() => {
