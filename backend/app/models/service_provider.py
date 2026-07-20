@@ -67,7 +67,7 @@ class ServiceProvider(Base):
     # Relationships
     crew_members = relationship("CrewMember", back_populates="provider", lazy="selectin")
     vehicles = relationship("Vehicle", back_populates="provider", lazy="selectin")
-    digital_prfs = relationship("DigitalPRF", back_populates="provider", lazy="selectin")
+    digital_prfs = relationship("DigitalPRF", back_populates="provider", lazy="select")
 
     def __repr__(self):
         return f"<ServiceProvider {self.name} ({self.slug})>"

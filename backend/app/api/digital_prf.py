@@ -128,9 +128,12 @@ async def _next_prf_number(db: AsyncSession, provider: ServiceProvider) -> int:
 
 
 def _generate_case_number(provider_slug: str, prf_number: int) -> str:
-    """Generate a case number like JEMS-2026-04-000001."""
+    """Generate a case number like JEMS-2026-04-000001 (max 50 chars)."""
     now = datetime.now(timezone.utc)
-    return f"{provider_slug.upper()}-{now.year}-{now.month:02d}-{prf_number:06d}"
+    # Suffix '-YYYY-MM-00000X' is exactly 15 chars. Max total is 50.
+    # Truncate slug to max 35 chars.
+    safe_slug = provider_slug[:35].upper().rstrip('-')
+    return f"{safe_slug}-{now.year}-{now.month:02d}-{prf_number:06d}"
 
 
 # ═══════════════════════════════════════════════════════════
@@ -240,7 +243,6 @@ async def create_prf(
     )
     db.add(prf)
     await db.commit()
-    await db.refresh(prf)
 
     logger.info(
         "Created draft PRF #%d (case %s) by crew %s",
