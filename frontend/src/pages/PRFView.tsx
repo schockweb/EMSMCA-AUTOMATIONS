@@ -1095,24 +1095,22 @@ export default function PRFView() {
               <FieldRow label="Suburb"       value={fd.med_aid_dec_death_deceased_suburb} />
               <FieldRow label="Code"         value={fd.med_aid_dec_death_deceased_postal_code} />
 
-              {/* Crew sign-off — the pre-submit Crew Sign-Off modal signatures,
-                  mirrored from the standard layout's crew columns so the DOD
-                  certificate carries the attending crew's details too. */}
-              {([
-                { c: prf.crew_1, sig: fd.crew_signoff_sigs?.c1 || prf.signatures?.crew_signature,   fbName: fd.assessed_by, fbQual: fd.assessor_qualifications },
-                { c: prf.crew_2, sig: fd.crew_signoff_sigs?.c2 || prf.signatures?.crew_2_signature, fbName: fd.managed_by,  fbQual: fd.manager_qualifications  },
-              ]).filter(({ c, sig, fbName }) => c || sig || fbName).map(({ c, sig, fbName, fbQual }, i) => (
-                <div key={i} style={{ display: 'flex', flexDirection: 'column' }}>
-                  <SectionHead label={`Crew ${i + 1} Sign-Off`} />
-                  <FieldRow label="Name"  value={c?.full_name || fbName} />
-                  <FieldRow label="Qual"  value={c?.qualification || fbQual} />
-                  <FieldRow label="HPCSA" value={c?.hpcsa_number} />
+              {/* Crew 1 sign-off — pre-submit Crew Sign-Off modal signature.
+                  Crew 2's block lives at the bottom of column 2 and the
+                  Undertaker block at the bottom of column 3, so the three
+                  columns come out roughly equal in height. */}
+              {(prf.crew_1 || fd.crew_signoff_sigs?.c1 || prf.signatures?.crew_signature || fd.assessed_by) && (
+                <>
+                  <SectionHead label="Crew 1 Sign-Off" />
+                  <FieldRow label="Name"  value={prf.crew_1?.full_name || fd.assessed_by} />
+                  <FieldRow label="Qual"  value={prf.crew_1?.qualification || fd.assessor_qualifications} />
+                  <FieldRow label="HPCSA" value={prf.crew_1?.hpcsa_number} />
                   <div style={{ padding: '6px 8px', borderTop: `1px solid ${LN}` }}>
                     <div style={{ fontSize: '0.52rem', fontWeight: 800, color: MUT, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Signature</div>
-                    <SignatureBox src={sig} minHeight={56} />
+                    <SignatureBox src={fd.crew_signoff_sigs?.c1 || prf.signatures?.crew_signature} minHeight={56} />
                   </div>
-                </div>
-              ))}
+                </>
+              )}
             </div>
 
             {/* Column 2 — practitioner + medical confirmation + handover */}
@@ -1145,15 +1143,17 @@ export default function PRFView() {
                 </div>
               )}
 
-              {(fd.undertaker_name || fd.undertaker_collector_signature) && (
+              {/* Crew 2 sign-off — placed here (not under Crew 1) to balance
+                  the three column heights. */}
+              {(prf.crew_2 || fd.crew_signoff_sigs?.c2 || prf.signatures?.crew_2_signature || fd.managed_by) && (
                 <>
-                  <SectionHead label="Undertaker Details" />
-                  <FieldRow label="Company Name" value={fd.undertaker_name} />
-                  <FieldRow label="Phone No" value={fd.undertaker_phone} />
-                  <FieldRow label="Collector" value={fd.undertaker_collector_name} />
+                  <SectionHead label="Crew 2 Sign-Off" />
+                  <FieldRow label="Name"  value={prf.crew_2?.full_name || fd.managed_by} />
+                  <FieldRow label="Qual"  value={prf.crew_2?.qualification || fd.manager_qualifications} />
+                  <FieldRow label="HPCSA" value={prf.crew_2?.hpcsa_number} />
                   <div style={{ padding: '6px 8px', borderTop: `1px solid ${LN}` }}>
-                    <div style={{ fontSize: '0.52rem', fontWeight: 800, color: MUT, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Undertaker Signature</div>
-                    <SignatureBox src={fd.undertaker_collector_signature} minHeight={64} />
+                    <div style={{ fontSize: '0.52rem', fontWeight: 800, color: MUT, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Signature</div>
+                    <SignatureBox src={fd.crew_signoff_sigs?.c2 || prf.signatures?.crew_2_signature} minHeight={56} />
                   </div>
                 </>
               )}
@@ -1192,6 +1192,21 @@ export default function PRFView() {
                 <div style={{ fontSize: '0.52rem', fontWeight: 800, color: MUT, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Witness Signature</div>
                 <SignatureBox src={fd.med_aid_dec_death_witness_signature} minHeight={64} />
               </div>
+
+              {/* Undertaker — moved from column 2 to fill this column's slack
+                  and keep the three columns roughly equal in height. */}
+              {(fd.undertaker_name || fd.undertaker_collector_signature) && (
+                <>
+                  <SectionHead label="Undertaker Details" />
+                  <FieldRow label="Company Name" value={fd.undertaker_name} />
+                  <FieldRow label="Phone No" value={fd.undertaker_phone} />
+                  <FieldRow label="Collector" value={fd.undertaker_collector_name} />
+                  <div style={{ padding: '6px 8px', borderTop: `1px solid ${LN}` }}>
+                    <div style={{ fontSize: '0.52rem', fontWeight: 800, color: MUT, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Undertaker Signature</div>
+                    <SignatureBox src={fd.undertaker_collector_signature} minHeight={64} />
+                  </div>
+                </>
+              )}
             </div>
           </div>
         )}
