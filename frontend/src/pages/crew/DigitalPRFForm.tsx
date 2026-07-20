@@ -871,7 +871,48 @@ const applyDictation = (e: any, st: DictationState): string => {
   return (st.committed + (needSpace ? ' ' : '') + it);
 };
 
-const Inp = ({ fk, type = 'text', onBlur, noMic }: { fk: string; ph?: string; type?: string; req?: boolean; noMic?: boolean; onBlur?: (e: React.FocusEvent<HTMLInputElement>) => void }) => {
+// ── Global "fields expand downwards" rule ─────────────────────────────────
+// Text fields render as auto-growing textareas so long values (typed or
+// dictated) wrap and push the field taller instead of scrolling out of view.
+// Mirrors the proven VoiceTxt pattern: height tracks scrollHeight with the
+// initial height as the floor, and the mic button stays anchored to the TOP
+// of the field so growth never moves it mid-press (moving/re-centring the
+// button during dictation is what broke hold-to-talk on mobile previously).
+const useAutoGrow = (value: string) => {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const minHRef = useRef<number>(0);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (!minHRef.current) minHRef.current = el.offsetHeight;
+    el.style.height = 'auto';
+    el.style.height = Math.max(el.scrollHeight, minHRef.current) + 'px';
+  }, [value]);
+  return ref;
+};
+
+// Single-line-semantics fields swallow Enter so wrapped display never puts
+// literal newlines into form data (matching the old <input> behaviour).
+const blockEnter = (e: React.KeyboardEvent) => { if (e.key === 'Enter') e.preventDefault(); };
+
+// Auto-growing replacement for raw single-line <input type="text"> fields
+// (e.g. the Declaration-of-Death signatory names). Standard textarea props
+// pass straight through.
+const GrowTa = ({ value, style, ...rest }: React.TextareaHTMLAttributes<HTMLTextAreaElement> & { value: string }) => {
+  const ref = useAutoGrow(value);
+  return (
+    <textarea
+      ref={ref}
+      rows={1}
+      value={value}
+      onKeyDown={blockEnter}
+      style={{ resize: 'none', overflow: 'hidden', fontFamily: 'inherit', ...style }}
+      {...rest}
+    />
+  );
+};
+
+const Inp = ({ fk, type = 'text', onBlur, noMic }: { fk: string; ph?: string; type?: string; req?: boolean; noMic?: boolean; onBlur?: (e: React.FocusEvent<any>) => void }) => {
   const { fd, sf } = useContext(FormContext);
   // PRF data is unique per patient, so browser form-history suggestions (e.g.
   // re-offering the last value you typed) are never useful and are turned off.
@@ -892,6 +933,10 @@ const Inp = ({ fk, type = 'text', onBlur, noMic }: { fk: string; ph?: string; ty
   const fdRef = useRef(fd);
   fdRef.current = fd;
   const dictRef = useRef<DictationState>(newDictationState(''));
+
+  // Only plain text fields grow; date/time/number/tel/email keep native inputs.
+  const growable = type === 'text';
+  const taRef = useAutoGrow(growable ? (fd[fk] ?? '') : '');
 
   useEffect(() => () => {
     try { recogRef.current?.stop?.(); } catch { /* ignore */ }
@@ -926,21 +971,26 @@ const Inp = ({ fk, type = 'text', onBlur, noMic }: { fk: string; ph?: string; ty
   };
 
   if (!showMic) {
-    return <input id={`prf-field-${fk}`} type={type} value={fd[fk] ?? ''} onChange={e => sf(fk, e.target.value)} onFocus={onF} onBlur={e => { onB(e); if (onBlur) onBlur(e); }} placeholder="" {...nf} style={{ ...base, marginBottom: 14, borderColor: '#e2e8f0' }} />;
+    if (!growable) {
+      return <input id={`prf-field-${fk}`} type={type} value={fd[fk] ?? ''} onChange={e => sf(fk, e.target.value)} onFocus={onF} onBlur={e => { onB(e); if (onBlur) onBlur(e); }} placeholder="" {...nf} style={{ ...base, marginBottom: 14, borderColor: '#e2e8f0' }} />;
+    }
+    return <textarea id={`prf-field-${fk}`} ref={taRef} rows={1} value={fd[fk] ?? ''} onChange={e => sf(fk, e.target.value)} onKeyDown={blockEnter} onFocus={onF} onBlur={e => { onB(e); if (onBlur) onBlur(e); }} placeholder="" {...nf} style={{ ...base, marginBottom: 14, borderColor: '#e2e8f0', resize: 'none', overflow: 'hidden' }} />;
   }
 
   return (
     <div style={{ position: 'relative', marginBottom: 14 }}>
-      <input
+      <textarea
         id={`prf-field-${fk}`}
-        type={type}
+        ref={taRef}
+        rows={1}
         value={fd[fk] ?? ''}
         onChange={e => sf(fk, e.target.value)}
+        onKeyDown={blockEnter}
         onFocus={onF}
         onBlur={e => { onB(e); if (onBlur) onBlur(e); }}
         placeholder=""
         {...nf}
-        style={{ ...base, marginBottom: 0, borderColor: '#e2e8f0', paddingRight: 54 }}
+        style={{ ...base, marginBottom: 0, borderColor: '#e2e8f0', paddingRight: 54, resize: 'none', overflow: 'hidden' }}
       />
       <button
         type="button"
@@ -956,8 +1006,11 @@ const Inp = ({ fk, type = 'text', onBlur, noMic }: { fk: string; ph?: string; ty
         aria-label={recording ? 'Recording â€” release to stop' : 'Hold to dictate'}
         title={recording ? 'Release to stop' : 'Hold to dictate'}
         style={{
+          // Top-anchored (NOT vertically centred): the field grows downward as
+          // dictation fills it, and a centred button would drift out from
+          // under the crew's held finger and cancel the recording.
           position: 'absolute',
-          top: '50%', right: 6, transform: 'translateY(-50%)',
+          top: 4, right: 6,
           width: 40, height: 40, borderRadius: 10,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           border: `2.5px solid \$\{recording \? '#991b1b' : '#1e3a8a'\}`,
@@ -1805,6 +1858,9 @@ const ComboInp = ({ fk, opts, listId }: { fk: string; ph?: string; opts: string[
 
   const current = fd[fk] ?? '';
   const borderStyle = { ...base, marginBottom: 14, borderColor: '#e2e8f0' };
+  // Mobile branch renders an auto-growing textarea (long scheme names wrap);
+  // the desktop branch keeps a native <input> because <datalist> needs one.
+  const taRef = useAutoGrow(current);
 
   // Touch / mobile: typeable input with a custom 3-suggestion popdown.
   // Native <datalist> is unreliable on mobile (and blocks typing inside a
@@ -1836,11 +1892,13 @@ const ComboInp = ({ fk, opts, listId }: { fk: string; ph?: string; opts: string[
 
     return (
       <div ref={wrapRef} style={{ position: 'relative', marginBottom: 14 }}>
-        <input
+        <textarea
           id={`prf-field-${fk}`}
-          type="text"
+          ref={taRef}
+          rows={1}
           value={current}
           onChange={e => { sf(fk, e.target.value); setOpen(true); }}
+          onKeyDown={blockEnter}
           onFocus={e => { onF(e); setOpen(true); }}
           onBlur={onB}
           placeholder=""
@@ -1848,7 +1906,7 @@ const ComboInp = ({ fk, opts, listId }: { fk: string; ph?: string; opts: string[
           autoCorrect="off"
           autoCapitalize="words"
           spellCheck={false}
-          style={{ ...borderStyle, marginBottom: 0 }}
+          style={{ ...borderStyle, marginBottom: 0, resize: 'none', overflow: 'hidden' }}
         />
         {showSuggestions && (
           <div style={{
@@ -1907,7 +1965,10 @@ const ComboInp = ({ fk, opts, listId }: { fk: string; ph?: string; opts: string[
 
 const Txt = ({ fk, rows = 3 }: { fk: string; ph?: string; rows?: number }) => {
   const { fd, sf } = useContext(FormContext);
-  return <textarea id={`prf-field-${fk}`} value={fd[fk] ?? ''} onChange={e => sf(fk, e.target.value)} onFocus={onF} onBlur={onB} placeholder="" rows={rows} style={{ ...base, resize: 'vertical', marginBottom: 14, fontFamily: 'inherit' }} />
+  // Auto-grows with content (initial `rows` height as the floor) so long
+  // entries expand the field downward instead of scrolling inside it.
+  const taRef = useAutoGrow(fd[fk] ?? '');
+  return <textarea id={`prf-field-${fk}`} ref={taRef} value={fd[fk] ?? ''} onChange={e => sf(fk, e.target.value)} onFocus={onF} onBlur={onB} placeholder="" rows={rows} style={{ ...base, resize: 'none', overflow: 'hidden', marginBottom: 14, fontFamily: 'inherit' }} />
 };
 
 // VoiceTxt — textarea with an overlaid mic-icon trigger that dictates into
@@ -2070,16 +2131,15 @@ const Sel = ({ fk, opts }: { fk: string; opts: string[] }) => {
   if (showCustom) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-        <input 
+        <GrowTa
           autoFocus
-          type="text" 
-          value={val} 
-          onChange={e => sf(fk, e.target.value)} 
-          onFocus={onF} 
-          onBlur={onB} 
-          autoComplete="off" 
-          placeholder="Type custom value..." 
-          style={{ ...base, marginBottom: 0, flex: 1 }} 
+          value={val}
+          onChange={e => sf(fk, e.target.value)}
+          onFocus={onF}
+          onBlur={onB}
+          autoComplete="off"
+          placeholder="Type custom value..."
+          style={{ ...base, marginBottom: 0, flex: 1 }}
         />
         <button 
           type="button" 
@@ -2719,8 +2779,7 @@ const DodFormBody = ({ showDeclaration = true }: { showDeclaration?: boolean }) 
         <Lbl t="Full name" />
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <input
-              type="text"
+            <GrowTa
               value={fd.med_aid_dec_death_signatory_name ?? ''}
               onChange={e => sf('med_aid_dec_death_signatory_name', e.target.value)}
               onFocus={onF}
@@ -2741,8 +2800,7 @@ const DodFormBody = ({ showDeclaration = true }: { showDeclaration?: boolean }) 
         <Lbl t="Crew Member 2" />
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <input
-              type="text"
+            <GrowTa
               value={fd.med_aid_dec_death_crew_attended_name ?? ''}
               onChange={e => sf('med_aid_dec_death_crew_attended_name', e.target.value)}
               onFocus={onF}
@@ -2768,8 +2826,7 @@ const DodFormBody = ({ showDeclaration = true }: { showDeclaration?: boolean }) 
         <Lbl t="Witness name" />
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <input
-              type="text"
+            <GrowTa
               value={fd.med_aid_dec_death_witness_name ?? ''}
               onChange={e => sf('med_aid_dec_death_witness_name', e.target.value)}
               onFocus={onF}
