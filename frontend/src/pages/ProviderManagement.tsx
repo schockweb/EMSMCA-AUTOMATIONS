@@ -552,9 +552,6 @@ export default function ProviderManagement() {
                     value={newProvider.prfName}
                     onChange={e => setNewProvider({ ...newProvider, prfName: e.target.value })}
                   />
-                  <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: '4px 0 0' }}>
-                    Used to name PRF files, e.g. "EL" → EL31 PRF. Leave blank to use the company name.
-                  </p>
                 </div>
 
                 <div>
@@ -752,9 +749,6 @@ export default function ProviderManagement() {
                   value={editForm.prfNumber}
                   onChange={e => setEditForm({ ...editForm, prfNumber: e.target.value })}
                 />
-                <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: '4px 0 0' }}>
-                  Blank keeps the current count.
-                </p>
               </div>
               <div>
                 <label style={labelStyle}>PRF Name</label>
@@ -764,9 +758,6 @@ export default function ProviderManagement() {
                   value={editForm.prf_name}
                   onChange={e => setEditForm({ ...editForm, prf_name: e.target.value })}
                 />
-                <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: '4px 0 0' }}>
-                  Used to name PRF files, e.g. "EL" → EL31 PRF. Leave blank to use the company name.
-                </p>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 8, background: 'var(--surface-100)', border: '1px solid var(--surface-200)' }}>
                 <input
