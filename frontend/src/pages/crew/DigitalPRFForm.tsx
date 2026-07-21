@@ -10,6 +10,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 // Raw axios — the PRF form builds its own crew_token-authenticated instance via
 // api() below; it must not inherit the admin api/client interceptor.
 import axios from 'axios';
+import { getCrewToken, getCrewProfile, CREW_SESSION_KEYS } from '../../utils/crewSession';
+import { inferResumePhase } from '../../utils/prfResumePhase';
 import SignaturePad from '../../components/SignaturePad';
 import FullscreenSignaturePad, { FullscreenCanvas } from '../../components/FullscreenSignaturePad';
 import PatientDocumentsCapture from '../../components/PatientDocumentsCapture';
@@ -54,7 +56,7 @@ function api() {
   return axios.create({
     baseURL: API,
     headers: {
-      Authorization: `Bearer ${localStorage.getItem('crew_token')}`,
+      Authorization: `Bearer ${getCrewToken()}`,
       // Skips ngrok's HTML interstitial when accessed via an ngrok tunnel.
       // No effect on direct LAN / localhost access.
       'ngrok-skip-browser-warning': 'true',
@@ -545,7 +547,9 @@ const PHASES = [
 // ── Timing rows (split across phases) ─────────────────────────────────────────
 const ALL_TIME_ROWS = [
   { label: 'Dispatch Time', timeKey: 'time_dispatched', kmKey: 'km_dispatched', phase: 0 },
-  { label: 'Mobile', timeKey: 'time_mobile', kmKey: 'km_mobile', phase: 1 },
+  // Mobile / En Route tracker was removed (replaced by an in-phase timer); its
+  // time row and time_mobile/km_mobile fields are gone. Phase 1 (En Route) stays
+  // in PHASES only to preserve the existing 0-based phase indices.
   { label: 'On Scene', timeKey: 'time_on_scene', kmKey: 'km_on_scene', phase: 2 },
   { label: 'Depart Scene', timeKey: 'time_depart_scene', kmKey: 'km_depart_scene', phase: 4 },
   { label: 'Arrival At Facility', timeKey: 'time_at_destination', kmKey: 'km_at_destination', phase: 5 },
@@ -625,15 +629,9 @@ function fmtTime(iso: string | null | undefined): string | null {
   const d = new Date(iso);
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
-function inferPhase(ts: Record<string, string | null>): number {
-  if (ts.time_available) return 6;
-  if (ts.time_at_destination) return 5;
-  if (ts.time_depart_scene) return 4;
-  if (ts.time_on_scene) return 3;
-  if (ts.time_mobile) return 2;
-  if (ts.time_dispatched) return 1;
-  return 0;
-}
+// inferResumePhase (draft-resume phase mapping) lives in utils/prfResumePhase.ts
+// so it can be unit-tested and never returns a hidden phase (En Route 1 /
+// Clinical 3 / Complete 6). The old version here returned those.
 
 // ── SA-ID derivation ─────────────────────────────────────────────────────────
 // South African ID numbers are 13 digits with YYMMDD as the leading 6.
@@ -830,45 +828,71 @@ const SpeechRecognitionAPI: any =
     ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition)) || null;
 
 // ── Robust incremental dictation builder ──────────────────────────────────
-// Fixes the Android "duplicate words" bug. Some mobile SpeechRecognition
-// engines re-emit an already-finalised segment — either as a second final
-// entry in the same event, or as a lingering interim copy — which the old
-// "rebuild from index 0 every event" logic double-counted, so a spoken phrase
-// showed up twice. Here each final result is committed exactly once (tracked by
-// a high-water mark), an exact repeat of the segment we just committed is
-// dropped, and interim words are layered on top transiently (never persisted).
-type DictationState = { committed: string; finalCount: number; lastFinal: string };
+// Android engines (Chrome AND Samsung Internet, both backed by the system
+// speech service) misbehave in `continuous` mode in ways a result-index
+// high-water mark alone cannot absorb:
+//   • a final segment may RE-CONTAIN everything said so far (cumulative
+//     transcripts), so plain appending doubles every word;
+//   • an interim update repeats words that were already finalised;
+//   • the engine may silently restart its session mid-hold, resetting the
+//     results list back to index 0.
+// Every commit therefore goes through `mergeDictation`, which drops the
+// longest overlap between the already-committed text and the incoming
+// segment before appending — duplicates vanish regardless of which of the
+// above shapes the engine emits.
+type DictationState = { committed: string; finalCount: number };
 
 const newDictationState = (baseline: string): DictationState => ({
-  // Trailing space so the first dictated word doesn't butt against typed text.
-  committed: baseline && !/\s$/.test(baseline) ? baseline + ' ' : baseline,
+  committed: (baseline || '').trim(),
   finalCount: 0,
-  lastFinal: '',
 });
 
+// Append `next` to `base`, dropping whatever prefix of `next` already ends
+// `base` (word-level comparison, case-insensitive). Handles exact repeats,
+// cumulative re-emissions, and partial overlaps.
+const mergeDictation = (base: string, next: string): string => {
+  const b = base.replace(/\s+$/, '');
+  const n = next.trim().replace(/\s+/g, ' ');
+  if (!n) return b;
+  if (!b) return n;
+  const bl = b.toLowerCase();
+  const nl = n.toLowerCase();
+  // Cumulative re-emission: the new segment starts with everything so far.
+  if (nl === bl) return b;
+  if (nl.startsWith(bl + ' ')) return b + n.slice(b.length);
+  // Longest word-suffix of `base` that matches a word-prefix of `next`.
+  const bWords = bl.split(/\s+/);
+  const nWordsL = nl.split(/\s+/);
+  const nWords = n.split(/\s+/);
+  let overlap = 0;
+  for (let k = Math.min(bWords.length, nWordsL.length); k > 0; k--) {
+    if (bWords.slice(-k).join(' ') === nWordsL.slice(0, k).join(' ')) { overlap = k; break; }
+  }
+  const addition = nWords.slice(overlap).join(' ');
+  return addition ? b + ' ' + addition : b;
+};
+
 const applyDictation = (e: any, st: DictationState): string => {
+  // Session restarted internally (results list shrank) — realign the
+  // high-water mark so the new session's finals still commit.
+  if (e.results.length < st.finalCount) st.finalCount = 0;
   let interim = '';
   for (let i = 0; i < e.results.length; i++) {
     const res = e.results[i];
     const seg: string = res[0]?.transcript ?? '';
     if (res.isFinal) {
-      // Commit each final index only once (guards against re-emission).
+      // Commit each final index only once, deduped via overlap-merge.
       if (i >= st.finalCount) {
-        const norm = seg.trim();
-        if (norm && norm.toLowerCase() !== st.lastFinal.toLowerCase()) {
-          const needSpace = st.committed && !/\s$/.test(st.committed);
-          st.committed += (needSpace ? ' ' : '') + norm;
-          st.lastFinal = norm;
-        }
         st.finalCount = i + 1;
+        st.committed = mergeDictation(st.committed, seg);
       }
     } else {
-      interim += seg;
+      interim += ' ' + seg;
     }
   }
-  const it = interim.trim();
-  const needSpace = st.committed && it && !/\s$/.test(st.committed);
-  return (st.committed + (needSpace ? ' ' : '') + it);
+  // Interim words layer on transiently (never persisted into `committed`),
+  // deduped against the committed text the same way.
+  return mergeDictation(st.committed, interim);
 };
 
 // ── Global "fields expand downwards" rule ─────────────────────────────────
@@ -3932,12 +3956,10 @@ export default function DigitalPRFForm() {
     }
   }, [fd.call_type, fd.transfer_subtype, fd.preauth_number, loading]);
 
-  const profile = (() => {
-    // Guard against a corrupted localStorage value — an unguarded JSON.parse
-    // here throws during render and white-screens the whole form.
-    try { return JSON.parse(localStorage.getItem('crew_profile') || '{}'); }
-    catch { return {}; }
-  })();
+  // getCrewProfile() guards against a corrupted localStorage value — an
+  // unguarded JSON.parse here would throw during render and white-screen the
+  // whole form.
+  const profile = getCrewProfile();
   const dirtyRef = useRef(false);
 
   // (Live header timer is owned by the <LiveTimer> component — keeping the
@@ -4012,7 +4034,7 @@ export default function DigitalPRFForm() {
 
     // ── Auto-prefill assessor / manager from authenticated crew session ──
     const crew2Profile = (() => {
-      try { return JSON.parse(localStorage.getItem('crew2_profile') || '{}'); }
+      try { return JSON.parse(localStorage.getItem(CREW_SESSION_KEYS.partner) || '{}'); }
       catch { return {}; }
     })();
     const crew1FromMeta = prf.crew_member_1 || null;
@@ -4031,7 +4053,7 @@ export default function DigitalPRFForm() {
 
     const extraCrews = (() => {
       try {
-        const raw = JSON.parse(localStorage.getItem('extra_crew_profiles') || 'null');
+        const raw = JSON.parse(localStorage.getItem(CREW_SESSION_KEYS.extraCrew) || 'null');
         return Array.isArray(raw) ? raw : [];
       } catch { return []; }
     })();
@@ -4070,7 +4092,11 @@ export default function DigitalPRFForm() {
         crew_signature:      prf.crew_signature      || null,
         valuables_signature: prf.valuables_signature || null,
       });
-      setPhase(inferPhase({ ...ts }));
+      // RHT and Declaration of Death are "compressed" — they hide TRANS + HNDVR
+      // and capture every leg on the first two screens, so they resume only to
+      // DISP / PT INFO.
+      const compressed = !!data.med_aid_dec_death || data.call_type === 'RHT';
+      setPhase(inferResumePhase({ ...ts }, { compressed }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prfId]);
@@ -4982,10 +5008,12 @@ export default function DigitalPRFForm() {
         timeKey = undefined;
         kmKey = undefined;
       }
-    } else if (['RESUS', 'PRIMARY', 'COURTESY', 'IFT', 'IHT'].includes(fd.call_type)) {
+    } else if (['RESUS', 'PRIMARY', 'COURTESY', 'IFT', 'IHT', 'WCA_IOD'].includes(fd.call_type)) {
       // These call types skip En Route (1), Clinical (3), and Complete (6).
       // The clinical body is rendered inline on Dispatch or skipped, and
-      // submission happens on Handover (or On Scene for some).
+      // submission happens on Handover (or On Scene for some). WCA_IOD is a
+      // clinical Primary-style call — without it here, advancePhase would step
+      // onto the hidden En Route/Clinical nodes that the stepper doesn't show.
       const hidden = new Set([1, 3, 6]);
       if (hidden.has(target)) {
         while (target < PHASES.length && hidden.has(target)) target++;
@@ -5699,11 +5727,11 @@ export default function DigitalPRFForm() {
     const now = Date.now();
     const iso = (m: number) => new Date(now + m * 60000).toISOString();
     setTs(prev => ({ ...prev,
-      time_dispatched: iso(0), time_mobile: iso(2), time_on_scene: iso(6),
+      time_dispatched: iso(0), time_on_scene: iso(6),
       time_depart_scene: iso(20), time_at_destination: iso(30), time_available: iso(40),
     }));
     setKms(prev => ({ ...prev,
-      km_dispatched: '23', km_mobile: '24', km_on_scene: '24',
+      km_dispatched: '23', km_on_scene: '24',
       km_depart_scene: '45', km_at_destination: '45', km_available: '70',
     }));
 
@@ -5988,14 +6016,14 @@ export default function DigitalPRFForm() {
         </div>
       )}
 
-      {/* ── Clinical section gates (unchanged logic) ── */}
-      {(fd.call_type === 'PRIMARY' || fd.call_type === 'COURTESY' || fd.call_type === 'WCA_IOD') && timestamps.time_dispatched && kms.km_dispatched && timestamps.time_on_scene && kms.km_on_scene && (startedExam ? P3(true) : startExamBtn)}
-
-      {fd.call_type === 'RESUS' && timestamps.time_dispatched && kms.km_dispatched && timestamps.time_on_scene && kms.km_on_scene && (startedExam ? P3(true) : startExamBtn)}
-
-      {['IHT', 'IFT'].includes(fd.call_type) && timestamps.time_dispatched && kms.km_dispatched && timestamps.time_on_scene && kms.km_on_scene && (startedExam ? P3(true) : startExamBtn)}
-
-      {fd.call_type === 'RHT' && timestamps.time_dispatched && kms.km_dispatched && timestamps.time_on_scene && kms.km_on_scene && (startedExam ? P3(true) : startExamBtn)}
+      {/* ── Clinical section gate ──
+          Every call type EXCEPT Declaration of Death renders the clinical body
+          inline on Dispatch, once dispatch + on-scene time/km are captured.
+          (Was four call-type-split lines with identical bodies — collapsed to
+          one; same set.) */}
+      {['PRIMARY', 'COURTESY', 'WCA_IOD', 'RESUS', 'IHT', 'IFT', 'RHT'].includes(fd.call_type) &&
+        timestamps.time_dispatched && kms.km_dispatched && timestamps.time_on_scene && kms.km_on_scene &&
+        (startedExam ? P3(true) : startExamBtn)}
 
       {/* Resus: Declaration of Death at bottom of clinical section */}
       {fd.call_type === 'RESUS' && startedExam && (
@@ -6067,8 +6095,6 @@ export default function DigitalPRFForm() {
   const P1 = () => (
     <>
       <SHdr t="En Route" />
-
-      {TimeTable({ rows: ALL_TIME_ROWS.filter(r => r.phase === 1) })}
 
       <SHdr t="Call Information" />
       <Card>
@@ -8402,7 +8428,6 @@ export default function DigitalPRFForm() {
             v('rht_call_out_fee', 'RHT Call-Out Fee'),
           ].filter(Boolean) as { label: string; value: string }[];
           if (timestamps.time_dispatched) dispatch.push({ label: 'Dispatched', value: timestamps.time_dispatched });
-          if (timestamps.time_mobile) dispatch.push({ label: 'Mobile', value: timestamps.time_mobile });
           if (dispatch.length) card2Sections.push({ title: 'Dispatch & Mobilisation', items: dispatch });
 
           const scene = [
