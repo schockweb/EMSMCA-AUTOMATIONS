@@ -7485,6 +7485,10 @@ export default function DigitalPRFForm() {
       {/* Note: the DoD branch is gone — P4 is hidden when DoD is active
           and the Undertaker form now lives on the On Scene phase. */}
       <>
+          {/* Medication/Infusion, Vitals Trend and Ongoing Monitoring are all
+              clinical capture — hidden when the patient refused treatment (only
+              Management Notes stays so the crew can narrate the refusal). */}
+          {!fd.patient_refused_treatment && (<>
           {IvAndMedsSection({ showOnly: 'med_only', forceOpen: true })}
 
           {/* Vitals trend — last 3 sets side by side */}
@@ -7518,6 +7522,7 @@ export default function DigitalPRFForm() {
 
           <SHdr t="Ongoing Monitoring" />
           {VitalsSection({ showFull: true })}
+          </>)}
 
           <SHdr t="Management Notes" />
           <VoiceTxt fk="management_notes" ph="Full clinical narrative — care provided, patient response, interventions..." rows={6} />
