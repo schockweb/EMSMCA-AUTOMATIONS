@@ -6098,12 +6098,17 @@ export default function DigitalPRFForm() {
         </div>
       )}
 
-      {/* Patient Information CTA — DOD shows CTA inside its own form body */}
-      {!!fd.chief_complaint && fd.call_type !== 'DOD' && (
+      {/* Patient Information CTA — DOD shows CTA inside its own form body.
+          Normally gated on a chief complaint (proof the clinical section was
+          started), but that section is hidden when the patient refused
+          treatment — so a refusal also unlocks the CTA, otherwise the crew has
+          no way off the Dispatch screen. A refusal likewise skips the
+          monitoring-level modal (no monitoring to record). */}
+      {(!!fd.chief_complaint || fd.patient_refused_treatment) && fd.call_type !== 'DOD' && (
         CTA({
           label: "Patient Information  →",
           onClick: () => {
-            if (!fd.monitoring_level) {
+            if (!fd.monitoring_level && !fd.patient_refused_treatment) {
               setMonitoringModalOpen(true);
             } else {
               advancePhase(2);
