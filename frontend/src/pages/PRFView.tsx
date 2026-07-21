@@ -1659,11 +1659,12 @@ export default function PRFView() {
           }}>
             <div style={{
               transform: 'rotate(-30deg)',
-              fontSize: '5.2rem', fontWeight: 900, lineHeight: 1.05,
+              fontSize: '5.6rem', fontWeight: 900, lineHeight: 1.05,
               letterSpacing: '0.06em', textTransform: 'uppercase',
               textAlign: 'center', whiteSpace: 'nowrap',
-              color: 'rgba(185,28,28,0.16)',
-              border: '0.5rem solid rgba(185,28,28,0.16)',
+              color: 'rgba(185,28,28,0.55)',
+              WebkitTextStroke: '1px rgba(153,27,27,0.65)',
+              border: '0.6rem solid rgba(185,28,28,0.5)',
               borderRadius: 18, padding: '1.4rem 3rem',
             }}>
               Patient Refused<br />Treatment
