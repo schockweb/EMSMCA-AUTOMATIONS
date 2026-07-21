@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState, Fragment } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import axios from '../api/client';
+import { getCrewToken } from '../utils/crewSession';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 
@@ -265,7 +266,7 @@ export default function PRFView() {
   const pdfBuildStartedRef = useRef(false);
 
   useEffect(() => {
-    const token = localStorage.getItem('access_token') || localStorage.getItem('crew_token') || '';
+    const token = localStorage.getItem('access_token') || getCrewToken() || '';
     axios.get(`/api/digital-prf/admin/by-case/${caseId}`, {
       headers: { Authorization: `Bearer ${token}` },
     })
@@ -1644,6 +1645,19 @@ export default function PRFView() {
         {/* Crew Details moved to page 1 (bottom band) so this sheet has
             room for the full vitals + IV + medication + management stack
             without clipping the last rows. */}
+
+        {/* Patient refused treatment — stamped across the clinical sheet so
+            the empty clinical sections below read as intentional. */}
+        {fd.patient_refused_treatment && (
+          <div style={{
+            margin: '10px 12px 0', padding: '10px 14px', borderRadius: 8,
+            border: '2px solid #b91c1c', background: '#fef2f2',
+            color: '#991b1b', fontWeight: 900, fontSize: '0.95rem',
+            letterSpacing: '0.08em', textTransform: 'uppercase', textAlign: 'center',
+          }}>
+            Patient Refused Treatment
+          </div>
+        )}
 
         {/* Main clinical grid: 3 cols (short checks + surveys | History | wide records) */}
         <div style={{

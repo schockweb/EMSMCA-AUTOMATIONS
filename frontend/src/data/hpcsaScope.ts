@@ -23,7 +23,7 @@
 // Category codes
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** HPCSA registration categories (six recognised tiers) + Doctor. */
+/** HPCSA registration categories (six recognised tiers) + ART (Doctor). */
 export type HpcsaCategory =
   | 'BAA'  // Basic Ambulance Assistant         (BLS tier)
   | 'AEA'  // Ambulance Emergency Assistant     (ILS tier)
@@ -31,10 +31,10 @@ export type HpcsaCategory =
   | 'ECA'  // Emergency Care Assistant          (own tier)
   | 'ANT'  // CCA — Critical Care Assistant     (ALS tier)
   | 'ECP'  // Emergency Care Practitioner       (ALS tier)
-  | 'DR';  // Doctor — highest profession; authorised for every PRF action
+  | 'ART'; // Doctor — highest profession; authorised for every PRF action
 
 export const HPCSA_CATEGORIES: readonly HpcsaCategory[] = [
-  'BAA', 'AEA', 'ECT', 'ECA', 'ANT', 'ECP', 'DR',
+  'BAA', 'AEA', 'ECT', 'ECA', 'ANT', 'ECP', 'ART',
 ] as const;
 
 /** Display metadata for each category — used by pickers and badges. */
@@ -45,7 +45,7 @@ export const CATEGORY_META: Record<HpcsaCategory, { label: string; tier: 'BLS' |
   ECA: { label: 'Emergency Care Assistant',      tier: 'ECA' },
   ANT: { label: 'Critical Care Assistant',       tier: 'ALS' },
   ECP: { label: 'Emergency Care Practitioner',   tier: 'ALS' },
-  DR:  { label: 'Doctor',                        tier: 'ALS' },
+  ART: { label: 'Doctor',                        tier: 'ALS' },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -160,7 +160,9 @@ const airwayManagement: CapabilitySection = {
     {
       key: 'airway_oro_nasogastric_tube',
       label: 'Oro / nasogastric tube insertion',
-      authorised: ['ECT', 'ANT', 'ECP'],
+      // AEA added per client direction 2026-07-21 — ILS-tier crews use NG
+      // tubes in the field and were being locked out of the NG Tube Size box.
+      authorised: ['AEA', 'ECT', 'ANT', 'ECP'],
     },
     {
       key: 'airway_needle_cricothyroidotomy',
@@ -1126,8 +1128,9 @@ const LEGACY_TIER_TO_CATEGORY: Readonly<Record<string, HpcsaCategory>> = {
   'EMT-P':   'ECP',
   CCA:       'ANT',
   BASIC:     'BAA',
-  DOCTOR:    'DR',
-  MD:        'DR',
+  DOCTOR:    'ART',
+  MD:        'ART',
+  DR:        'ART',
 };
 
 /**
@@ -1162,7 +1165,7 @@ export function normaliseHpcsaCategory(input: string | undefined | null): HpcsaC
  */
 export function medicationNamesForCategory(category: string | undefined | null): readonly string[] {
   const normalised = normaliseHpcsaCategory(category);
-  if (!normalised || normalised === 'DR') return MEDICATION_NAMES;
+  if (!normalised || normalised === 'ART') return MEDICATION_NAMES;
   return medications.capabilities
     .filter(c => c.authorised.includes(normalised))
     .map(c => c.label);
@@ -1277,9 +1280,10 @@ export function isAuthorised(category: HpcsaCategory, capabilityKey: string): bo
   const cap = CAPABILITY_INDEX.get(capabilityKey);
   if (!cap) throw new Error(`HPCSA scope: unknown capability key "${capabilityKey}"`);
   if (cap.forbidden) return false;
-  // Doctor: full scope — authorised for every capability the matrix offers.
-  // (The per-capability `authorised` arrays stay six-category EMS taxonomy.)
-  if (category === 'DR') return true;
+  // ART (Doctor): full scope — authorised for every capability the matrix
+  // offers. (The per-capability `authorised` arrays stay six-category EMS
+  // taxonomy.)
+  if (category === 'ART') return true;
   return cap.authorised.includes(category);
 }
 

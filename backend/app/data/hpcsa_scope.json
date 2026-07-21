@@ -177,6 +177,7 @@
       "label": "Oro / nasogastric tube insertion",
       "section": "Airway Management",
       "authorised": [
+        "AEA",
         "ECT",
         "ANT",
         "ECP"

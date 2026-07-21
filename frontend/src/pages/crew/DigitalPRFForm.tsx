@@ -5116,7 +5116,7 @@ export default function DigitalPRFForm() {
     // stuck true, gating the popup behind that ref made every later tap return
     // silently and the motivation block could never be reopened. We also clear
     // the ref here defensively so the subsequent real submit isn't blocked.
-    if (vitals.length < MIN_VITALS && !fd.med_aid_dec_death && fd.call_type !== 'RHT') {
+    if (vitals.length < MIN_VITALS && !fd.med_aid_dec_death && fd.call_type !== 'RHT' && !fd.patient_refused_treatment) {
       if (!(fd.vitals_shortfall_motivation ?? '').trim()) {
         submitInFlightRef.current = false;
         setVitalsMotivationOpen(true);
@@ -7280,6 +7280,26 @@ export default function DigitalPRFForm() {
           >Select Assessment Level ↓</button>
         )}
 
+        {/* Patient refuses treatment — hides the entire clinical capture block
+            below (history, mechanism, surveys, injury diagram, vitals, oxygen,
+            airway, circulation, immobilisation, equipment, IV/meds): there is
+            nothing to record when the patient declines care. Tap again to undo
+            and restore the sections. */}
+        <button
+          type="button"
+          onClick={() => sf('patient_refused_treatment', !fd.patient_refused_treatment)}
+          aria-pressed={!!fd.patient_refused_treatment}
+          style={{
+            width: '100%', padding: '13px 16px', borderRadius: 12, marginBottom: 16,
+            border: `1.5px solid ${fd.patient_refused_treatment ? '#ef4444' : S200}`,
+            background: fd.patient_refused_treatment ? '#fef2f2' : W,
+            color: fd.patient_refused_treatment ? '#991b1b' : S700,
+            fontWeight: 800, fontSize: '0.88rem', cursor: 'pointer', textAlign: 'center',
+          }}
+        >
+          {fd.patient_refused_treatment ? '✓ Patient Refused Treatment — tap to undo' : 'Patient Refuses Treatment'}
+        </button>
+
         <div ref={chiefComplaintRef} style={{ scrollMarginTop: 80 }}>
           {fd.call_type !== 'DOD' && (
             <>
@@ -7290,9 +7310,10 @@ export default function DigitalPRFForm() {
               </Card>
             </>
           )}
-
-          <SHdr t="Patient History" />
         </div>
+
+        {!fd.patient_refused_treatment && (<>
+        <SHdr t="Patient History" />
         <Card>
           <Lbl t="Chief Complaint / Signs and Symptoms" req /><VoiceTxt fk="chief_complaint" ph="Patient's primary complaint, signs and symptoms..." rows={2} />
           <Lbl t="Primary Diagnosis" req /><Inp fk="primary_diagnosis" ph="e.g. Suspected appendicitis?" req onBlur={e => {
@@ -7440,6 +7461,7 @@ export default function DigitalPRFForm() {
         <Card><Lbl t="Other Equipment / Adjuncts" /><Inp fk="other_equipment" ph="e.g. M17, other items" /></Card>
 
         {IvAndMedsSection()}
+        </>)}
 
         {!embedded && CTA({ label: "LOAD &amp; GO  →", color: ROSE, onClick: () => advancePhase(4, 'time_depart_scene', 'km_depart_scene') })}
       </>

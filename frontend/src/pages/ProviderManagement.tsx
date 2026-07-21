@@ -975,8 +975,7 @@ export default function ProviderManagement() {
                         <option value="AEA">AEA</option>
                         <option value="BAA">BAA</option>
                         <option value="ECP">ECP</option>
-                        <option value="ART">ART</option>
-                        <option value="DR">DR — Doctor</option>
+                        <option value="ART">ART — Doctor</option>
                       </select>
                     </div>
                     <div><label style={labelStyle}>Phone</label><input style={inputStyle} value={newCrew.phone} onChange={e => setNewCrew({ ...newCrew, phone: e.target.value })} /></div>
@@ -1024,8 +1023,7 @@ export default function ProviderManagement() {
                         <option value="AEA">AEA</option>
                         <option value="BAA">BAA</option>
                         <option value="ECP">ECP</option>
-                        <option value="ART">ART</option>
-                        <option value="DR">DR — Doctor</option>
+                        <option value="ART">ART — Doctor</option>
                       </select>
                     </div>
                     <div><label style={labelStyle}>Phone</label><input style={inputStyle} value={editCrewForm.phone} onChange={e => setEditCrewForm({ ...editCrewForm, phone: e.target.value })} /></div>
