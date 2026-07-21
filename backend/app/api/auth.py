@@ -6,15 +6,16 @@ from __future__ import annotations
 from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models.user import User
+from app.models.user import User, ALL_PERMISSIONS
 from app.models.audit_log import AuditLog
-from app.schemas.auth import LoginRequest, TokenResponse, RefreshRequest, UserProfile
-from app.models.user import ALL_PERMISSIONS
+from app.models.service_provider import ServiceProvider
+from app.schemas.auth import TokenResponse, RefreshRequest, UserProfile
 from app.utils.security import (
     verify_password,
     verify_password_async,
@@ -72,15 +73,11 @@ async def login(
     client_ip = _get_client_ip(request)
     logger.info("Login attempt for user=%s from ip=%s", form_data.username, client_ip)
 
-    from app.models.service_provider import ServiceProvider
-    from fastapi.responses import JSONResponse
-
     result = await db.execute(select(User).where(User.email == form_data.username))
     user = result.scalar_one_or_none()
 
     # ── Check if this is a Client Portal Redirect ──
     if not user:
-        from sqlalchemy import func
         provider_res = await db.execute(
             select(ServiceProvider).where(func.lower(ServiceProvider.portal_login_email) == form_data.username.lower())
         )

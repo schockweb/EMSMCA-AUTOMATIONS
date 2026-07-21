@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, func, or_
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -131,37 +131,88 @@ async def create_case(
     return _case_to_response(case)
 
 
-@router.get("/", response_model=list[CaseResponse])
-async def list_cases(
-    queue: Optional[str] = None,
-    skip: int = 0,
-    limit: int = 50,
-    db: AsyncSession = Depends(get_db),
-    _current: User = Depends(get_current_user),
-):
-    """List all cases, filtered by queue logic."""
-    query = select(Case).options(selectinload(Case.documents), selectinload(Case.claims)).order_by(Case.created_at.desc())
-    
+def _build_case_filter(queue: Optional[str], search: Optional[str]) -> list:
+    """WHERE conditions shared by the list and count endpoints, so the
+    dashboard's "showing N of M" always counts exactly what the list returns.
+    Both the queue routing and the free-text search live here."""
+    conditions: list = []
+
     if queue == 'era':
         # ERA queue: auth number obtained, ready for invoice submission
-        query = query.where(Case.preauth_number.is_not(None))
+        conditions.append(Case.preauth_number.is_not(None))
     elif queue == 'management':
-        # Management queue: all confirmed cases (HITL review cleared)
-        # Show everything — both pending-auth and auth-obtained cases
-        # Filter for cases linked to at least one reviewed document
+        # Management queue: cases linked to at least one HITL-cleared document
         from app.models.document import Document
         reviewed_case_ids = select(Document.case_id).where(
             Document.needs_hitl_review == False,
             Document.case_id.is_not(None),
         ).scalar_subquery()
-        query = query.where(Case.id.in_(reviewed_case_ids))
-    # No queue param → return all cases (admin overview)
+        conditions.append(Case.id.in_(reviewed_case_ids))
+    # No queue param → no queue restriction (admin overview)
 
-    result = await db.execute(query.offset(skip).limit(limit))
+    if search and search.strip():
+        # Server-side search so records beyond the page limit stay reachable —
+        # essential now that PRFs are retained for 7 years. patient_id_number is
+        # encrypted at rest and is deliberately excluded (can't be ilike-matched).
+        term = f"%{search.strip()}%"
+        conditions.append(or_(
+            Case.patient_name.ilike(term),
+            Case.medical_scheme_name.ilike(term),
+            Case.preauth_number.ilike(term),
+            Case.scheme_member_number.ilike(term),
+            Case.custom_display_name.ilike(term),
+        ))
+
+    return conditions
+
+
+@router.get("/", response_model=list[CaseResponse])
+async def list_cases(
+    queue: Optional[str] = None,
+    search: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 50,
+    db: AsyncSession = Depends(get_db),
+    _current: User = Depends(get_current_user),
+):
+    """List cases by queue + optional server-side search.
+
+    Returns a bare list (two consumers: Cases and ERA tracking — the shape must
+    not change). Pair with GET /api/cases/count using the same queue/search for
+    an honest "showing N of M": records past `limit` stay reachable via search
+    or by paging with `skip`, so 7 years of history never goes dark."""
+    conditions = _build_case_filter(queue, search)
+    query = (
+        select(Case)
+        .options(selectinload(Case.documents), selectinload(Case.claims))
+        .where(*conditions)
+        .order_by(Case.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+    )
+    result = await db.execute(query)
     cases = result.scalars().all()
     names = await _display_names_for(db, [c.id for c in cases])
     # Manual rename override (custom_display_name) wins over the computed name.
     return [_case_to_response(c, (c.custom_display_name or names.get(c.id))) for c in cases]
+
+
+@router.get("/count")
+async def count_cases(
+    queue: Optional[str] = None,
+    search: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    _current: User = Depends(get_current_user),
+):
+    """Total cases matching the same queue/search filter as the list endpoint,
+    so the dashboard can show how many records exist beyond the current page
+    rather than a silently-truncated count. Declared before /{case_id} so this
+    literal path wins over the UUID route."""
+    conditions = _build_case_filter(queue, search)
+    result = await db.execute(
+        select(func.count()).select_from(Case).where(*conditions)
+    )
+    return {"total": int(result.scalar() or 0)}
 
 
 @router.get("/{case_id}", response_model=CaseResponse)

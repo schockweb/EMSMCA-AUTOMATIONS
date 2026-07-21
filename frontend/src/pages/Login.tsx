@@ -1,10 +1,11 @@
 /**
  * Login Page — Premium glassmorphism dark-mode login.
  */
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useScrollLock } from '../hooks/useScrollLock';
 import Logo from '../components/Logo';
 
 export default function Login() {
@@ -15,16 +16,9 @@ export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
 
-  useEffect(() => {
-    const prevHtml = document.documentElement.style.overflow;
-    const prevBody = document.body.style.overflow;
-    document.documentElement.style.overflow = 'hidden';
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.documentElement.style.overflow = prevHtml;
-      document.body.style.overflow = prevBody;
-    };
-  }, []);
+  // Full-screen login card — freeze background scroll (iOS-safe) via the
+  // shared hook instead of a hand-rolled overflow lock.
+  useScrollLock();
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -33,19 +27,14 @@ export default function Login() {
     setLoading(true);
 
     try {
-      const result = await login(email.trim(), password.trim());
+      // Trim the username only — passwords may legitimately contain leading or
+      // trailing spaces, and trimming them here would make such a password
+      // impossible to log in with.
+      const result = await login(email.trim(), password);
       if (result && result.client_redirect) {
-        navigate(`/${result.slug}/login`, { 
-          state: { 
-            bypassedStep1: true,
-            providerInfo: {
-              name: result.provider_name,
-              slug: result.slug,
-              logo_url: result.logo_url,
-              pr_number: result.pr_number
-            }
-          } 
-        });
+        // ProviderLogin resolves its own branding from the slug in the URL, so
+        // there is no navigation state to thread through here.
+        navigate(`/${result.slug}/login`);
       } else {
         // Nuke the PWA service-worker cache so the browser loads the
         // latest JS bundle instead of serving a stale cached version.
@@ -89,7 +78,7 @@ export default function Login() {
               onChange={(e) => setEmail(e.target.value)}
               required
               autoFocus
-              autoComplete="off"
+              autoComplete="username"
             />
           </div>
 

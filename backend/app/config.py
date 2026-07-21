@@ -81,6 +81,14 @@ class Settings(BaseSettings):
     # Flip to True (or set OCR_INTAKE_ENABLED=true in .env) to re-enable.
     OCR_INTAKE_ENABLED: bool = False
 
+    # Tariff / billing-code engine is disabled while it is still being built.
+    # The billing codes are not finalised and must NOT influence any data yet,
+    # so generate_tariff_lines() returns an empty, unpriced result on every path
+    # (Digital-PRF task, OCR pipeline, adjudication + claims endpoints). PRFs
+    # still process into a viewable Case/Claim — just with no lines and total 0.
+    # Flip to True (or set TARIFF_ENGINE_ENABLED=true in .env) to resume billing.
+    TARIFF_ENGINE_ENABLED: bool = False
+
     # ── CORS ──
     FRONTEND_URL: str = "http://localhost:5173"
     CORS_ORIGINS: str = "http://localhost:5173,http://localhost:3000"

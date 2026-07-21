@@ -39,7 +39,9 @@ class DigitalPRF(Base):
 
     # ── Provider / Vehicle / Crew ─────────────────────────
     provider_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("service_providers.id"), nullable=False
+        UUID(as_uuid=True), ForeignKey("service_providers.id"), nullable=False,
+        index=True,  # provider dashboard filters every query by provider_id;
+                     # indexed so listing/searching stays fast across 7 years of PRFs
     )
     vehicle_id: Mapped[Union[uuid.UUID, None]] = mapped_column(
         UUID(as_uuid=True), ForeignKey("vehicles.id"), nullable=True

@@ -3586,12 +3586,40 @@ const EnRouteOverlay = ({ dispatchedAt, onDoubleTap }: { dispatchedAt: string; o
   // we confirm the arrival was intentional before actually marking On Scene.
   const [confirmOpen, setConfirmOpen] = useState(false);
 
+  // ── Timer anchor ─────────────────────────────────────────────────────────
+  // dispatchedAt is the SERVER's stamp but the ticking clock is the PHONE's.
+  // A phone clock that lags the server (bad NTP is common on field tablets)
+  // made `now - dispatchedAt` negative, so the display started at "-1:-1" and
+  // could count backwards. Fix: anchor once on mount — start from the true
+  // elapsed when it's positive (resume after reload), else 00:00 — and advance
+  // on performance.now(), which is monotonic (immune to the phone clock being
+  // adjusted mid-run). The wall-clock diff is still consulted each tick so the
+  // timer catches up forward after a device sleep, but the shown value is
+  // clamped to never be negative and never decrease.
+  const anchorRef = useRef<{ initial: number; perf0: number } | null>(null);
+  if (anchorRef.current === null) {
+    const parsed = new Date(dispatchedAt).getTime();
+    const wallDiff = Math.floor((Date.now() - parsed) / 1000);
+    anchorRef.current = {
+      initial: Number.isFinite(wallDiff) ? Math.max(0, wallDiff) : 0,
+      perf0: performance.now(),
+    };
+  }
+  const lastShownRef = useRef(0);
+
   useEffect(() => {
     const id = setInterval(() => tick(t => t + 1), 1000);
     return () => clearInterval(id);
   }, []);
 
-  const elapsed = Math.floor((Date.now() - new Date(dispatchedAt).getTime()) / 1000);
+  const parsedDispatch = new Date(dispatchedAt).getTime();
+  const wall = Number.isFinite(parsedDispatch)
+    ? Math.floor((Date.now() - parsedDispatch) / 1000)
+    : 0;
+  const mono = anchorRef.current.initial
+    + Math.floor((performance.now() - anchorRef.current.perf0) / 1000);
+  const elapsed = Math.max(0, mono, wall, lastShownRef.current);
+  lastShownRef.current = elapsed;
   const mins = Math.floor(elapsed / 60);
   const secs = elapsed % 60;
 

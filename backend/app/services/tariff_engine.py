@@ -62,6 +62,23 @@ async def generate_tariff_lines(
             "error": "..." | None,
         }
     """
+    # ── Billing kill-switch ──────────────────────────────────────────────
+    # The tariff/billing engine is intentionally OFF while it is still being
+    # built (TARIFF_ENGINE_ENABLED=false). Return an empty, unpriced result so
+    # NO billing codes influence data on ANY path — the callers all read this
+    # dict via .get(), so an empty priced-nothing result flows through cleanly
+    # (0 lines, total 0). Flip TARIFF_ENGINE_ENABLED=true to resume billing.
+    from app.config import get_settings as _get_settings
+    if not _get_settings().TARIFF_ENGINE_ENABLED:
+        return {
+            "lines": [],
+            "total_amount": 0.0,
+            "scheme_matched": None,
+            "rules_used": 0,
+            "ai_powered": False,
+            "error": "tariff_engine_disabled",
+        }
+
     clinical_context = _build_clinical_context(extracted_data)
 
     rules_module = get_rules_for_scheme(scheme_name)
@@ -1273,7 +1290,10 @@ async def _generate_gems_lines(clinical_context: dict, rules_module) -> dict:
 
         if base_row:
             raw_price = _pick_rate(base_row)
-            price = round(raw_price * base_multiplier, 2)
+            # _pick_rate returns a Decimal and base_multiplier is a float, so a
+            # raw `*` raises "unsupported operand type(s)". Use the Decimal-safe
+            # helper like every other rate×multiplier site (e.g. line ~1218).
+            price = _d_mul(raw_price, base_multiplier)
             if price > 0:
                 multi_note = ""
                 if patient_count == 2:

@@ -3,7 +3,7 @@
  */
 import { createContext, useContext, useState, useEffect } from 'react';
 import type { ReactNode } from 'react';
-import api from '../api/client';
+import api, { isCrewRoute } from '../api/client';
 
 interface User {
   id: string;
@@ -30,6 +30,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // The admin session lives only in the top-level admin app. On a crew /
+    // provider route we must NOT probe /api/auth/me: a stale admin access_token
+    // would 401 → refresh → forceLogin and hard-redirect an active crew member
+    // to the admin login. Crew pages carry their own crew_token and never use
+    // this context.
+    if (isCrewRoute()) {
+      setLoading(false);
+      return;
+    }
     const token = localStorage.getItem('access_token');
     if (token) {
       fetchUser();

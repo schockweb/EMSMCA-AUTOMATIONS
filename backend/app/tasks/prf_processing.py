@@ -119,18 +119,32 @@ def process_prf_submission(self, prf_id: str):
         engine, Session = _make_celery_session()
         try:
             async with Session() as db:
-                # ── Load PRF ──
+                # ── Load PRF (row-locked for idempotency) ──
+                # SELECT ... FOR UPDATE serialises concurrent/duplicate tasks for
+                # the same PRF (double-tap, or an offline-retry racing an online
+                # submit). A second task blocks here until the first commits, then
+                # observes PROCESSED / case_id set below and returns — so one
+                # incident can never produce two Cases/Claims (double-billing).
+                # Safe to hold the lock across the whole task: the tariff engine
+                # takes this session but does not commit it, so the transaction
+                # (and therefore the lock) lives until the single final commit.
                 result = await db.execute(
-                    select(DigitalPRF).where(DigitalPRF.id == uuid.UUID(prf_id))
+                    select(DigitalPRF).where(DigitalPRF.id == uuid.UUID(prf_id)).with_for_update()
                 )
                 prf = result.scalar_one_or_none()
                 if not prf:
                     logger.error("PRF %s not found for processing", prf_id)
                     return {"error": "prf_not_found"}
 
-                # Already processed (idempotent)
-                if prf.status == PRFStatus.PROCESSED:
-                    logger.info("PRF #%d already processed, skipping", prf.prf_number)
+                # Already processed (idempotent). Checked AFTER acquiring the lock
+                # so a racing task sees the finished state, not a stale DRAFT read.
+                # case_id is the definitive marker — it's set only when a Case has
+                # actually been created and committed for this PRF.
+                if prf.status == PRFStatus.PROCESSED or prf.case_id is not None:
+                    logger.info(
+                        "PRF #%d already processed (case_id=%s), skipping duplicate task",
+                        prf.prf_number, prf.case_id,
+                    )
                     return {"status": "already_processed", "prf_number": prf.prf_number}
 
                 fd: dict = prf.form_data or {}
@@ -154,6 +168,7 @@ def process_prf_submission(self, prf_id: str):
                 # ── Stage 0: adapt digital form into extracted_data shape ──
                 # Import the adapter from the API module (it's a pure function)
                 from app.api.digital_prf import _adapt_prf_to_extracted_data
+                from app.services.claims_pipeline import _parse_date
                 extracted_data = _adapt_prf_to_extracted_data(prf, crew1, provider)
 
                 # ── Stage 1: run mileage validation ──
@@ -188,6 +203,7 @@ def process_prf_submission(self, prf_id: str):
                 case = Case(
                     patient_name=full_name,
                     patient_id_number=(fd.get("patient_id_number") or None),
+                    patient_dob=_parse_date(fd.get("patient_dob")),
                     medical_scheme_name=(fd.get("medical_scheme") or None),
                     scheme_member_number=(fd.get("medical_aid_number") or None),
                     incident_date=incident_date,
@@ -254,14 +270,26 @@ def process_prf_submission(self, prf_id: str):
                         "error":          tariff.get("error"),
                     }
                 except Exception as te:
-                    logger.error("PRF #%d: tariff engine failed: %s", prf.prf_number, te)
-                    tariff_meta = {"error": f"Tariff engine failed: {te}"}
+                    # Do NOT finalise a PROCESSED claim when the tariff engine
+                    # crashed — that would ship an unbillable claim (R0.00, zero
+                    # line items) that looks fully processed to every dashboard.
+                    # Re-raise so the outer handler retries (transient failures)
+                    # and, once retries are exhausted, marks the PRF FAILED for
+                    # admin review. Nothing is committed yet, so the Case /
+                    # Document / Claim added above roll back cleanly with the
+                    # session — no orphaned or empty records are left behind.
+                    logger.error(
+                        "PRF #%d: tariff engine failed — aborting (will retry/FAILED): %s",
+                        prf.prf_number, te, exc_info=True,
+                    )
+                    raise
 
                 # ── Finalise PRF ──
                 prf.case_id = case.id
                 prf.document_id = document.id
                 prf.status = PRFStatus.PROCESSED
                 prf.submitted_at = now
+                prf.processing_error = None  # clear any stale error from a prior failed attempt
 
                 await db.commit()
 

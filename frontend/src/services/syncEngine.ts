@@ -1,5 +1,6 @@
-import { getPending, markSyncing, markSynced, markFailed } from './offlineDb';
+import { getPending, markSyncing, markSynced, markFailed, markDead } from './offlineDb';
 import axios from 'axios';
+import { getCrewToken } from '../utils/crewSession';
 
 let syncing = false;
 
@@ -11,14 +12,17 @@ export async function startSync() {
     const pending = await getPending();
     for (const entry of pending) {
       if (entry.retries > 5) {
-        // Give up cleanly after repeated failures: delete the entry so it can
-        // never linger in the "pending upload" counter forever.
-        await markSynced(entry.id);
+        // Auto-retry exhausted. Do NOT delete — the PRF never reached the server.
+        // Mark it 'dead': it stops auto-retrying but stays in the outbox count
+        // for the crew to see and manually resend. (This previously called
+        // markSynced() — a delete — which silently discarded a medical/legal PRF
+        // and then falsely showed "✅ All synced".)
+        await markDead(entry.id);
         window.dispatchEvent(new CustomEvent('outbox-change'));
         continue;
       }
 
-      const token = localStorage.getItem('crew_token');
+      const token = getCrewToken();
       if (!token) break;
       
       const headers = { Authorization: `Bearer ${token}` };

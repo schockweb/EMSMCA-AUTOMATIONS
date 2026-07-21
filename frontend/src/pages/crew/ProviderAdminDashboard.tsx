@@ -9,6 +9,7 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import { useScrollLock } from '../../hooks/useScrollLock';
 import { HPCSA_CATEGORIES, CATEGORY_META, type HpcsaCategory } from '../../data/hpcsaScope';
+import { getCrewToken, getCrewProfile, CREW_SESSION_KEYS } from '../../utils/crewSession';
 
 // ── Tokens ───────────────────────────────────────────────────────
 const INK = '#0a0a0a';
@@ -24,7 +25,7 @@ const TEAL = '#088395';   // EMSMCA brand teal — used for crew photo placehold
 const RED = '#dc2626';
 
 function getApi() {
-  return axios.create({ headers: { Authorization: `Bearer ${localStorage.getItem('crew_token')}` } });
+  return axios.create({ headers: { Authorization: `Bearer ${getCrewToken()}` } });
 }
 
 type Tab = 'employees' | 'vehicles' | 'prfs';
@@ -238,7 +239,7 @@ export default function ProviderAdminDashboard() {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
 
-  const profile    = JSON.parse(localStorage.getItem('crew_profile') || '{}');
+  const profile    = getCrewProfile();
   const providerId = profile.provider_id || null;
 
   // Open on the tab named in the URL (?tab=prfs) so returning from the PRF
@@ -260,6 +261,7 @@ export default function ProviderAdminDashboard() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [vehicles,  setVehicles]  = useState<Vehicle[]>([]);
   const [prfs,      setPrfs]      = useState<Prf[]>([]);
+  const [prfTotal,  setPrfTotal]  = useState(0);
   const [loading,   setLoading]   = useState(false);
 
   // modals
@@ -306,7 +308,7 @@ export default function ProviderAdminDashboard() {
 
   // auth guard
   useEffect(() => {
-    if (!localStorage.getItem('crew_token')) navigate(`/${providerSlug}/login`);
+    if (!getCrewToken()) navigate(`/${providerSlug}/login`);
   }, []);
 
   const fetchEmployees = useCallback(async () => {
@@ -328,16 +330,39 @@ export default function ProviderAdminDashboard() {
   const fetchPrfs = useCallback(async () => {
     if (!providerId) return;
     setLoading(true);
-    try { const { data } = await getApi().get(`/api/providers/${providerId}/prfs`); setPrfs(data); }
+    try {
+      const term = search.trim();
+      const qs = `limit=100${term ? `&search=${encodeURIComponent(term)}` : ''}`;
+      const res = await getApi().get(`/api/providers/${providerId}/prfs?${qs}`);
+      const data = res.data;
+      // Body is a bare array (kept backward-compatible so cached bundles that
+      // call .filter don't crash); the total rides in X-Total-Count. Tolerate a
+      // { items, total } body too, defensively.
+      const items = Array.isArray(data) ? data : (data.items ?? []);
+      setPrfs(items);
+      const hdr = res.headers?.['x-total-count'];
+      setPrfTotal(hdr != null ? Number(hdr) : (Array.isArray(data) ? items.length : (data.total ?? items.length)));
+    }
     catch { /* ignore */ }
     setLoading(false);
-  }, [providerId]);
+  }, [providerId, search]);
 
   useEffect(() => {
     if (activeTab === 'employees') fetchEmployees();
     else if (activeTab === 'vehicles') fetchVehicles();
     else if (activeTab === 'prfs') fetchPrfs();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
+
+  // Debounced server-side PRF search. Only refetches while the PRFs tab is
+  // open; the employees/vehicles tabs stay client-filtered (their lists are
+  // small). This is what makes older PRFs reachable across 7 years.
+  useEffect(() => {
+    if (activeTab !== 'prfs') return;
+    const t = setTimeout(() => { fetchPrfs(); }, 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
 
   // ── Search + status filtering (client-side; lists are small) ─────
   const q = search.trim().toLowerCase();
@@ -354,11 +379,8 @@ export default function ProviderAdminDashboard() {
     (!q || [v.callsign, v.registration, v.vehicle_type]
       .some(f => (f || '').toLowerCase().includes(q)))
   );
-  const filteredPrfs = prfs.filter(p =>
-    !q || [String(p.prf_number), p.case_number, p.patient_name, p.call_type,
-      p.crew_1, p.crew_2, p.vehicle, p.status]
-      .some(f => (f || '').toLowerCase().includes(q))
-  );
+  // NOTE: PRFs are searched server-side (see fetchPrfs) so the full 7-year
+  // history is reachable — `prfs` already holds the matches, no client filter.
 
   // Small headline counts shown as chips beneath the title.
   const empActive = employees.filter(e => e.is_active).length;
@@ -574,7 +596,7 @@ export default function ProviderAdminDashboard() {
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('crew_token'); localStorage.removeItem('crew_profile');
+    localStorage.removeItem(CREW_SESSION_KEYS.token); localStorage.removeItem(CREW_SESSION_KEYS.profile);
     navigate(`/${providerSlug}/login`);
   };
 
@@ -785,14 +807,14 @@ export default function ProviderAdminDashboard() {
 
           {loading ? (
             <div style={{ padding: 40, textAlign: 'center', color: MUT, fontSize: '0.84rem', background: '#fff', border: `1px solid ${LN}`, borderRadius: 6 }}>Loading…</div>
-          ) : filteredPrfs.length === 0 ? (
+          ) : prfs.length === 0 ? (
             <div style={{ padding: 40, textAlign: 'center', color: MUT, fontSize: '0.84rem', background: '#fff', border: `1px solid ${LN}`, borderRadius: 6 }}>
-              {prfs.length === 0 ? 'No PRFs yet. Submitted PRFs from your crews will appear here.' : 'No PRFs match your search.'}
+              {search.trim() ? 'No PRFs match your search.' : 'No PRFs yet. Submitted PRFs from your crews will appear here.'}
             </div>
           ) : isMobile ? (
             /* Stacked cards — a 7-column table can't fit a phone screen. */
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {filteredPrfs.map(p => (
+              {prfs.map(p => (
                 <div key={p.id} style={{ background: '#fff', border: `1px solid ${LN}`, borderRadius: 8, padding: 14 }}>
                   <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 10 }}>
                     <div style={{ fontWeight: 800, fontSize: '0.95rem', fontFamily: 'ui-monospace, monospace' }}>PRF #{p.prf_number}</div>
@@ -807,8 +829,8 @@ export default function ProviderAdminDashboard() {
                   {p.case_id ? (
                     <Btn kind="primary" onClick={() => navigate(`/${providerSlug}/crew/prf-view/${p.case_id}?from=admin`)} style={{ width: '100%', padding: '11px 10px', fontSize: '0.8rem' }}>View PRF</Btn>
                   ) : (
-                    <div style={{ textAlign: 'center', fontSize: '0.72rem', color: MUT, padding: '8px 0', background: BG, borderRadius: 6 }}>
-                      {p.status === 'submitted' ? 'Processing — view available shortly.' : 'View not available.'}
+                    <div style={{ textAlign: 'center', fontSize: '0.72rem', color: p.status === 'failed' ? '#dc2626' : MUT, fontWeight: p.status === 'failed' ? 700 : 400, padding: '8px 0', background: BG, borderRadius: 6 }}>
+                      {p.status === 'submitted' ? 'Processing — view available shortly.' : p.status === 'failed' ? 'Processing failed.' : 'View not available.'}
                     </div>
                   )}
                 </div>
@@ -829,7 +851,7 @@ export default function ProviderAdminDashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredPrfs.map(p => (
+                  {prfs.map(p => (
                     <tr key={p.id} style={{ borderBottom: `1px solid ${LN}` }}>
                       <td style={{ ...tdStyle, fontFamily: 'ui-monospace, monospace', fontWeight: 700 }}>#{p.prf_number}</td>
                       <td style={{ ...tdStyle, fontFamily: 'ui-monospace, monospace' }}>{p.case_number || '—'}</td>
@@ -840,14 +862,24 @@ export default function ProviderAdminDashboard() {
                       <td style={{ ...tdStyle, textAlign: 'right' }}>
                         {p.case_id ? (
                           <Btn onClick={() => navigate(`/${providerSlug}/crew/prf-view/${p.case_id}?from=admin`)} style={{ padding: '6px 12px', fontSize: '0.74rem' }}>View</Btn>
+                        ) : p.status === 'submitted' ? (
+                          <span style={{ fontSize: '0.7rem', color: MUT }}>Processing…</span>
+                        ) : p.status === 'failed' ? (
+                          <span style={{ fontSize: '0.7rem', color: '#dc2626', fontWeight: 700 }}>Failed</span>
                         ) : (
-                          <span style={{ fontSize: '0.7rem', color: MUT }}>{p.status === 'submitted' ? 'Processing…' : '—'}</span>
+                          <span style={{ fontSize: '0.7rem', color: MUT }}>—</span>
                         )}
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+          {prfs.length > 0 && (
+            <div style={{ marginTop: 12, fontSize: '0.76rem', color: MUT, textAlign: 'right' }}>
+              Showing <strong style={{ color: INK }}>{prfs.length}</strong> of <strong style={{ color: INK }}>{prfTotal}</strong> submitted PRF{prfTotal === 1 ? '' : 's'}
+              {prfTotal > prfs.length && ' — refine your search to narrow results'}
             </div>
           )}
           </>

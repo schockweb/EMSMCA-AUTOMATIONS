@@ -18,6 +18,9 @@ api.interceptors.request.use((config) => {
   const token = localStorage.getItem('access_token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
+    // Stash the token this request was sent with, so the response interceptor's
+    // fan-out guard can detect whether a refresh already happened mid-flight.
+    (config as any).__accessTokenUsed = token;
   }
   return config;
 });
@@ -33,10 +36,19 @@ api.interceptors.request.use((config) => {
 // user out to /login. That is the intermittent "I navigated too quickly and got
 // logged out" bug.
 //
-// Fix: collapse all concurrent refreshes into ONE in-flight promise. Every
-// request that 401s awaits the same refresh and then retries with the new
-// token. Only one /refresh hits the server per expiry, so nothing gets
-// spuriously revoked.
+// Fix (part 1): collapse all *concurrent* refreshes into ONE in-flight promise.
+// Every request that 401s while a refresh is already in flight awaits the same
+// refresh, then retries with the new token.
+//
+// Fix (part 2 — the "fan-out guard" in the response interceptor): single-flight
+// alone is NOT enough. It only dedups refreshes that overlap in time. Requests
+// that were in flight with the OLD token and 401 a moment AFTER the shared
+// refresh has already settled and cleared (`refreshPromise = null`) each start
+// yet ANOTHER /refresh. Because the backend rotates + blacklists on every call,
+// a wave of these "stragglers" became an observed storm of 27 /refresh calls,
+// ending when one straggler used a just-revoked token → 401 → logout. The guard
+// makes a straggler retry with the already-refreshed token instead of refreshing
+// again, so exactly ONE /refresh runs per expiry.
 let refreshPromise: Promise<string> | null = null;
 // Guard so a failed refresh redirects to /login exactly once, even when a whole
 // batch of requests fails together.
@@ -73,13 +85,44 @@ function refreshAccessToken(): Promise<string> {
   return refreshPromise;
 }
 
+/**
+ * True when the current URL is a crew / service-provider route
+ * (`/<slug>/login`, `/<slug>/crew/*`, `/<slug>/admin/*`). Those pages run the
+ * SEPARATE crew_token auth system with their own raw-axios Bearer header. The
+ * admin session machinery in this module (and AuthContext) must never redirect
+ * or probe on them: a stale admin access_token left in the same browser would
+ * otherwise hijack an active crew session and bounce it to the admin login. The
+ * top-level admin app (`/`, `/dashboard`, …) does not match.
+ */
+export function isCrewRoute(): boolean {
+  return /^\/[^/]+\/(crew|admin|login)(\/|$)/.test(window.location.pathname);
+}
+
 function forceLogin() {
   localStorage.removeItem('access_token');
   localStorage.removeItem('refresh_token');
+  // On a crew/provider route, clearing the stale admin tokens above is enough —
+  // do NOT hard-redirect to the admin /login, which would yank an active crew
+  // member out of their shift. Their crew_token is a separate session and is
+  // still valid; the crew page's own raw-axios 401 handling manages it.
+  if (isCrewRoute()) return;
   if (!isRedirectingToLogin) {
     isRedirectingToLogin = true;
     window.location.href = '/login';
   }
+}
+
+/**
+ * True only when the server actively REJECTED the refresh (expired/revoked
+ * refresh token). A network error, timeout, or 5xx during refresh has no
+ * response and must NOT end the session — otherwise a transient blip (e.g. a
+ * backend restart during a deploy) logs everyone out AND deletes a still-valid
+ * refresh token, so the user can't even retry.
+ */
+function isSessionEndingRefreshError(err: any): boolean {
+  if (err?.message === 'no_refresh_token') return true;
+  const s = err?.response?.status;
+  return s === 401 || s === 403;
 }
 
 // Response interceptor — handle 401 + report 5xx crashes
@@ -139,15 +182,34 @@ api.interceptors.response.use(
       }
 
       originalRequest._retry = true;
+
+      // ── Fan-out guard ──
+      // If a refresh has ALREADY happened while this request was in flight, the
+      // token it was sent with no longer matches what's now stored. Retry it (the
+      // request interceptor re-attaches the current token) instead of starting
+      // ANOTHER /refresh — this stops a wave of stragglers from each rotating the
+      // token, and stops one of them landing on a just-revoked token → spurious
+      // logout. Only requests that 401 while their token is still the current one
+      // fall through to the single-flight refresh below.
+      const usedToken = (originalRequest as any).__accessTokenUsed;
+      const storedToken = localStorage.getItem('access_token');
+      if (storedToken && usedToken && storedToken !== usedToken) {
+        return api(originalRequest);
+      }
+
       try {
         const newToken = await refreshAccessToken();
         originalRequest.headers = originalRequest.headers || {};
         originalRequest.headers.Authorization = `Bearer ${newToken}`;
         return api(originalRequest);
-      } catch {
-        // The shared refresh failed (expired/revoked refresh token, or network).
-        // Every concurrent caller lands here, but forceLogin() only redirects once.
-        forceLogin();
+      } catch (refreshErr) {
+        // End the session ONLY when the refresh was genuinely rejected by the
+        // server (expired/revoked refresh token). On a network error / timeout /
+        // 5xx we keep the stored tokens intact so the next request can retry —
+        // a transient outage must not log the user out or destroy a valid token.
+        if (isSessionEndingRefreshError(refreshErr)) {
+          forceLogin();
+        }
         return Promise.reject(error);
       }
     }

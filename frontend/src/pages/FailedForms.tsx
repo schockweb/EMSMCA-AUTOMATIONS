@@ -18,12 +18,14 @@ interface FailedForm {
   id: number;
   prf_number: string;
   patient_name: string;
-  error_message: string;
-  attempts: number;
-  failed_at: string;
-  status: string;
+  // Field names match the backend response (failed_prfs.py). These were
+  // previously mis-named error_message / attempts / failed_at, which the API
+  // never returns — so the table rendered blank cells and "NaNm ago".
+  processing_error: string;
+  processing_attempts: number;
+  last_processing_at: string | null;   // may be null
+  status?: string;                      // only present on the detail response
   form_data?: Record<string, any>;
-  last_error_detail?: string;
   created_at?: string;
 }
 
@@ -141,8 +143,10 @@ export default function FailedForms() {
 
   /* ── Helpers ── */
 
-  const timeAgo = (dateStr: string) => {
+  const timeAgo = (dateStr: string | null | undefined) => {
+    if (!dateStr) return '—';
     const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return '—';
     const now = new Date();
     const diffMs = now.getTime() - d.getTime();
     const mins = Math.floor(diffMs / 60000);
@@ -417,7 +421,7 @@ export default function FailedForms() {
                       textOverflow: 'ellipsis',
                       whiteSpace: 'nowrap',
                     }}>
-                      {f.error_message}
+                      {f.processing_error}
                     </span>
                   </td>
                   <td style={{ padding: '10px 14px', textAlign: 'center' }}>
@@ -430,19 +434,19 @@ export default function FailedForms() {
                       borderRadius: '50%',
                       fontSize: '0.78rem',
                       fontWeight: 800,
-                      color: attemptColor(f.attempts),
-                      background: f.attempts >= 5
+                      color: attemptColor(f.processing_attempts),
+                      background: f.processing_attempts >= 5
                         ? 'rgba(194,24,91,0.08)'
-                        : f.attempts >= 3
+                        : f.processing_attempts >= 3
                           ? 'rgba(230,81,0,0.08)'
                           : 'var(--surface-50)',
                     }}>
-                      {f.attempts}
+                      {f.processing_attempts}
                     </span>
                   </td>
                   <td style={{ padding: '10px 14px', fontSize: '0.75rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-                    <span title={new Date(f.failed_at).toLocaleString()}>
-                      {timeAgo(f.failed_at)}
+                    <span title={f.last_processing_at ? new Date(f.last_processing_at).toLocaleString() : ''}>
+                      {timeAgo(f.last_processing_at)}
                     </span>
                   </td>
                   <td style={{ padding: '10px 14px', textAlign: 'right', whiteSpace: 'nowrap' }}>
@@ -552,8 +556,8 @@ export default function FailedForms() {
                     { label: 'PRF Number', value: selectedForm.prf_number },
                     { label: 'Patient', value: selectedForm.patient_name },
                     { label: 'Status', value: selectedForm.status },
-                    { label: 'Attempts', value: String(selectedForm.attempts) },
-                    { label: 'Failed At', value: new Date(selectedForm.failed_at).toLocaleString() },
+                    { label: 'Attempts', value: String(selectedForm.processing_attempts) },
+                    { label: 'Failed At', value: selectedForm.last_processing_at ? new Date(selectedForm.last_processing_at).toLocaleString() : '—' },
                     { label: 'Created', value: selectedForm.created_at ? new Date(selectedForm.created_at).toLocaleString() : '—' },
                   ].map((field) => (
                     <div key={field.label}>
@@ -590,29 +594,9 @@ export default function FailedForms() {
                     fontFamily: 'monospace',
                     wordBreak: 'break-word',
                   }}>
-                    {selectedForm.error_message}
+                    {selectedForm.processing_error}
                   </div>
                 </div>
-
-                {/* Detailed error */}
-                {selectedForm.last_error_detail && (
-                  <div style={{ marginBottom: 20 }}>
-                    <div style={labelStyle}>Error Detail</div>
-                    <div style={{
-                      background: 'var(--surface-50)',
-                      border: '1px solid var(--surface-100)',
-                      borderRadius: 10, padding: 14,
-                      fontSize: '0.78rem', color: 'var(--text-muted)', lineHeight: 1.6,
-                      fontFamily: 'monospace',
-                      whiteSpace: 'pre-wrap',
-                      wordBreak: 'break-word',
-                      maxHeight: 200,
-                      overflowY: 'auto',
-                    }}>
-                      {selectedForm.last_error_detail}
-                    </div>
-                  </div>
-                )}
 
                 {/* Form data preview */}
                 {selectedForm.form_data && (
@@ -680,7 +664,7 @@ export default function FailedForms() {
               borderRadius: 8, padding: 10, marginBottom: 16,
               fontSize: '0.75rem', color: rose,
             }}>
-              <strong>Error:</strong> {correctingForm.error_message}
+              <strong>Error:</strong> {correctingForm.processing_error}
             </div>
 
             <div>

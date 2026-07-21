@@ -3,6 +3,7 @@ Service Provider Admin API — CRUD for providers, crew members, and vehicles.
 Admin-only endpoints for onboarding and managing service providers.
 """
 from __future__ import annotations
+from typing import Optional
 import uuid
 import logging
 import re
@@ -12,9 +13,9 @@ import os
 import io
 import shutil
 from PIL import Image
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Response
 from pydantic import BaseModel, EmailStr
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_, cast, Text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -1241,6 +1242,10 @@ async def delete_vehicle(
 @router.get("/{provider_id}/prfs")
 async def list_provider_prfs(
     provider_id: str,
+    response: Response,
+    search: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 100,
     db: AsyncSession = Depends(get_db),
     principal = Depends(get_admin_or_crew_admin),
 ):
@@ -1250,9 +1255,33 @@ async def list_provider_prfs(
     submitted it (SUBMITTED → PROCESSED / FAILED / CORRECTED). Selects only
     the summary columns: full rows carry five base64 signatures each, which
     would bloat a list response badly.
+
+    Response body stays a bare array (backward-compatible: cached/old frontend
+    bundles call .filter on it directly, so we must NOT wrap it in an object).
+    The match total rides in the `X-Total-Count` header, so the dashboard can
+    page/search across the full 7-year retained history instead of silently
+    capping at one page. Server-side search covers PRF number, case number, and
+    the form_data blob (patient name, call type, scheme). Crew/vehicle names are
+    resolved only for the selected page and are not part of the search.
     """
     pid = uuid.UUID(provider_id)
     _assert_settings_access(principal, pid)
+
+    conditions = [
+        DigitalPRF.provider_id == pid,
+        DigitalPRF.status != PRFStatus.DRAFT,
+    ]
+    if search and search.strip():
+        term = f"%{search.strip()}%"
+        conditions.append(or_(
+            cast(DigitalPRF.prf_number, Text).ilike(term),
+            DigitalPRF.case_number.ilike(term),
+            cast(DigitalPRF.form_data, Text).ilike(term),
+        ))
+
+    total = (await db.execute(
+        select(func.count()).select_from(DigitalPRF).where(*conditions)
+    )).scalar() or 0
 
     result = await db.execute(
         select(
@@ -1268,12 +1297,10 @@ async def list_provider_prfs(
             DigitalPRF.submitted_at,
             DigitalPRF.created_at,
         )
-        .where(
-            DigitalPRF.provider_id == pid,
-            DigitalPRF.status != PRFStatus.DRAFT,
-        )
+        .where(*conditions)
         .order_by(func.coalesce(DigitalPRF.submitted_at, DigitalPRF.created_at).desc())
-        .limit(500)
+        .offset(skip)
+        .limit(limit)
     )
     rows = result.all()
 
@@ -1320,4 +1347,7 @@ async def list_provider_prfs(
             "submitted_at": r.submitted_at.isoformat() if r.submitted_at else None,
             "created_at": r.created_at.isoformat() if r.created_at else None,
         })
+    # Bare array body (backward-compatible); total in a header so old cached
+    # frontends that call .filter on the response keep working after deploy.
+    response.headers["X-Total-Count"] = str(int(total))
     return items

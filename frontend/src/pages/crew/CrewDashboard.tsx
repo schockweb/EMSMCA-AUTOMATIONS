@@ -12,6 +12,12 @@ import { useNavigate, useParams } from 'react-router-dom';
 // to the admin /login instead of the provider login.
 import axios from 'axios';
 import { useScrollLock } from '../../hooks/useScrollLock';
+import {
+  getCrewToken,
+  getCrewProfile,
+  clearCrewSession as clearCrewSessionStorage,
+  CREW_SESSION_KEYS,
+} from '../../utils/crewSession';
 
 const G = '#10b981';
 const GD = '#059669';
@@ -43,20 +49,23 @@ interface ShiftSupervisor {
 
 /** Offline sync status bar — shows when PRFs are queued in the local outbox. */
 function OfflineSyncBar() {
-  const [count, setCount] = useState(0);
+  const [pending, setPending] = useState(0);
+  const [dead, setDead] = useState(0);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
 
-  const refreshCount = async () => {
+  const refresh = async () => {
     try {
-      const { getCount } = await import('../../services/offlineDb');
-      setCount(await getCount());
-    } catch { setCount(0); }
+      const { getOutboxSummary } = await import('../../services/offlineDb');
+      const s = await getOutboxSummary();
+      setPending(s.pending);
+      setDead(s.dead);
+    } catch { setPending(0); setDead(0); }
   };
 
   useEffect(() => {
-    refreshCount();
-    const onOutboxChange = () => refreshCount();
-    const onOnline = () => { setIsOnline(true); refreshCount(); };
+    refresh();
+    const onOutboxChange = () => refresh();
+    const onOnline = () => { setIsOnline(true); refresh(); };
     const onOffline = () => setIsOnline(false);
     window.addEventListener('outbox-change', onOutboxChange);
     window.addEventListener('online', onOnline);
@@ -68,24 +77,35 @@ function OfflineSyncBar() {
     };
   }, []);
 
-  if (count === 0 && isOnline) return null;
+  // Hide only when everything is uploaded AND online AND nothing has given up.
+  // A 'dead' entry (upload gave up) must ALWAYS stay visible — never silently 0.
+  if (pending === 0 && dead === 0 && isOnline) return null;
 
   const handleRetry = async () => {
     try {
+      const db = await import('../../services/offlineDb');
+      await db.retryDead();  // give any gave-up ('dead') PRFs another attempt
       const { startSync } = await import('../../services/syncEngine');
       await startSync();
     } catch { /* silent */ }
   };
 
-  const bg = !isOnline ? '#fef2f2' : count > 0 ? '#fffbeb' : '#f0fdf4';
-  const border = !isOnline ? '#fecaca' : count > 0 ? '#fcd34d' : '#bbf7d0';
-  const textColor = !isOnline ? '#b91c1c' : count > 0 ? '#92400e' : '#166534';
-  const icon = !isOnline ? '📵' : count > 0 ? '📤' : '✅';
-  const label = !isOnline
+  // 'dead' is the alarm state — a PRF exhausted its retries and has NOT reached
+  // the office. It outranks the offline / pending states.
+  const isDead = dead > 0;
+  const bg = isDead || !isOnline ? '#fef2f2' : pending > 0 ? '#fffbeb' : '#f0fdf4';
+  const border = isDead ? '#fca5a5' : !isOnline ? '#fecaca' : pending > 0 ? '#fcd34d' : '#bbf7d0';
+  const textColor = isDead || !isOnline ? '#b91c1c' : pending > 0 ? '#92400e' : '#166534';
+  const icon = isDead ? '⚠️' : !isOnline ? '📵' : pending > 0 ? '📤' : '✅';
+  const label = isDead
+    ? `${dead} PRF${dead > 1 ? 's' : ''} failed to upload — needs attention`
+    : !isOnline
     ? 'You are offline — changes are saved locally'
-    : count > 0
-    ? `${count} PRF${count > 1 ? 's' : ''} pending upload`
+    : pending > 0
+    ? `${pending} PRF${pending > 1 ? 's' : ''} pending upload`
     : 'All synced';
+
+  const showButton = isDead || (isOnline && pending > 0);
 
   return (
     <div style={{
@@ -98,14 +118,19 @@ function OfflineSyncBar() {
         <span style={{ fontSize: '1.1rem' }}>{icon}</span>
         <div>
           <div style={{ fontSize: '0.82rem', fontWeight: 700, color: textColor }}>{label}</div>
-          {!isOnline && count > 0 && (
+          {isDead && (
             <div style={{ fontSize: '0.72rem', color: '#6b7280', marginTop: 2 }}>
-              {count} item{count > 1 ? 's' : ''} will sync when you're back online
+              Tap Retry — or contact your administrator. This PRF has not reached the office.
+            </div>
+          )}
+          {!isDead && !isOnline && pending > 0 && (
+            <div style={{ fontSize: '0.72rem', color: '#6b7280', marginTop: 2 }}>
+              {pending} item{pending > 1 ? 's' : ''} will sync when you're back online
             </div>
           )}
         </div>
       </div>
-      {isOnline && count > 0 && (
+      {showButton && (
         <button
           onClick={handleRetry}
           style={{
@@ -114,7 +139,7 @@ function OfflineSyncBar() {
             cursor: 'pointer', whiteSpace: 'nowrap', transition: 'all 0.15s',
           }}
         >
-          Sync now
+          {isDead ? 'Retry upload' : 'Sync now'}
         </button>
       )}
     </div>
@@ -130,28 +155,24 @@ export default function CrewDashboard() {
   // "Start Shift", the old JEMS token and profile are still in localStorage.
   // We must clear them BEFORE initializing React state so Michael's dashboard
   // doesn't accidentally show JEMS crew/vehicles.
-  const _rawProfile = (() => { try { return JSON.parse(localStorage.getItem('crew_profile') || '{}'); } catch { return {}; } })();
+  const _rawProfile = getCrewProfile();
   if (_rawProfile.provider_slug && _rawProfile.provider_slug !== providerSlug) {
-    localStorage.removeItem('crew_token');
-    localStorage.removeItem('crew_profile');
-    localStorage.removeItem('crew2_profile');
-    localStorage.removeItem('extra_crew_profiles');
-    localStorage.removeItem('active_vehicle');
+    clearCrewSessionStorage();
     localStorage.removeItem('last_prf_id');
     localStorage.removeItem('shift_supervisor');
   }
 
-  const token = localStorage.getItem('crew_token');
-  const profile = (() => { try { return JSON.parse(localStorage.getItem('crew_profile') || '{}'); } catch { return {}; } })();
-  const savedVehicle = (() => { try { return JSON.parse(localStorage.getItem('active_vehicle') || 'null'); } catch { return null; } })();
+  const token = getCrewToken();
+  const profile = getCrewProfile();
+  const savedVehicle = (() => { try { return JSON.parse(localStorage.getItem(CREW_SESSION_KEYS.vehicle) || 'null'); } catch { return null; } })();
   const initialExtraCrews = (() => {
     try {
-      const raw = JSON.parse(localStorage.getItem('extra_crew_profiles') || 'null');
+      const raw = JSON.parse(localStorage.getItem(CREW_SESSION_KEYS.extraCrew) || 'null');
       if (Array.isArray(raw)) return raw;
     } catch { /* ignore */ }
     // Back-compat: an existing single crew2_profile becomes the first entry.
     try {
-      const c2 = JSON.parse(localStorage.getItem('crew2_profile') || 'null');
+      const c2 = JSON.parse(localStorage.getItem(CREW_SESSION_KEYS.partner) || 'null');
       if (c2 && c2.id) return [c2];
     } catch { /* ignore */ }
     return [];
@@ -213,11 +234,11 @@ export default function CrewDashboard() {
   const persistExtraCrews = (list: any[]) => {
     setDashboardExtraCrews(list);
     if (list.length === 0) {
-      localStorage.removeItem('extra_crew_profiles');
-      localStorage.removeItem('crew2_profile');
+      localStorage.removeItem(CREW_SESSION_KEYS.extraCrew);
+      localStorage.removeItem(CREW_SESSION_KEYS.partner);
     } else {
-      localStorage.setItem('extra_crew_profiles', JSON.stringify(list));
-      localStorage.setItem('crew2_profile', JSON.stringify(list[0]));
+      localStorage.setItem(CREW_SESSION_KEYS.extraCrew, JSON.stringify(list));
+      localStorage.setItem(CREW_SESSION_KEYS.partner, JSON.stringify(list[0]));
     }
   };
 
@@ -256,11 +277,7 @@ export default function CrewDashboard() {
   // the crew can HPCSA-verify again — same crew row means their draft PRFs
   // reappear on the next dashboard mount.
   const clearCrewSession = () => {
-    localStorage.removeItem('crew_token');
-    localStorage.removeItem('crew_profile');
-    localStorage.removeItem('crew2_profile');
-    localStorage.removeItem('extra_crew_profiles');
-    localStorage.removeItem('active_vehicle');
+    clearCrewSessionStorage();
     localStorage.removeItem('last_prf_id');
     localStorage.removeItem('shift_supervisor');
     setShiftSupervisor(null);
@@ -316,7 +333,7 @@ export default function CrewDashboard() {
   useEffect(() => {
     const refresh = () => {
       if (document.visibilityState !== 'visible') return;
-      const tkn = localStorage.getItem('crew_token');
+      const tkn = getCrewToken();
       if (tkn) loadDrafts(tkn);
     };
     document.addEventListener('visibilitychange', refresh);
@@ -373,11 +390,7 @@ export default function CrewDashboard() {
       keysToRemove.forEach(k => localStorage.removeItem(k));
     } catch { /* localStorage unavailable — non-fatal */ }
 
-    localStorage.removeItem('crew_token');
-    localStorage.removeItem('crew_profile');
-    localStorage.removeItem('crew2_profile');
-    localStorage.removeItem('extra_crew_profiles');
-    localStorage.removeItem('active_vehicle');
+    clearCrewSessionStorage();
     localStorage.removeItem('shift_supervisor');
     setShiftSupervisor(null);
     navigate(`/${providerSlug}/login`);
@@ -408,7 +421,7 @@ export default function CrewDashboard() {
    */
   const closeShiftModal = () => {
     setStep(null);
-    if (!localStorage.getItem('crew_token')) {
+    if (!getCrewToken()) {
       navigate(`/${providerSlug}/login`);
     }
   };
@@ -453,8 +466,8 @@ export default function CrewDashboard() {
         provider_name: res1.data.provider_name,
         provider_slug: res1.data.provider_slug,
       };
-      localStorage.setItem('crew_token', newToken);
-      localStorage.setItem('crew_profile', JSON.stringify(crew1Profile));
+      localStorage.setItem(CREW_SESSION_KEYS.token, newToken);
+      localStorage.setItem(CREW_SESSION_KEYS.profile, JSON.stringify(crew1Profile));
 
       // Authenticate additional crew members.
       // The first extra crew is mirrored into crew2_profile for backend
@@ -475,7 +488,7 @@ export default function CrewDashboard() {
       persistExtraCrews(extraProfiles);
 
       // Save vehicle for PRF creation
-      localStorage.setItem('active_vehicle', JSON.stringify(selectedVehicle));
+      localStorage.setItem(CREW_SESSION_KEYS.vehicle, JSON.stringify(selectedVehicle));
 
       // Load Crew 1's existing drafts
       loadDrafts(newToken);
@@ -497,9 +510,9 @@ export default function CrewDashboard() {
 
   /** Create a new PRF using the stored vehicle + crew2 (+ supervisor, if BAA-only). */
   const handleNewPRF = async () => {
-    const tkn = localStorage.getItem('crew_token');
-    const vehicle: Vehicle | null = (() => { try { return JSON.parse(localStorage.getItem('active_vehicle') || 'null'); } catch { return null; } })();
-    const crew2: any = (() => { try { return JSON.parse(localStorage.getItem('crew2_profile') || '{}'); } catch { return {}; } })();
+    const tkn = getCrewToken();
+    const vehicle: Vehicle | null = (() => { try { return JSON.parse(localStorage.getItem(CREW_SESSION_KEYS.vehicle) || 'null'); } catch { return null; } })();
+    const crew2: any = (() => { try { return JSON.parse(localStorage.getItem(CREW_SESSION_KEYS.partner) || '{}'); } catch { return {}; } })();
     const supervisor: ShiftSupervisor | null = (() => {
       try { return JSON.parse(localStorage.getItem('shift_supervisor') || 'null'); }
       catch { return null; }

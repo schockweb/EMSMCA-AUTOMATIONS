@@ -48,6 +48,7 @@ export default function Cases() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
+  const [total, setTotal] = useState(0);
 
   // Rename dialog state
   const [renameCase, setRenameCase] = useState<Case | null>(null);
@@ -62,7 +63,6 @@ export default function Cases() {
   const nameSeparator = localStorage.getItem('prf_name_separator') || ' . ';
 
   useEffect(() => {
-    fetchCases();
     loadRFIs();
     // Load PRF name template from settings
     api.get('/api/knowledge-base/extraction-settings')
@@ -71,6 +71,15 @@ export default function Cases() {
        })
        .catch(() => {});
   }, []);
+
+  // Server-side search (debounced). Fires on mount too (empty term = full list),
+  // so 7 years of retained cases stay reachable — matching happens on the server,
+  // not just within the loaded page. See GET /api/cases + /api/cases/count.
+  useEffect(() => {
+    const t = setTimeout(() => { fetchCases(); }, 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchTerm]);
 
   useEffect(() => {
     if (showRfiQueue) loadRFIs();
@@ -104,8 +113,17 @@ export default function Cases() {
   const fetchCases = async () => {
     try {
       setLoading(true);
-      const res = await api.get('/api/cases/?queue=management');
-      setCases(res.data);
+      const term = searchTerm.trim();
+      const searchQs = term ? `&search=${encodeURIComponent(term)}` : '';
+      // Pull a generous page plus the true total, so "showing N of M" is honest
+      // and records past the page stay reachable by searching.
+      const [listRes, countRes] = await Promise.all([
+        api.get(`/api/cases/?queue=management&limit=200${searchQs}`),
+        api.get(`/api/cases/count?queue=management${searchQs}`),
+      ]);
+      setCases(listRes.data);
+      setTotal(countRes.data?.total ?? listRes.data.length);
+      setError('');
     } catch (err: any) {
       setError(err.message || 'Failed to fetch cases');
     } finally {
@@ -124,15 +142,10 @@ export default function Cases() {
     setRenameCase(null);
   };
 
-  const filteredCases = cases.filter(c =>
-    getPrfDisplayName(c).toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.original_filename?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.medical_scheme_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.preauth_number?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
-  // Pinned flagged cases to the top
-  const sortedCases = [...filteredCases].sort((a, b) => {
+  // Search is now server-side (so it reaches the full 7-year history, not just
+  // the loaded page) — `cases` already holds the matches. Here we only pin
+  // flagged cases to the top and sort the rest newest-first.
+  const sortedCases = [...cases].sort((a, b) => {
     if (a.auth_flag && !b.auth_flag) return -1;
     if (!a.auth_flag && b.auth_flag) return 1;
     return new Date(b.created_at || '').getTime() - new Date(a.created_at || '').getTime();
@@ -253,8 +266,8 @@ export default function Cases() {
           borderRadius: 'var(--radius-lg)', boxShadow: 'var(--glass-shadow)',
         }}>
           <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" style={{ opacity: 0.4 }}><path d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
-          <div style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--text-secondary)' }}>{cases.length === 0 ? 'No cases yet' : 'No cases match your search'}</div>
-          <div style={{ fontSize: '0.85rem' }}>{cases.length === 0 ? 'Process a PRF document to generate a case.' : 'Try a different search term.'}</div>
+          <div style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--text-secondary)' }}>{searchTerm.trim() ? 'No cases match your search' : 'No cases yet'}</div>
+          <div style={{ fontSize: '0.85rem' }}>{searchTerm.trim() ? 'Try a different search term.' : 'Process a PRF document to generate a case.'}</div>
         </div>
       ) : (
         <div className="cases-in" style={{
@@ -313,7 +326,7 @@ export default function Cases() {
             background: 'var(--surface-50)',
           }}>
             <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-              Showing <strong style={{ color: 'var(--text-primary)' }}>{sortedCases.length}</strong> of <strong style={{ color: 'var(--text-primary)' }}>{cases.length}</strong> cases
+              Showing <strong style={{ color: 'var(--text-primary)' }}>{sortedCases.length}</strong> of <strong style={{ color: 'var(--text-primary)' }}>{total}</strong> cases
             </span>
             {flaggedCount > 0 && (
               <span style={{

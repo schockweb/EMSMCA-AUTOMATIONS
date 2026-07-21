@@ -69,7 +69,9 @@ class Case(Base):
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc),
+        index=True,  # case list orders by created_at DESC; indexed so pagination
+                     # over 7 years of retained cases stays fast
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

@@ -6,12 +6,8 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta, timezone
 
-# Shift tokens live long enough to cover a full EMS shift with breaks / device sleep.
-# The tablet may go idle while the crew attends to a patient — the session must persist
-# until the physical End Shift button is pressed.
-CREW_SHIFT_TOKEN_HOURS = 12
-
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,9 +22,13 @@ from app.utils.security import (
     create_access_token,
     decode_token,
 )
-from fastapi.security import OAuth2PasswordBearer
 
 logger = logging.getLogger("ems.crew_auth")
+
+# Shift tokens live long enough to cover a full EMS shift with breaks / device sleep.
+# The tablet may go idle while the crew attends to a patient — the session must persist
+# until the physical End Shift button is pressed.
+CREW_SHIFT_TOKEN_HOURS = 12
 
 router = APIRouter(prefix="/api/crew", tags=["Crew Authentication"])
 

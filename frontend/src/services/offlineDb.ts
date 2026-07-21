@@ -7,7 +7,9 @@ export interface OfflineEntry {
   timestamp: number;
   retries: number;
   lastError?: string;
-  status: 'pending' | 'syncing' | 'failed';
+  // 'dead' = gave up auto-retrying after too many failures. NEVER deleted (the
+  // PRF never reached the server) — kept for the crew to see and manually resend.
+  status: 'pending' | 'syncing' | 'failed' | 'dead';
 }
 
 const DB_NAME = 'ems-offline';
@@ -92,10 +94,51 @@ export async function markFailed(key: string, error: string) {
   }
 }
 
+/**
+ * Auto-retry has been exhausted for this entry. Mark it 'dead' — it stops being
+ * retried (getPending excludes 'dead') but is NEVER deleted, so the crew's work
+ * is preserved and stays visible in the outbox count for manual resend. This
+ * replaces the old behaviour of calling markSynced() (delete) on give-up, which
+ * silently discarded the PRF and falsely reported "all synced".
+ */
+export async function markDead(key: string) {
+  const db = await initDb();
+  const entry = await db.get(STORE, key);
+  if (entry) {
+    entry.status = 'dead';
+    await db.put(STORE, entry);
+  }
+}
+
 export async function getCount(): Promise<number> {
   const db = await initDb();
   const all = await db.getAll(STORE);
-  return all.filter(e => e.status === 'pending' || e.status === 'syncing' || e.status === 'failed').length;
+  // 'dead' entries are included — the PRF still hasn't reached the server, so the
+  // crew must keep seeing it (never let a failed upload drop silently to zero).
+  return all.filter(e => e.status === 'pending' || e.status === 'syncing' || e.status === 'failed' || e.status === 'dead').length;
+}
+
+/** Breakdown so the UI can distinguish "will retry" from "gave up, needs attention". */
+export async function getOutboxSummary(): Promise<{ pending: number; dead: number }> {
+  const db = await initDb();
+  const all = (await db.getAll(STORE)) as OfflineEntry[];
+  return {
+    pending: all.filter(e => e.status === 'pending' || e.status === 'syncing' || e.status === 'failed').length,
+    dead: all.filter(e => e.status === 'dead').length,
+  };
+}
+
+/** Resurrect every 'dead' entry (reset retries) so a manual "Retry" gives them another attempt. */
+export async function retryDead(): Promise<void> {
+  const db = await initDb();
+  const all = (await db.getAll(STORE)) as OfflineEntry[];
+  for (const e of all) {
+    if (e.status === 'dead') {
+      e.status = 'pending';
+      e.retries = 0;
+      await db.put(STORE, e);
+    }
+  }
 }
 
 export async function getAll(): Promise<OfflineEntry[]> {
