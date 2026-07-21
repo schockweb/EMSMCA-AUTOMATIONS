@@ -270,9 +270,14 @@ async def save_prf(
     # Only DRAFTs are editable. Once a PRF is SUBMITTED it is being read by the
     # billing pipeline — a late autosave here would produce a torn read and bill
     # off inconsistent data. PROCESSED PRFs are immutable billing records.
+    # 423 (Locked), NOT 409: the client's 409 handler means "concurrency
+    # conflict — refetch and retry", so a 409 here put a device that still had
+    # a submitted PRF open into an infinite zero-delay retry loop that tripped
+    # the nginx rate limiter and blocked the whole device (Samsung PWA outage,
+    # 2026-07-21). 423 tells the client the row is permanently uneditable.
     if prf.status != PRFStatus.DRAFT:
         raise HTTPException(
-            409, f"Cannot edit a {prf.status.value} PRF — only drafts can be auto-saved."
+            423, f"Cannot edit a {prf.status.value} PRF — only drafts can be auto-saved."
         )
 
     # Optimistic concurrency — reject a save built on a stale view of the row so
@@ -975,6 +980,7 @@ def _adapt_prf_to_extracted_data(
         "member_number":           fd.get("medical_aid_number"),
         "preauth_number":          fd.get("preauth_number"),
         "patient_id_number":       fd.get("patient_id_number"),
+        "patient_dob":             fd.get("patient_dob"),
         "patient_name":            " ".join(filter(None, [fd.get("patient_name"), fd.get("patient_surname")])).strip(),
         "incident_location":       fd.get("incident_location"),
         "receiving_facility":      fd.get("receiving_facility"),
@@ -1479,6 +1485,10 @@ async def get_prf_by_case_for_admin(
         "crew_2": crew2,
         "vehicle": vehicle,
         "submitted_at": prf.submitted_at.isoformat() if prf.submitted_at else None,
+        # Optimistic-concurrency token — the client stores this and echoes it
+        # back on saves; without it the 409-recovery refetch could never
+        # converge (it always read null and retried against a stale base).
+        "updated_at": prf.updated_at.isoformat() if prf.updated_at else None,
     }
 
 

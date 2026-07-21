@@ -4405,6 +4405,14 @@ export default function DigitalPRFForm() {
   const savingInFlightRef = useRef(false);
   const savePendingRef = useRef(false);
   const sessionExpiredRef = useRef(false);
+  // Set when the server answers 423: the PRF is SUBMITTED/PROCESSED and can
+  // never be edited again — every further save attempt would be rejected, so
+  // saving stops permanently for this mount.
+  const prfLockedRef = useRef(false);
+  // Delay before a queued retry runs (ms). Zero for normal coalesced saves;
+  // raised on a 409 concurrency conflict so two devices ping-ponging over the
+  // same draft back off instead of hammering the API into the rate limiter.
+  const retryDelayRef = useRef(0);
   // Synchronous guard against a double-tap submitting the PRF twice (the
   // `submitting` state flips a render later, which is too slow on laggy phones).
   const submitInFlightRef = useRef(false);
@@ -4447,7 +4455,7 @@ export default function DigitalPRFForm() {
   };
 
   const doSave = async () => {
-    if (!prfId) return;
+    if (!prfId || prfLockedRef.current) return;
     // Coalesce concurrent saves: if one is already running, request exactly one
     // more pass when it finishes rather than racing a second request.
     if (savingInFlightRef.current) { savePendingRef.current = true; return; }
@@ -4475,15 +4483,29 @@ export default function DigitalPRFForm() {
         handleSessionExpired();
         return;
       }
+      if (statusCode === 423) {
+        // The PRF was submitted (possibly from another device) — it is now a
+        // billing record and permanently uneditable. Stop saving for good and
+        // send the crew back to the dashboard; retrying would loop forever
+        // and trip the API rate limiter, blocking the whole device.
+        prfLockedRef.current = true;
+        savePendingRef.current = false;
+        setSaveState('saved');
+        alert('This PRF has already been submitted and can no longer be edited. Returning to the dashboard.');
+        navigate(`/${providerSlug}/crew/dashboard`, { replace: true });
+        return;
+      }
       if (statusCode === 409) {
         // Another writer touched this PRF. Refresh the version token and force a
-        // retry on the next pass so this device's data still persists.
+        // retry on the next pass so this device's data still persists — but
+        // back the retry off so two live devices can't hammer the API.
         try {
           const fresh = await api().get(`/api/digital-prf/${prfId}`);
           baseUpdatedAtRef.current = fresh?.data?.updated_at || null;
         } catch { /* ignore */ }
         lastSavedPayloadRef.current = null;
         savePendingRef.current = true;
+        retryDelayRef.current = 1500;
         setSaveState('saving');
       } else if (!navigator.onLine || err?.code === 'ECONNABORTED' || err?.code === 'ERR_NETWORK') {
         // Offline / network error — queue to the outbox so nothing is lost.
@@ -4499,7 +4521,9 @@ export default function DigitalPRFForm() {
       setSaving(false);
       if (savePendingRef.current) {
         savePendingRef.current = false;
-        setTimeout(() => { doSave(); }, 0);
+        const delay = retryDelayRef.current;
+        retryDelayRef.current = 0;
+        setTimeout(() => { doSaveRef.current(); }, delay);
       }
     }
   };
