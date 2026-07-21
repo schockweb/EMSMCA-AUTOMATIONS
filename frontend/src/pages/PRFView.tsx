@@ -1634,6 +1634,7 @@ export default function PRFView() {
         margin: '28px auto 0', background: '#fff', color: INK,
         border: `2px solid ${LN}`, boxShadow: '0 6px 24px rgba(0,0,0,0.1)',
         display: 'flex', flexDirection: 'column',
+        position: 'relative',   // anchor for the refused-treatment watermark
       }}>
         {/* Page-2 mini header removed (logo + Patient Name / Date / Case No /
             Sheet No). The whole row is freed so the clinical grid starts at
@@ -1646,16 +1647,27 @@ export default function PRFView() {
             room for the full vitals + IV + medication + management stack
             without clipping the last rows. */}
 
-        {/* Patient refused treatment — stamped across the clinical sheet so
-            the empty clinical sections below read as intentional. */}
+        {/* Patient refused treatment — large diagonal watermark across the
+            whole clinical sheet so the empty clinical sections read as
+            intentional. pointer-events:none keeps the (empty) fields
+            selectable; sits above the grid but translucent. */}
         {fd.patient_refused_treatment && (
           <div style={{
-            margin: '10px 12px 0', padding: '10px 14px', borderRadius: 8,
-            border: '2px solid #b91c1c', background: '#fef2f2',
-            color: '#991b1b', fontWeight: 900, fontSize: '0.95rem',
-            letterSpacing: '0.08em', textTransform: 'uppercase', textAlign: 'center',
+            position: 'absolute', inset: 0, zIndex: 5,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            pointerEvents: 'none', overflow: 'hidden',
           }}>
-            Patient Refused Treatment
+            <div style={{
+              transform: 'rotate(-30deg)',
+              fontSize: '5.2rem', fontWeight: 900, lineHeight: 1.05,
+              letterSpacing: '0.06em', textTransform: 'uppercase',
+              textAlign: 'center', whiteSpace: 'nowrap',
+              color: 'rgba(185,28,28,0.16)',
+              border: '0.5rem solid rgba(185,28,28,0.16)',
+              borderRadius: 18, padding: '1.4rem 3rem',
+            }}>
+              Patient Refused<br />Treatment
+            </div>
           </div>
         )}
 
