@@ -6479,7 +6479,7 @@ export default function DigitalPRFForm() {
                   <div style={{ fontSize: '0.72rem', fontWeight: 700, color: S500, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>
                     Crew Receipt Confirmation
                   </div>
-                  <Lbl t="Amount Received by Crew (R)" req />
+                  <Lbl t="Amount Received by Person Paying (R)" req />
                   <Inp fk="pvt_cash_crew_received" ph="Exact amount received" type="number" />
                   <div style={{ fontSize: '0.76rem', color: S600, lineHeight: 1.55, marginBottom: 12, fontStyle: 'italic' }}>
                     By signing below, I confirm that I have received{' '}
