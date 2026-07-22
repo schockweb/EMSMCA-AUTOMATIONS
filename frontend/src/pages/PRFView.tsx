@@ -1072,10 +1072,11 @@ export default function PRFView() {
           <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
             <SectionHead label="Call Information" />
             <FieldRow label="Incident Add"  value={fd.incident_location} />
-            {/* Suburb/Ward + Destination + handover rows don't apply to a
-                Declaration of Death (the patient is deceased at scene — there's
-                no receiving facility), so the whole block is omitted for DOD. */}
-            {fd.call_type !== 'DOD' && (
+            {/* Suburb/Ward + Destination + handover rows don't apply when the
+                patient was never transported to a facility — a Declaration of
+                Death (deceased at scene) or an RHT (Refused Hospital Transport)
+                — so the whole block is omitted for both. */}
+            {!noTransport && (
               <>
                 <FieldRow label="Suburb / Ward" value={fd.suburb_ward} />
                 <FieldRow label="Dest Facility" value={fd.receiving_facility} />
