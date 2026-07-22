@@ -1020,7 +1020,7 @@ export default function PRFView() {
             )}
             {prov.pty_reg_number && (
               <div style={{ fontSize: '0.72rem', fontWeight: 700, color: MUT, letterSpacing: '0.03em' }}>
-                PTY Reg: <span style={{ fontFamily: 'ui-monospace, monospace', color: INK, fontWeight: 800 }}>{prov.pty_reg_number}</span>
+                Co Reg: <span style={{ fontFamily: 'ui-monospace, monospace', color: INK, fontWeight: 800 }}>{prov.pty_reg_number}</span>
               </div>
             )}
           </div>
@@ -2284,7 +2284,7 @@ export default function PRFView() {
                   )}
                   {prov.pty_reg_number && (
                     <div style={{ fontSize: '0.7rem', fontWeight: 700, color: MUT }}>
-                      PTY Reg: <span style={{ fontFamily: 'ui-monospace, monospace', color: INK, fontWeight: 800 }}>{prov.pty_reg_number}</span>
+                      Co Reg: <span style={{ fontFamily: 'ui-monospace, monospace', color: INK, fontWeight: 800 }}>{prov.pty_reg_number}</span>
                     </div>
                   )}
                   {prov.address && (
