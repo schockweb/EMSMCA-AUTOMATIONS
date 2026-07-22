@@ -1493,8 +1493,9 @@ export default function PRFView() {
             )}
               </>
             )}
-            {/* Handover Signature — moved here per user request, but hidden for DOD since it is in the DOD block */}
-            {!(fd.call_type === 'DOD' && fd.med_aid_dec_death) && (
+            {/* Handover Signature — hidden for DOD (shown in the DOD block) and
+                for RHT (patient refused transport — there's no facility handover). */}
+            {!(fd.call_type === 'DOD' && fd.med_aid_dec_death) && fd.call_type !== 'RHT' && (
               <>
                 <SectionHead label="Handover Signature" />
                 <div style={{ padding: '6px 8px', borderTop: `1px solid ${LN}`, flexShrink: 0 }}>
@@ -1506,8 +1507,9 @@ export default function PRFView() {
             {/* Hospital Sticker — dedicated placeholder, now positioned beneath
                 Medical Aid Information. Shows the captured sticker inline when
                 present, otherwise a reserved "affix here" box so the slot is
-                always visible on the printed / exported PRF. */}
-            {!(fd.call_type === 'DOD' && fd.med_aid_dec_death) && (
+                always visible on the printed / exported PRF. Hidden for RHT
+                (no hospital transport, so no sticker). */}
+            {!(fd.call_type === 'DOD' && fd.med_aid_dec_death) && fd.call_type !== 'RHT' && (
               <>
                 <SectionHead label="Hospital Sticker" />
                 {/* Fixed-size slot (real stickers are ~credit-card sized) — it
@@ -1634,8 +1636,10 @@ export default function PRFView() {
               vertically with Band B's Patient/Debtor border (1.64/6.4). The
               freed width goes to Motivation, widening it. */}
         {fd.call_type !== 'DOD' && (
-          <div style={{ display: 'grid', gridTemplateColumns: '1.54fr 1.5fr 1.5fr 1.46fr', borderTop: `2px solid ${LN}` }}>
-          {/* Valuables + Handover Signature (+ RAF sketch if any) */}
+          <div style={{ display: 'grid', gridTemplateColumns: fd.call_type === 'RHT' ? '1.5fr 1.5fr 1.46fr' : '1.54fr 1.5fr 1.5fr 1.46fr', borderTop: `2px solid ${LN}` }}>
+          {/* Valuables + Handover Signature (+ RAF sketch if any) — dropped for
+              RHT (no hospital transport, so no valuables handover). */}
+          {fd.call_type !== 'RHT' && (
           <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
             <SectionHead label="Valuables" />
             {valuablesEmpty ? (
@@ -1672,6 +1676,7 @@ export default function PRFView() {
             )}
             <FillLines />
           </div>
+          )}
 
           {/* Crew sign-off — one tidy column per crew member: details stacked
               above a properly-sized signature box (no full-width stretch). */}
