@@ -827,6 +827,16 @@ const SpeechRecognitionAPI: any =
   (typeof window !== 'undefined' &&
     ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition)) || null;
 
+// The OS speech service is a SINGLE shared resource: a browser throws if you
+// start a second recognition while one is still active. Press-and-hold mics on
+// adjacent fields could leave a prior recogniser finalising (onend fires late
+// on mobile), so the next field's start() threw and its mic silently did
+// nothing ("voice won't work on the fields lower down"). This module-level
+// handle lets every mic force-stop any still-active recogniser before starting
+// its own, so dictation always works no matter which field was used last.
+// Un-exported so it never breaks Fast Refresh (see project crash-patterns note).
+let activeRecognition: any = null;
+
 // ── Robust incremental dictation builder ──────────────────────────────────
 // Android engines (Chrome AND Samsung Internet, both backed by the system
 // speech service) misbehave in `continuous` mode in ways a result-index
@@ -969,6 +979,9 @@ const Inp = ({ fk, type = 'text', onBlur, noMic }: { fk: string; ph?: string; ty
 
   const startVoice = () => {
     if (!SpeechRecognitionAPI || recording) return;
+    // Free the shared speech service if another field's recogniser is still
+    // active/finalising, so this start() never throws and silently no-ops.
+    try { activeRecognition?.stop?.(); } catch { /* ignore */ }
     const recog = new SpeechRecognitionAPI();
     recog.lang = 'en-ZA';
     recog.continuous = true;
@@ -977,15 +990,17 @@ const Inp = ({ fk, type = 'text', onBlur, noMic }: { fk: string; ph?: string; ty
     recog.onresult = (e: any) => {
       sf(fk, applyDictation(e, dictRef.current));
     };
-    recog.onend = () => { setRecording(false); recogRef.current = null; };
-    recog.onerror = () => { setRecording(false); recogRef.current = null; };
+    recog.onend = () => { setRecording(false); recogRef.current = null; if (activeRecognition === recog) activeRecognition = null; };
+    recog.onerror = () => { setRecording(false); recogRef.current = null; if (activeRecognition === recog) activeRecognition = null; };
     recogRef.current = recog;
+    activeRecognition = recog;
     try {
       recog.start();
       setRecording(true);
     } catch {
       setRecording(false);
       recogRef.current = null;
+      if (activeRecognition === recog) activeRecognition = null;
     }
   };
 
@@ -2097,6 +2112,9 @@ const VoiceTxt = ({ fk, rows = 3 }: { fk: string; ph?: string; rows?: number }) 
 
   const start = () => {
     if (!supported || recording) return;
+    // Free the shared speech service if another field's recogniser is still
+    // active/finalising, so this start() never throws and silently no-ops.
+    try { activeRecognition?.stop?.(); } catch { /* ignore */ }
     const recog = new SpeechRecognitionAPI();
     recog.lang = 'en-ZA';
     recog.continuous = true;
@@ -2110,9 +2128,10 @@ const VoiceTxt = ({ fk, rows = 3 }: { fk: string; ph?: string; rows?: number }) 
     recog.onresult = (e: any) => {
       sf(fk, applyDictation(e, dictRef.current));
     };
-    recog.onend = () => { setRecording(false); recogRef.current = null; };
-    recog.onerror = () => { setRecording(false); recogRef.current = null; };
+    recog.onend = () => { setRecording(false); recogRef.current = null; if (activeRecognition === recog) activeRecognition = null; };
+    recog.onerror = () => { setRecording(false); recogRef.current = null; if (activeRecognition === recog) activeRecognition = null; };
     recogRef.current = recog;
+    activeRecognition = recog;
     try {
       recog.start();
       setRecording(true);
@@ -2798,8 +2817,6 @@ const DodFormBody = ({ showDeclaration = true }: { showDeclaration?: boolean }) 
     }
   }, []);
 
-  const [declarationOpen, setDeclarationOpen] = useState(false);
-
   return (
     <>
       <DodG2>
@@ -2897,11 +2914,29 @@ const DodFormBody = ({ showDeclaration = true }: { showDeclaration?: boolean }) 
         </>
       )}
 
-      {showDeclaration && (
-      <>
-      <DodSubHdr t="Declaration" />
-      {/* Tapping this button expands the declaration warning + signatory fields
-          inline (populates down) so the crew reads and signs in place. */}
+      {showDeclaration && <DodDeclarationSection />}
+
+      <DodSubHdr t="Supporting Documents" />
+      <DocumentsCapture
+        value={fd.med_aid_dec_death_documents}
+        onChange={v => sf('med_aid_dec_death_documents', v)}
+        buttonLabel={(Array.isArray(fd.med_aid_dec_death_documents) && fd.med_aid_dec_death_documents.length) ? 'Add More Documents' : 'Add Document'}
+      />
+    </>
+  );
+};
+
+// Declaration sign-off — its OWN top-level section, rendered SEPARATELY from
+// the collapsible "Declaration of Death Form" dropdown (per request) so the
+// crew reads and signs the declaration outside the certificate body. State
+// lives in form_data / PRF signatures, so mounting it apart from DodFormBody
+// changes nothing about what's captured.
+const DodDeclarationSection = () => {
+  const { fd, sf } = useContext(FormContext);
+  const [declarationOpen, setDeclarationOpen] = useState(false);
+  return (
+    <>
+      <SHdr t="Declaration" />
       <button
         type="button"
         onClick={() => setDeclarationOpen(v => !v)}
@@ -2923,122 +2958,96 @@ const DodFormBody = ({ showDeclaration = true }: { showDeclaration?: boolean }) 
           background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12,
           padding: '16px 14px', marginBottom: 18,
         }}>
-        <div style={{
-          padding: '16px 18px',
-          background: 'linear-gradient(135deg, rgba(245,158,11,0.12), rgba(225,29,72,0.08))',
-          border: '2px solid #f59e0b',
-          borderRadius: 12,
-          marginBottom: 18,
-          boxShadow: '0 4px 14px rgba(245,158,11,0.18)',
-          color: '#7c2d12',
-          lineHeight: 1.55,
-        }}>
           <div style={{
-            display: 'flex', alignItems: 'center', gap: 8,
-            fontSize: '0.72rem', fontWeight: 900, letterSpacing: '0.12em',
-            textTransform: 'uppercase', color: '#b45309',
-            marginBottom: 10,
+            padding: '16px 18px',
+            background: 'linear-gradient(135deg, rgba(245,158,11,0.12), rgba(225,29,72,0.08))',
+            border: '2px solid #f59e0b', borderRadius: 12, marginBottom: 18,
+            boxShadow: '0 4px 14px rgba(245,158,11,0.18)', color: '#7c2d12', lineHeight: 1.55,
           }}>
-            <span style={{ fontSize: '1rem' }}>⚠</span> Read Before Signing
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              fontSize: '0.72rem', fontWeight: 900, letterSpacing: '0.12em',
+              textTransform: 'uppercase', color: '#b45309', marginBottom: 10,
+            }}>
+              <span style={{ fontSize: '1rem' }}>⚠</span> Read Before Signing
+            </div>
+            <div style={{ fontSize: '0.92rem', fontWeight: 700, marginBottom: 8 }}>
+              I, undersigned, hereby declare that the deceased sustained no further harm while in my care.
+            </div>
+            <div style={{ fontSize: '0.92rem', fontWeight: 700 }}>
+              I, undersigned, hereby confirm that the above facts are to the best of my knowledge, true and correct.
+            </div>
           </div>
-          <div style={{ fontSize: '0.92rem', fontWeight: 700, marginBottom: 8 }}>
-            I, undersigned, hereby declare that the deceased sustained no further harm while in my care.
-          </div>
-          <div style={{ fontSize: '0.92rem', fontWeight: 700 }}>
-            I, undersigned, hereby confirm that the above facts are to the best of my knowledge, true and correct.
-          </div>
-        </div>
 
-        <Lbl t="Full name" />
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <GrowTa
-              value={fd.med_aid_dec_death_signatory_name ?? ''}
-              onChange={e => sf('med_aid_dec_death_signatory_name', e.target.value)}
-              onFocus={onF}
-              onBlur={onB}
-              placeholder=""
-              autoComplete="off"
-              style={{ ...base, marginBottom: 0, borderColor: '#e2e8f0' }}
+          <Lbl t="Full name" />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <GrowTa
+                value={fd.med_aid_dec_death_signatory_name ?? ''}
+                onChange={e => sf('med_aid_dec_death_signatory_name', e.target.value)}
+                onFocus={onF} onBlur={onB} placeholder="" autoComplete="off"
+                style={{ ...base, marginBottom: 0, borderColor: '#e2e8f0' }}
+              />
+            </div>
+            <FullscreenSignaturePad
+              compact label="Signature"
+              value={fd.med_aid_dec_death_signature}
+              onChange={v => sf('med_aid_dec_death_signature', v)}
             />
           </div>
-          <FullscreenSignaturePad
-            compact
-            label="Signature"
-            value={fd.med_aid_dec_death_signature}
-            onChange={v => sf('med_aid_dec_death_signature', v)}
-          />
-        </div>
 
-        <Lbl t="Crew Member 2" />
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <GrowTa
-              value={fd.med_aid_dec_death_crew_attended_name ?? ''}
-              onChange={e => sf('med_aid_dec_death_crew_attended_name', e.target.value)}
-              onFocus={onF}
-              onBlur={onB}
-              placeholder=""
-              autoComplete="off"
-              style={{ ...base, marginBottom: 0, borderColor: '#e2e8f0' }}
+          <Lbl t="Crew Member 2" />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <GrowTa
+                value={fd.med_aid_dec_death_crew_attended_name ?? ''}
+                onChange={e => sf('med_aid_dec_death_crew_attended_name', e.target.value)}
+                onFocus={onF} onBlur={onB} placeholder="" autoComplete="off"
+                style={{ ...base, marginBottom: 0, borderColor: '#e2e8f0' }}
+              />
+            </div>
+            <FullscreenSignaturePad
+              compact label="Crew Signature"
+              value={fd.med_aid_dec_death_crew_attended_signature}
+              onChange={v => sf('med_aid_dec_death_crew_attended_signature', v)}
             />
           </div>
-          <FullscreenSignaturePad
-            compact
-            label="Crew Signature"
-            value={fd.med_aid_dec_death_crew_attended_signature}
-            onChange={v => sf('med_aid_dec_death_crew_attended_signature', v)}
-          />
-        </div>
 
-        <DodG2>
-          <div><Lbl t="Date" /><Inp fk="med_aid_dec_death_signature_date" ph="YYYY-MM-DD" type="date" /></div>
-          <div><Lbl t="Place" /><Inp fk="med_aid_dec_death_signature_place" ph="Place" /></div>
-        </DodG2>
+          <DodG2>
+            <div><Lbl t="Date" /><Inp fk="med_aid_dec_death_signature_date" ph="YYYY-MM-DD" type="date" /></div>
+            <div><Lbl t="Place" /><Inp fk="med_aid_dec_death_signature_place" ph="Place" /></div>
+          </DodG2>
 
-        <Lbl t="Witness name" />
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <GrowTa
-              value={fd.med_aid_dec_death_witness_name ?? ''}
-              onChange={e => sf('med_aid_dec_death_witness_name', e.target.value)}
-              onFocus={onF}
-              onBlur={onB}
-              placeholder=""
-              autoComplete="off"
-              style={{ ...base, marginBottom: 0, borderColor: '#e2e8f0' }}
+          <Lbl t="Witness name" />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <GrowTa
+                value={fd.med_aid_dec_death_witness_name ?? ''}
+                onChange={e => sf('med_aid_dec_death_witness_name', e.target.value)}
+                onFocus={onF} onBlur={onB} placeholder="" autoComplete="off"
+                style={{ ...base, marginBottom: 0, borderColor: '#e2e8f0' }}
+              />
+            </div>
+            <FullscreenSignaturePad
+              compact label="Witness Signature"
+              value={fd.med_aid_dec_death_witness_signature}
+              onChange={v => sf('med_aid_dec_death_witness_signature', v)}
             />
           </div>
-          <FullscreenSignaturePad
-            compact
-            label="Witness Signature"
-            value={fd.med_aid_dec_death_witness_signature}
-            onChange={v => sf('med_aid_dec_death_witness_signature', v)}
-          />
-        </div>
 
-        <button
-          type="button"
-          onClick={() => setDeclarationOpen(false)}
-          style={{
-            width: '100%', padding: 14, borderRadius: 12, fontWeight: 800, fontSize: '0.95rem',
-            border: 'none', background: 'linear-gradient(135deg,#16a34a,#15803d)', color: '#fff',
-            cursor: 'pointer', marginTop: 6,
-          }}
-        >
-          Done
-        </button>
+          <button
+            type="button"
+            onClick={() => setDeclarationOpen(false)}
+            style={{
+              width: '100%', padding: 14, borderRadius: 12, fontWeight: 800, fontSize: '0.95rem',
+              border: 'none', background: 'linear-gradient(135deg,#16a34a,#15803d)', color: '#fff',
+              cursor: 'pointer', marginTop: 6,
+            }}
+          >
+            Done
+          </button>
         </div>
       )}
-      </>
-      )}
-
-      <DodSubHdr t="Supporting Documents" />
-      <DocumentsCapture
-        value={fd.med_aid_dec_death_documents}
-        onChange={v => sf('med_aid_dec_death_documents', v)}
-        buttonLabel={(Array.isArray(fd.med_aid_dec_death_documents) && fd.med_aid_dec_death_documents.length) ? 'Add More Documents' : 'Add Document'}
-      />
     </>
   );
 };
@@ -6779,9 +6788,16 @@ export default function DigitalPRFForm() {
                 background: W,
                 boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
               }}>
-                <DodFormBody />
+                {/* Certificate body only — the Declaration sign-off is a
+                    SEPARATE section below, not nested in this dropdown. */}
+                <DodFormBody showDeclaration={false} />
               </div>
             )}
+          </div>
+
+          {/* Declaration — its own section, separate from the form dropdown. */}
+          <div style={{ marginBottom: 20 }}>
+            <DodDeclarationSection />
           </div>
         </>
       )}
