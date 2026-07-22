@@ -50,10 +50,13 @@ export default function Cases() {
   const [searchTerm, setSearchTerm] = useState('');
   const [total, setTotal] = useState(0);
 
-  // Failed-PRF alert (red/amber triangle in the header). Counts PRFs that
-  // failed processing + ones stuck in SUBMITTED with no case. When > 0 the
-  // triangle appears and clicking it opens the Failed Forms page.
+  // Failed-PRF alert (amber triangle in the header). Counts PRFs that failed
+  // processing + ones stuck in SUBMITTED with no case. When > 0 the triangle
+  // appears; clicking it opens a popup tile that states what's wrong with
+  // each PRF and provides the fix (Retry). There is deliberately no separate
+  // Failed Forms page.
   const [failedCount, setFailedCount] = useState(0);
+  const [showFailedAlert, setShowFailedAlert] = useState(false);
 
   // Rename dialog state
   const [renameCase, setRenameCase] = useState<Case | null>(null);
@@ -209,12 +212,12 @@ export default function Cases() {
           </h1>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          {/* Red/amber triangle — appears when any PRF failed to process, so
+          {/* Amber triangle — appears when any PRF failed to process, so
               EMSMCA staff see it immediately from the Cases section. Click
-              opens Failed Forms for review + retry. */}
+              opens the popup tile explaining each problem + its fix. */}
           {failedCount > 0 && (
             <button
-              onClick={() => navigate('/failed-forms')}
+              onClick={() => setShowFailedAlert(true)}
               title={`${failedCount} PRF${failedCount === 1 ? '' : 's'} failed to process — click to review`}
               style={{
                 display: 'flex', alignItems: 'center', gap: 8,
@@ -408,6 +411,180 @@ export default function Cases() {
       {showRfiQueue && (
         <RfiQueueModal rfis={activeRfis} loading={rfiLoading} onClose={() => setShowRfiQueue(false)} onReload={loadRFIs} />
       )}
+
+      {showFailedAlert && (
+        <FailedPrfModal
+          onClose={() => setShowFailedAlert(false)}
+          onResolved={() => { fetchFailedStats(); fetchCases(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ── Failed-PRF popup tile ─────────────────────────────────────────────────
+   Opened by the amber triangle. For every failed/stuck PRF it states WHAT is
+   wrong (the processing error, in plain terms) and provides THE SOLUTION
+   (Retry — plus what happens automatically). Replaces the old Failed Forms
+   page entirely. */
+interface FailedPrfRow {
+  id: string;
+  prf_number: number;
+  patient_name: string;
+  status?: string;               // "failed" | "submitted" (= stuck)
+  processing_error: string;
+  submitted_at?: string | null;
+  last_processing_at?: string | null;
+}
+
+function FailedPrfModal({ onClose, onResolved }: { onClose: () => void; onResolved: () => void }) {
+  const [rows, setRows] = useState<FailedPrfRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [doneIds, setDoneIds] = useState<string[]>([]);
+  useScrollLock(true);
+
+  const fetchRows = async () => {
+    setLoading(true);
+    try {
+      // cb param busts the 30s response cache so the tile always shows the
+      // live truth (watchdog escalations are invisible to cache invalidation).
+      const res = await api.get(`/api/failed-prfs?cb=${Date.now()}`);
+      setRows(res.data);
+      setLoadError(false);
+    } catch { setLoadError(true); }
+    setLoading(false);
+  };
+  useEffect(() => { fetchRows(); }, []);
+
+  const problemOf = (r: FailedPrfRow) =>
+    r.status === 'submitted'
+      ? 'Submitted by the crew, but processing has not picked it up yet.'
+      : (r.processing_error || 'Processing failed with an unknown error.');
+
+  const solutionOf = (r: FailedPrfRow) =>
+    r.status === 'submitted'
+      ? 'The system retries automatically every 5 minutes — no action is required. Press Retry to process it immediately.'
+      : 'Press Retry to send it through processing again. If it fails repeatedly, note the PRF number and the error above, and contact support.';
+
+  const retry = async (r: FailedPrfRow) => {
+    setBusyId(r.id);
+    try {
+      await api.post(`/api/failed-prfs/${r.id}/reprocess`);
+      setDoneIds(prev => [...prev, r.id]);
+      setTimeout(onResolved, 4000); // let the pipeline finish, then refresh page data
+    } catch (e: any) {
+      const detail = e?.response?.data?.detail || '';
+      if (e?.response?.status === 409 && detail.includes('already been processed')) {
+        // Self-healed before the click — that's a success, not an error.
+        setDoneIds(prev => [...prev, r.id]);
+        onResolved();
+      } else {
+        alert(detail || 'Retry failed — please try again.');
+      }
+    }
+    setBusyId(null);
+  };
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 200,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: 'rgba(15,23,42,0.45)', padding: 20,
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          width: 640, maxWidth: '94vw', maxHeight: '82vh', overflowY: 'auto',
+          background: 'white', borderRadius: 16,
+          boxShadow: '0 24px 60px rgba(0,0,0,0.22)',
+        }}
+      >
+        <div style={{
+          padding: '18px 22px 14px', borderBottom: '1px solid var(--surface-100)',
+          display: 'flex', alignItems: 'center', gap: 10,
+        }}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="rgba(245,124,0,0.2)"
+            stroke="#E65100" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+            <line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
+          </svg>
+          <div style={{ flex: 1 }}>
+            <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+              PRFs needing attention
+            </h3>
+            <p style={{ margin: '3px 0 0', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+              What went wrong with each PRF, and how to fix it.
+            </p>
+          </div>
+          <button onClick={onClose} style={{
+            border: 'none', background: 'var(--surface-50)', borderRadius: 8,
+            padding: '7px 14px', fontWeight: 700, fontSize: '0.8rem',
+            color: 'var(--text-secondary)', cursor: 'pointer', fontFamily: 'inherit',
+          }}>
+            Close
+          </button>
+        </div>
+
+        <div style={{ padding: '14px 22px 20px' }}>
+          {loading ? (
+            <div style={{ padding: 30, textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>Loading…</div>
+          ) : loadError ? (
+            <div style={{ padding: 20, textAlign: 'center', color: '#dc2626', fontSize: '0.85rem', fontWeight: 600 }}>
+              Couldn&apos;t load the list — the server didn&apos;t respond.
+              <div><button onClick={fetchRows} style={{ marginTop: 10, padding: '8px 20px', borderRadius: 8, border: 'none', background: '#dc2626', color: '#fff', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>Retry</button></div>
+            </div>
+          ) : rows.length === 0 ? (
+            <div style={{ padding: 30, textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+              All clear — every PRF has processed successfully.
+            </div>
+          ) : rows.map(r => (
+            <div key={r.id} style={{
+              border: `1px solid ${doneIds.includes(r.id) ? 'rgba(16,185,129,0.4)' : 'rgba(245,124,0,0.35)'}`,
+              background: doneIds.includes(r.id) ? 'rgba(16,185,129,0.05)' : 'rgba(245,124,0,0.05)',
+              borderRadius: 12, padding: '14px 16px', marginBottom: 12,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 8 }}>
+                <span style={{ fontWeight: 800, fontFamily: 'ui-monospace, monospace', fontSize: '0.9rem', color: 'var(--text-primary)' }}>
+                  PRF #{r.prf_number}
+                </span>
+                <span style={{ fontSize: '0.84rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                  {r.patient_name || 'Unknown patient'}
+                </span>
+                {doneIds.includes(r.id) && (
+                  <span style={{ marginLeft: 'auto', fontSize: '0.74rem', fontWeight: 800, color: '#059669' }}>
+                    ✓ Sent for processing
+                  </span>
+                )}
+              </div>
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-primary)', marginBottom: 6 }}>
+                <strong style={{ color: '#E65100' }}>Problem:</strong> {problemOf(r)}
+              </div>
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: doneIds.includes(r.id) ? 0 : 10 }}>
+                <strong style={{ color: 'var(--brand-teal)' }}>Solution:</strong> {solutionOf(r)}
+              </div>
+              {!doneIds.includes(r.id) && (
+                <button
+                  onClick={() => retry(r)}
+                  disabled={busyId === r.id}
+                  style={{
+                    padding: '8px 22px', borderRadius: 8, border: 'none',
+                    background: '#E65100', color: '#fff', fontWeight: 700,
+                    fontSize: '0.8rem', cursor: busyId === r.id ? 'wait' : 'pointer',
+                    opacity: busyId === r.id ? 0.6 : 1, fontFamily: 'inherit',
+                  }}
+                >
+                  {busyId === r.id ? 'Retrying…' : 'Retry'}
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
