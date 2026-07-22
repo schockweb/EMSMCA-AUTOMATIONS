@@ -3160,13 +3160,13 @@ const Chk = ({ fk, val, label, disabled, hint }: { fk: string; val: string; labe
 // authorised for `capabilityKey`, the input is replaced with a non-editable
 // pill that preserves any pre-existing value and surfaces an out-of-scope
 // badge. Mirrors the `Chk` disabled-state pattern.
-const ScopedInp = ({ fk, capabilityKey, ph, type = 'text' }: {
-  fk: string; capabilityKey: string; ph?: string; type?: string;
+const ScopedInp = ({ fk, capabilityKey, ph, type = 'text', noMic }: {
+  fk: string; capabilityKey: string; ph?: string; type?: string; noMic?: boolean;
 }) => {
   const { fd } = useContext(FormContext);
   const cat = normaliseHpcsaCategory(fd.treating_practitioner_category);
   const ok = !cat || isAuthorised(cat, capabilityKey);
-  if (ok) return <Inp fk={fk} ph={ph} type={type} />;
+  if (ok) return <Inp fk={fk} ph={ph} type={type} noMic={noMic} />;
   const existing = fd[fk];
   const accent = existing ? '#f59e0b' : '#cbd5e1';
   const tint = existing ? '#fffbeb' : '#f8fafc';
@@ -7498,7 +7498,7 @@ export default function DigitalPRFForm() {
             <div><Lbl t="Start Time" /><Inp fk="o2_start_time" type="time" /></div>
             <div><Lbl t="Stop Time" /><Inp fk="o2_stop_time" type="time" /></div>
           </G2>
-          <Lbl t="BVM" /><Inp fk="o2_bvm" ph="Rate (bpm) / notes" />
+          <Lbl t="BVM" /><Inp fk="o2_bvm" ph="Rate (bpm) / notes" noMic />
         </Card>
 
         <SHdr t="Airway" />
@@ -7529,7 +7529,7 @@ export default function DigitalPRFForm() {
               </div>
             </div>
           )}
-          <Lbl t="NG Tube Size" /><ScopedInp fk="ng_tube_size" capabilityKey="airway_oro_nasogastric_tube" ph="Size if applicable" />
+          <Lbl t="NG Tube Size" /><ScopedInp fk="ng_tube_size" capabilityKey="airway_oro_nasogastric_tube" ph="Size if applicable" noMic />
         </Card>
 
         <SHdr t="Circulation" />
