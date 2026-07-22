@@ -390,10 +390,15 @@ async def reprocess_failed_prf(
             f"(this one is '{prf.status.value}').",
         )
 
-    # Reset processing state
+    # Reset processing state. submitted_at is stamped NOW: a retry IS a fresh
+    # submission attempt. Without this, an old PRF kept its original (stale)
+    # submitted_at and instantly re-matched the stuck condition (>10 min), so
+    # the admin alert stayed lit with a misleading "not picked up yet" row
+    # even while the retry was genuinely in flight.
     prf.status = PRFStatus.SUBMITTED
     prf.processing_error = None
     prf.processing_attempts = 0
+    prf.submitted_at = datetime.now(timezone.utc)
     prf.updated_at = datetime.now(timezone.utc)
 
     await db.commit()

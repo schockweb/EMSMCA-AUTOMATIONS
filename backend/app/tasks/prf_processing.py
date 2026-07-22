@@ -209,19 +209,51 @@ def process_prf_submission(self, prf_id: str):
                 dispatch_type = "IFT" if call_raw in ("TRANSFER", "IHT", "IFT", "RHT", "COURTESY") else "Primary"
                 incident_date = prf.time_call_received.date() if prf.time_call_received else now.date()
 
+                # Length-guard for the Case's varchar columns. A single over-long
+                # crew-typed value (live incident: a 14-digit "SA ID" vs the
+                # 13-char column) used to kill the INSERT with
+                # StringDataRightTruncationError and fail the WHOLE PRF forever.
+                # Rule: never silently truncate (a trimmed ID/member number looks
+                # valid but is wrong) — drop the field from the Case, keep the
+                # raw value in form_data, and record a review flag so staff see
+                # exactly what was dropped. The PRF must always arrive.
+                dropped: list[str] = []
+
+                def _fit(field: str, value, maxlen: int):
+                    v = str(value).strip() if value is not None else ""
+                    if not v:
+                        return None
+                    if len(v) > maxlen:
+                        dropped.append(f"{field} ({len(v)} chars > {maxlen})")
+                        return None
+                    return v
+
                 case = Case(
-                    patient_name=full_name,
-                    patient_id_number=(fd.get("patient_id_number") or None),
+                    patient_name=full_name[:255],
+                    patient_id_number=_fit("patient_id_number", fd.get("patient_id_number"), 13),
                     patient_dob=_parse_date(fd.get("patient_dob")),
-                    medical_scheme_name=(fd.get("medical_scheme") or None),
-                    scheme_member_number=(fd.get("medical_aid_number") or None),
+                    medical_scheme_name=_fit("medical_scheme", fd.get("medical_scheme"), 255),
+                    scheme_member_number=_fit("medical_aid_number", fd.get("medical_aid_number"), 50),
                     incident_date=incident_date,
                     incident_location=(fd.get("incident_location") or None),
-                    preauth_number=(fd.get("preauth_number") or None),
-                    dependant_code=(fd.get("dependent_number") or None),
+                    preauth_number=_fit("preauth_number", fd.get("preauth_number"), 50),
+                    dependant_code=_fit("dependent_number", fd.get("dependent_number"), 5),
                     dispatch_type=dispatch_type,
-                    referring_doctor_pr=(fd.get("referring_doctor") or None),
+                    referring_doctor_pr=_fit("referring_doctor", fd.get("referring_doctor"), 20),
                 )
+                if dropped:
+                    logger.warning(
+                        "PRF #%d: dropped invalid-length field(s) from Case: %s",
+                        prf.prf_number, "; ".join(dropped),
+                    )
+                    prf.review_flags = (prf.review_flags or []) + [{
+                        "type": "invalid_field_length",
+                        "timestamp": now.isoformat(),
+                        "fields": dropped,
+                        "note": "Value(s) exceeded the storage limit and were left off the "
+                                "case record. The original entry is preserved on the PRF form "
+                                "data — verify and correct with the crew if needed.",
+                    }]
                 db.add(case)
                 await db.flush()
 
