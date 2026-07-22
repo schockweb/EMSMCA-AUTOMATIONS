@@ -711,10 +711,14 @@ export default function PRFView() {
     .filter(d => d.file && typeof d.file === 'object' && typeof d.file.data_url === 'string' && d.file.data_url);
   const isImageDoc = (f: any) => typeof f?.data_url === 'string' && f.data_url.startsWith('data:image/');
 
+  // Depart + Arrival At Facility don't apply when the patient was never
+  // transported: a Declaration of Death (deceased at scene) or an RHT
+  // (Refused Hospital Transport) — so those two rows are omitted for both.
+  const noTransport = fd.call_type === 'DOD' || fd.call_type === 'RHT';
   const timeRows = [
     { label: 'Call Disp',           t: 'time_dispatched',     k: 'km_dispatched'     },
     { label: 'Scene',               t: 'time_on_scene',       k: 'km_on_scene'       },
-    ...(fd.call_type !== 'DOD' ? [
+    ...(!noTransport ? [
       { label: 'Depart', t: 'time_depart_scene', k: 'km_depart_scene' },
       { label: 'Arrival At Facility', t: 'time_at_destination', k: 'km_at_destination' }
     ] : []),
