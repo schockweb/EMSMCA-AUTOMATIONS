@@ -1288,32 +1288,33 @@ export default function PRFView() {
           display: 'grid', gridTemplateColumns: (fd.call_type === 'DOD' && fd.med_aid_dec_death) ? '1fr 1fr' : '1.64fr 1.36fr 1.8fr 1.6fr',
           borderTop: `2px solid ${LN}`, flex: 1, minHeight: 0,
         }}>
-          {/* Patient Information — the full standard row set ALWAYS renders,
-              with blanks printing as "—", so the section reads like the paper
-              form and looks identical across call types (hiding blank rows
-              made Courtesy/Resus PRFs look like data hadn't pulled through).
-              Only the legacy postal-address keys — which the digital form no
-              longer captures — stay present-only. */}
+          {/* Patient Information — only fields the crew actually captured are
+              shown; blank rows are omitted (no column of "—"). DOB prints
+              dd/mm/yyyy. */}
           {!(fd.call_type === 'DOD' && fd.med_aid_dec_death) && (
           <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
             <SectionHead label="Patient Information" />
-            <FieldRow label="Gender"       value={fd.gender} />
-            <FieldRow label="Name"         value={fd.patient_name} />
-            <FieldRow label="Surname"      value={fd.patient_surname} />
-            <FieldRow label="ID No"        value={fd.patient_id_number} />
-            <FieldRow label="Passport"     value={fd.patient_passport_number} />
-            <FieldRow label="Age"          value={fd.age} />
-            <FieldRow label="DOB"          value={fmtDateValue(fd.patient_dob)} />
-            <FieldRow label="Res. Address" value={fd.patient_address} />
-            <FieldRow label="Res. Suburb"  value={fd.patient_suburb} />
-            <FieldRow label="Res. Code"    value={fd.patient_postal_code} />
-            {!isBlank(fd.patient_postal_address)      && <FieldRow label="Postal Add"    value={fd.patient_postal_address} />}
-            {!isBlank(fd.patient_postal_suburb)       && <FieldRow label="Postal Suburb" value={fd.patient_postal_suburb} />}
-            {!isBlank(fd.patient_postal_address_code) && <FieldRow label="Postal Code"   value={fd.patient_postal_address_code} />}
-            <FieldRow label="Tel (H)"      value={fd.patient_phone_home} />
-            <FieldRow label="Tel (W)"      value={fd.patient_phone_work} />
-            <FieldRow label="Cell"         value={fd.patient_phone_cell} />
-            <FieldRow label="Accompanying" value={fd.accompanying_persons_count} />
+            {(([
+              ['Gender',        fd.gender],
+              ['Name',          fd.patient_name],
+              ['Surname',       fd.patient_surname],
+              ['ID No',         fd.patient_id_number],
+              ['Passport',      fd.patient_passport_number],
+              ['Age',           fd.age],
+              ['DOB',           fmtDateValue(fd.patient_dob)],
+              ['Res. Address',  fd.patient_address],
+              ['Res. Suburb',   fd.patient_suburb],
+              ['Res. Code',     fd.patient_postal_code],
+              ['Postal Add',    fd.patient_postal_address],
+              ['Postal Suburb', fd.patient_postal_suburb],
+              ['Postal Code',   fd.patient_postal_address_code],
+              ['Tel (H)',       fd.patient_phone_home],
+              ['Tel (W)',       fd.patient_phone_work],
+              ['Cell',          fd.patient_phone_cell],
+              ['Accompanying',  fd.accompanying_persons_count],
+            ] as Array<[string, any]>)
+              .filter(([, v]) => !isBlank(v)))
+              .map(([label, v]) => <FieldRow key={label} label={label} value={v} />)}
             {fd.call_type !== 'DOD' && (
               <>
                 <SectionHead label="Mechanism" />
