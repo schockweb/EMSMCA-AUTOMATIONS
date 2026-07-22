@@ -34,10 +34,26 @@ export async function startSync() {
         if (entry.action === 'save') {
           await axios.patch(`/api/digital-prf/${prfId}`, entry.payload, { headers, timeout: 10000 });
         } else if (entry.action === 'submit') {
-          // Save first, then submit
+          // Save first, then submit. The pre-submit save can legitimately fail
+          // with 423 Locked when the PRF is ALREADY submitted/processed on the
+          // server — e.g. a prior attempt's submit landed but markSynced never
+          // ran (lost response / app closed), or the crew tapped Retry. A
+          // submitted PRF is no longer an editable draft, so the save is
+          // rejected. That is NOT a real failure: the work is already on the
+          // server. Swallow the 423 and fall through to the idempotent submit,
+          // which returns "processed"/"submitted" and lets us clear the outbox
+          // entry. Without this the save throw stranded the entry as
+          // "pending upload" forever with no way to clear it (reported:
+          // "1 PRF pending upload, clicking does nothing").
           if (entry.payload) {
-            await axios.patch(`/api/digital-prf/${prfId}`, entry.payload, { headers, timeout: 10000 });
+            try {
+              await axios.patch(`/api/digital-prf/${prfId}`, entry.payload, { headers, timeout: 10000 });
+            } catch (patchErr: any) {
+              if (patchErr?.response?.status !== 423) throw patchErr; // real save failure — retry later
+            }
           }
+          // Idempotent: returns 200 with status processed/submitted even on
+          // replay, so an already-submitted PRF clears cleanly here.
           await axios.post(`/api/digital-prf/${prfId}/submit`, null, { headers, timeout: 15000 });
         }
         await markSynced(entry.id);

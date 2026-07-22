@@ -52,6 +52,8 @@ function OfflineSyncBar() {
   const [pending, setPending] = useState(0);
   const [dead, setDead] = useState(0);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState('');
 
   const refresh = async () => {
     try {
@@ -82,12 +84,31 @@ function OfflineSyncBar() {
   if (pending === 0 && dead === 0 && isOnline) return null;
 
   const handleRetry = async () => {
+    if (busy) return;
+    setBusy(true);
+    setNote('');
     try {
       const db = await import('../../services/offlineDb');
       await db.retryDead();  // give any gave-up ('dead') PRFs another attempt
       const { startSync } = await import('../../services/syncEngine');
       await startSync();
-    } catch { /* silent */ }
+      await refresh();
+      // Surface the outcome so the crew isn't left tapping a button that
+      // "does nothing". If anything is still queued, show WHY (the last upload
+      // error) instead of failing silently.
+      const remaining = await db.getAll();
+      const stuck = remaining.filter(e => ['pending', 'syncing', 'failed', 'dead'].includes(e.status));
+      if (stuck.length === 0) {
+        setNote('✓ Uploaded — all synced');
+      } else {
+        const err = stuck.find(e => e.lastError)?.lastError;
+        setNote(err ? `Still not uploaded: ${err}` : 'Still uploading — please try again in a moment');
+      }
+    } catch {
+      setNote('Could not sync right now — check your connection and try again');
+    } finally {
+      setBusy(false);
+    }
   };
 
   // 'dead' is the alarm state — a PRF exhausted its retries and has NOT reached
@@ -128,18 +149,25 @@ function OfflineSyncBar() {
               {pending} item{pending > 1 ? 's' : ''} will sync when you're back online
             </div>
           )}
+          {note && (
+            <div style={{ fontSize: '0.72rem', color: note.startsWith('✓') ? '#166534' : '#6b7280', marginTop: 2 }}>
+              {note}
+            </div>
+          )}
         </div>
       </div>
       {showButton && (
         <button
           onClick={handleRetry}
+          disabled={busy}
           style={{
             padding: '6px 14px', borderRadius: 8, fontSize: '0.75rem', fontWeight: 700,
             border: `1px solid ${border}`, background: '#fff', color: textColor,
-            cursor: 'pointer', whiteSpace: 'nowrap', transition: 'all 0.15s',
+            cursor: busy ? 'wait' : 'pointer', whiteSpace: 'nowrap', transition: 'all 0.15s',
+            opacity: busy ? 0.6 : 1,
           }}
         >
-          {isDead ? 'Retry upload' : 'Sync now'}
+          {busy ? 'Syncing…' : isDead ? 'Retry upload' : 'Sync now'}
         </button>
       )}
     </div>
