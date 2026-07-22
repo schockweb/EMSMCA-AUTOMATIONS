@@ -964,6 +964,43 @@ const correctDictation = (text: string, fk?: string): string => {
 const IS_SAMSUNG_INTERNET =
   typeof navigator !== 'undefined' && /SamsungBrowser/i.test(navigator.userAgent || '');
 
+// ── Mic-failure toast ──────────────────────────────────────────────────────
+// When the speech service fails, it fails SILENTLY (error event + onend, no
+// result) and the respawn loop just churned — the crew saw a live mic button
+// that typed nothing ("voice doesn't work"). This transient floating pill
+// names the actual failure so it's fixable on the spot (permission, network,
+// mic in use). Plain DOM, module-level: no React re-render mid-hold, and
+// un-exported per the Fast-Refresh rule for non-component values.
+let voiceToastEl: HTMLDivElement | null = null;
+let voiceToastTimer = 0;
+const showVoiceToast = (msg: string) => {
+  try {
+    if (!voiceToastEl || !document.body.contains(voiceToastEl)) {
+      voiceToastEl = document.createElement('div');
+      Object.assign(voiceToastEl.style, {
+        position: 'fixed', left: '50%', bottom: '96px', transform: 'translateX(-50%)',
+        zIndex: '10000', background: '#0f172a', color: '#ffffff',
+        padding: '10px 16px', borderRadius: '999px', fontSize: '0.78rem',
+        fontWeight: '700', boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
+        maxWidth: '86vw', textAlign: 'center', pointerEvents: 'none',
+      });
+      document.body.appendChild(voiceToastEl);
+    }
+    voiceToastEl.textContent = msg;
+    voiceToastEl.style.display = 'block';
+    window.clearTimeout(voiceToastTimer);
+    voiceToastTimer = window.setTimeout(() => {
+      if (voiceToastEl) voiceToastEl.style.display = 'none';
+    }, 4500);
+  } catch { /* never let a toast break dictation */ }
+};
+const VOICE_ERROR_MSG: Record<string, string> = {
+  'not-allowed': 'Microphone blocked — allow the microphone for this site in your browser settings',
+  'service-not-allowed': 'Speech service blocked on this device — check the browser microphone settings',
+  'audio-capture': 'Microphone unavailable — close other apps that may be using it',
+  'network': 'Speech service unreachable — check the internet connection',
+};
+
 // Word-level overlap between the committed text's tail and a segment's head —
 // the same comparison mergeDictation uses to dedup cumulative re-emissions.
 const overlapLen = (base: string, next: string): number => {
@@ -1094,6 +1131,9 @@ const Inp = ({ fk, type = 'text', onBlur, noMic }: { fk: string; ph?: string; ty
   const [recording, setRecording] = useState(false);
   const recogRef = useRef<any>(null);
   const heldRef = useRef(false);   // true while the mic button is physically held
+  const gotResultRef = useRef(false);     // this session produced any transcript
+  const emptySessionsRef = useRef(0);     // consecutive sessions with no result
+  const lastErrorRef = useRef<string | null>(null);  // last engine error code
   const fdRef = useRef(fd);
   fdRef.current = fd;
   const dictRef = useRef<DictationState>(newDictationState(''));
@@ -1120,6 +1160,9 @@ const Inp = ({ fk, type = 'text', onBlur, noMic }: { fk: string; ph?: string; ty
     // active/finalising, so this start() never throws and silently no-ops.
     try { activeRecognition?.stop?.(); } catch { /* ignore */ }
     dictRef.current = newDictationState(fdRef.current[fk] || '');
+    gotResultRef.current = false;
+    emptySessionsRef.current = 0;
+    lastErrorRef.current = null;
     // Spawn a recogniser. Samsung Internet / Android Chrome fire `onend` on the
     // first pause even with continuous=true, which used to kill dictation
     // mid-hold. While the button is still held we RE-SPAWN so the mic keeps
@@ -1127,6 +1170,7 @@ const Inp = ({ fk, type = 'text', onBlur, noMic }: { fk: string; ph?: string; ty
     // committed text carries across sessions.
     let busyRetries = 0;
     const spawn = () => {
+      gotResultRef.current = false;   // per-session: did THIS session transcribe?
       const recog = new SpeechRecognitionAPI();
       recog.lang = 'en-ZA';
       recog.continuous = true;
@@ -1141,6 +1185,8 @@ const Inp = ({ fk, type = 'text', onBlur, noMic }: { fk: string; ph?: string; ty
         // a late result from a stopped recogniser) — only the current session
         // writes to the field, so a superseded one can't corrupt the text.
         if (recogRef.current !== recog) return;
+        gotResultRef.current = true;
+        emptySessionsRef.current = 0;
         sf(fk, applyDictation(e, dictRef.current, fk));
       };
       recog.onend = () => {
@@ -1158,9 +1204,25 @@ const Inp = ({ fk, type = 'text', onBlur, noMic }: { fk: string; ph?: string; ty
           // common 1-final case (1 < 1 is false) — the stale count then
           // silently dropped the new session's first final, so on Samsung
           // every pause made the next utterance appear and then vanish.
-          dictRef.current.finalCount = 0;
-          startWithRetry();
-          return;
+          //
+          // Fruitless-session cap: when the speech service is broken (mic
+          // permission, network, service dead) every session ends instantly
+          // with an error and NO result — the respawn loop then churned
+          // silently forever while the crew saw a live mic that typed
+          // nothing. After 4 consecutive no-result sessions, stop and NAME
+          // the failure so it can be fixed on the spot.
+          if (!gotResultRef.current && ++emptySessionsRef.current >= 4) {
+            heldRef.current = false;
+            showVoiceToast(
+              VOICE_ERROR_MSG[lastErrorRef.current || ''] ||
+              'Voice input is not responding on this device — release and try again',
+            );
+            // fall through to the cleanup below
+          } else {
+            dictRef.current.finalCount = 0;
+            startWithRetry();
+            return;
+          }
         }
         setRecording(false); recogRef.current = null;
         // Clear the global dictation flag only if WE are still the active
@@ -1170,11 +1232,16 @@ const Inp = ({ fk, type = 'text', onBlur, noMic }: { fk: string; ph?: string; ty
         if (activeRecognition === recog) { dictationActive = false; activeRecognition = null; }
       };
       recog.onerror = (ev: any) => {
-        // Permission / service errors are fatal — stop for good. Transient
-        // errors (no-speech, network) fall through to onend, which respawns
-        // while the button is still held.
+        // Remember the engine's reason — the fruitless-session cap reports it.
+        if (ev?.error && ev.error !== 'no-speech' && ev.error !== 'aborted') {
+          lastErrorRef.current = ev.error;
+        }
+        // Permission / service errors are fatal — stop for good and say why.
+        // Transient errors (no-speech, network) fall through to onend, which
+        // respawns while the button is still held.
         if (ev?.error === 'not-allowed' || ev?.error === 'service-not-allowed') {
           heldRef.current = false;
+          showVoiceToast(VOICE_ERROR_MSG[ev.error]);
         }
       };
       recogRef.current = recog;
@@ -2291,6 +2358,9 @@ const VoiceTxt = ({ fk, rows = 3 }: { fk: string; ph?: string; rows?: number }) 
   const [recording, setRecording] = useState(false);
   const recogRef = useRef<any>(null);
   const heldRef = useRef(false);   // true while the mic button is physically held
+  const gotResultRef = useRef(false);     // this session produced any transcript
+  const emptySessionsRef = useRef(0);     // consecutive sessions with no result
+  const lastErrorRef = useRef<string | null>(null);  // last engine error code
   const fdRef = useRef(fd);
   fdRef.current = fd;
   const supported = !!SpeechRecognitionAPI;
@@ -2336,12 +2406,16 @@ const VoiceTxt = ({ fk, rows = 3 }: { fk: string; ph?: string; rows?: number }) 
     // dictation appends on top — any manual edits made before tapping the mic
     // survive the session.
     dictRef.current = newDictationState(fdRef.current[fk] || '');
+    gotResultRef.current = false;
+    emptySessionsRef.current = 0;
+    lastErrorRef.current = null;
     // Re-spawn on `onend` while the button is held: Samsung Internet / Android
     // Chrome end the session on the first pause even with continuous=true,
     // which used to kill dictation mid-hold. Re-baseline from the field so the
     // committed text carries across sessions.
     let busyRetries = 0;
     const spawn = () => {
+      gotResultRef.current = false;   // per-session: did THIS session transcribe?
       const recog = new SpeechRecognitionAPI();
       recog.lang = 'en-ZA';
       recog.continuous = true;
@@ -2356,6 +2430,8 @@ const VoiceTxt = ({ fk, rows = 3 }: { fk: string; ph?: string; rows?: number }) 
         // a late result from a stopped recogniser) — only the current session
         // writes to the field, so a superseded one can't corrupt the text.
         if (recogRef.current !== recog) return;
+        gotResultRef.current = true;
+        emptySessionsRef.current = 0;
         sf(fk, applyDictation(e, dictRef.current, fk));
       };
       recog.onend = () => {
@@ -2373,9 +2449,25 @@ const VoiceTxt = ({ fk, rows = 3 }: { fk: string; ph?: string; rows?: number }) 
           // common 1-final case (1 < 1 is false) — the stale count then
           // silently dropped the new session's first final, so on Samsung
           // every pause made the next utterance appear and then vanish.
-          dictRef.current.finalCount = 0;
-          startWithRetry();
-          return;
+          //
+          // Fruitless-session cap: when the speech service is broken (mic
+          // permission, network, service dead) every session ends instantly
+          // with an error and NO result — the respawn loop then churned
+          // silently forever while the crew saw a live mic that typed
+          // nothing. After 4 consecutive no-result sessions, stop and NAME
+          // the failure so it can be fixed on the spot.
+          if (!gotResultRef.current && ++emptySessionsRef.current >= 4) {
+            heldRef.current = false;
+            showVoiceToast(
+              VOICE_ERROR_MSG[lastErrorRef.current || ''] ||
+              'Voice input is not responding on this device — release and try again',
+            );
+            // fall through to the cleanup below
+          } else {
+            dictRef.current.finalCount = 0;
+            startWithRetry();
+            return;
+          }
         }
         setRecording(false); recogRef.current = null;
         // Clear the global dictation flag only if WE are still the active
@@ -2385,8 +2477,13 @@ const VoiceTxt = ({ fk, rows = 3 }: { fk: string; ph?: string; rows?: number }) 
         if (activeRecognition === recog) { dictationActive = false; activeRecognition = null; }
       };
       recog.onerror = (ev: any) => {
+        // Remember the engine's reason — the fruitless-session cap reports it.
+        if (ev?.error && ev.error !== 'no-speech' && ev.error !== 'aborted') {
+          lastErrorRef.current = ev.error;
+        }
         if (ev?.error === 'not-allowed' || ev?.error === 'service-not-allowed') {
-          heldRef.current = false;   // fatal — don't respawn
+          heldRef.current = false;   // fatal — don't respawn, and say why
+          showVoiceToast(VOICE_ERROR_MSG[ev.error]);
         }
       };
       recogRef.current = recog;
