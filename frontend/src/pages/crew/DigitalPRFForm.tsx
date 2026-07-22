@@ -906,7 +906,43 @@ const mergeDictation = (base: string, next: string): string => {
   return addition ? b + ' ' + addition : b;
 };
 
-const applyDictation = (e: any, st: DictationState): string => {
+// ── Context-aware homophone corrections ───────────────────────────────────
+// The OS speech engine "smart-formats" ambiguous words as digits, so spoken
+// "patient ate at 5" arrives as "patient 8 at 5". Nothing in the Web Speech
+// API lets us bias its vocabulary, so we repair the transcript instead.
+// Every rule is CONTEXT-GATED so genuine clinical numbers are never touched
+// ("GCS 8 at scene", "gave 2 puffs", "4 mg morphine" all stay as digits):
+// a digit is only rewritten when the words around it make the homophone the
+// only sensible reading. Rules run on the OUTPUT string only — the raw
+// committed transcript is preserved so overlap-dedup keeps matching the
+// engine's cumulative re-emissions. Extend the lists as crews report more.
+const DICTATION_FIXES: Array<[RegExp, string]> = [
+  // "8" → "ate": an eater before it AND a meal/time word after it.
+  [/\b(patient|pt|he|she|they|the patient|resident|child|baby|mom|mother|father|wife|husband|family says he|family says she)\s+8\s+(at|around|about|approximately|breakfast|lunch|dinner|supper|earlier|last|this|nothing|some|food|porridge|pap)\b/gi, '$1 ate $2'],
+  // "last ate at/around ..." — gated so "last 8 hours" is left alone.
+  [/\blast\s+8\s+(at|around|about|approximately|this|yesterday|earlier)\b/gi, 'last ate $1'],
+  // "2" → "to" before articles / pronouns ("handed 2 the nurse").
+  [/\b2\s+(the|him|her|them|a|an)\b/gi, 'to $1'],
+  // "4" → "for" before articles ("treated 4 the pain").
+  [/\b4\s+(the|a|an)\b/gi, 'for $1'],
+];
+// Meal-history fields get one extra, more assertive rule: a phrase STARTING
+// with "8 at/around <time>" can only mean "ate ..." there ("ate at 5"). Not
+// applied globally — in clinical fields a leading 8 is usually a real vital.
+const MEAL_FIELDS = /^(last_meal|events_hpi|past_medical_history|findings_on_arrival)$/;
+const MEAL_FIELD_FIXES: Array<[RegExp, string]> = [
+  [/(^|[.,]\s*)8\s+(at|around|about|approximately|this|last|nothing)\b/gi, '$1ate $2'],
+];
+const correctDictation = (text: string, fk?: string): string => {
+  let out = text;
+  for (const [re, sub] of DICTATION_FIXES) out = out.replace(re, sub);
+  if (fk && MEAL_FIELDS.test(fk)) {
+    for (const [re, sub] of MEAL_FIELD_FIXES) out = out.replace(re, sub);
+  }
+  return out;
+};
+
+const applyDictation = (e: any, st: DictationState, fk?: string): string => {
   // Session restarted internally (results list shrank) — realign the
   // high-water mark so the new session's finals still commit.
   if (e.results.length < st.finalCount) st.finalCount = 0;
@@ -925,8 +961,10 @@ const applyDictation = (e: any, st: DictationState): string => {
     }
   }
   // Interim words layer on transiently (never persisted into `committed`),
-  // deduped against the committed text the same way.
-  return mergeDictation(st.committed, interim);
+  // deduped against the committed text the same way. Homophone corrections
+  // apply to the returned string only — `committed` stays raw so dedup
+  // still matches the engine's re-emissions verbatim.
+  return correctDictation(mergeDictation(st.committed, interim), fk);
 };
 
 // ── Global "fields expand downwards" rule ─────────────────────────────────
@@ -1031,7 +1069,7 @@ const Inp = ({ fk, type = 'text', onBlur, noMic }: { fk: string; ph?: string; ty
         // a late result from a stopped recogniser) — only the current session
         // writes to the field, so a superseded one can't corrupt the text.
         if (recogRef.current !== recog) return;
-        sf(fk, applyDictation(e, dictRef.current));
+        sf(fk, applyDictation(e, dictRef.current, fk));
       };
       recog.onend = () => {
         if (heldRef.current) {
@@ -2231,7 +2269,7 @@ const VoiceTxt = ({ fk, rows = 3 }: { fk: string; ph?: string; rows?: number }) 
         // a late result from a stopped recogniser) — only the current session
         // writes to the field, so a superseded one can't corrupt the text.
         if (recogRef.current !== recog) return;
-        sf(fk, applyDictation(e, dictRef.current));
+        sf(fk, applyDictation(e, dictRef.current, fk));
       };
       recog.onend = () => {
         if (heldRef.current) {
