@@ -10158,7 +10158,7 @@ export default function DigitalPRFForm() {
         })()}
 
         {medReasonPromptOpen && (
-          <Modal open={true} onClose={() => { setMedReasonPromptOpen(false); setTempMedReason(null); }}>
+          <Modal open={true} onClose={() => { setMedReasonPromptOpen(false); setTempMedReason(null); }} centerOnMobile>
             <div style={{ padding: '0 4px 0px', borderBottom: `1px solid ${S100}`, marginBottom: 14 }}>
               <div style={{ fontSize: '1.1rem', fontWeight: 900, color: S900, letterSpacing: '-0.01em' }}>
                 Reason for Medication
@@ -10207,8 +10207,10 @@ export default function DigitalPRFForm() {
         )}
 
         {/* ── IV Therapy Reason Modal ── */}
+        {/* centerOnMobile: buttons-only picker (no keyboard field), so centre it
+            vertically instead of anchoring to the top — easier thumb reach. */}
         {ivReasonModalOpen && (
-          <Modal open={true} onClose={() => setIvReasonModalOpen(false)}>
+          <Modal open={true} onClose={() => setIvReasonModalOpen(false)} centerOnMobile>
             <div style={{ padding: '0 4px 0px', borderBottom: `1px solid ${S100}`, marginBottom: 14 }}>
               <div style={{ fontSize: '1.1rem', fontWeight: 900, color: S900, letterSpacing: '-0.01em' }}>
                 Reason for IV Therapy
