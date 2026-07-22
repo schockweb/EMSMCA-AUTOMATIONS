@@ -38,6 +38,14 @@ function fmtDate(iso: string | null | undefined): string {
   const d = new Date(iso);
   return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
 }
+// Date-input values ("1982-05-19") print SA-style as 19/05/1982. String-split
+// (not `new Date`) so the day can never shift across timezones; anything that
+// isn't a plain YYYY-MM-DD passes through untouched.
+function fmtDateValue(v: unknown): any {
+  if (typeof v !== 'string') return v;
+  const m = v.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : v;
+}
 
 // ── Empty-value helpers ──────────────────────────────────────────────
 function isBlank(v: unknown): boolean {
@@ -1249,31 +1257,32 @@ export default function PRFView() {
           display: 'grid', gridTemplateColumns: (fd.call_type === 'DOD' && fd.med_aid_dec_death) ? '1fr 1fr' : '1.64fr 1.36fr 1.8fr 1.6fr',
           borderTop: `2px solid ${LN}`, flex: 1, minHeight: 0,
         }}>
-          {/* Patient Information — all populated fields rendered (16 max) */}
+          {/* Patient Information — the full standard row set ALWAYS renders,
+              with blanks printing as "—", so the section reads like the paper
+              form and looks identical across call types (hiding blank rows
+              made Courtesy/Resus PRFs look like data hadn't pulled through).
+              Only the legacy postal-address keys — which the digital form no
+              longer captures — stay present-only. */}
           {!(fd.call_type === 'DOD' && fd.med_aid_dec_death) && (
           <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
             <SectionHead label="Patient Information" />
-            {(([
-              ['Gender',        fd.gender],
-              ['Name',          fd.patient_name],
-              ['Surname',       fd.patient_surname],
-              ['ID No',         fd.patient_id_number],
-              ['Passport',      fd.patient_passport_number],
-              ['Age',           fd.age],
-              ['DOB',           fd.patient_dob],
-              ['Res. Address',  fd.patient_address],
-              ['Res. Suburb',   fd.patient_suburb],
-              ['Res. Code',     fd.patient_postal_code],
-              ['Postal Add',    fd.patient_postal_address],
-              ['Postal Suburb', fd.patient_postal_suburb],
-              ['Postal Code',   fd.patient_postal_address_code],
-              ['Tel (H)',       fd.patient_phone_home],
-              ['Tel (W)',       fd.patient_phone_work],
-              ['Cell',          fd.patient_phone_cell],
-              ['Accompanying',  fd.accompanying_persons_count],
-            ] as Array<[string, any]>)
-              .filter(([, v]) => !isBlank(v)))
-              .map(([label, v]) => <FieldRow key={label} label={label} value={v} />)}
+            <FieldRow label="Gender"       value={fd.gender} />
+            <FieldRow label="Name"         value={fd.patient_name} />
+            <FieldRow label="Surname"      value={fd.patient_surname} />
+            <FieldRow label="ID No"        value={fd.patient_id_number} />
+            <FieldRow label="Passport"     value={fd.patient_passport_number} />
+            <FieldRow label="Age"          value={fd.age} />
+            <FieldRow label="DOB"          value={fmtDateValue(fd.patient_dob)} />
+            <FieldRow label="Res. Address" value={fd.patient_address} />
+            <FieldRow label="Res. Suburb"  value={fd.patient_suburb} />
+            <FieldRow label="Res. Code"    value={fd.patient_postal_code} />
+            {!isBlank(fd.patient_postal_address)      && <FieldRow label="Postal Add"    value={fd.patient_postal_address} />}
+            {!isBlank(fd.patient_postal_suburb)       && <FieldRow label="Postal Suburb" value={fd.patient_postal_suburb} />}
+            {!isBlank(fd.patient_postal_address_code) && <FieldRow label="Postal Code"   value={fd.patient_postal_address_code} />}
+            <FieldRow label="Tel (H)"      value={fd.patient_phone_home} />
+            <FieldRow label="Tel (W)"      value={fd.patient_phone_work} />
+            <FieldRow label="Cell"         value={fd.patient_phone_cell} />
+            <FieldRow label="Accompanying" value={fd.accompanying_persons_count} />
             {fd.call_type !== 'DOD' && (
               <>
                 <SectionHead label="Mechanism" />
@@ -1288,8 +1297,15 @@ export default function PRFView() {
                   <FieldRow label="Detail" value={fd.mechanism_other} valueMin={24} />
                 )}
                 
-                <SectionHead label="Patient Priority" />
-                <FieldRow label="Priority" value={fd.priority || '—'} />
+                {/* Resus never captures a triage priority (the form hides the
+                    picker — the crew is already running the resus), so the row
+                    is omitted rather than printing a permanent "—". */}
+                {fd.call_type !== 'RESUS' && (
+                  <>
+                    <SectionHead label="Patient Priority" />
+                    <FieldRow label="Priority" value={fd.priority || '—'} />
+                  </>
+                )}
               </>
             )}
             <FillLines />
@@ -1319,22 +1335,20 @@ export default function PRFView() {
               </div>
             ) : (
               <>
-                {(([
-                  ['Gender',   fd.debtor_gender],
-                  ['Name',     fd.debtor_name],
-                  ['Surname',  fd.debtor_surname],
-                  ['ID No',    fd.debtor_id_number],
-                  ['Passport', fd.debtor_passport_number],
-                  ['Age',      fd.debtor_age],
-                  ['DOB',      fd.debtor_dob],
-                  ['Address',  fd.debtor_address],
-                  ['Suburb',   fd.debtor_suburb],
-                  ['Code',     fd.debtor_postal_code],
-                  ['Tel (H)',  fd.debtor_phone_home],
-                  ['Cell',     fd.debtor_phone_cell],
-                ] as Array<[string, any]>)
-                  .filter(([, v]) => !isBlank(v)))
-                  .map(([label, v]) => <FieldRow key={label} label={label} value={v} />)}
+                {/* Full standard debtor row set — blanks print as "—", matching
+                    the always-render Patient Information policy above. */}
+                <FieldRow label="Gender"   value={fd.debtor_gender} />
+                <FieldRow label="Name"     value={fd.debtor_name} />
+                <FieldRow label="Surname"  value={fd.debtor_surname} />
+                <FieldRow label="ID No"    value={fd.debtor_id_number} />
+                <FieldRow label="Passport" value={fd.debtor_passport_number} />
+                <FieldRow label="Age"      value={fd.debtor_age} />
+                <FieldRow label="DOB"      value={fmtDateValue(fd.debtor_dob)} />
+                <FieldRow label="Address"  value={fd.debtor_address} />
+                <FieldRow label="Suburb"   value={fd.debtor_suburb} />
+                <FieldRow label="Code"     value={fd.debtor_postal_code} />
+                <FieldRow label="Tel (H)"  value={fd.debtor_phone_home} />
+                <FieldRow label="Cell"     value={fd.debtor_phone_cell} />
                 {fd.call_type === 'DOD'
                   ? <div style={{ flex: 1, borderTop: `1px solid ${LN}` }} />
                   : <FillLines />}
