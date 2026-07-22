@@ -5339,10 +5339,23 @@ export default function DigitalPRFForm() {
   };
 
   // ── Computed smart values ─────────────────────────────────────────────────
+  // Debounced copy of `vitals` used ONLY for the critical-vitals banner.
+  // Evaluating on every keystroke made the banner flap: a half-typed HR ("1",
+  // then "12" on the way to "120") reads as severe bradycardia (<40), so the
+  // banner appeared then vanished per digit, shifting the whole phase layout
+  // under the crew's finger — the reported "HR field page jump". Lagging it
+  // ~700ms means the banner only re-evaluates once typing settles, so partial
+  // values never trigger a transient alert or a layout shift.
+  const [debouncedVitals, setDebouncedVitals] = useState(vitals);
+  useEffect(() => {
+    const h = window.setTimeout(() => setDebouncedVitals(vitals), 700);
+    return () => window.clearTimeout(h);
+  }, [vitals]);
+
   const criticalAlerts = useMemo(() => {
     const alerts: string[] = [];
-    if (!vitals.length) return alerts;
-    const v = vitals[vitals.length - 1];
+    if (!debouncedVitals.length) return alerts;
+    const v = debouncedVitals[debouncedVitals.length - 1];
     const spo2 = parseFloat(v.spo2), hr = parseFloat(v.hr);
     if (!isNaN(spo2) && spo2 < 90) alerts.push(`SpO₂ ${spo2}% — critical hypoxia`);
     if (!isNaN(hr) && hr > 180) alerts.push(`HR ${hr} bpm — severe tachycardia`);
@@ -5351,7 +5364,7 @@ export default function DigitalPRFForm() {
     const gcs = (+v.gcs_e || 0) + (+v.gcs_v || 0) + (+v.gcs_m || 0);
     if (gcs > 0 && gcs < 9) alerts.push(`GCS ${gcs}/15 — severe neurological compromise`);
     return alerts;
-  }, [vitals]);
+  }, [debouncedVitals]);
 
   const allergyAlert = useMemo(() => {
     const a = (fd.allergies || '').trim();
