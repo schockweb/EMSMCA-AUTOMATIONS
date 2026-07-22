@@ -56,3 +56,8 @@ nginx/ssl/
 # ── Windows specials ──
 nul
 *.sql
+
+# Real-claims replay data — REAL PATIENT DATA, never commit (POPIA)
+backend/golden_claims*.csv
+backend/golden_claims*.json
+backend/golden_claims_report*
