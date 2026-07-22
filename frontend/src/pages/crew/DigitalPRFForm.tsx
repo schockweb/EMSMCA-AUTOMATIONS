@@ -1020,6 +1020,7 @@ const Inp = ({ fk, type = 'text', onBlur, noMic }: { fk: string; ph?: string; ty
     // mid-hold. While the button is still held we RE-SPAWN so the mic keeps
     // listening until the crew releases — re-baselining from the field so the
     // committed text carries across sessions.
+    let busyRetries = 0;
     const spawn = () => {
       const recog = new SpeechRecognitionAPI();
       recog.lang = 'en-ZA';
@@ -1029,7 +1030,8 @@ const Inp = ({ fk, type = 'text', onBlur, noMic }: { fk: string; ph?: string; ty
       recog.onend = () => {
         if (heldRef.current) {
           dictRef.current = newDictationState(fdRef.current[fk] || '');
-          try { spawn(); return; } catch { /* fall through to stop */ }
+          startWithRetry();
+          return;
         }
         setRecording(false); recogRef.current = null;
         dictationActive = false;
@@ -1045,18 +1047,33 @@ const Inp = ({ fk, type = 'text', onBlur, noMic }: { fk: string; ph?: string; ty
       };
       recogRef.current = recog;
       activeRecognition = recog;
-      recog.start();
+      recog.start();          // throws InvalidStateError if the engine is busy
+      busyRetries = 0;        // started cleanly — reset the backoff
     };
-    try {
-      spawn();
-      setRecording(true);
-    } catch {
-      setRecording(false);
-      recogRef.current = null;
-      heldRef.current = false;
-      dictationActive = false;
-      if (activeRecognition === recogRef.current) activeRecognition = null;
-    }
+    // Samsung's single OS speech engine releases asynchronously, so a start()
+    // that lands while a previous recogniser is still tearing down throws.
+    // Retry with a short backoff (rather than silently dying) for as long as
+    // the button is held — this is what makes switching between adjacent
+    // fields' mics reliable and keeps dictation alive across Samsung's
+    // premature onend restarts.
+    const startWithRetry = () => {
+      if (!heldRef.current) return;
+      try {
+        spawn();
+      } catch {
+        if (heldRef.current && busyRetries++ < 10) {
+          window.setTimeout(startWithRetry, 130);
+        } else {
+          setRecording(false);
+          recogRef.current = null;
+          heldRef.current = false;
+          dictationActive = false;
+          if (activeRecognition === recogRef.current) activeRecognition = null;
+        }
+      }
+    };
+    startWithRetry();
+    setRecording(true);
   };
 
   const stopVoice = () => {
@@ -2188,6 +2205,7 @@ const VoiceTxt = ({ fk, rows = 3 }: { fk: string; ph?: string; rows?: number }) 
     // Chrome end the session on the first pause even with continuous=true,
     // which used to kill dictation mid-hold. Re-baseline from the field so the
     // committed text carries across sessions.
+    let busyRetries = 0;
     const spawn = () => {
       const recog = new SpeechRecognitionAPI();
       recog.lang = 'en-ZA';
@@ -2197,7 +2215,8 @@ const VoiceTxt = ({ fk, rows = 3 }: { fk: string; ph?: string; rows?: number }) 
       recog.onend = () => {
         if (heldRef.current) {
           dictRef.current = newDictationState(fdRef.current[fk] || '');
-          try { spawn(); return; } catch { /* fall through to stop */ }
+          startWithRetry();
+          return;
         }
         setRecording(false); recogRef.current = null;
         dictationActive = false;
@@ -2210,20 +2229,35 @@ const VoiceTxt = ({ fk, rows = 3 }: { fk: string; ph?: string; rows?: number }) 
       };
       recogRef.current = recog;
       activeRecognition = recog;
-      recog.start();
+      recog.start();          // throws InvalidStateError if the engine is busy
+      busyRetries = 0;        // started cleanly — reset the backoff
     };
-    try {
-      spawn();
-      setRecording(true);
-      // NB: do NOT scrollIntoView here — starting dictation must leave the page
-      // exactly where it is. Auto-scrolling on press moved the field out from
-      // under the crew's thumb mid-hold (reported "screen scrolls into place").
-    } catch {
-      setRecording(false);
-      recogRef.current = null;
-      heldRef.current = false;
-      dictationActive = false;
-    }
+    // Samsung's single OS speech engine releases asynchronously, so a start()
+    // that lands while a previous recogniser is still tearing down throws.
+    // Retry with a short backoff (rather than silently dying) for as long as
+    // the button is held — this is what makes switching between adjacent
+    // fields' mics reliable and keeps dictation alive across Samsung's
+    // premature onend restarts.
+    const startWithRetry = () => {
+      if (!heldRef.current) return;
+      try {
+        spawn();
+      } catch {
+        if (heldRef.current && busyRetries++ < 10) {
+          window.setTimeout(startWithRetry, 130);
+        } else {
+          setRecording(false);
+          recogRef.current = null;
+          heldRef.current = false;
+          dictationActive = false;
+        }
+      }
+    };
+    // NB: do NOT scrollIntoView here — starting dictation must leave the page
+    // exactly where it is. Auto-scrolling on press moved the field out from
+    // under the crew's thumb mid-hold (reported "screen scrolls into place").
+    startWithRetry();
+    setRecording(true);
   };
 
   const stop = () => {
