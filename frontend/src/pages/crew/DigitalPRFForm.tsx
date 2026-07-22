@@ -5502,7 +5502,13 @@ export default function DigitalPRFForm() {
   const TimeRow = ({ row }: { row: typeof ALL_TIME_ROWS[0] }) => {
     const has = !!timestamps[row.timeKey];
     const geo = geos[row.timeKey];
-    const addressKey = `address_${row.timeKey}`;
+    // The On Scene arrival address IS the incident address. Bind this row's
+    // ADDRESS field directly to `incident_location` (the field the PDF renders
+    // as "Incident Add"), so the On Scene geo-locator — or an address typed
+    // into this row — is the SINGLE source of the PDF's Incident Address.
+    // Every other leg keeps its own per-row address field. This is the one and
+    // only path from the On Scene arrival to the incident address field.
+    const addressKey = row.timeKey === 'time_on_scene' ? 'incident_location' : `address_${row.timeKey}`;
     const addressVal: string = fd[addressKey] || '';
     const isIftDispatch = row.timeKey === 'time_dispatched' && ['IFT', 'IHT'].includes(fd.call_type);
     const handleMark = () => {
@@ -9021,8 +9027,10 @@ export default function DigitalPRFForm() {
                 // Also seed the per-row address field shown in the time
                 // table (one input per timestamp). If the crew already typed
                 // a manual address in that row before tapping Mark Time,
-                // don't overwrite it.
-                const rowAddressKey = `address_${timeKey}`;
+                // don't overwrite it. On Scene's row is `incident_location`
+                // itself (see TimeRow), which the target fill above already
+                // handled — so we skip it here to avoid writing a dead field.
+                const rowAddressKey = timeKey === 'time_on_scene' ? 'incident_location' : `address_${timeKey}`;
                 if (resolvedStreet && !fd[rowAddressKey]) {
                   sf(rowAddressKey, resolvedStreet);
                 }
