@@ -5659,12 +5659,24 @@ export default function DigitalPRFForm() {
     return alerts;
   }, [debouncedVitals]);
 
+  // Debounce the allergies value the same way as vitals: the Allergy banner
+  // sits directly above the Allergies input, so re-evaluating it on every
+  // keystroke / dictation commit popped the banner in mid-hold, shifted the
+  // field down under the crew's thumb ("screen snaps"), and that layout reflow
+  // cancelled the speech recogniser — words then dropped repeatedly. Settling
+  // ~700ms after input stops means the banner never flips while dictating.
+  const [debouncedAllergies, setDebouncedAllergies] = useState(fd.allergies || '');
+  useEffect(() => {
+    const h = window.setTimeout(() => setDebouncedAllergies(fd.allergies || ''), 700);
+    return () => window.clearTimeout(h);
+  }, [fd.allergies]);
+
   const allergyAlert = useMemo(() => {
-    const a = (fd.allergies || '').trim();
+    const a = (debouncedAllergies || '').trim();
     if (!a) return null;
     if (['none', 'nka', 'nil known', 'no known', 'nkda'].some(t => a.toLowerCase().includes(t))) return null;
     return a;
-  }, [fd.allergies]);
+  }, [debouncedAllergies]);
 
   // sceneSeconds / transportSeconds were derived from a per-second `now` state
   // that re-rendered the whole form. <LiveTimer> in the header now owns the
