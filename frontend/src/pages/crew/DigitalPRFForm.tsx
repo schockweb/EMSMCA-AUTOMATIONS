@@ -1679,8 +1679,7 @@ const AddrInp = ({ fk, suburbKey, codeKey, ph, containerStyle, inputStyle, label
       </div>
 
       {modalOpen && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 300, background: 'rgba(0,0,0,0.55)', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
-          <div style={{ background: W, borderRadius: '20px 20px 0 0', padding: 24, maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
+        <Modal open={true} onClose={() => setModalOpen(false)}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
               <div style={{ fontWeight: 900, fontSize: '1.05rem', color: S900 }}>Confirm Location {label ? `· ${label}` : ''}</div>
               <button type="button" onClick={() => setModalOpen(false)} style={{ background: S100, border: 'none', borderRadius: 8, padding: '6px 12px', fontSize: '0.8rem', fontWeight: 700, color: S600, cursor: 'pointer' }}>Cancel</button>
@@ -1700,7 +1699,7 @@ const AddrInp = ({ fk, suburbKey, codeKey, ph, containerStyle, inputStyle, label
             </button>
             {gpsError && <div style={{ fontSize: '0.8rem', color: REDC, marginBottom: 16, textAlign: 'center' }}>{gpsError}</div>}
 
-            <div style={{ background: '#f8fafc', borderRadius: 16, padding: '16px 14px', border: `1.5px solid ${S200}`, marginBottom: 16 }}>
+            <div style={{ background: W, borderRadius: 16, padding: '16px 14px', border: `1.5px solid ${S200}`, marginBottom: 16 }}>
               <div style={{ fontSize: '0.75rem', fontWeight: 800, color: S600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10 }}>
                 Manual Entry / Search
               </div>
@@ -1755,8 +1754,7 @@ const AddrInp = ({ fk, suburbKey, codeKey, ph, containerStyle, inputStyle, label
             >
               ✓ Confirm Address
             </button>
-          </div>
-        </div>
+          </Modal>
       )}
     </>
   );
