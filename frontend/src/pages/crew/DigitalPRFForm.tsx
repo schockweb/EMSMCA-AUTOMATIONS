@@ -665,9 +665,10 @@ function ageFromDob(dob: Date, ref: Date = new Date()): number {
 // Self-contained ticker: owns its own setInterval so the parent form does not
 // re-render every second. On mobile, parent re-renders mid-keystroke dismiss
 // the keyboard — same isolation pattern as <LiveTimer>. Renders a small
-// fixed-position pill (bottom-left) that the crew can tap to jump straight to
-// the vitals section in the Clinical phase. Footprint is intentionally small
-// so it does not occlude form fields on phone screens.
+// fixed-position pill in the TOP-RIGHT corner (below the sticky journey
+// header) with a solid colour fill — it used to sit translucent bottom-left
+// where crews reported it hiding. Tap jumps straight to the vitals section
+// in the Clinical phase. Footprint stays small so it doesn't occlude fields.
 //
 // Cadence by level of care: BLS → 20 min, ILS → 15 min, ALS → 10 min.
 // Higher acuity = tighter monitoring window. 15 min is the default fallback
@@ -690,8 +691,10 @@ function VitalsReminder({ lastVitalAt, level, onClick }: { lastVitalAt: number |
   const remaining = intervalMs - (Date.now() - lastVitalAt);
   const overdue = remaining <= 0;
   const warn = !overdue && remaining <= 2 * 60 * 1000;
-  const colour = overdue ? '#ef4444' : warn ? '#f59e0b' : '#3b6fde';
-  const bg = overdue ? '#fef2f2' : warn ? '#fffbeb' : 'rgba(91,141,239,0.10)';
+  // Solid fills (white text) so the pill reads at a glance instead of the old
+  // translucent tint that blended into the page.
+  const bg = overdue ? '#dc2626' : warn ? '#f59e0b' : '#3b6fde';
+  const border = overdue ? '#b91c1c' : warn ? '#d97706' : '#2f5ac7';
   const mins = Math.max(0, Math.ceil(Math.abs(remaining) / 60000));
   const text = overdue ? `Vitals overdue +${mins}m` : `Next vitals in ${mins}m`;
   return (
@@ -700,10 +703,11 @@ function VitalsReminder({ lastVitalAt, level, onClick }: { lastVitalAt: number |
       onClick={onClick}
       aria-label={overdue ? 'Vitals overdue — tap to record' : 'Next vitals due — tap to record'}
       style={{
-        position: 'fixed', bottom: 90, left: 14, zIndex: 100,
-        background: bg, border: `1.5px solid ${colour}`, color: colour,
-        borderRadius: 999, padding: '7px 12px', fontSize: '0.7rem', fontWeight: 800,
-        letterSpacing: '0.03em', cursor: 'pointer', boxShadow: `0 4px 16px ${colour}40`,
+        // Top-right, clear of the sticky journey header (expanded height ≈100px).
+        position: 'fixed', top: 112, right: 14, zIndex: 100,
+        background: bg, border: `1.5px solid ${border}`, color: '#ffffff',
+        borderRadius: 999, padding: '8px 14px', fontSize: '0.72rem', fontWeight: 800,
+        letterSpacing: '0.03em', cursor: 'pointer', boxShadow: `0 4px 16px ${bg}66`,
         display: 'flex', alignItems: 'center', gap: 6, maxWidth: 'calc(100vw - 90px)',
         whiteSpace: 'nowrap', fontFamily: 'inherit',
       }}
