@@ -5509,12 +5509,52 @@ export default function DigitalPRFForm() {
     setSubmit(true);
     saveToLocal();  // Persist locally before server attempt
 
-    // Force an explicit save. If one is already running, it queues a pending
-    // save. We then wait for all background networking to drain so the backend
-    // definitely has the data before we hit the /submit endpoint.
-    await doSave();
+    // Drain any in-flight / pending autosave first so it can't clobber the
+    // authoritative save below.
     while (savingInFlightRef.current || savePendingRef.current) {
       await new Promise(r => setTimeout(r, 100));
+    }
+
+    // Authoritative final save — MUST land before we lock the PRF via /submit.
+    // The crew sign-off and patient signatures were drawn seconds ago in the
+    // pre-submit modals; going through doSave()'s dedup + coalescing could skip
+    // or defer this save (a deferred save then 423s after submit and is lost),
+    // which dropped every signature captured at submit time — crew + patient
+    // saved NULL while the earlier handover signature persisted. Patch the full
+    // payload directly and await it, retrying once on a 409 version conflict.
+    {
+      let saved = false;
+      for (let attempt = 0; attempt < 2 && !saved; attempt++) {
+        const finalPayload = buildSavePayload();
+        if (baseUpdatedAtRef.current) finalPayload.client_base_updated_at = baseUpdatedAtRef.current;
+        try {
+          const resp = await api().patch(`/api/digital-prf/${prfId}`, finalPayload);
+          if (resp?.data?.updated_at) baseUpdatedAtRef.current = resp.data.updated_at;
+          lastSavedPayloadRef.current = JSON.stringify(finalPayload);
+          saved = true;
+        } catch (err: any) {
+          const code = err?.response?.status;
+          if (code === 409) {
+            // Another writer bumped the version — refresh the token and retry.
+            try {
+              const fresh = await api().get(`/api/digital-prf/${prfId}`);
+              baseUpdatedAtRef.current = fresh?.data?.updated_at || null;
+            } catch { /* ignore */ }
+            continue;
+          }
+          if (code === 423) { saved = true; break; } // already submitted — nothing to save
+          if (code === 401) {
+            // Session expired — preserve everything (incl. signatures) offline.
+            await queueToOutbox(finalPayload);
+            handleSessionExpired();
+            return;
+          }
+          // Offline / 500: fall through to the submit below, which routes to the
+          // offline outbox (buildSavePayload carries the signatures) so nothing
+          // is lost.
+          break;
+        }
+      }
     }
 
     try {
@@ -8842,7 +8882,10 @@ export default function DigitalPRFForm() {
                         label={`${c.name} Signature`}
                         value={cs[c.key] || null}
                         onChange={v => {
-                          sf('crew_signoff_sigs', { ...(fd.crew_signoff_sigs || {}), [c.key]: v });
+                          // Functional update — merge into the LATEST crew_signoff_sigs,
+                          // not the render's fd closure, so two crew signing in quick
+                          // succession can't clobber each other's signature.
+                          setFd(p => ({ ...p, crew_signoff_sigs: { ...(p.crew_signoff_sigs || {}), [c.key]: v } }));
                           // Mirror crew 1 to the dedicated crew_signature column so it
                           // shows in the existing PDF crew strip.
                           if (c.key === 'c1') setSigs(p => ({ ...p, crew_signature: v }));
