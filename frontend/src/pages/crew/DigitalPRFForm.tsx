@@ -952,15 +952,44 @@ const correctDictation = (text: string, fk?: string): string => {
   return out;
 };
 
+// Samsung Internet's engine emits CUMULATIVE finals (each final re-contains
+// everything said so far). Swapping such a final for an alternative whose
+// wording differs from the committed text breaks the overlap-dedup — the
+// re-emission stops matching the committed prefix and gets APPENDED instead
+// of deduped, garbling the field with duplicates ("voice prompt way worse").
+// So on Samsung Internet the alternatives feature is disabled outright: the
+// pipeline there is exactly the proven single-candidate one (the regex
+// corrections still apply at the output). Un-exported per the Fast-Refresh
+// rule for non-component values.
+const IS_SAMSUNG_INTERNET =
+  typeof navigator !== 'undefined' && /SamsungBrowser/i.test(navigator.userAgent || '');
+
+// Word-level overlap between the committed text's tail and a segment's head —
+// the same comparison mergeDictation uses to dedup cumulative re-emissions.
+const overlapLen = (base: string, next: string): number => {
+  const b = base.replace(/\s+$/, '').toLowerCase();
+  const n = next.trim().replace(/\s+/g, ' ').toLowerCase();
+  if (!b || !n) return 0;
+  if (n === b || n.startsWith(b + ' ')) return b.split(/\s+/).length;
+  const bW = b.split(/\s+/), nW = n.split(/\s+/);
+  for (let k = Math.min(bW.length, nW.length); k > 0; k--) {
+    if (bW.slice(-k).join(' ') === nW.slice(0, k).join(' ')) return k;
+  }
+  return 0;
+};
+
 // With maxAlternatives raised, each final result carries up to 5 candidate
 // transcripts (confidence-ordered; [0] is the engine's pick). When our
 // correction rules flag the top pick as suspicious ("patient 8 at 5"), scan
 // the engine's OWN alternatives for one that already matches the corrected
 // reading ("patient ate at 5") and use it verbatim — the engine's natural
-// phrasing beats a regex splice. If no alternative agrees, keep the top pick;
-// the output-side corrections still apply. Never deviates from the top pick
-// when nothing looks wrong, so ordinary dictation is untouched.
-const pickTranscript = (res: any, fk?: string): string => {
+// phrasing beats a regex splice. MERGE-SAFETY: an alternative is only
+// accepted when it keeps the exact words the overlap-dedup will match
+// against the committed text (its head must equal the top pick's head over
+// the committed-overlap region) — otherwise swapping it in would turn a
+// cumulative re-emission into an append and duplicate the whole phrase.
+// Falls back to the top pick (output-side corrections still apply).
+const pickTranscript = (res: any, fk: string | undefined, committed: string): string => {
   const top: string = res[0]?.transcript ?? '';
   const n: number = Math.min(res.length ?? 1, 5);
   if (n <= 1) return top;
@@ -968,9 +997,13 @@ const pickTranscript = (res: any, fk?: string): string => {
   if (corrected === top) return top;
   const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim();
   const wanted = norm(corrected);
+  const k = overlapLen(committed, top);
+  const topHead = norm(top).split(' ').slice(0, k).join(' ');
   for (let i = 1; i < n; i++) {
     const alt: string = res[i]?.transcript ?? '';
-    if (alt && norm(alt) === wanted) return alt;
+    if (!alt || norm(alt) !== wanted) continue;
+    const altHead = norm(alt).split(' ').slice(0, k).join(' ');
+    if (k === 0 || altHead === topHead) return alt;
   }
   return top;
 };
@@ -988,7 +1021,7 @@ const applyDictation = (e: any, st: DictationState, fk?: string): string => {
       // on the engine's top pick for speed.
       if (i >= st.finalCount) {
         st.finalCount = i + 1;
-        st.committed = mergeDictation(st.committed, pickTranscript(res, fk));
+        st.committed = mergeDictation(st.committed, pickTranscript(res, fk, st.committed));
       }
     } else {
       interim += ' ' + (res[0]?.transcript ?? '');
@@ -1100,7 +1133,9 @@ const Inp = ({ fk, type = 'text', onBlur, noMic }: { fk: string; ph?: string; ty
       recog.interimResults = true;
       // Ask the engine for its runner-up transcripts too — pickTranscript uses
       // them to resolve homophones ("8" vs "ate") with the engine's own words.
-      recog.maxAlternatives = 5;
+      // NOT on Samsung Internet: its cumulative finals + alternative swapping
+      // broke the overlap-dedup and duplicated dictation (see pickTranscript).
+      recog.maxAlternatives = IS_SAMSUNG_INTERNET ? 1 : 5;
       recog.onresult = (e: any) => {
         // Ignore stragglers from a session we've already replaced (iOS can fire
         // a late result from a stopped recogniser) — only the current session
@@ -2303,7 +2338,9 @@ const VoiceTxt = ({ fk, rows = 3 }: { fk: string; ph?: string; rows?: number }) 
       recog.interimResults = true;
       // Ask the engine for its runner-up transcripts too — pickTranscript uses
       // them to resolve homophones ("8" vs "ate") with the engine's own words.
-      recog.maxAlternatives = 5;
+      // NOT on Samsung Internet: its cumulative finals + alternative swapping
+      // broke the overlap-dedup and duplicated dictation (see pickTranscript).
+      recog.maxAlternatives = IS_SAMSUNG_INTERNET ? 1 : 5;
       recog.onresult = (e: any) => {
         // Ignore stragglers from a session we've already replaced (iOS can fire
         // a late result from a stopped recogniser) — only the current session
