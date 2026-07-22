@@ -108,15 +108,22 @@ services:
           memory: 256M
     env_file:
       - .env.prod
-    volumes:
-      - celerybeat_data:/app/beat      # Persists last-run times across restarts
     depends_on:
       ems_rabbitmq:
         condition: service_healthy
+    # Schedule file lives in the container's /tmp — world-writable, so it works
+    # under the image's non-root user (a named volume here is root-owned and
+    # crashed beat with EACCES). Losing it on restart is harmless: the only
+    # entry is the idempotent 5-min watchdog, which simply re-fires within one
+    # interval.
     command: >
       celery -A app.tasks.celery_app beat
       --loglevel=info
-      --schedule=/app/beat/celerybeat-schedule
+      --schedule=/tmp/celerybeat-schedule
+    healthcheck:
+      # The image's inherited healthcheck probes a celery *worker*; beat is a
+      # scheduler and would show permanently unhealthy. Disable (dev does too).
+      disable: true
     networks:
       - ems_worker_net
 
@@ -158,8 +165,6 @@ volumes:
   upload_data:
     driver: local
   worker_logs:
-    driver: local
-  celerybeat_data:
     driver: local
 
 # ── Networks ──────────────────────────────────────────────
