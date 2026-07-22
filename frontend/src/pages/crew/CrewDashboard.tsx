@@ -47,133 +47,6 @@ interface ShiftSupervisor {
   qualification: string;
 }
 
-/** Offline sync status bar — shows when PRFs are queued in the local outbox. */
-function OfflineSyncBar() {
-  const [pending, setPending] = useState(0);
-  const [dead, setDead] = useState(0);
-  const [isOnline, setIsOnline] = useState(navigator.onLine);
-  const [busy, setBusy] = useState(false);
-  const [note, setNote] = useState('');
-
-  const refresh = async () => {
-    try {
-      const { getOutboxSummary } = await import('../../services/offlineDb');
-      const s = await getOutboxSummary();
-      setPending(s.pending);
-      setDead(s.dead);
-    } catch { setPending(0); setDead(0); }
-  };
-
-  useEffect(() => {
-    refresh();
-    const onOutboxChange = () => refresh();
-    const onOnline = () => { setIsOnline(true); refresh(); };
-    const onOffline = () => setIsOnline(false);
-    window.addEventListener('outbox-change', onOutboxChange);
-    window.addEventListener('online', onOnline);
-    window.addEventListener('offline', onOffline);
-    return () => {
-      window.removeEventListener('outbox-change', onOutboxChange);
-      window.removeEventListener('online', onOnline);
-      window.removeEventListener('offline', onOffline);
-    };
-  }, []);
-
-  // Hide only when everything is uploaded AND online AND nothing has given up.
-  // A 'dead' entry (upload gave up) must ALWAYS stay visible — never silently 0.
-  if (pending === 0 && dead === 0 && isOnline) return null;
-
-  const handleRetry = async () => {
-    if (busy) return;
-    setBusy(true);
-    setNote('');
-    try {
-      const db = await import('../../services/offlineDb');
-      await db.retryDead();  // give any gave-up ('dead') PRFs another attempt
-      const { startSync } = await import('../../services/syncEngine');
-      await startSync();
-      await refresh();
-      // Surface the outcome so the crew isn't left tapping a button that
-      // "does nothing". If anything is still queued, show WHY (the last upload
-      // error) instead of failing silently.
-      const remaining = await db.getAll();
-      const stuck = remaining.filter(e => ['pending', 'syncing', 'failed', 'dead'].includes(e.status));
-      if (stuck.length === 0) {
-        setNote('✓ Uploaded — all synced');
-      } else {
-        const err = stuck.find(e => e.lastError)?.lastError;
-        setNote(err ? `Still not uploaded: ${err}` : 'Still uploading — please try again in a moment');
-      }
-    } catch {
-      setNote('Could not sync right now — check your connection and try again');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  // 'dead' is the alarm state — a PRF exhausted its retries and has NOT reached
-  // the office. It outranks the offline / pending states.
-  const isDead = dead > 0;
-  const bg = isDead || !isOnline ? '#fef2f2' : pending > 0 ? '#fffbeb' : '#f0fdf4';
-  const border = isDead ? '#fca5a5' : !isOnline ? '#fecaca' : pending > 0 ? '#fcd34d' : '#bbf7d0';
-  const textColor = isDead || !isOnline ? '#b91c1c' : pending > 0 ? '#92400e' : '#166534';
-  const icon = isDead ? '⚠️' : !isOnline ? '📵' : pending > 0 ? '📤' : '✅';
-  const label = isDead
-    ? `${dead} PRF${dead > 1 ? 's' : ''} failed to upload — needs attention`
-    : !isOnline
-    ? 'You are offline — changes are saved locally'
-    : pending > 0
-    ? `${pending} PRF${pending > 1 ? 's' : ''} pending upload`
-    : 'All synced';
-
-  const showButton = isDead || (isOnline && pending > 0);
-
-  return (
-    <div style={{
-      marginBottom: 18, padding: '12px 16px', borderRadius: 12,
-      background: bg, border: `1px solid ${border}`,
-      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      gap: 12, transition: 'all 0.3s',
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <span style={{ fontSize: '1.1rem' }}>{icon}</span>
-        <div>
-          <div style={{ fontSize: '0.82rem', fontWeight: 700, color: textColor }}>{label}</div>
-          {isDead && (
-            <div style={{ fontSize: '0.72rem', color: '#6b7280', marginTop: 2 }}>
-              Tap Retry — or contact your administrator. This PRF has not reached the office.
-            </div>
-          )}
-          {!isDead && !isOnline && pending > 0 && (
-            <div style={{ fontSize: '0.72rem', color: '#6b7280', marginTop: 2 }}>
-              {pending} item{pending > 1 ? 's' : ''} will sync when you're back online
-            </div>
-          )}
-          {note && (
-            <div style={{ fontSize: '0.72rem', color: note.startsWith('✓') ? '#166534' : '#6b7280', marginTop: 2 }}>
-              {note}
-            </div>
-          )}
-        </div>
-      </div>
-      {showButton && (
-        <button
-          onClick={handleRetry}
-          disabled={busy}
-          style={{
-            padding: '6px 14px', borderRadius: 8, fontSize: '0.75rem', fontWeight: 700,
-            border: `1px solid ${border}`, background: '#fff', color: textColor,
-            cursor: busy ? 'wait' : 'pointer', whiteSpace: 'nowrap', transition: 'all 0.15s',
-            opacity: busy ? 0.6 : 1,
-          }}
-        >
-          {busy ? 'Syncing…' : isDead ? 'Retry upload' : 'Sync now'}
-        </button>
-      )}
-    </div>
-  );
-}
-
 export default function CrewDashboard() {
   const navigate = useNavigate();
   const { providerSlug } = useParams<{ providerSlug: string }>();
@@ -832,8 +705,11 @@ export default function CrewDashboard() {
           </div>
         )}
 
-        {/* ── Offline Sync Status Bar ── */}
-        <OfflineSyncBar />
+        {/* Offline Sync Status Bar removed per request (the "N PRF pending
+            upload" notification was buggy). The background sync engine still
+            runs — PRFs auto-upload on reconnect / foreground / interval, with
+            the 404 + 423 self-heal — so nothing stops reaching the office; the
+            crew just no longer sees this (previously misbehaving) banner. */}
 
         {/* ── Active PRFs (Drafts) ─────────────────────────────────────────
             Rendered ABOVE the New PRF button so a crew member returning
