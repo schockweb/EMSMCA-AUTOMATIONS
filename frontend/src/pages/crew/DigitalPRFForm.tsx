@@ -837,6 +837,15 @@ const SpeechRecognitionAPI: any =
 // Un-exported so it never breaks Fast Refresh (see project crash-patterns note).
 let activeRecognition: any = null;
 
+// True while ANY field is actively dictating. The sticky journey-header
+// collapse (isScrolled) must NOT reflow the layout while a mic is held — the
+// mic button holds focus (not the textarea), so the "skip while an input is
+// focused" guard is bypassed, the auto-growing field crosses the 40px scroll
+// threshold, the header resizes, the page jumps, and that layout shift fires
+// pointercancel which kills the recogniser. Suppressing header reflow during
+// dictation fixes both the Resus/Samsung screen-jump AND the dropped voice.
+let dictationActive = false;
+
 // ── Robust incremental dictation builder ──────────────────────────────────
 // Android engines (Chrome AND Samsung Internet, both backed by the system
 // speech service) misbehave in `continuous` mode in ways a result-index
@@ -964,6 +973,7 @@ const Inp = ({ fk, type = 'text', onBlur, noMic }: { fk: string; ph?: string; ty
 
   const [recording, setRecording] = useState(false);
   const recogRef = useRef<any>(null);
+  const heldRef = useRef(false);   // true while the mic button is physically held
   const fdRef = useRef(fd);
   fdRef.current = fd;
   const dictRef = useRef<DictationState>(newDictationState(''));
@@ -973,38 +983,67 @@ const Inp = ({ fk, type = 'text', onBlur, noMic }: { fk: string; ph?: string; ty
   const taRef = useAutoGrow(growable ? (fd[fk] ?? '') : '');
 
   useEffect(() => () => {
+    heldRef.current = false;
+    dictationActive = false;
     try { recogRef.current?.stop?.(); } catch { /* ignore */ }
     recogRef.current = null;
   }, []);
 
   const startVoice = () => {
     if (!SpeechRecognitionAPI || recording) return;
+    heldRef.current = true;
+    dictationActive = true;
     // Free the shared speech service if another field's recogniser is still
     // active/finalising, so this start() never throws and silently no-ops.
     try { activeRecognition?.stop?.(); } catch { /* ignore */ }
-    const recog = new SpeechRecognitionAPI();
-    recog.lang = 'en-ZA';
-    recog.continuous = true;
-    recog.interimResults = true;
     dictRef.current = newDictationState(fdRef.current[fk] || '');
-    recog.onresult = (e: any) => {
-      sf(fk, applyDictation(e, dictRef.current));
-    };
-    recog.onend = () => { setRecording(false); recogRef.current = null; if (activeRecognition === recog) activeRecognition = null; };
-    recog.onerror = () => { setRecording(false); recogRef.current = null; if (activeRecognition === recog) activeRecognition = null; };
-    recogRef.current = recog;
-    activeRecognition = recog;
-    try {
+    // Spawn a recogniser. Samsung Internet / Android Chrome fire `onend` on the
+    // first pause even with continuous=true, which used to kill dictation
+    // mid-hold. While the button is still held we RE-SPAWN so the mic keeps
+    // listening until the crew releases — re-baselining from the field so the
+    // committed text carries across sessions.
+    const spawn = () => {
+      const recog = new SpeechRecognitionAPI();
+      recog.lang = 'en-ZA';
+      recog.continuous = true;
+      recog.interimResults = true;
+      recog.onresult = (e: any) => { sf(fk, applyDictation(e, dictRef.current)); };
+      recog.onend = () => {
+        if (heldRef.current) {
+          dictRef.current = newDictationState(fdRef.current[fk] || '');
+          try { spawn(); return; } catch { /* fall through to stop */ }
+        }
+        setRecording(false); recogRef.current = null;
+        dictationActive = false;
+        if (activeRecognition === recog) activeRecognition = null;
+      };
+      recog.onerror = (ev: any) => {
+        // Permission / service errors are fatal — stop for good. Transient
+        // errors (no-speech, network) fall through to onend, which respawns
+        // while the button is still held.
+        if (ev?.error === 'not-allowed' || ev?.error === 'service-not-allowed') {
+          heldRef.current = false;
+        }
+      };
+      recogRef.current = recog;
+      activeRecognition = recog;
       recog.start();
+    };
+    try {
+      spawn();
       setRecording(true);
     } catch {
       setRecording(false);
       recogRef.current = null;
-      if (activeRecognition === recog) activeRecognition = null;
+      heldRef.current = false;
+      dictationActive = false;
+      if (activeRecognition === recogRef.current) activeRecognition = null;
     }
   };
 
   const stopVoice = () => {
+    heldRef.current = false;   // release BEFORE stop so onend doesn't respawn
+    dictationActive = false;
     try { recogRef.current?.stop?.(); } catch { /* ignore */ }
     setRecording(false);
   };
@@ -2081,6 +2120,7 @@ const VoiceTxt = ({ fk, rows = 3 }: { fk: string; ph?: string; rows?: number }) 
   const { fd, sf } = useContext(FormContext);
   const [recording, setRecording] = useState(false);
   const recogRef = useRef<any>(null);
+  const heldRef = useRef(false);   // true while the mic button is physically held
   const fdRef = useRef(fd);
   fdRef.current = fd;
   const supported = !!SpeechRecognitionAPI;
@@ -2106,34 +2146,53 @@ const VoiceTxt = ({ fk, rows = 3 }: { fk: string; ph?: string; rows?: number }) 
   useEffect(() => () => {
     // Make sure we tear down any active recogniser if the field unmounts
     // mid-dictation (e.g. crew jumps phase).
+    heldRef.current = false;
+    dictationActive = false;
     try { recogRef.current?.stop?.(); } catch { /* ignore */ }
     recogRef.current = null;
   }, []);
 
   const start = () => {
     if (!supported || recording) return;
+    heldRef.current = true;
+    dictationActive = true;
     // Free the shared speech service if another field's recogniser is still
     // active/finalising, so this start() never throws and silently no-ops.
     try { activeRecognition?.stop?.(); } catch { /* ignore */ }
-    const recog = new SpeechRecognitionAPI();
-    recog.lang = 'en-ZA';
-    recog.continuous = true;
-    recog.interimResults = true;
-
-    // Capture what the crew already typed as the immutable prefix.
-    // Streaming dictation appends on top — any manual edits made before
-    // tapping the mic survive the session.
+    // Capture what the crew already typed as the immutable prefix. Streaming
+    // dictation appends on top — any manual edits made before tapping the mic
+    // survive the session.
     dictRef.current = newDictationState(fdRef.current[fk] || '');
-
-    recog.onresult = (e: any) => {
-      sf(fk, applyDictation(e, dictRef.current));
-    };
-    recog.onend = () => { setRecording(false); recogRef.current = null; if (activeRecognition === recog) activeRecognition = null; };
-    recog.onerror = () => { setRecording(false); recogRef.current = null; if (activeRecognition === recog) activeRecognition = null; };
-    recogRef.current = recog;
-    activeRecognition = recog;
-    try {
+    // Re-spawn on `onend` while the button is held: Samsung Internet / Android
+    // Chrome end the session on the first pause even with continuous=true,
+    // which used to kill dictation mid-hold. Re-baseline from the field so the
+    // committed text carries across sessions.
+    const spawn = () => {
+      const recog = new SpeechRecognitionAPI();
+      recog.lang = 'en-ZA';
+      recog.continuous = true;
+      recog.interimResults = true;
+      recog.onresult = (e: any) => { sf(fk, applyDictation(e, dictRef.current)); };
+      recog.onend = () => {
+        if (heldRef.current) {
+          dictRef.current = newDictationState(fdRef.current[fk] || '');
+          try { spawn(); return; } catch { /* fall through to stop */ }
+        }
+        setRecording(false); recogRef.current = null;
+        dictationActive = false;
+        if (activeRecognition === recog) activeRecognition = null;
+      };
+      recog.onerror = (ev: any) => {
+        if (ev?.error === 'not-allowed' || ev?.error === 'service-not-allowed') {
+          heldRef.current = false;   // fatal — don't respawn
+        }
+      };
+      recogRef.current = recog;
+      activeRecognition = recog;
       recog.start();
+    };
+    try {
+      spawn();
       setRecording(true);
       // NB: do NOT scrollIntoView here — starting dictation must leave the page
       // exactly where it is. Auto-scrolling on press moved the field out from
@@ -2141,10 +2200,14 @@ const VoiceTxt = ({ fk, rows = 3 }: { fk: string; ph?: string; rows?: number }) 
     } catch {
       setRecording(false);
       recogRef.current = null;
+      heldRef.current = false;
+      dictationActive = false;
     }
   };
 
   const stop = () => {
+    heldRef.current = false;   // release BEFORE stop so onend doesn't respawn
+    dictationActive = false;
     try { recogRef.current?.stop?.(); } catch { /* ignore */ }
     setRecording(false);
   };
@@ -3940,6 +4003,10 @@ export default function DigitalPRFForm() {
       // focused. On mobile the keyboard scrolls the page around the 40px
       // threshold, and resizing the header mid-type reflows the layout — that's
       // the "page jumps up and down while typing in the vitals set" bug.
+      // Also freeze the header while a mic is held: dictation focuses the mic
+      // BUTTON (not the field), so the input-focus check below misses it, and a
+      // header reflow mid-dictation jumps the page and cancels the recogniser.
+      if (dictationActive) return;
       const ae = document.activeElement as HTMLElement | null;
       if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT')) return;
       setIsScrolled(window.scrollY > 40);
