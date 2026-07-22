@@ -5655,7 +5655,12 @@ export default function DigitalPRFForm() {
                   ) : (
                     <input
                       type="text"
-                      inputMode={isNumericField ? 'decimal' : 'text'}
+                      // `decimal` opens the numeric keypad first for number
+                      // fields AND Temp (a decimal like 36.5). type stays
+                      // "text" so the crew can still switch to letters where
+                      // the keyboard offers it and the auto-appended "°C"/unit
+                      // suffix is preserved.
+                      inputMode={(isNumericField || f.key === 'temp') ? 'decimal' : 'text'}
                       value={editing[f.key] ?? ''}
                       onChange={e => updVS(f.key, e.target.value)}
                       placeholder={'placeholder' in f ? f.placeholder : ''}
