@@ -200,6 +200,33 @@ const Chk = ({ label, checked, color }: { label: string; checked: boolean; color
 
 // Sub-block used inside Medical-Aid / Channel-specific column. Renders a
 // thin green strip + a stack of FieldRows for the populated keys only.
+// Ruled write-in lines — converts leftover column height into intentional,
+// usable space (like the ruled areas on paper PRFs) instead of a blank void.
+// Columns are locked to the A4 sheet height, so sparse forms MUST absorb the
+// slack somewhere; ruling reads as "room for more" rather than "missing data",
+// and it satisfies the requirement that every extra field always has space —
+// populated fields simply compress the ruling from above. Pure bordered DIVs
+// (no CSS gradients) so html2canvas capture and browser print render
+// identically; overflow:hidden clips to whole lines (tall gaps show more
+// lines, short gaps fewer, never a half line).
+const FillLines = ({ minHeight = 0 }: { minHeight?: number }) => (
+  // The line stack is absolutely positioned so it contributes ZERO intrinsic
+  // height — the container only ever absorbs the column's genuine leftover
+  // space (flex:1), exactly like the blank fillers it replaces. Rendering the
+  // lines in normal flow inflated every column by the full stack height and
+  // ballooned the fixed A4 sheet to ~3× its size.
+  <div style={{
+    flex: 1, minHeight, borderTop: `1px solid ${LN}`,
+    position: 'relative', overflow: 'hidden',
+  }}>
+    <div style={{ position: 'absolute', top: 4, left: 10, right: 10, bottom: 0 }}>
+      {[...Array(40)].map((_, i) => (
+        <div key={i} style={{ height: 26, borderBottom: '1px solid rgba(8,131,149,0.18)' }} />
+      ))}
+    </div>
+  </div>
+);
+
 const SubBlock = ({ title, rows }: { title: string; rows: Array<[string, any, number?]> }) => {
   const visible = rows.filter(([, v]) => !isBlank(v));
   if (visible.length === 0) return null;
@@ -1018,7 +1045,9 @@ export default function PRFView() {
                 <FieldRow label="Receiving Facility Email" value={fd.handover_doctor_email} />
               </>
             )}
-            <div style={{ flex: 1, borderTop: `1px solid ${LN}`, background: GREEN_TINT }} />
+            {fd.call_type === 'DOD'
+              ? <div style={{ flex: 1, borderTop: `1px solid ${LN}`, background: GREEN_TINT }} />
+              : <FillLines />}
           </div>
 
           {/* Ambulance Call sign + Times/KM grid. The column is a flex stack so
@@ -1259,7 +1288,7 @@ export default function PRFView() {
                 <FieldRow label="Priority" value={fd.priority || '—'} />
               </>
             )}
-            <div style={{ flex: 1, borderTop: `1px solid ${LN}` }} />
+            <FillLines />
           </div>
           )}
 
@@ -1302,7 +1331,9 @@ export default function PRFView() {
                 ] as Array<[string, any]>)
                   .filter(([, v]) => !isBlank(v)))
                   .map(([label, v]) => <FieldRow key={label} label={label} value={v} />)}
-                <div style={{ flex: 1, borderTop: `1px solid ${LN}` }} />
+                {fd.call_type === 'DOD'
+                  ? <div style={{ flex: 1, borderTop: `1px solid ${LN}` }} />
+                  : <FillLines />}
               </>
             )}
           </div>
@@ -1407,13 +1438,16 @@ export default function PRFView() {
             {!(fd.call_type === 'DOD' && fd.med_aid_dec_death) && (
               <>
                 <SectionHead label="Hospital Sticker" />
+                {/* Fixed-size slot (real stickers are ~credit-card sized) — it
+                    used to flex-grow and swallow the column's leftover height
+                    as a huge dashed void. Leftover space now becomes ruled
+                    write-in lines below instead. */}
                 <div style={{
                   borderTop: `1px solid ${LN}`, padding: 6,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  flex: 1,
                 }}>
                   <div style={{
-                    width: '96%', minHeight: 120,
+                    width: '96%', minHeight: 110,
                     border: `1.6px dashed ${MUT}`, borderRadius: 4,
                     background: SOFT_BG,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -1431,6 +1465,7 @@ export default function PRFView() {
                     )}
                   </div>
                 </div>
+                <FillLines />
               </>
             )}
           </div>
@@ -1515,7 +1550,7 @@ export default function PRFView() {
                 })()}
               </>
             )}
-            <div style={{ flex: 1, borderTop: `1px solid ${LN}` }} />
+            <FillLines />
           </div>
           )}
         </div>
@@ -1563,7 +1598,7 @@ export default function PRFView() {
                 </div>
               </>
             )}
-            <div style={{ flex: 1, borderTop: `1px solid ${LN}` }} />
+            <FillLines />
           </div>
 
           {/* Crew sign-off — one tidy column per crew member: details stacked
@@ -1583,22 +1618,25 @@ export default function PRFView() {
             </div>
           ))}
 
-          {/* Motivation / Other Notes */}
+          {/* Motivation / Other Notes — the captured text sits at natural
+              height and the remaining space renders as ruled note lines (an
+              empty section is ALL ruling — a proper blank notes area, not an
+              italic apology in a void). */}
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             <SectionHead label="Motivation / Other Notes" />
-            <div style={{
-              flex: 1,
-              borderTop: `1px solid ${LN}`,
-              padding: '6px 9px',
-              background: '#fff',
-              color: INK,
-              fontSize: '0.74rem', lineHeight: 1.45,
-              whiteSpace: 'pre-wrap',
-            }}>
-              {motivationNotes
-                ? motivationNotes
-                : <span style={{ fontStyle: 'italic', color: DIM }}>No motivation or additional notes recorded.</span>}
-            </div>
+            {motivationNotes && (
+              <div style={{
+                borderTop: `1px solid ${LN}`,
+                padding: '6px 9px',
+                background: '#fff',
+                color: INK,
+                fontSize: '0.74rem', lineHeight: 1.45,
+                whiteSpace: 'pre-wrap',
+              }}>
+                {motivationNotes}
+              </div>
+            )}
+            <FillLines />
             {fd.extra_crew && fd.extra_crew.length > 0 && (
               <>
                 <SectionHead label="Additional Crew" />
@@ -1747,7 +1785,7 @@ export default function PRFView() {
             <FieldRow label="Abdomen"     value={fd.survey_abdo} />
             <FieldRow label="Limbs"       value={fd.survey_limbs} />
             <FieldRow label="Back"        value={fd.survey_back} />
-            <div style={{ flex: 1, borderTop: `1px solid ${LN}` }} />
+            <FillLines />
           </div>
 
           {/* COL 2 — History (narrative-heavy) + IV Therapy + Medication.
@@ -1829,7 +1867,7 @@ export default function PRFView() {
               </Fragment>
             ))}
 
-            <div style={{ flex: 1, borderTop: `1px solid ${LN}` }} />
+            <FillLines />
           </div>
 
           {/* COL 3 — Vitals time-series + IV Therapy + Medication + Management */}
@@ -1917,18 +1955,20 @@ export default function PRFView() {
                 History) so this column can host the full vitals time-series
                 and let Management absorb any leftover height. */}
 
-            {/* Management notes — fills remaining vertical space (flex:1) */}
+            {/* Management notes — text at natural height, remaining vertical
+                space rendered as ruled note lines (blank section = a proper
+                ruled notes area, not an italic placeholder in a void). */}
             <SectionHead label="Management" />
-            <div style={{
-              padding: '6px 9px', fontSize: '0.74rem', color: INK,
-              whiteSpace: 'pre-wrap', lineHeight: 1.45,
-              borderTop: `1px solid ${LN}`,
-              flex: 1,
-            }}>
-              {fd.management_notes
-                ? fd.management_notes
-                : <span style={{ color: DIM, fontStyle: 'italic' }}>No management notes recorded.</span>}
-            </div>
+            {!isBlank(fd.management_notes) && (
+              <div style={{
+                padding: '6px 9px', fontSize: '0.74rem', color: INK,
+                whiteSpace: 'pre-wrap', lineHeight: 1.45,
+                borderTop: `1px solid ${LN}`,
+              }}>
+                {fd.management_notes}
+              </div>
+            )}
+            <FillLines />
           </div>
         </div>
 
