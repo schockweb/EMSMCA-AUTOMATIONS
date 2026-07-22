@@ -1026,10 +1026,25 @@ const Inp = ({ fk, type = 'text', onBlur, noMic }: { fk: string; ph?: string; ty
       recog.lang = 'en-ZA';
       recog.continuous = true;
       recog.interimResults = true;
-      recog.onresult = (e: any) => { sf(fk, applyDictation(e, dictRef.current)); };
+      recog.onresult = (e: any) => {
+        // Ignore stragglers from a session we've already replaced (iOS can fire
+        // a late result from a stopped recogniser) — only the current session
+        // writes to the field, so a superseded one can't corrupt the text.
+        if (recogRef.current !== recog) return;
+        sf(fk, applyDictation(e, dictRef.current));
+      };
       recog.onend = () => {
         if (heldRef.current) {
-          dictRef.current = newDictationState(fdRef.current[fk] || '');
+          // Respawn to keep listening — iOS Safari (and Samsung) ignore
+          // `continuous` and end the session after every pause. Do NOT
+          // re-baseline from the field here: dictRef.current.committed is the
+          // authoritative running transcript for this hold, and re-reading
+          // fd[fk] races React's async state flush — the just-spoken word may
+          // not be in fd yet, so baselining off it dropped that word (the iOS
+          // "talk, come back, talk again — it deletes a word" bug).
+          // applyDictation already re-aligns its finalCount when the fresh
+          // session's results list restarts at index 0, so the committed text
+          // simply continues to accumulate across sessions.
           startWithRetry();
           return;
         }
@@ -2211,10 +2226,25 @@ const VoiceTxt = ({ fk, rows = 3 }: { fk: string; ph?: string; rows?: number }) 
       recog.lang = 'en-ZA';
       recog.continuous = true;
       recog.interimResults = true;
-      recog.onresult = (e: any) => { sf(fk, applyDictation(e, dictRef.current)); };
+      recog.onresult = (e: any) => {
+        // Ignore stragglers from a session we've already replaced (iOS can fire
+        // a late result from a stopped recogniser) — only the current session
+        // writes to the field, so a superseded one can't corrupt the text.
+        if (recogRef.current !== recog) return;
+        sf(fk, applyDictation(e, dictRef.current));
+      };
       recog.onend = () => {
         if (heldRef.current) {
-          dictRef.current = newDictationState(fdRef.current[fk] || '');
+          // Respawn to keep listening — iOS Safari (and Samsung) ignore
+          // `continuous` and end the session after every pause. Do NOT
+          // re-baseline from the field here: dictRef.current.committed is the
+          // authoritative running transcript for this hold, and re-reading
+          // fd[fk] races React's async state flush — the just-spoken word may
+          // not be in fd yet, so baselining off it dropped that word (the iOS
+          // "talk, come back, talk again — it deletes a word" bug).
+          // applyDictation already re-aligns its finalCount when the fresh
+          // session's results list restarts at index 0, so the committed text
+          // simply continues to accumulate across sessions.
           startWithRetry();
           return;
         }
