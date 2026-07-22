@@ -2274,6 +2274,81 @@ const CALL_TYPE_LABELS: Record<string, string> = {
   DOD: 'Declaration of Death',
 };
 
+// "Why is this an IFT/IHT call?" — the transfer reasons as tappable cards.
+// Picking one collapses the grid to show ONLY the chosen reason (tap "Change"
+// to reopen the full set). Mobile-first: an auto-fill grid gives 2 columns on
+// a phone and more on wider screens, every card a large (≥56px) touch target.
+const TransferSubtypeCards = () => {
+  const { fd, sf } = useContext(FormContext);
+  const BRAND = '#088395', BRAND_DK = '#005f6b', BRAND_TINT = '#e7f3f5';
+  const selected: string = fd.transfer_subtype || '';
+  const [expanded, setExpanded] = useState(false);
+  const showAll = !selected || expanded;
+
+  // Collapsed — only the picked reason, with a Change affordance.
+  if (!showAll) {
+    return (
+      <button
+        type="button"
+        onClick={() => setExpanded(true)}
+        style={{
+          width: '100%', padding: '14px 16px', borderRadius: 12,
+          border: `1.5px solid ${BRAND}`, background: BRAND_TINT,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          gap: 10, cursor: 'pointer', touchAction: 'manipulation', textAlign: 'left',
+          boxShadow: '0 2px 8px rgba(8,131,149,0.12)',
+        }}
+      >
+        <span style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+          <span style={{
+            flexShrink: 0, width: 22, height: 22, borderRadius: 11, background: BRAND,
+            color: W, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: '0.8rem', fontWeight: 900,
+          }}>✓</span>
+          <span style={{ fontWeight: 800, fontSize: '0.9rem', color: BRAND_DK, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {selected}
+          </span>
+        </span>
+        <span style={{ flexShrink: 0, fontSize: '0.72rem', fontWeight: 800, color: BRAND, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+          Change
+        </span>
+      </button>
+    );
+  }
+
+  // Expanded — every reason as a card; the current pick (if any) is highlighted.
+  return (
+    <div style={{
+      display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 8,
+    }}>
+      {TRANSFER_SUBTYPES.map(r => {
+        const isSel = r === selected;
+        return (
+          <button
+            key={r} type="button"
+            onClick={() => { sf('transfer_subtype', r); setExpanded(false); }}
+            style={{
+              minHeight: 56, padding: '10px', borderRadius: 12,
+              border: `1.5px solid ${isSel ? BRAND : S200}`,
+              background: isSel ? BRAND_TINT : W,
+              color: isSel ? BRAND_DK : S700,
+              fontWeight: isSel ? 800 : 600, fontSize: '0.8rem', lineHeight: 1.25,
+              textAlign: 'center', whiteSpace: 'normal', wordBreak: 'normal',
+              overflowWrap: 'break-word', hyphens: 'auto',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer', touchAction: 'manipulation',
+              boxShadow: isSel ? '0 2px 8px rgba(8,131,149,0.15)' : '0 1px 3px rgba(0,0,0,0.03)',
+              transition: 'border-color 0.15s, background 0.15s',
+            }}
+          >
+            {r}
+          </button>
+        );
+      })}
+    </div>
+  );
+};
+
 const CallTypePicker = ({ onPick }: { onPick?: (o: string) => void }) => {
   const { fd, sf } = useContext(FormContext);
   const selected: string = fd.call_type || '';
@@ -5906,22 +5981,7 @@ export default function DigitalPRFForm() {
       <FadeIn show={fd.call_type === 'IHT'} delay={150}>
         <div style={{ marginBottom: 14 }}>
           <Lbl t="Why is this an IFT/IHT call?" req />
-          <input
-            list="transfer-subtypes"
-            value={fd.transfer_subtype ?? ''}
-            onChange={e => sf('transfer_subtype', e.target.value)}
-            placeholder="Select or type reason…"
-            style={{
-              width: '100%', padding: '12px 14px', fontSize: '0.88rem',
-              borderRadius: 10, border: `1.5px solid ${S200}`, background: W,
-              color: fd.transfer_subtype ? S900 : S400, cursor: 'text',
-              fontWeight: fd.transfer_subtype ? 700 : 400,
-              boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
-            }}
-          />
-          <datalist id="transfer-subtypes">
-            {TRANSFER_SUBTYPES.map(r => <option key={r} value={r} />)}
-          </datalist>
+          <TransferSubtypeCards />
         </div>
       </FadeIn>
 
@@ -5945,7 +6005,9 @@ export default function DigitalPRFForm() {
       <FadeIn show={['IHT', 'IFT'].includes(fd.call_type) && (fd.call_type !== 'IHT' || !!fd.transfer_subtype) && preauthVisible} delay={150}>
         <div style={{ marginBottom: 14 }}>
           <Lbl t="Pre-Auth No." req />
-          <Inp fk="preauth_number" ph="Tap to enter Pre-Auth No.…" />
+          {/* noMic: Pre-Auth is a reference code — the voice-dictation box is
+              removed (dictating a code is error-prone and unwanted here). */}
+          <Inp fk="preauth_number" ph="Tap to enter Pre-Auth No.…" noMic />
         </div>
       </FadeIn>
 
