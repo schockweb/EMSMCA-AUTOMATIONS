@@ -1069,9 +1069,12 @@ export default function PRFView() {
             <SectionHead label="Call Information" />
             <FieldRow label="Incident Add"  value={fd.incident_location} />
             <FieldRow label="Suburb / Ward" value={fd.suburb_ward} />
-            <FieldRow label="Dest Facility" value={fd.receiving_facility} />
+            {/* Destination / handover rows don't apply to a Declaration of
+                Death (the patient is deceased at scene — there's no receiving
+                facility), so the whole block is omitted for DOD. */}
             {fd.call_type !== 'DOD' && (
               <>
+                <FieldRow label="Dest Facility" value={fd.receiving_facility} />
                 <FieldRow label="Ward"          value={fd.ward} />
                 <FieldRow label={fd.call_type === 'COURTESY' ? "Receiving Dr/Person" : "Receiving Dr"}  value={fd.receiving_doctor} />
                 <FieldRow label="Qualification" value={fd.handover_qualification} />
@@ -1250,12 +1253,18 @@ export default function PRFView() {
                 <SignatureBox src={fd.med_aid_dec_death_crew_attended_signature} minHeight={64} />
               </div>
 
-              {/* Witness */}
-              <FieldRow label="Witness Name" value={fd.med_aid_dec_death_witness_name} />
-              <div style={{ padding: '6px 8px', borderTop: `1px solid ${LN}` }}>
-                <div style={{ fontSize: '0.52rem', fontWeight: 800, color: MUT, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Witness Signature</div>
-                <SignatureBox src={fd.med_aid_dec_death_witness_signature} minHeight={64} />
-              </div>
+              {/* Witness — a witness is optional on a DOD, so the whole block
+                  (name + signature) is omitted unless one was captured, rather
+                  than printing an empty "Not captured" box. */}
+              {(!isBlank(fd.med_aid_dec_death_witness_name) || !isBlank(fd.med_aid_dec_death_witness_signature)) && (
+                <>
+                  <FieldRow label="Witness Name" value={fd.med_aid_dec_death_witness_name} />
+                  <div style={{ padding: '6px 8px', borderTop: `1px solid ${LN}` }}>
+                    <div style={{ fontSize: '0.52rem', fontWeight: 800, color: MUT, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Witness Signature</div>
+                    <SignatureBox src={fd.med_aid_dec_death_witness_signature} minHeight={64} />
+                  </div>
+                </>
+              )}
 
               {/* Undertaker — moved from column 2 to fill this column's slack
                   and keep the three columns roughly equal in height. */}
@@ -2365,12 +2374,16 @@ export default function PRFView() {
                   <SignatureBox src={fd.med_aid_dec_death_crew_attended_signature} minHeight={64} />
                 </div>
 
-                {/* Witness */}
-                <FieldRow label="Witness Name" value={fd.med_aid_dec_death_witness_name} />
-                <div style={{ padding: '6px 8px', borderTop: `1px solid ${LN}` }}>
-                  <div style={{ fontSize: '0.52rem', fontWeight: 800, color: MUT, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Witness Signature</div>
-                  <SignatureBox src={fd.med_aid_dec_death_witness_signature} minHeight={64} />
-                </div>
+                {/* Witness — optional; omit the whole block unless captured. */}
+                {(!isBlank(fd.med_aid_dec_death_witness_name) || !isBlank(fd.med_aid_dec_death_witness_signature)) && (
+                  <>
+                    <FieldRow label="Witness Name" value={fd.med_aid_dec_death_witness_name} />
+                    <div style={{ padding: '6px 8px', borderTop: `1px solid ${LN}` }}>
+                      <div style={{ fontSize: '0.52rem', fontWeight: 800, color: MUT, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Witness Signature</div>
+                      <SignatureBox src={fd.med_aid_dec_death_witness_signature} minHeight={64} />
+                    </div>
+                  </>
+                )}
 
                 {/* Undertaker Details added underneath declaration for RESUS DOD */}
                 {(fd.undertaker_name || fd.undertaker_collector_signature) && (
