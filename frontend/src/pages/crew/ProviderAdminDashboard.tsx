@@ -9,7 +9,7 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import { useScrollLock } from '../../hooks/useScrollLock';
 import { HPCSA_CATEGORIES, CATEGORY_META, type HpcsaCategory } from '../../data/hpcsaScope';
-import { getCrewToken, getCrewProfile, CREW_SESSION_KEYS } from '../../utils/crewSession';
+import { getCrewToken, getCrewProfile, ensureProviderSession, CREW_SESSION_KEYS } from '../../utils/crewSession';
 import { LoadErrorBar } from '../../components/LoadError';
 
 // ── Tokens ───────────────────────────────────────────────────────
@@ -239,6 +239,14 @@ export default function ProviderAdminDashboard() {
   const { providerSlug } = useParams<{ providerSlug: string }>();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
+
+  // ── Tenant guard — MUST run before reading the profile ──
+  // providerId below comes from the STORED profile, not the URL: without this
+  // wipe, a leftover Provider-A session rendered Provider A's employees,
+  // vehicles and PRFs underneath Provider B's URL. URL slug is authoritative;
+  // a mismatched session is wiped here and the auth effect below then
+  // redirects to this provider's own login.
+  ensureProviderSession(providerSlug);
 
   const profile    = getCrewProfile();
   const providerId = profile.provider_id || null;

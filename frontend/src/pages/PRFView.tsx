@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState, Fragment } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import axios from '../api/client';
-import { getCrewToken } from '../utils/crewSession';
+import { getCrewToken, ensureProviderSession } from '../utils/crewSession';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 
@@ -301,6 +301,16 @@ export default function PRFView() {
   const pdfBuildStartedRef = useRef(false);
 
   useEffect(() => {
+    // Tenant guard for the crew route (/:providerSlug/crew/prf-view/...):
+    // a crew session from a DIFFERENT provider is wiped and the user routed
+    // to this provider's own login. EMSMCA admin tokens (access_token) are
+    // exempt — staff legitimately view every provider's PRFs via /cases.
+    if (providerSlug && !localStorage.getItem('access_token')) {
+      if (!ensureProviderSession(providerSlug)) {
+        navigate(`/${providerSlug}/login`, { replace: true });
+        return;
+      }
+    }
     const token = localStorage.getItem('access_token') || getCrewToken() || '';
     axios.get(`/api/digital-prf/admin/by-case/${caseId}`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -1795,12 +1805,18 @@ export default function PRFView() {
           {/* COL 1 — Oxygen / Airway / Circ / Immob / Primary + Secondary Survey */}
           <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
             <SectionHead label="Oxygen Admin" />
-            <FieldRow label="L / Min"    value={fd.o2_flow_rate} />
-            <FieldRow label="% Oxygen"   value={fd.o2_percent} />
-            <FieldRow label="Device"     value={fd.o2_device} />
-            <FieldRow label="BVM"        value={fd.o2_bvm} />
-            <FieldRow label="Start Time" value={fd.o2_start_time} />
-            <FieldRow label="Stop Time"  value={fd.o2_stop_time} />
+            {/* Hide the rows when no oxygen was administered — keep just the
+                section tag so the PDF isn't a column of empty "—" rows. */}
+            {[fd.o2_flow_rate, fd.o2_percent, fd.o2_device, fd.o2_bvm, fd.o2_start_time, fd.o2_stop_time].some(v => !isBlank(v)) && (
+              <>
+                <FieldRow label="L / Min"    value={fd.o2_flow_rate} />
+                <FieldRow label="% Oxygen"   value={fd.o2_percent} />
+                <FieldRow label="Device"     value={fd.o2_device} />
+                <FieldRow label="BVM"        value={fd.o2_bvm} />
+                <FieldRow label="Start Time" value={fd.o2_start_time} />
+                <FieldRow label="Stop Time"  value={fd.o2_stop_time} />
+              </>
+            )}
 
             {(() => {
               const airway = Array.isArray(fd.airway_interventions) ? fd.airway_interventions.filter(Boolean) : [];

@@ -16,6 +16,7 @@ import {
   getCrewToken,
   getCrewProfile,
   clearCrewSession as clearCrewSessionStorage,
+  ensureProviderSession,
   CREW_SESSION_KEYS,
 } from '../../utils/crewSession';
 
@@ -51,17 +52,11 @@ export default function CrewDashboard() {
   const navigate = useNavigate();
   const { providerSlug } = useParams<{ providerSlug: string }>();
 
-  // ── Clear stale session from a different provider ──
-  // If crew logged into JEMS, then navigates to Michael's portal via
-  // "Start Shift", the old JEMS token and profile are still in localStorage.
-  // We must clear them BEFORE initializing React state so Michael's dashboard
-  // doesn't accidentally show JEMS crew/vehicles.
-  const _rawProfile = getCrewProfile();
-  if (_rawProfile.provider_slug && _rawProfile.provider_slug !== providerSlug) {
-    clearCrewSessionStorage();
-    localStorage.removeItem('last_prf_id');
-    localStorage.removeItem('shift_supervisor');
-  }
+  // ── Tenant guard: wipe any session from a different provider ──
+  // Runs BEFORE React state initializes so a leftover Provider-A login can
+  // never seed Provider B's dashboard. Centralized in ensureProviderSession
+  // (same guard on the PRF form, admin dashboard, PRF viewer, login page).
+  ensureProviderSession(providerSlug);
 
   const token = getCrewToken();
   const profile = getCrewProfile();

@@ -72,6 +72,31 @@ export function getCrewProfile(): Record<string, any> {
  * by this module are removed — callers that also track their own extra keys
  * (e.g. last_prf_id, shift_supervisor) must clear those themselves.
  */
+/**
+ * Tenant guard for every crew-side page. The URL's provider slug is
+ * AUTHORITATIVE: if the stored crew session belongs to a DIFFERENT provider,
+ * the session is stale/foreign and is wiped on the spot — Provider A's data
+ * must never render under Provider B's URL, and a leftover login must never
+ * teleport the user between providers' portals.
+ *
+ * Call at the very top of a crew page's render, BEFORE reading the profile:
+ *     if (!ensureProviderSession(providerSlug)) →  no usable session for this
+ *     provider (absent or just wiped) — send the user to `/${slug}/login`.
+ */
+export function ensureProviderSession(urlSlug: string | undefined): boolean {
+  const prof = getCrewProfile();
+  if (urlSlug && prof?.provider_slug && prof.provider_slug !== urlSlug) {
+    clearCrewSession();
+    // Companion per-shift keys that would otherwise leak between providers.
+    try {
+      localStorage.removeItem('last_prf_id');
+      localStorage.removeItem('shift_supervisor');
+    } catch { /* storage unavailable — nothing to clear */ }
+    return false;
+  }
+  return !!getCrewToken();
+}
+
 export function clearCrewSession(): void {
   localStorage.removeItem(CREW_SESSION_KEYS.token);
   localStorage.removeItem(CREW_SESSION_KEYS.profile);

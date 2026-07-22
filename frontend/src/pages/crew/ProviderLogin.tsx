@@ -16,7 +16,7 @@ import { useScrollLock } from '../../hooks/useScrollLock';
 import InstallAppButton from '../../components/InstallAppButton';
 import StartShiftWizard from './StartShiftWizard';
 import type { CrewOption, VehicleOption } from './StartShiftWizard';
-import { saveAdminSession } from '../../utils/crewSession';
+import { saveAdminSession, ensureProviderSession } from '../../utils/crewSession';
 
 interface ProviderInfo {
   name: string;
@@ -47,6 +47,15 @@ export default function ProviderLogin() {
   // time it is mounted, the Start-Shift wizard modal is covered too — no
   // separate modal-only lock is needed.
   useScrollLock();
+
+  // ── Tenant guard: landing on THIS provider's login page wipes any session
+  // belonging to a DIFFERENT provider. Prevents a leftover Provider-A login
+  // from leaking into Provider B's portal (or teleporting the user back to
+  // A's pages after they deliberately opened B's login).
+  useEffect(() => {
+    ensureProviderSession(providerSlug);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [providerSlug]);
 
   // Pre-load provider logo/name
   useEffect(() => {

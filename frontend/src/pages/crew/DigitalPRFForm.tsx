@@ -10,7 +10,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 // Raw axios — the PRF form builds its own crew_token-authenticated instance via
 // api() below; it must not inherit the admin api/client interceptor.
 import axios from 'axios';
-import { getCrewToken, getCrewProfile, CREW_SESSION_KEYS } from '../../utils/crewSession';
+import { getCrewToken, getCrewProfile, ensureProviderSession, CREW_SESSION_KEYS } from '../../utils/crewSession';
 import { inferResumePhase } from '../../utils/prfResumePhase';
 import SignaturePad from '../../components/SignaturePad';
 import FullscreenSignaturePad, { FullscreenCanvas } from '../../components/FullscreenSignaturePad';
@@ -4268,6 +4268,20 @@ function normalizeFormData(data: Record<string, any>): Record<string, any> {
 export default function DigitalPRFForm() {
   const { prfId, providerSlug } = useParams<{ prfId: string; providerSlug: string }>();
   const navigate = useNavigate();
+
+  // ── Tenant guard — runs at render, before any state/API call uses the
+  // stored token. The URL's provider slug is authoritative: a session from a
+  // different provider is wiped immediately (so a foreign token can never
+  // drive this form), and the effect below then routes the crew to THIS
+  // provider's login. Cross-tenant API calls would 404 server-side anyway —
+  // this stops the confusing bounce before it starts.
+  ensureProviderSession(providerSlug);
+  useEffect(() => {
+    if (!ensureProviderSession(providerSlug)) {
+      navigate(`/${providerSlug}/login`, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [providerSlug]);
 
   const [phase, setPhase] = useState(0);
   // Highest phase the crew has reached so far. The stepper hides nodes ahead
