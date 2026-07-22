@@ -102,7 +102,14 @@
 
 html {
   font-size: 16px;
-  scroll-behavior: smooth;
+  /* NB: deliberately NO `scroll-behavior: smooth` here. A global smooth
+     turns every BROWSER-initiated scroll into an animation too — including
+     Android's "bring the focused input into view" when the on-screen
+     keyboard opens/closes and the keep-visible adjustments fired on every
+     keystroke / dictation update. Samsung Internet computes those animated
+     targets against the pre-keyboard layout and flings the page to the
+     top/bottom of the form. Intentional scrolls all pass
+     `behavior: 'smooth'` explicitly, so removing this loses nothing. */
   overflow-x: hidden;
   width: 100%;
 }

@@ -846,6 +846,21 @@ let activeRecognition: any = null;
 // dictation fixes both the Resus/Samsung screen-jump AND the dropped voice.
 let dictationActive = false;
 
+// Dictating while the on-screen keyboard is open is what makes Samsung
+// Internet "snap": the mic button preventDefaults its pointerdown, so
+// whichever input the crew last tapped KEEPS focus, and Android re-scrolls
+// that focused field into view on every transcript update — yanking the
+// page away from the field actually being dictated into (crew on field B
+// gets dragged back to still-focused field A, over and over). Closing the
+// keyboard by blurring the focused input before recognition starts removes
+// the scroll anchor, so the page stays put no matter whose mic is held.
+const blurFocusedField = () => {
+  const ae = (typeof document !== 'undefined' ? document.activeElement : null) as HTMLElement | null;
+  if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT' || ae.isContentEditable)) {
+    try { ae.blur(); } catch { /* ignore */ }
+  }
+};
+
 // ── Robust incremental dictation builder ──────────────────────────────────
 // Android engines (Chrome AND Samsung Internet, both backed by the system
 // speech service) misbehave in `continuous` mode in ways a result-index
@@ -993,6 +1008,9 @@ const Inp = ({ fk, type = 'text', onBlur, noMic }: { fk: string; ph?: string; ty
     if (!SpeechRecognitionAPI || recording) return;
     heldRef.current = true;
     dictationActive = true;
+    // Close the keyboard first (dictationActive is already set, so the
+    // keyboard-close scroll never reflows the sticky header mid-hold).
+    blurFocusedField();
     // Free the shared speech service if another field's recogniser is still
     // active/finalising, so this start() never throws and silently no-ops.
     try { activeRecognition?.stop?.(); } catch { /* ignore */ }
@@ -2156,6 +2174,9 @@ const VoiceTxt = ({ fk, rows = 3 }: { fk: string; ph?: string; rows?: number }) 
     if (!supported || recording) return;
     heldRef.current = true;
     dictationActive = true;
+    // Close the keyboard first (dictationActive is already set, so the
+    // keyboard-close scroll never reflows the sticky header mid-hold).
+    blurFocusedField();
     // Free the shared speech service if another field's recogniser is still
     // active/finalising, so this start() never throws and silently no-ops.
     try { activeRecognition?.stop?.(); } catch { /* ignore */ }
