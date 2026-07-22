@@ -5107,6 +5107,35 @@ export default function DigitalPRFForm() {
     }
   }, [timestamps.time_dispatched, timestamps.time_on_scene]);
 
+  // Auto-scroll to the "Start Examination" button once On Scene time + km are
+  // captured. On a phone the button renders below the fold, so bring it to the
+  // bottom of the screen (block:'end'). Keyed on the capture COMPLETING — not
+  // the button tap — so it still fires when async GPS capture delays the state
+  // update (the old fixed 150ms timeout raced the button's mount and scrolled
+  // to nothing). Polls via requestAnimationFrame until the button exists, runs
+  // once per capture, and skips resume (on-scene already set at mount) so the
+  // page never jumps on load.
+  const startExamScrolled = useRef<boolean>(!!timestamps.time_on_scene);
+  useEffect(() => {
+    const ready = !!(timestamps.time_on_scene && kms.km_on_scene) && !startedExam;
+    if (!ready) { startExamScrolled.current = false; return; }
+    if (startExamScrolled.current) return;
+    if (typeof window === 'undefined' || window.innerWidth >= 768) return;
+    let raf = 0;
+    let tries = 0;
+    const toButton = () => {
+      const el = document.getElementById('start-exam-button');
+      if (el) {
+        startExamScrolled.current = true;
+        el.scrollIntoView({ behavior: 'smooth', block: 'end' });
+        return;
+      }
+      if (tries++ < 40) raf = requestAnimationFrame(toButton);
+    };
+    raf = requestAnimationFrame(toButton);
+    return () => cancelAnimationFrame(raf);
+  }, [timestamps.time_on_scene, kms.km_on_scene, startedExam]);
+
   const advancePhase = async (nextPhase: number, autoTimeKey?: string, autoKmKey?: string) => {
     const inlineBlockers = collectLeavePhaseBlockers(phase);
     if (inlineBlockers.length > 0) {
@@ -9712,15 +9741,11 @@ export default function DigitalPRFForm() {
                 setOnScenePromptOpen(false);
                 if (hasError) return;
                 runMarkTime();
-                // On mobile the Start Examination button renders below the fold
-                // once On Scene time is marked. Slide the page down to the button
-                // (block:'end' brings it to the bottom of the view) so the crew
-                // can see it. The button also plays its slide-in animation.
-                if (window.innerWidth < 768) {
-                  window.setTimeout(() => {
-                    document.getElementById('start-exam-button')?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-                  }, 150);
-                }
+                // The scroll to the Start Examination button is handled by the
+                // effect keyed on On Scene time+km being captured (see the
+                // "Start Examination" scroll effect near the top of the
+                // component). Keying it on the captured state — not this tap —
+                // makes it robust to GPS capture delaying the button's render.
               }}
               style={{
                 flex: 2, padding: '12px 24px', borderRadius: 12, fontSize: '0.9rem',
