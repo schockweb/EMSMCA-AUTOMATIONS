@@ -764,18 +764,43 @@ async def delete_prf(
     return {"status": "deleted", "prf_number": prf_number}
 
 
+_TIMESTAMP_COLS = (
+    "time_call_received", "time_dispatched", "time_mobile", "time_on_scene",
+    "time_depart_scene", "time_at_destination", "time_handover",
+    "time_available", "time_back_to_base",
+)
+
+
+def _draft_has_captured_work(prf: DigitalPRF) -> bool:
+    """True when a DRAFT holds real crew work, so end-shift must NOT discard it.
+
+    A freshly-created draft carries only the seeded `supervising_practitioner_*`
+    keys in form_data and no timestamps. Anything beyond that — a call type,
+    patient details, a marked time — means the crew started working the PRF and
+    losing it would destroy their work (the "End Shift in another tab deleted my
+    open PRF" data-loss bug)."""
+    fd = prf.form_data or {}
+    for k in fd:
+        if not str(k).startswith("supervising_practitioner"):
+            return True
+    if any(getattr(prf, col, None) for col in _TIMESTAMP_COLS):
+        return True
+    return False
+
+
 @router.post("/end-shift", status_code=200)
 async def end_shift(
     crew: CrewMember = Depends(get_current_crew),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    End-of-shift cleanup. Deletes every DRAFT PRF the authenticated crew
-    member has open. Submitted PRFs are untouched (they're already in the
-    billing pipeline).
+    End-of-shift cleanup. Discards only EMPTY draft PRFs (crew opened "New PRF"
+    then never used it). Drafts that hold captured work are KEPT so ending a
+    shift — including accidentally, or from another browser tab while a PRF is
+    open — can never delete an in-progress report. Kept drafts resurface on the
+    crew's dashboard next login to finish or submit. Submitted PRFs are untouched.
 
-    Idempotent — safe to call multiple times. Returns the list of deleted
-    PRF numbers so the frontend can show a final confirmation toast.
+    Idempotent. Returns the discarded PRF numbers (and how many were kept).
     """
     result = await db.execute(
         select(DigitalPRF).where(
@@ -785,19 +810,24 @@ async def end_shift(
     )
     drafts = result.scalars().all()
 
-    deleted_numbers = [p.prf_number for p in drafts]
-    for prf in drafts:
+    discardable = [p for p in drafts if not _draft_has_captured_work(p)]
+    kept = [p for p in drafts if _draft_has_captured_work(p)]
+
+    deleted_numbers = [p.prf_number for p in discardable]
+    for prf in discardable:
         await db.delete(prf)
     await db.commit()
 
     logger.info(
-        "Crew %s ended shift — discarded %d draft PRF(s): %s",
+        "Crew %s ended shift — discarded %d empty draft(s): %s; kept %d in-progress draft(s): %s",
         crew.full_name, len(deleted_numbers), deleted_numbers,
+        len(kept), [p.prf_number for p in kept],
     )
     return {
         "status": "shift_ended",
         "drafts_deleted": len(deleted_numbers),
         "prf_numbers": deleted_numbers,
+        "drafts_kept": len(kept),
     }
 
 

@@ -5399,6 +5399,51 @@ export default function DigitalPRFForm() {
         handleSessionExpired();
         return;
       }
+      // Self-heal: the PRF row is gone server-side (404) — e.g. an End Shift
+      // in another tab swept drafts while this tab still holds the full form.
+      // Rather than lose the crew's work, re-create the PRF from the in-memory
+      // data and submit the fresh row. (A 404 here is deterministic — the row
+      // truly doesn't exist — so this can't create a duplicate of a live PRF.)
+      if (statusCode === 404) {
+        try {
+          const supervisor = (() => {
+            try { return JSON.parse(localStorage.getItem('shift_supervisor') || 'null'); }
+            catch { return null; }
+          })();
+          const createRes = await api().post('/api/digital-prf', {
+            vehicle_id: vehicle || null,
+            crew_member_2_id: crew2Id || null,
+            supervising_practitioner_pr: supervisor?.hpcsa_number || null,
+            supervising_practitioner_name: supervisor?.name || null,
+            supervising_practitioner_qualification: supervisor?.qualification || null,
+          });
+          const newId = createRes.data?.id;
+          if (newId) {
+            await api().patch(`/api/digital-prf/${newId}`, buildSavePayload());
+            const subRes = await api().post(`/api/digital-prf/${newId}/submit`);
+            const st = subRes.data?.status;
+            const caseId = subRes.data?.case_id;
+            if (st === 'submitted' || st === 'processed') {
+              clearLocalDraft();
+              const rawEmail = (fd.handover_doctor_email || '').trim();
+              const hasEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawEmail);
+              if (caseId && hasEmail) {
+                navigate(`/${providerSlug}/crew/prf-view/${caseId}?send=1`);
+              } else {
+                alert('PRF submitted successfully.');
+                navigate(`/${providerSlug}/crew/dashboard`);
+              }
+              setSubmit(false);
+              submitInFlightRef.current = false;
+              return;
+            }
+          }
+        } catch { /* fall through to the generic message below */ }
+        alert('This PRF was removed from the server (a shift may have been ended in another tab) and could not be recovered automatically. Please note any critical details and start a new PRF.');
+        setSubmit(false);
+        submitInFlightRef.current = false;
+        return;
+      }
       // Offline fallback: queue submission to outbox
       if (!navigator.onLine || e?.code === 'ECONNABORTED' || e?.code === 'ERR_NETWORK') {
         try {
