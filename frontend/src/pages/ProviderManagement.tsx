@@ -5,6 +5,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import api from '../api/client';
 import { useScrollLock } from '../hooks/useScrollLock';
+import { LoadErrorPanel, LoadErrorBar } from '../components/LoadError';
 
 interface Provider {
   id: string;
@@ -154,12 +155,17 @@ export default function ProviderManagement() {
   useScrollLock(showAddProvider || showEditClient || showAddCrew || showEditCrew || showAddVehicle || showEditVehicle);
   const [tempPassword, setTempPassword] = useState('');
 
+  // Failed load ≠ no clients — without this an unreachable backend rendered
+  // "No service providers yet" over a full client list.
+  const [loadError, setLoadError] = useState(false);
+
   const fetchProviders = useCallback(async () => {
     setLoading(true);
     try {
       const res = await api.get('/api/providers');
       setProviders(res.data);
-    } catch { /* ignore */ }
+      setLoadError(false);
+    } catch { setLoadError(true); }
     setLoading(false);
   }, []);
 
@@ -609,6 +615,9 @@ export default function ProviderManagement() {
 
         {loading ? (
           <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>Loading providers...</div>
+        ) : loadError && providers.length === 0 ? (
+          /* Fetch failed with nothing loaded — explicit error, not "no clients yet" */
+          <LoadErrorPanel what="service providers" onRetry={fetchProviders} />
         ) : providers.length === 0 ? (
           <div style={{ ...cardStyle, textAlign: 'center', padding: 40 }}>
             <p style={{ fontSize: '1rem', color: 'var(--text-muted)' }}>No service providers yet</p>

@@ -15,7 +15,7 @@ from sqlalchemy import select, text
 from app.config import get_settings
 from app.database import create_tables, AsyncSessionLocal, get_db
 from app.models.user import User, UserRole
-from app.utils.security import hash_password
+from app.utils.security import hash_password, get_current_user
 from app.middleware import RateLimitMiddleware, XSSProtectionMiddleware, CrashHandlerMiddleware, setup_logging, get_logger
 from app.core.response_cache import ResponseCacheMiddleware
 
@@ -415,8 +415,14 @@ _start_time = time.time()
 # ── Dashboard Stats ──────────────────────────────────────
 
 @app.get("/api/stats", tags=["Dashboard"])
-async def get_stats():
-    """Quick statistics for the dashboard — includes pipeline stage counts."""
+async def get_stats(_user: User = Depends(get_current_user)):
+    """Quick statistics for the dashboard — includes pipeline stage counts.
+
+    Auth required: this was the one unauthenticated data endpoint — it leaked
+    operational counts (documents, claims, cases, EDI volumes) to anyone who
+    could reach the server. The response-cache key includes the Authorization
+    header and only 200s are cached, so adding auth cannot serve cached data
+    to anonymous callers."""
     from sqlalchemy import func
     from app.models.document import Document, OCRStatus
     from app.models.claim import Claim, AdjudicationStatus

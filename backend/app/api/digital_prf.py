@@ -1493,16 +1493,17 @@ async def get_prf_by_case_for_admin(
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# EMAIL HELPERS — used by the submit-time PRF-PDF-to-receiving-facility flow
+# EMAIL HELPER — currently UNUSED (no automatic email-on-submit exists)
 # ═══════════════════════════════════════════════════════════════════════════
-# On a successful PRF submission we enqueue a Celery task that renders the
-# final PRF view to a PDF using Playwright (running in the celery_worker
-# container) and emails it to the Receiving Facility Email captured at
-# handover. The crew never has to do anything — submitting the PRF IS the
-# trigger.
+# STATUS (2026-07-22 audit): automatic "PDF to receiving facility on submit"
+# is NOT implemented. The referenced Celery task (app/tasks/prf_email.py)
+# does not exist and nothing calls _send_email. What DOES exist is the
+# MANUAL flow in PRFView.tsx: staff export the PDF and the app opens Gmail
+# pre-addressed to the Receiving Facility Email captured at handover.
 #
-# `_send_email` is the SMTP wrapper used by that flow. It accepts optional
-# binary attachments so the Celery task can attach the rendered PDF.
+# _send_email is kept as the ready-made SMTP wrapper (with attachment
+# support) for when the automatic flow is actually built. Do not describe
+# the automatic flow as existing until a task calls this.
 
 def _send_email(
     to: str,
@@ -1567,8 +1568,8 @@ def _public_app_url() -> str:
 
 # Doctor-portal endpoints and token-handling code were removed during the
 # live rollout. The PRF is no longer shared as a link the doctor edits —
-# instead, a Celery task renders the final PRF view to a PDF on submit and
-# emails it to the Receiving Facility Email (see app/tasks/prf_email.py).
+# staff send the PDF via the manual Gmail flow in PRFView.tsx (automatic
+# email-on-submit is not implemented; see the note above _send_email).
 
 
 # ── OCR Hospital Sticker ────────────────────────────────────────────────────

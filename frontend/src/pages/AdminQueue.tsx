@@ -6,6 +6,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
+import { LoadErrorPanel, LoadErrorBar } from '../components/LoadError';
 
 interface DocumentItem {
   id: string;
@@ -244,6 +245,10 @@ export default function AdminQueue() {
     return () => clearInterval(iv);
   }, [documents]);
 
+  // Failed load ≠ empty queue: without this flag an unreachable backend
+  // rendered "No documents found", hiding real pending work.
+  const [loadError, setLoadError] = useState(false);
+
   const fetchDocuments = async () => {
     setLoading(true);
     try {
@@ -252,7 +257,8 @@ export default function AdminQueue() {
       const res = await api.get('/api/documents/', { params });
       setDocuments(res.data.documents);
       setTotal(res.data.total);
-    } catch (_e) { /* Error handled by API interceptor */ }
+      setLoadError(false);
+    } catch (_e) { setLoadError(true); }
     finally { setLoading(false); }
   };
 
@@ -756,10 +762,16 @@ export default function AdminQueue() {
       )}
 
       {/* ── Table ─────────────────────────────────────────────────────────── */}
+      {loadError && documents.length > 0 && (
+        <LoadErrorBar what="the queue" onRetry={fetchDocuments} />
+      )}
       {loading ? (
         <div style={{ display: 'flex', justifyContent: 'center', padding: 80 }}>
           <div style={{ width: 36, height: 36, border: '3px solid var(--surface-200)', borderTopColor: 'var(--brand-teal)', borderRadius: '50%', animation: 'queueSpin 0.8s linear infinite' }} />
         </div>
+      ) : loadError && documents.length === 0 ? (
+        /* Load failed with nothing shown — an explicit error, not "No documents found" */
+        <LoadErrorPanel what="the document queue" onRetry={fetchDocuments} />
       ) : filteredDocs.length === 0 ? (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '80px 0', gap: 16, color: 'var(--text-muted)' }}>
           <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" style={{ opacity: 0.3 }}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>

@@ -10,6 +10,7 @@ import axios from 'axios';
 import { useScrollLock } from '../../hooks/useScrollLock';
 import { HPCSA_CATEGORIES, CATEGORY_META, type HpcsaCategory } from '../../data/hpcsaScope';
 import { getCrewToken, getCrewProfile, CREW_SESSION_KEYS } from '../../utils/crewSession';
+import { LoadErrorBar } from '../../components/LoadError';
 
 // ── Tokens ───────────────────────────────────────────────────────
 const INK = '#0a0a0a';
@@ -311,25 +312,30 @@ export default function ProviderAdminDashboard() {
     if (!getCrewToken()) navigate(`/${providerSlug}/login`);
   }, []);
 
+  // Failed load ≠ empty list — without this, an unreachable backend rendered
+  // "No PRFs yet" / "No vehicles" over real data. Cleared at each fetch start
+  // (tabs share it; every tab switch refetches).
+  const [loadError, setLoadError] = useState(false);
+
   const fetchEmployees = useCallback(async () => {
     if (!providerId) return;
-    setLoading(true);
+    setLoading(true); setLoadError(false);
     try { const { data } = await getApi().get(`/api/providers/${providerId}/crew`); setEmployees(data); }
-    catch { /* ignore */ }
+    catch { setLoadError(true); }
     setLoading(false);
   }, [providerId]);
 
   const fetchVehicles = useCallback(async () => {
     if (!providerId) return;
-    setLoading(true);
+    setLoading(true); setLoadError(false);
     try { const { data } = await getApi().get(`/api/providers/${providerId}/vehicles`); setVehicles(data); }
-    catch { /* ignore */ }
+    catch { setLoadError(true); }
     setLoading(false);
   }, [providerId]);
 
   const fetchPrfs = useCallback(async () => {
     if (!providerId) return;
-    setLoading(true);
+    setLoading(true); setLoadError(false);
     try {
       const term = search.trim();
       const qs = `limit=100${term ? `&search=${encodeURIComponent(term)}` : ''}`;
@@ -343,7 +349,7 @@ export default function ProviderAdminDashboard() {
       const hdr = res.headers?.['x-total-count'];
       setPrfTotal(hdr != null ? Number(hdr) : (Array.isArray(data) ? items.length : (data.total ?? items.length)));
     }
-    catch { /* ignore */ }
+    catch { setLoadError(true); }
     setLoading(false);
   }, [providerId, search]);
 
@@ -805,8 +811,14 @@ export default function ProviderAdminDashboard() {
             </div>
           )}
 
+          {loadError && <LoadErrorBar what="PRFs" onRetry={fetchPrfs} />}
           {loading ? (
             <div style={{ padding: 40, textAlign: 'center', color: MUT, fontSize: '0.84rem', background: '#fff', border: `1px solid ${LN}`, borderRadius: 6 }}>Loading…</div>
+          ) : loadError && prfs.length === 0 ? (
+            /* Load failed — the banner above explains; don't claim "No PRFs yet" */
+            <div style={{ padding: 40, textAlign: 'center', color: MUT, fontSize: '0.84rem', background: '#fff', border: `1px solid ${LN}`, borderRadius: 6 }}>
+              PRFs could not be loaded.
+            </div>
           ) : prfs.length === 0 ? (
             <div style={{ padding: 40, textAlign: 'center', color: MUT, fontSize: '0.84rem', background: '#fff', border: `1px solid ${LN}`, borderRadius: 6 }}>
               {search.trim() ? 'No PRFs match your search.' : 'No PRFs yet. Submitted PRFs from your crews will appear here.'}
@@ -885,6 +897,12 @@ export default function ProviderAdminDashboard() {
           </>
           ) : (
           <>
+          {loadError && (
+            <LoadErrorBar
+              what={activeTab === 'vehicles' ? 'vehicles' : 'employees'}
+              onRetry={activeTab === 'vehicles' ? fetchVehicles : fetchEmployees}
+            />
+          )}
           {activeTab === 'employees' ? (
           /* Crew view (mobile + desktop) — decluttered: no title, chips or status
              filter. Just a neat right-aligned group of icon actions. The search

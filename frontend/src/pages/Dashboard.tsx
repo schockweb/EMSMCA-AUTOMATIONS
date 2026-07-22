@@ -8,6 +8,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
+import { LoadErrorPanel, LoadErrorBar } from '../components/LoadError';
 
 // ── Palette (locked to white / teal / green / orange) ──────────────────────
 const TEAL = 'var(--brand-teal)';     // #088395
@@ -124,6 +125,10 @@ export default function Dashboard() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastRefresh, setLastRefresh] = useState(new Date());
+  // Distinguishes "server said zero" from "we never heard from the server" —
+  // without it a dead backend rendered an all-zeros dashboard that looked
+  // like a quiet day instead of an outage.
+  const [loadError, setLoadError] = useState(false);
   const { user } = useAuth();
   const navigate = useNavigate();
 
@@ -138,8 +143,9 @@ export default function Dashboard() {
       const res = await api.get('/api/stats');
       setStats(res.data);
       setLastRefresh(new Date());
+      setLoadError(false);
     } catch (_err) {
-      // Error handled by API interceptor
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -167,6 +173,16 @@ export default function Dashboard() {
     );
   }
 
+  // First load failed → nothing to show. Render an explicit error instead of
+  // falling through to a dashboard of zeros (which reads as "quiet day").
+  if (!stats && loadError) {
+    return (
+      <div style={{ padding: '28px 36px', maxWidth: 720, margin: '0 auto', fontFamily: 'var(--font-sans)' }}>
+        <LoadErrorPanel what="the dashboard" onRetry={() => { setLoading(true); fetchStats(); }} />
+      </div>
+    );
+  }
+
   const d = stats?.documents;
   const c = stats?.claims;
   const p = stats?.pipeline;
@@ -189,6 +205,11 @@ export default function Dashboard() {
         @keyframes dashFadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
         .dash-in { animation: dashFadeUp 0.4s ease-out forwards; }
       `}</style>
+
+      {/* Background refresh failing — keep the stale numbers visible but say so */}
+      {loadError && (
+        <LoadErrorBar what="dashboard stats" onRetry={fetchStats} />
+      )}
 
       {/* ── Header ───────────────────────────────────────────────────── */}
       <div className="dash-in" style={{

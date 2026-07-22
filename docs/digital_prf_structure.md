@@ -168,7 +168,7 @@ These fields reside as keys inside the JSON-serialized `form_data` attribute. To
 *   **`receiving_facility`**: `string` (Hospital or clinic full name and physical address)
 *   **`handover_name`**: `string` (Doctor or nurse full name accepting the patient)
 *   **`handover_qualification`**: `string` (Qualification of practitioner, e.g. `MBChB`, `RN`)
-*   **`receiving_facility_email`**: `string` (Target address for instant PDF export delivery on submit)
+*   **`receiving_facility_email`**: `string` (Pre-fills the To field of the manual PDF-export email in the PRF viewer. Automatic delivery on submit is not implemented.)
 
 ### Phase 6: Complete
 *   **`signature_refused_reason`**: `string` (Documented reason if patient signature is unavailable)

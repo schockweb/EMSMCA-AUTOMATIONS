@@ -3,6 +3,7 @@
  */
 import { useState, useEffect } from 'react';
 import api from '../api/client';
+import { LoadErrorPanel, LoadErrorBar } from '../components/LoadError';
 
 interface Employee {
   id: string;
@@ -64,11 +65,16 @@ export default function EmployeeManagement() {
     fetchPermissions();
   }, []);
 
+  // Failed load ≠ zero employees — track it so we never render the
+  // "No employees found" invite over a connection problem.
+  const [loadError, setLoadError] = useState(false);
+
   const fetchEmployees = async () => {
     try {
       const res = await api.get('/api/users/');
       setEmployees(res.data);
-    } catch { /* silent */ } finally {
+      setLoadError(false);
+    } catch { setLoadError(true); } finally {
       setLoading(false);
     }
   };
@@ -386,8 +392,19 @@ export default function EmployeeManagement() {
           </tbody>
         </table>
         {employees.length === 0 && (
-          <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>
-            No employees found. Click "New Employee" to create the first account.
+          loadError ? (
+            <div style={{ padding: 20 }}>
+              <LoadErrorPanel what="employees" onRetry={fetchEmployees} />
+            </div>
+          ) : (
+            <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>
+              No employees found. Click "New Employee" to create the first account.
+            </div>
+          )
+        )}
+        {loadError && employees.length > 0 && (
+          <div style={{ padding: '12px 16px 0' }}>
+            <LoadErrorBar what="employees" onRetry={fetchEmployees} />
           </div>
         )}
       </div>

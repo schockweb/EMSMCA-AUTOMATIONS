@@ -4,6 +4,7 @@
  */
 import { useState, useEffect } from 'react';
 import api from '../api/client';
+import { LoadErrorPanel } from '../components/LoadError';
 
 interface Analytics {
   pipeline: { total_documents: number; completed: number; failed: number; needs_review: number; completion_rate: number; automation_rate: number; pending: number; preprocessing: number; extracting: number };
@@ -28,13 +29,17 @@ export default function AnalyticsDashboard() {
     try {
       const res = await api.get('/api/analytics/dashboard');
       setData(res.data);
-    } catch (_err) { /* Error handled by API interceptor */ } finally { setLoading(false); }
+    } catch (_err) { /* data stays null → explicit failure panel below */ } finally { setLoading(false); }
   };
 
   const formatZAR = (n: number) => `R ${n.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   if (loading) return <div className="page-content" style={{ display: 'flex', justifyContent: 'center', paddingTop: 100 }}><div className="spinner" style={{ width: 40, height: 40 }} /></div>;
-  if (!data) return <div className="page-content"><p style={{ color: 'var(--text-muted)' }}>Failed to load analytics.</p></div>;
+  if (!data) return (
+    <div className="page-content" style={{ maxWidth: 720, margin: '0 auto' }}>
+      <LoadErrorPanel what="analytics" onRetry={loadAnalytics} />
+    </div>
+  );
 
   return (
     <div className="page-content" style={{ animation: 'fadeInUp 0.6s ease-out' }}>

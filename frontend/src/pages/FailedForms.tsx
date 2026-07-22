@@ -4,6 +4,7 @@
  */
 import { useState, useEffect, useCallback } from 'react';
 import api from '../api/client';
+import { LoadErrorPanel, LoadErrorBar } from '../components/LoadError';
 
 /* ────────────────── Types ────────────────── */
 
@@ -69,6 +70,11 @@ export default function FailedForms() {
     } catch { /* ignore */ }
   }, []);
 
+  // Load failure must NOT render as the celebratory "everything is processing
+  // smoothly" empty state — that's exactly the false all-clear this page
+  // exists to prevent. Track it and show an explicit error instead.
+  const [loadError, setLoadError] = useState(false);
+
   const fetchForms = useCallback(async () => {
     setLoading(true);
     try {
@@ -76,7 +82,8 @@ export default function FailedForms() {
       if (search.trim()) params.search = search.trim();
       const res = await api.get('/api/failed-prfs', { params });
       setForms(res.data);
-    } catch { /* ignore */ }
+      setLoadError(false);
+    } catch { setLoadError(true); }
     setLoading(false);
   }, [search]);
 
@@ -349,6 +356,11 @@ export default function FailedForms() {
         ))}
       </div>
 
+      {/* Refresh failing but we still have rows — keep them, say refreshing broke */}
+      {loadError && forms.length > 0 && (
+        <LoadErrorBar what="failed forms" onRetry={fetchForms} />
+      )}
+
       {/* ── Stuck-submissions banner ── */}
       {forms.some((f) => f.status === 'submitted') && (
         <div style={{
@@ -387,6 +399,9 @@ export default function FailedForms() {
         <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
           Loading failed forms...
         </div>
+      ) : loadError && forms.length === 0 ? (
+        /* Fetch failed with nothing loaded — never show the 🎉 all-clear here */
+        <LoadErrorPanel what="failed forms" onRetry={fetchForms} />
       ) : forms.length === 0 ? (
         <div style={{ ...cardStyle, textAlign: 'center', padding: 40 }}>
           <p style={{ fontSize: '2rem', margin: '0 0 8px' }}>🎉</p>

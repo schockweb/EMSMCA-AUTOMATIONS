@@ -50,6 +50,11 @@ export default function Cases() {
   const [searchTerm, setSearchTerm] = useState('');
   const [total, setTotal] = useState(0);
 
+  // Failed-PRF alert (red/amber triangle in the header). Counts PRFs that
+  // failed processing + ones stuck in SUBMITTED with no case. When > 0 the
+  // triangle appears and clicking it opens the Failed Forms page.
+  const [failedCount, setFailedCount] = useState(0);
+
   // Rename dialog state
   const [renameCase, setRenameCase] = useState<Case | null>(null);
 
@@ -70,6 +75,22 @@ export default function Cases() {
          if (res.data.prf_name_template) setPrfNameTemplate(res.data.prf_name_template);
        })
        .catch(() => {});
+  }, []);
+
+  // Failed-PRF alert poll: on mount and every 60s, so the triangle "pops up"
+  // for staff already sitting on this page — not just on a reload. A fetch
+  // error leaves the count unchanged (never falsely clears an active alert).
+  const fetchFailedStats = async () => {
+    try {
+      const res = await api.get('/api/failed-prfs/stats');
+      setFailedCount((res.data?.total_failed ?? 0) + (res.data?.total_stuck ?? 0));
+    } catch { /* keep last known count */ }
+  };
+  useEffect(() => {
+    fetchFailedStats();
+    const id = setInterval(fetchFailedStats, 60000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Server-side search (debounced). Fires on mount too (empty term = full list),
@@ -161,6 +182,10 @@ export default function Cases() {
         @keyframes casesSpin { to { transform: rotate(360deg); } }
         @keyframes casesFadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes casesRowPulse  { 0%,100%{opacity:1} 50%{opacity:0.78} }
+        @keyframes casesAlertPulse {
+          0%,100% { box-shadow: 0 0 0 0 rgba(220,38,38,0.35); }
+          50%     { box-shadow: 0 0 0 6px rgba(220,38,38,0); }
+        }
         .cases-in { animation: casesFadeUp 0.4s ease-out forwards; }
         .cases-th { cursor:pointer; user-select:none; white-space:nowrap; }
         .cases-th:hover { color: var(--brand-teal); }
@@ -183,8 +208,38 @@ export default function Cases() {
             Case Management
           </h1>
         </div>
-        <div style={{ display: 'flex', gap: 10 }}>
-          <button onClick={fetchCases}
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          {/* Red/amber triangle — appears when any PRF failed to process, so
+              EMSMCA staff see it immediately from the Cases section. Click
+              opens Failed Forms for review + retry. */}
+          {failedCount > 0 && (
+            <button
+              onClick={() => navigate('/failed-forms')}
+              title={`${failedCount} PRF${failedCount === 1 ? '' : 's'} failed to process — click to review`}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '9px 16px', borderRadius: 'var(--radius-md)',
+                border: '1px solid rgba(220,38,38,0.35)',
+                background: 'rgba(245,124,0,0.09)',
+                color: '#dc2626', fontWeight: 800, fontSize: '0.85rem',
+                cursor: 'pointer', fontFamily: 'inherit',
+                animation: 'casesAlertPulse 2s ease-in-out infinite',
+                transition: 'transform var(--transition-fast)',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-1px)'; }}
+              onMouseLeave={e => { e.currentTarget.style.transform = 'none'; }}
+            >
+              {/* Warning triangle: amber fill, red outline */}
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="rgba(245,124,0,0.25)"
+                stroke="#dc2626" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                <line x1="12" y1="9" x2="12" y2="13" />
+                <line x1="12" y1="17" x2="12.01" y2="17" />
+              </svg>
+              {failedCount} PRF{failedCount === 1 ? '' : 's'} failed to process
+            </button>
+          )}
+          <button onClick={() => { fetchCases(); fetchFailedStats(); }}
             style={{
               padding: '9px 16px', borderRadius: 'var(--radius-md)',
               border: '1px solid var(--glass-border)', background: 'var(--surface-0)',
