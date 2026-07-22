@@ -4,6 +4,37 @@ import { getCrewToken } from '../utils/crewSession';
 
 let syncing = false;
 
+// Re-create a PRF whose server row is gone (404) from a queued payload, then
+// submit the fresh row. Mirrors the live form's inline 404 self-heal: an End
+// Shift in another tab (or a draft created offline that never persisted) can
+// sweep the draft while the outbox still holds the full, submitted form data.
+// A 404 is deterministic — the row truly doesn't exist — so this can never
+// duplicate a live PRF. The vehicle/crew2 travel in the payload; the shift
+// supervisor is read from local storage (same source the New-PRF button uses).
+async function recreateAndSubmit(prfId: string, payload: any, headers: Record<string, string>) {
+  const supervisor = (() => {
+    try { return JSON.parse(localStorage.getItem('shift_supervisor') || 'null'); }
+    catch { return null; }
+  })();
+  const storedVehicle = (() => {
+    try { return JSON.parse(localStorage.getItem('active_vehicle') || 'null'); }
+    catch { return null; }
+  })();
+  const createRes = await axios.post('/api/digital-prf', {
+    vehicle_id: payload?.vehicle_id || storedVehicle?.id || null,
+    crew_member_2_id: payload?.crew_member_2_id || null,
+    supervising_practitioner_pr: supervisor?.hpcsa_number || null,
+    supervising_practitioner_name: supervisor?.name || null,
+    supervising_practitioner_qualification: supervisor?.qualification || null,
+  }, { headers, timeout: 10000 });
+  const newId = createRes.data?.id;
+  if (!newId) throw new Error('Re-create returned no id');
+  if (payload) {
+    await axios.patch(`/api/digital-prf/${newId}`, payload, { headers, timeout: 10000 });
+  }
+  await axios.post(`/api/digital-prf/${newId}/submit`, null, { headers, timeout: 15000 });
+}
+
 export async function startSync() {
   if (syncing || !navigator.onLine) return;
   syncing = true;
@@ -32,7 +63,15 @@ export async function startSync() {
       
       try {
         if (entry.action === 'save') {
-          await axios.patch(`/api/digital-prf/${prfId}`, entry.payload, { headers, timeout: 10000 });
+          try {
+            await axios.patch(`/api/digital-prf/${prfId}`, entry.payload, { headers, timeout: 10000 });
+          } catch (saveErr: any) {
+            const code = saveErr?.response?.status;
+            // 404 (draft swept) or 423 (already submitted) make this autosave
+            // obsolete — the authoritative data rides on the submit entry, so
+            // drop it (fall through to markSynced) instead of retrying forever.
+            if (code !== 404 && code !== 423) throw saveErr;
+          }
         } else if (entry.action === 'submit') {
           // Save first, then submit. The pre-submit save can legitimately fail
           // with 423 Locked when the PRF is ALREADY submitted/processed on the
@@ -45,16 +84,29 @@ export async function startSync() {
           // entry. Without this the save throw stranded the entry as
           // "pending upload" forever with no way to clear it (reported:
           // "1 PRF pending upload, clicking does nothing").
-          if (entry.payload) {
-            try {
-              await axios.patch(`/api/digital-prf/${prfId}`, entry.payload, { headers, timeout: 10000 });
-            } catch (patchErr: any) {
-              if (patchErr?.response?.status !== 423) throw patchErr; // real save failure — retry later
+          try {
+            if (entry.payload) {
+              try {
+                await axios.patch(`/api/digital-prf/${prfId}`, entry.payload, { headers, timeout: 10000 });
+              } catch (patchErr: any) {
+                // 423 = already submitted → let the idempotent submit confirm.
+                // 404 = draft gone → rethrow so the self-heal below re-creates.
+                if (patchErr?.response?.status !== 423) throw patchErr;
+              }
+            }
+            // Idempotent: returns 200 with status processed/submitted even on
+            // replay, so an already-submitted PRF clears cleanly here.
+            await axios.post(`/api/digital-prf/${prfId}/submit`, null, { headers, timeout: 15000 });
+          } catch (subErr: any) {
+            // "PRF not found": the draft was swept server-side. Re-create it
+            // from the queued payload and submit the fresh row rather than
+            // stranding the crew's work as "pending upload" forever.
+            if (subErr?.response?.status === 404) {
+              await recreateAndSubmit(prfId, entry.payload, headers);
+            } else {
+              throw subErr;
             }
           }
-          // Idempotent: returns 200 with status processed/submitted even on
-          // replay, so an already-submitted PRF clears cleanly here.
-          await axios.post(`/api/digital-prf/${prfId}/submit`, null, { headers, timeout: 15000 });
         }
         await markSynced(entry.id);
       } catch (err: any) {
