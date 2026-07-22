@@ -12,11 +12,12 @@ interface FailedFormStats {
   failed_today: number;
   avg_attempts: number;
   oldest_unresolved_days: number;
+  total_stuck?: number;                 // submitted >10 min ago, never processed
 }
 
 interface FailedForm {
-  id: number;
-  prf_number: string;
+  id: string;                           // UUID from the backend
+  prf_number: number;
   patient_name: string;
   // Field names match the backend response (failed_prfs.py). These were
   // previously mis-named error_message / attempts / failed_at, which the API
@@ -24,7 +25,10 @@ interface FailedForm {
   processing_error: string;
   processing_attempts: number;
   last_processing_at: string | null;   // may be null
-  status?: string;                      // only present on the detail response
+  // "failed" = pipeline errored out; "submitted" = STUCK (crew submitted but
+  // processing never ran — the watchdog auto-retries these every 5 min).
+  status?: string;
+  submitted_at?: string | null;
   form_data?: Record<string, any>;
   created_at?: string;
 }
@@ -54,7 +58,7 @@ export default function FailedForms() {
   const [correcting, setCorrecting] = useState(false);
 
   // Reprocess loading per row
-  const [reprocessingId, setReprocessingId] = useState<number | null>(null);
+  const [reprocessingId, setReprocessingId] = useState<string | null>(null);
 
   /* ── Data Fetching ── */
 
@@ -95,7 +99,7 @@ export default function FailedForms() {
 
   /* ── Reprocess ── */
 
-  const handleReprocess = async (id: number) => {
+  const handleReprocess = async (id: string) => {
     setReprocessingId(id);
     try {
       await api.post(`/api/failed-prfs/${id}/reprocess`);
@@ -268,7 +272,7 @@ export default function FailedForms() {
             ⚠️ Failed Forms
           </h1>
           <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', margin: '4px 0 0' }}>
-            Monitor and resolve PRF submissions that failed during processing
+            Monitor and resolve PRF submissions that failed or got stuck during processing
           </p>
         </div>
         <button
@@ -345,6 +349,24 @@ export default function FailedForms() {
         ))}
       </div>
 
+      {/* ── Stuck-submissions banner ── */}
+      {forms.some((f) => f.status === 'submitted') && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          padding: '10px 14px', marginBottom: 16,
+          background: 'rgba(230,81,0,0.07)',
+          border: '1px solid rgba(230,81,0,0.25)',
+          borderRadius: 10, color: amber,
+          fontSize: '0.82rem', fontWeight: 600,
+        }}>
+          <span style={{ fontSize: '1rem' }}>⏳</span>
+          {forms.filter((f) => f.status === 'submitted').length} submitted PRF
+          {forms.filter((f) => f.status === 'submitted').length !== 1 ? 's have' : ' has'} been
+          waiting over 10 minutes without processing. Auto-retry runs every 5 minutes —
+          use Retry to reprocess one immediately.
+        </div>
+      )}
+
       {/* ── Search ── */}
       <div style={{ display: 'flex', gap: 10, marginBottom: 16, alignItems: 'center' }}>
         <input
@@ -381,7 +403,7 @@ export default function FailedForms() {
                 <th style={thStyle}>Patient</th>
                 <th style={thStyle}>Error</th>
                 <th style={{ ...thStyle, textAlign: 'center' }}>Attempts</th>
-                <th style={thStyle}>Failed At</th>
+                <th style={thStyle}>Last Activity</th>
                 <th style={{ ...thStyle, textAlign: 'right' }}>Actions</th>
               </tr>
             </thead>
@@ -414,14 +436,18 @@ export default function FailedForms() {
                       borderRadius: 99,
                       fontSize: '0.7rem',
                       fontWeight: 600,
-                      background: 'rgba(194,24,91,0.08)',
-                      color: rose,
+                      background: f.status === 'submitted'
+                        ? 'rgba(230,81,0,0.08)'
+                        : 'rgba(194,24,91,0.08)',
+                      color: f.status === 'submitted' ? amber : rose,
                       maxWidth: '100%',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
                       whiteSpace: 'nowrap',
                     }}>
-                      {f.processing_error}
+                      {f.status === 'submitted'
+                        ? '⏳ Stuck — submitted, not processed'
+                        : f.processing_error}
                     </span>
                   </td>
                   <td style={{ padding: '10px 14px', textAlign: 'center' }}>
@@ -445,8 +471,9 @@ export default function FailedForms() {
                     </span>
                   </td>
                   <td style={{ padding: '10px 14px', fontSize: '0.75rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-                    <span title={f.last_processing_at ? new Date(f.last_processing_at).toLocaleString() : ''}>
-                      {timeAgo(f.last_processing_at)}
+                    {/* Stuck rows have never been processed — show submit time instead */}
+                    <span title={(f.last_processing_at || f.submitted_at) ? new Date((f.last_processing_at || f.submitted_at)!).toLocaleString() : ''}>
+                      {timeAgo(f.last_processing_at ?? f.submitted_at ?? null)}
                     </span>
                   </td>
                   <td style={{ padding: '10px 14px', textAlign: 'right', whiteSpace: 'nowrap' }}>
@@ -462,18 +489,23 @@ export default function FailedForms() {
                     >
                       👁 View
                     </button>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); openCorrect(f); }}
-                      style={{
-                        background: 'none', border: 'none', cursor: 'pointer',
-                        color: amber, fontSize: '0.75rem', fontWeight: 700, marginRight: 6,
-                        transition: 'opacity 0.15s ease',
-                      }}
-                      title="Correct form data"
-                      id={`btn-correct-${f.id}`}
-                    >
-                      ✏️ Correct
-                    </button>
+                    {/* Correction creates a replacement PRF and is only valid for
+                        FAILED rows (the backend rejects other statuses). Stuck
+                        rows just need a Retry. */}
+                    {f.status !== 'submitted' && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); openCorrect(f); }}
+                        style={{
+                          background: 'none', border: 'none', cursor: 'pointer',
+                          color: amber, fontSize: '0.75rem', fontWeight: 700, marginRight: 6,
+                          transition: 'opacity 0.15s ease',
+                        }}
+                        title="Correct form data"
+                        id={`btn-correct-${f.id}`}
+                      >
+                        ✏️ Correct
+                      </button>
+                    )}
                     <button
                       onClick={(e) => { e.stopPropagation(); handleReprocess(f.id); }}
                       disabled={reprocessingId === f.id}
@@ -570,10 +602,14 @@ export default function FailedForms() {
                           <span style={{
                             display: 'inline-block', padding: '2px 10px', borderRadius: 99,
                             fontSize: '0.7rem', fontWeight: 700,
-                            background: field.value === 'failed' ? 'rgba(194,24,91,0.1)' : 'rgba(8,131,149,0.1)',
-                            color: field.value === 'failed' ? rose : teal,
+                            background: field.value === 'failed'
+                              ? 'rgba(194,24,91,0.1)'
+                              : field.value === 'submitted'
+                                ? 'rgba(230,81,0,0.1)'
+                                : 'rgba(8,131,149,0.1)',
+                            color: field.value === 'failed' ? rose : field.value === 'submitted' ? amber : teal,
                           }}>
-                            {field.value?.toUpperCase()}
+                            {field.value != null ? String(field.value).toUpperCase() : ''}
                           </span>
                         ) : (
                           field.value

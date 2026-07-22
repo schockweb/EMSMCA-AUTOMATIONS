@@ -4,11 +4,11 @@ PRFs that failed during the automated processing pipeline.
 """
 from __future__ import annotations
 import logging
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone, date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select, func, text
+from sqlalchemy import select, func, text, or_, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -18,6 +18,26 @@ from app.utils.security import get_current_user
 logger = logging.getLogger("ems.failed_prfs")
 
 router = APIRouter(prefix="/api/failed-prfs", tags=["Failed Forms"])
+
+# A PRF is "stuck" when the crew submitted it but the billing pipeline never
+# produced a Case — the SUBMITTED-black-hole state (lost queue message, worker
+# outage). Stuck rows are surfaced here alongside FAILED ones so admins can see
+# and retry them. Keep the threshold in sync with STUCK_AFTER_MINUTES in
+# app/tasks/prf_processing.py (the beat watchdog that auto-requeues them).
+STUCK_AFTER_MINUTES = 10
+
+
+def _stuck_condition():
+    """SQLAlchemy filter for submitted-but-never-processed PRFs."""
+    ref_time = func.coalesce(
+        DigitalPRF.submitted_at, DigitalPRF.updated_at, DigitalPRF.created_at
+    )
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=STUCK_AFTER_MINUTES)
+    return and_(
+        DigitalPRF.status == PRFStatus.SUBMITTED,
+        DigitalPRF.case_id.is_(None),
+        ref_time < cutoff,
+    )
 
 
 # ── Pydantic Schemas ────────────────────────────────────────
@@ -81,11 +101,19 @@ async def get_failed_stats(
         delta = datetime.now(timezone.utc) - oldest_created
         oldest_unresolved_days = delta.days
 
+    # Stuck submissions (SUBMITTED, no Case, older than the threshold) —
+    # additive key; the UI shows a warning banner when this is non-zero.
+    result = await db.execute(
+        select(func.count(DigitalPRF.id)).where(_stuck_condition())
+    )
+    total_stuck = result.scalar() or 0
+
     return {
         "total_failed": total_failed,
         "failed_today": failed_today,
         "avg_attempts": avg_attempts,
         "oldest_unresolved_days": oldest_unresolved_days,
+        "total_stuck": total_stuck,
     }
 
 
@@ -95,11 +123,20 @@ async def list_failed_prfs(
     db: AsyncSession = Depends(get_db),
     _user=Depends(get_current_user),
 ):
-    """List all failed PRFs, ordered by last_processing_at DESC."""
+    """List failed PRFs plus stuck submissions (SUBMITTED but never processed).
+
+    Stuck rows carry status="submitted" and no processing_error; the UI labels
+    them distinctly. They sort first (NULL last_processing_at, NULLS FIRST) —
+    exactly the rows needing the most attention."""
     query = (
         select(DigitalPRF)
-        .where(DigitalPRF.status == PRFStatus.FAILED)
-        .order_by(DigitalPRF.last_processing_at.desc())
+        .where(
+            or_(
+                DigitalPRF.status == PRFStatus.FAILED,
+                _stuck_condition(),
+            )
+        )
+        .order_by(DigitalPRF.last_processing_at.desc().nullsfirst())
     )
 
     if search:
@@ -117,6 +154,7 @@ async def list_failed_prfs(
             "id": str(prf.id),
             "prf_number": prf.prf_number,
             "case_number": prf.case_number,
+            "status": prf.status.value,
             "patient_name": (
                 (prf.form_data or {}).get("patient_name", "")
                 + " "
@@ -130,6 +168,9 @@ async def list_failed_prfs(
                 prf.last_processing_at.isoformat()
                 if prf.last_processing_at
                 else None
+            ),
+            "submitted_at": (
+                prf.submitted_at.isoformat() if prf.submitted_at else None
             ),
             "created_at": (
                 prf.created_at.isoformat() if prf.created_at else None
@@ -331,6 +372,23 @@ async def reprocess_failed_prf(
     prf = result.scalar_one_or_none()
     if not prf:
         raise HTTPException(404, f"PRF {prf_id} not found")
+
+    # Guards — reprocessing is only meaningful for PRFs whose pipeline never
+    # completed. Without these, reprocessing a PROCESSED PRF flipped it back to
+    # SUBMITTED while the task refused to touch it (case already exists) —
+    # stranding it as "Processing…" forever; and reprocessing a DRAFT would
+    # push an incomplete, never-submitted form into billing.
+    if prf.status == PRFStatus.PROCESSED or prf.case_id is not None:
+        raise HTTPException(
+            409,
+            "This PRF has already been processed (a case exists) — nothing to reprocess.",
+        )
+    if prf.status not in (PRFStatus.FAILED, PRFStatus.SUBMITTED):
+        raise HTTPException(
+            409,
+            f"Only failed or stuck-submitted PRFs can be reprocessed "
+            f"(this one is '{prf.status.value}').",
+        )
 
     # Reset processing state
     prf.status = PRFStatus.SUBMITTED

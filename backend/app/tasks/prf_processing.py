@@ -11,10 +11,19 @@ This prevents long-running tariff calculations from blocking Uvicorn workers
 from __future__ import annotations
 import uuid
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from celery import shared_task
 from celery.exceptions import SoftTimeLimitExceeded
+
+# Import the configured Celery app so IT is the current app wherever this
+# module is used (API process, docker-exec scripts, beat, worker). Without
+# this, a process that imports only this module publishes via Celery's
+# fallback default app — which knows the broker URL (env var) but NOT our
+# task_queues DLQ arguments, so RabbitMQ rejects the queue declare with
+# 406 PRECONDITION_FAILED (x-dead-letter-exchange mismatch) and the enqueue
+# fails. extraction.py / preprocessing.py already follow this pattern.
+import app.tasks.celery_app  # noqa: F401
 
 logger = logging.getLogger("ems.prf_processing")
 
@@ -357,3 +366,109 @@ def process_prf_submission(self, prf_id: str):
             return {"status": "failed", "prf_id": prf_id, "error": str(exc)[:500]}
 
         raise self.retry(exc=exc)
+
+
+# ── Watchdog: rescue PRFs stuck in SUBMITTED ────────────────────────────────
+# The submit endpoint commits status=SUBMITTED *then* enqueues the Celery task.
+# If the message is lost between those steps (worker down, broker hiccup,
+# dropped delivery), the PRF sits at SUBMITTED with no Case forever — invisible
+# on every dashboard ("Processing…" that never ends), and it never gets billed.
+#
+# This beat task (see beat_schedule in celery_app.py — runs every 5 minutes)
+# closes that hole:
+#   * stuck  > STUCK_AFTER_MINUTES  → re-enqueue process_prf_submission
+#     (safe: the task takes a row lock and returns if case_id is already set,
+#     so duplicate/racing deliveries can never double-bill)
+#   * stuck  > ESCALATE_AFTER_MINUTES → mark FAILED with a clear reason, so it
+#     surfaces on the admin Failed Forms page instead of re-queueing forever.
+#     Escalation does NOT strand the PRF: FAILED doesn't block the processing
+#     task, so any still-queued delivery (or an admin Retry) completes it.
+
+STUCK_AFTER_MINUTES = 10
+ESCALATE_AFTER_MINUTES = 60
+
+
+@shared_task(name="requeue_stuck_prfs", acks_late=True)
+def requeue_stuck_prfs():
+    """Find SUBMITTED PRFs with no Case and re-enqueue (or escalate) them."""
+    import asyncio
+
+    async def _sweep():
+        from sqlalchemy import select, func
+        from app.models.digital_prf import DigitalPRF, PRFStatus
+
+        engine, Session = _make_celery_session()
+        try:
+            async with Session() as db:
+                now = datetime.now(timezone.utc)
+                # submitted_at is set by the submit endpoint; the coalesce
+                # fallbacks cover legacy rows that predate that field.
+                ref_time = func.coalesce(
+                    DigitalPRF.submitted_at,
+                    DigitalPRF.updated_at,
+                    DigitalPRF.created_at,
+                )
+                result = await db.execute(
+                    select(DigitalPRF).where(
+                        DigitalPRF.status == PRFStatus.SUBMITTED,
+                        DigitalPRF.case_id.is_(None),
+                        ref_time < now - timedelta(minutes=STUCK_AFTER_MINUTES),
+                    )
+                )
+                stuck = result.scalars().all()
+                if not stuck:
+                    return {"stuck": 0, "requeued": 0, "escalated": 0}
+
+                to_requeue: list[tuple[str, int]] = []
+                escalated: list[int] = []
+                for prf in stuck:
+                    anchor = prf.submitted_at or prf.updated_at or prf.created_at
+                    age_min = (now - anchor).total_seconds() / 60.0
+                    if age_min >= ESCALATE_AFTER_MINUTES:
+                        prf.status = PRFStatus.FAILED
+                        prf.processing_error = (
+                            f"Submitted {int(age_min)} minutes ago but processing never "
+                            "completed — the processing queue may have been down. "
+                            "Use Retry to reprocess this PRF."
+                        )
+                        prf.last_processing_at = now
+                        escalated.append(prf.prf_number)
+                    else:
+                        to_requeue.append((str(prf.id), prf.prf_number))
+
+                # Commit escalations BEFORE enqueueing, so a broker error below
+                # can't roll back the FAILED flags that make PRFs visible.
+                await db.commit()
+
+                requeued: list[int] = []
+                for pid, num in to_requeue:
+                    try:
+                        process_prf_submission.apply_async(args=[pid], queue="ems_default")
+                        requeued.append(num)
+                    except Exception as enq_err:
+                        # Broker still down — leave it SUBMITTED; the next sweep
+                        # (or the escalation threshold) will pick it up again.
+                        logger.error(
+                            "Watchdog: could not re-enqueue stuck PRF #%d: %s",
+                            num, enq_err,
+                        )
+
+                if requeued or escalated:
+                    logger.warning(
+                        "Watchdog: %d stuck PRF(s) — re-enqueued %s, escalated to FAILED %s",
+                        len(stuck), requeued or "none", escalated or "none",
+                    )
+                return {
+                    "stuck": len(stuck),
+                    "requeued": len(requeued),
+                    "escalated": len(escalated),
+                }
+        finally:
+            await engine.dispose()
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(_sweep())
+    finally:
+        loop.close()

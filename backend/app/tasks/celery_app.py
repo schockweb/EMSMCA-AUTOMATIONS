@@ -60,6 +60,20 @@ celery_app.conf.update(
     task_soft_time_limit=60,
     worker_send_task_events=True,
     task_send_sent_event=True,
+
+    # ── Beat schedule (runs in the celery_beat container) ──
+    # Watchdog for the "SUBMITTED black hole": the submit endpoint commits
+    # SUBMITTED then enqueues — a lost message strands the PRF invisibly.
+    # Every 5 minutes the watchdog re-enqueues PRFs stuck >10 min and
+    # escalates ones stuck >60 min to FAILED for the admin Failed Forms page.
+    # See requeue_stuck_prfs in app/tasks/prf_processing.py.
+    beat_schedule={
+        "requeue-stuck-prfs": {
+            "task": "requeue_stuck_prfs",
+            "schedule": 300.0,  # every 5 minutes
+            "options": {"queue": "ems_default"},
+        },
+    },
 )
 
 
