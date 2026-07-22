@@ -1147,20 +1147,27 @@ const Inp = ({ fk, type = 'text', onBlur, noMic }: { fk: string; ph?: string; ty
         if (heldRef.current) {
           // Respawn to keep listening — iOS Safari (and Samsung) ignore
           // `continuous` and end the session after every pause. Do NOT
-          // re-baseline from the field here: dictRef.current.committed is the
+          // re-baseline `committed` from the field here: it is the
           // authoritative running transcript for this hold, and re-reading
           // fd[fk] races React's async state flush — the just-spoken word may
           // not be in fd yet, so baselining off it dropped that word (the iOS
           // "talk, come back, talk again — it deletes a word" bug).
-          // applyDictation already re-aligns its finalCount when the fresh
-          // session's results list restarts at index 0, so the committed text
-          // simply continues to accumulate across sessions.
+          // DO reset the final-index high-water mark though: the fresh
+          // session's results restart at index 0, and applyDictation's
+          // shrink heuristic (`results.length < finalCount`) misses the
+          // common 1-final case (1 < 1 is false) — the stale count then
+          // silently dropped the new session's first final, so on Samsung
+          // every pause made the next utterance appear and then vanish.
+          dictRef.current.finalCount = 0;
           startWithRetry();
           return;
         }
         setRecording(false); recogRef.current = null;
-        dictationActive = false;
-        if (activeRecognition === recog) activeRecognition = null;
+        // Clear the global dictation flag only if WE are still the active
+        // recogniser — when another field's mic force-stopped this one, its
+        // dictation is live and clobbering the flag here would switch off the
+        // scroll/header guards mid-hold.
+        if (activeRecognition === recog) { dictationActive = false; activeRecognition = null; }
       };
       recog.onerror = (ev: any) => {
         // Permission / service errors are fatal — stop for good. Transient
@@ -1203,7 +1210,10 @@ const Inp = ({ fk, type = 'text', onBlur, noMic }: { fk: string; ph?: string; ty
 
   const stopVoice = () => {
     heldRef.current = false;   // release BEFORE stop so onend doesn't respawn
-    dictationActive = false;
+    // Only drop the global flag when our recogniser is (or was) the active
+    // one — releasing a superseded mic must not kill the guards for a
+    // dictation another field has since taken over.
+    if (!activeRecognition || activeRecognition === recogRef.current) dictationActive = false;
     try { recogRef.current?.stop?.(); } catch { /* ignore */ }
     setRecording(false);
   };
@@ -2352,20 +2362,27 @@ const VoiceTxt = ({ fk, rows = 3 }: { fk: string; ph?: string; rows?: number }) 
         if (heldRef.current) {
           // Respawn to keep listening — iOS Safari (and Samsung) ignore
           // `continuous` and end the session after every pause. Do NOT
-          // re-baseline from the field here: dictRef.current.committed is the
+          // re-baseline `committed` from the field here: it is the
           // authoritative running transcript for this hold, and re-reading
           // fd[fk] races React's async state flush — the just-spoken word may
           // not be in fd yet, so baselining off it dropped that word (the iOS
           // "talk, come back, talk again — it deletes a word" bug).
-          // applyDictation already re-aligns its finalCount when the fresh
-          // session's results list restarts at index 0, so the committed text
-          // simply continues to accumulate across sessions.
+          // DO reset the final-index high-water mark though: the fresh
+          // session's results restart at index 0, and applyDictation's
+          // shrink heuristic (`results.length < finalCount`) misses the
+          // common 1-final case (1 < 1 is false) — the stale count then
+          // silently dropped the new session's first final, so on Samsung
+          // every pause made the next utterance appear and then vanish.
+          dictRef.current.finalCount = 0;
           startWithRetry();
           return;
         }
         setRecording(false); recogRef.current = null;
-        dictationActive = false;
-        if (activeRecognition === recog) activeRecognition = null;
+        // Clear the global dictation flag only if WE are still the active
+        // recogniser — when another field's mic force-stopped this one, its
+        // dictation is live and clobbering the flag here would switch off the
+        // scroll/header guards mid-hold.
+        if (activeRecognition === recog) { dictationActive = false; activeRecognition = null; }
       };
       recog.onerror = (ev: any) => {
         if (ev?.error === 'not-allowed' || ev?.error === 'service-not-allowed') {
@@ -2407,7 +2424,10 @@ const VoiceTxt = ({ fk, rows = 3 }: { fk: string; ph?: string; rows?: number }) 
 
   const stop = () => {
     heldRef.current = false;   // release BEFORE stop so onend doesn't respawn
-    dictationActive = false;
+    // Only drop the global flag when our recogniser is (or was) the active
+    // one — releasing a superseded mic must not kill the guards for a
+    // dictation another field has since taken over.
+    if (!activeRecognition || activeRecognition === recogRef.current) dictationActive = false;
     try { recogRef.current?.stop?.(); } catch { /* ignore */ }
     setRecording(false);
   };
