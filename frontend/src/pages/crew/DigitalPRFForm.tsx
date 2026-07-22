@@ -7725,7 +7725,7 @@ export default function DigitalPRFForm() {
         <SHdr t="Airway" />
         <Card>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
-            {['Self-maintained', 'Suction', 'OP Airway', 'Supraglottic Airway', 'Intubation', 'Chest Decompression', 'Surg. Airway'].map(i => {
+            {['Self-maintained', 'Suction', 'OP Airway', 'Supraglottic Airway', 'Intubation', 'Advanced Airway', 'Chest Decompression', 'Surg. Airway'].map(i => {
               const cat = normaliseHpcsaCategory(fd.treating_practitioner_category);
               const verdict = scopeForFormLabel(i, cat);
               const disabled = verdict.kind === 'unauthorised';

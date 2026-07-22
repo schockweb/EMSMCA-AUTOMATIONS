@@ -6,6 +6,7 @@
   "form_label_to_capability": {
     "Self-maintained": "airway_basic_manual_manoeuvres",
     "Intubation": "airway_ett_drug_facilitated",
+    "Advanced Airway": "airway_advanced",
     "Supraglottic Airway": "airway_supraglottic_extraglottic_device",
     "Suction": "airway_suction_upper",
     "Chest Decompression": "o2_needle_thoracentesis_adult_paed",
@@ -179,6 +180,17 @@
       "authorised": [
         "AEA",
         "ECT",
+        "ANT",
+        "ECP"
+      ],
+      "forbidden": false,
+      "conditions": {},
+      "note": null
+    },
+    "airway_advanced": {
+      "label": "Advanced airway (ALS)",
+      "section": "Airway Management",
+      "authorised": [
         "ANT",
         "ECP"
       ],

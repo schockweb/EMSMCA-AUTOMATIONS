@@ -165,6 +165,15 @@ const airwayManagement: CapabilitySection = {
       authorised: ['AEA', 'ECT', 'ANT', 'ECP'],
     },
     {
+      // Client-requested umbrella "Advanced Airway" tag on the PRF, restricted
+      // to ALS-tier crew (ANT / ECP; Doctor/ART bypasses). Not a distinct HPCSA
+      // table row — it's the PRF's catch-all advanced-airway checkbox, scoped
+      // so only ALS practitioners can record it.
+      key: 'airway_advanced',
+      label: 'Advanced airway (ALS)',
+      authorised: ['ANT', 'ECP'],
+    },
+    {
       key: 'airway_needle_cricothyroidotomy',
       label: 'Needle cricothyroidotomy',
       authorised: ['AEA', 'ECT', 'ANT', 'ECP'],
@@ -1197,6 +1206,7 @@ export const FORM_LABEL_TO_CAPABILITY: Readonly<Record<string, string>> = {
   // wrongly locked out of the ETT-only checkbox.
   'Self-maintained':     'airway_basic_manual_manoeuvres',
   'Intubation':          'airway_ett_drug_facilitated',
+  'Advanced Airway':     'airway_advanced',
   'Supraglottic Airway': 'airway_supraglottic_extraglottic_device',
   'Suction':             'airway_suction_upper',
   'Chest Decompression': 'o2_needle_thoracentesis_adult_paed',
