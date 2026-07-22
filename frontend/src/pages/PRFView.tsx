@@ -694,6 +694,23 @@ export default function PRFView() {
   const medRows: any[] = (Array.isArray(fd.medications) ? fd.medications : [])
     .filter((r: any) => anyValue(r, ['type', 'route', 'dose', 'time', 'reason', 'sign']));
 
+  // Documents the crew attached on the form (WCA / employee docs, RAF OAR
+  // report) — each renders on its own sheet after the clinical pages, so the
+  // exported PDF carries the supporting evidence. Photographed documents are
+  // stored as JPEG data-URLs and embed as a full-page image; an uploaded
+  // PDF file can't be painted into the page snapshot, so it renders as a
+  // labelled record block instead (the original stays with the PRF).
+  const attachedDocs = ([
+    { key: 'wca_oar_report_pdf',     label: 'WCA Document' },
+    { key: 'wca_employee_id_pdf',    label: 'Employee ID' },
+    { key: 'wca_payslip_pdf',        label: 'Payslip' },
+    { key: 'wca_medical_report_pdf', label: 'Medical Report' },
+    { key: 'raf_oar_report_pdf',     label: 'OAR Report' },
+  ] as Array<{ key: string; label: string }>)
+    .map(d => ({ ...d, file: fd[d.key] as { name?: string; size?: number; data_url?: string } | undefined }))
+    .filter(d => d.file && typeof d.file === 'object' && typeof d.file.data_url === 'string' && d.file.data_url);
+  const isImageDoc = (f: any) => typeof f?.data_url === 'string' && f.data_url.startsWith('data:image/');
+
   const timeRows = [
     { label: 'Call Disp',           t: 'time_dispatched',     k: 'km_dispatched'     },
     { label: 'Scene',               t: 'time_on_scene',       k: 'km_on_scene'       },
@@ -1372,13 +1389,22 @@ export default function PRFView() {
             {fd.call_type !== 'COURTESY' && (
               <>
             <SectionHead label="Billing Information" />
-            {billingType === 'WCA / IOD' ? (
+            {(billingType === 'WCA / IOD' || (fd.call_type || '').toUpperCase() === 'WCA_IOD') ? (
               <>
-                <FieldRow label="Reference"   value={fd.compensation_reference} />
-                <FieldRow label="Employer"    value={fd.wca_employer} />
-                <FieldRow label="Employee No" value={fd.wca_employee_number} />
-                <FieldRow label="Injury Date" value={fd.wca_injury_date} />
-                <FieldRow label="OAR No"      value={fd.wca_oar_number} />
+                <FieldRow label="Reference"    value={fd.compensation_reference} />
+                <FieldRow label="Employer"     value={fd.wca_employer} />
+                <FieldRow label="Company Add"  value={fd.wca_employer_address} valueMin={24} />
+                <FieldRow label="Resp. Person" value={fd.wca_employer_responsible_person} />
+                <FieldRow label="Contact"      value={fd.wca_employer_contact} />
+                <FieldRow label="Employee No"  value={fd.wca_employee_number} />
+                <FieldRow label="Injury Date"  value={fmtDateValue(fd.wca_injury_date)} />
+                {!isBlank(fd.wca_oar_number) && <FieldRow label="OAR No" value={fd.wca_oar_number} />}
+                <FieldRow label="Incident"     value={fd.wca_incident_description} valueMin={40} />
+                {attachedDocs.some(d => d.key.startsWith('wca_')) && (
+                  <FieldRow label="Documents" valueMin={24} value={
+                    attachedDocs.filter(d => d.key.startsWith('wca_')).map(d => d.label).join(', ') + ' — see attached sheet(s)'
+                  } />
+                )}
               </>
             ) : billingType === 'RAF' ? (
               <>
@@ -2121,6 +2147,92 @@ export default function PRFView() {
           </div>
         </div>
       )}
+
+      {/* ═══════════════════ ATTACHED DOCUMENTS ═══════════════════
+          One A4-landscape sheet per document the crew attached on the form
+          (WCA / employee documents, RAF OAR report). Photographed documents
+          render as a full-page image; an uploaded PDF file renders as a
+          labelled record block (a canvas snapshot cannot rasterise PDF pages
+          — the original file stays stored with the PRF). Picked up by the
+          PDF/print pipeline via the shared .prf-page selector. */}
+      {attachedDocs.map(d => (
+        <div className="prf-print-frame" key={`doc-${d.key}`}>
+          <div className="prf-page" style={{
+            width: 1220, minHeight: 862,
+            margin: '28px auto 0', background: '#fff', color: INK,
+            border: `2px solid ${LN}`, boxShadow: '0 6px 24px rgba(0,0,0,0.1)',
+            display: 'flex', flexDirection: 'column',
+          }}>
+            {/* Mini header so the sheet is identifiable on its own */}
+            <div style={{
+              display: 'grid', gridTemplateColumns: '1.3fr 2.4fr 2fr',
+              borderBottom: `2px solid ${LN}`,
+            }}>
+              <div style={{
+                padding: '10px 12px', borderRight: `1px solid ${LN}`,
+                display: 'flex', alignItems: 'center',
+              }}>
+                <ProviderLogo prov={prov} height={30} />
+              </div>
+              <div style={{
+                padding: '10px 12px', borderRight: `1px solid ${LN}`,
+                display: 'flex', alignItems: 'center',
+                fontSize: '0.78rem', fontWeight: 800, color: INK,
+                letterSpacing: '0.08em', textTransform: 'uppercase',
+              }}>
+                Attached Document — {d.label}
+              </div>
+              <div style={{
+                padding: '10px 12px', display: 'flex', alignItems: 'center',
+                justifyContent: 'flex-end', gap: 18,
+                fontSize: '0.68rem', color: MUT,
+              }}>
+                <span>Patient: <b style={{ color: INK }}>{patientFullName}</b></span>
+                {prf.case_number && <span>Case: <b style={{ color: INK, fontFamily: 'ui-monospace, monospace' }}>{prf.case_number}</b></span>}
+              </div>
+            </div>
+
+            {isImageDoc(d.file) ? (
+              <div style={{
+                flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                padding: 14, background: SOFT_BG,
+              }}>
+                <img
+                  src={d.file!.data_url}
+                  alt={d.label}
+                  style={{ maxWidth: '100%', maxHeight: 770, objectFit: 'contain', border: `1px solid ${LN}`, background: '#fff' }}
+                />
+              </div>
+            ) : (
+              <div style={{
+                flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                padding: 24, background: SOFT_BG,
+              }}>
+                <div style={{
+                  border: `2px dashed ${MUT}`, borderRadius: 8, background: '#fff',
+                  padding: '46px 60px', textAlign: 'center', maxWidth: 640,
+                }}>
+                  <div style={{
+                    fontSize: '1rem', fontWeight: 900, color: INK,
+                    textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10,
+                  }}>PDF document attached</div>
+                  <div style={{ fontSize: '0.86rem', fontWeight: 700, color: GREEN_DK, wordBreak: 'break-word', marginBottom: 8 }}>
+                    {d.file!.name || 'document.pdf'}
+                  </div>
+                  {typeof d.file!.size === 'number' && d.file!.size > 0 && (
+                    <div style={{ fontSize: '0.72rem', color: MUT, marginBottom: 12 }}>
+                      {(d.file!.size / 1024).toFixed(1)} KB
+                    </div>
+                  )}
+                  <div style={{ fontSize: '0.72rem', color: MUT, lineHeight: 1.5 }}>
+                    The original PDF file is stored with this PRF in the portal.
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      ))}
 
       {/* ═══════════════════ DECLARATION OF DEATH ═══════════════════
           Rendered on its own dedicated A4-landscape sheet, and ONLY when a
