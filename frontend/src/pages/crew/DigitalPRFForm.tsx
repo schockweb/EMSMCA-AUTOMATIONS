@@ -952,6 +952,29 @@ const correctDictation = (text: string, fk?: string): string => {
   return out;
 };
 
+// With maxAlternatives raised, each final result carries up to 5 candidate
+// transcripts (confidence-ordered; [0] is the engine's pick). When our
+// correction rules flag the top pick as suspicious ("patient 8 at 5"), scan
+// the engine's OWN alternatives for one that already matches the corrected
+// reading ("patient ate at 5") and use it verbatim — the engine's natural
+// phrasing beats a regex splice. If no alternative agrees, keep the top pick;
+// the output-side corrections still apply. Never deviates from the top pick
+// when nothing looks wrong, so ordinary dictation is untouched.
+const pickTranscript = (res: any, fk?: string): string => {
+  const top: string = res[0]?.transcript ?? '';
+  const n: number = Math.min(res.length ?? 1, 5);
+  if (n <= 1) return top;
+  const corrected = correctDictation(top, fk);
+  if (corrected === top) return top;
+  const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim();
+  const wanted = norm(corrected);
+  for (let i = 1; i < n; i++) {
+    const alt: string = res[i]?.transcript ?? '';
+    if (alt && norm(alt) === wanted) return alt;
+  }
+  return top;
+};
+
 const applyDictation = (e: any, st: DictationState, fk?: string): string => {
   // Session restarted internally (results list shrank) — realign the
   // high-water mark so the new session's finals still commit.
@@ -959,15 +982,16 @@ const applyDictation = (e: any, st: DictationState, fk?: string): string => {
   let interim = '';
   for (let i = 0; i < e.results.length; i++) {
     const res = e.results[i];
-    const seg: string = res[0]?.transcript ?? '';
     if (res.isFinal) {
-      // Commit each final index only once, deduped via overlap-merge.
+      // Commit each final index only once, deduped via overlap-merge. Finals
+      // go through the alternatives picker (homophone-aware); interims stay
+      // on the engine's top pick for speed.
       if (i >= st.finalCount) {
         st.finalCount = i + 1;
-        st.committed = mergeDictation(st.committed, seg);
+        st.committed = mergeDictation(st.committed, pickTranscript(res, fk));
       }
     } else {
-      interim += ' ' + seg;
+      interim += ' ' + (res[0]?.transcript ?? '');
     }
   }
   // Interim words layer on transiently (never persisted into `committed`),
@@ -1074,6 +1098,9 @@ const Inp = ({ fk, type = 'text', onBlur, noMic }: { fk: string; ph?: string; ty
       recog.lang = 'en-ZA';
       recog.continuous = true;
       recog.interimResults = true;
+      // Ask the engine for its runner-up transcripts too — pickTranscript uses
+      // them to resolve homophones ("8" vs "ate") with the engine's own words.
+      recog.maxAlternatives = 5;
       recog.onresult = (e: any) => {
         // Ignore stragglers from a session we've already replaced (iOS can fire
         // a late result from a stopped recogniser) — only the current session
@@ -2274,6 +2301,9 @@ const VoiceTxt = ({ fk, rows = 3 }: { fk: string; ph?: string; rows?: number }) 
       recog.lang = 'en-ZA';
       recog.continuous = true;
       recog.interimResults = true;
+      // Ask the engine for its runner-up transcripts too — pickTranscript uses
+      // them to resolve homophones ("8" vs "ate") with the engine's own words.
+      recog.maxAlternatives = 5;
       recog.onresult = (e: any) => {
         // Ignore stragglers from a session we've already replaced (iOS can fire
         // a late result from a stopped recogniser) — only the current session
