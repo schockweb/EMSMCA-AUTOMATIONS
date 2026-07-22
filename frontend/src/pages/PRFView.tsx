@@ -686,8 +686,13 @@ export default function PRFView() {
   const VITALS_PER_PAGE = 3;
   const vitalsPage1: any[] = vitals.slice(0, VITALS_PER_PAGE);
   const vitalsOverflow: any[] = vitals.slice(VITALS_PER_PAGE);
-  const ivRows: any[] = Array.isArray(fd.iv_therapy) ? fd.iv_therapy : [];
-  const medRows: any[] = Array.isArray(fd.medications) ? fd.medications : [];
+  // Only rows with actual content count — the form can save a blank row shell
+  // (section opened, nothing entered), and an all-blank row must not resurrect
+  // an otherwise-hidden IV / Medication section on the PDF.
+  const ivRows: any[] = (Array.isArray(fd.iv_therapy) ? fd.iv_therapy : [])
+    .filter((r: any) => anyValue(r, ['type', 'jelco_size', 'site', 'vol_infused', 'time_up', 'indication', 'sign']));
+  const medRows: any[] = (Array.isArray(fd.medications) ? fd.medications : [])
+    .filter((r: any) => anyValue(r, ['type', 'route', 'dose', 'time', 'reason', 'sign']));
 
   const timeRows = [
     { label: 'Call Disp',           t: 'time_dispatched',     k: 'km_dispatched'     },
@@ -1831,9 +1836,13 @@ export default function PRFView() {
             <FieldRow label="Last Meal Time" value={fd.last_meal_time} />
             <FieldRow label="Events / HPI"   value={fd.events_hpi}           valueMin={48} />
 
-            {/* Intravenous Therapy (stacked vertically) */}
+            {/* Intravenous Therapy (stacked vertically) — the whole section is
+                omitted when no IV row was recorded, instead of printing an
+                empty placeholder row with a "Not captured" signature box. */}
+            {ivRows.length > 0 && (
+              <>
             <SectionHead label="Intravenous Therapy" />
-            {(ivRows.length ? ivRows : [{}]).map((row: any, i: number) => (
+            {ivRows.map((row: any, i: number) => (
               <Fragment key={`iv-${i}`}>
                 {i > 0 && <div style={{ borderTop: `2px solid ${GREEN_DK}` }} />}
                 <FieldRow label="Type / Fluid" value={[row.type, row.jelco_size].filter(Boolean).join(' · ')} />
@@ -1861,10 +1870,15 @@ export default function PRFView() {
                 </div>
               </Fragment>
             ))}
+              </>
+            )}
 
-            {/* Medication / Infusion (stacked vertically) */}
+            {/* Medication / Infusion (stacked vertically) — likewise omitted
+                entirely when no medication row was recorded. */}
+            {medRows.length > 0 && (
+              <>
             <SectionHead label="Medication / Infusion" />
-            {(medRows.length ? medRows : [{}]).map((row: any, i: number) => (
+            {medRows.map((row: any, i: number) => (
               <Fragment key={`med-${i}`}>
                 {i > 0 && <div style={{ borderTop: `2px solid ${GREEN_DK}` }} />}
                 <FieldRow label="Drug / Type" value={row.type} />
@@ -1892,6 +1906,8 @@ export default function PRFView() {
                 </div>
               </Fragment>
             ))}
+              </>
+            )}
 
             <FillLines />
           </div>
