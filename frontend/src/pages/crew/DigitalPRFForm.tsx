@@ -949,7 +949,7 @@ const Inp = ({ fk, type = 'text', onBlur, noMic }: { fk: string; ph?: string; ty
   // Voice dictation is unreliable/unwanted for identity + code fields, so the
   // mic is hidden for names, surnames, practitioner numbers, IDs, passports,
   // relationship, etc. (applies app-wide).
-  const excludedKeyPatterns = /(id_number|passport|phone|_id$|_dob$|dependant_code|med_aid_number|postal_code|surname|_name$|hpcsa|relationship|identified_by)/i;
+  const excludedKeyPatterns = /(id_number|passport|phone|_id$|_dob$|dependant_code|med_aid_number|postal_code|suburb|surname|_name$|hpcsa|relationship|identified_by)/i;
   const showMic = !noMic && !!SpeechRecognitionAPI && !excludedTypes.includes(type) && !excludedKeyPatterns.test(fk);
 
   const [recording, setRecording] = useState(false);
@@ -1076,6 +1076,7 @@ type AddrSuggestion = {
   formatted: string;
   display: string;
   suburb: string | null;
+  postcode: string | null;
 };
 
 // Builds a complete, comma-separated South African street address from a
@@ -1139,12 +1140,14 @@ const formatNominatimSuggestion = (item: any): AddrSuggestion => {
     formatted: formatted || (item.display_name || ''),
     display: item.display_name || formatted,
     suburb: a.suburb || a.neighbourhood || a.city_district || null,
+    postcode: a.postcode || null,
   };
 };
 
 type ResolvedAddress = {
   street: string;
   suburb: string | null;
+  postcode: string | null;
   raw: any;
 };
 
@@ -1169,6 +1172,7 @@ const reverseGeocode = async (
   return {
     street: street || (data.display_name || ''),
     suburb: a.suburb || a.neighbourhood || a.city_district || null,
+    postcode: a.postcode || null,
     raw: data,
   };
 };
@@ -1510,7 +1514,7 @@ const HospitalPicker = ({ wardKey }: { wardKey?: string }) => {
   );
 };
 
-const AddrInp = ({ fk, suburbKey, ph, containerStyle, inputStyle, label }: { fk: string; ph?: string; req?: boolean; suburbKey?: string; containerStyle?: React.CSSProperties; inputStyle?: React.CSSProperties; label?: string }) => {
+const AddrInp = ({ fk, suburbKey, codeKey, ph, containerStyle, inputStyle, label, manualOnly }: { fk: string; ph?: string; req?: boolean; suburbKey?: string; codeKey?: string; containerStyle?: React.CSSProperties; inputStyle?: React.CSSProperties; label?: string; manualOnly?: boolean }) => {
   const { fd, sf } = useContext(FormContext);
   const val: string = fd[fk] ?? '';
   const [modalOpen, setModalOpen] = useState(false);
@@ -1565,6 +1569,9 @@ const AddrInp = ({ fk, suburbKey, ph, containerStyle, inputStyle, label }: { fk:
     skipNextRef.current = true;
     sf(fk, s.formatted);
     if (suburbKey && s.suburb && !fd[suburbKey]) sf(suburbKey, s.suburb);
+    // Fill the postal Code field from the selected address' postcode so the
+    // crew doesn't have to re-type it. Only when the code field is still empty.
+    if (codeKey && s.postcode && !fd[codeKey]) sf(codeKey, s.postcode);
     setSuggestions([]);
     setOpen(false);
   };
@@ -1585,6 +1592,7 @@ const AddrInp = ({ fk, suburbKey, ph, containerStyle, inputStyle, label }: { fk:
               skipNextRef.current = true;
               sf(fk, addr.street);
               if (suburbKey && addr.suburb && !fd[suburbKey]) sf(suburbKey, addr.suburb);
+              if (codeKey && addr.postcode && !fd[codeKey]) sf(codeKey, addr.postcode);
             } else {
               setGpsError('Address not found');
             }
@@ -1610,9 +1618,59 @@ const AddrInp = ({ fk, suburbKey, ph, containerStyle, inputStyle, label }: { fk:
     );
   };
 
+  // Shared suggestion dropdown — used by both the manual-only inline field and
+  // the modal's search input.
+  const suggestionDropdown = open && (loading || suggestions.length > 0) && (
+    <div
+      role="listbox"
+      style={{
+        position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 30,
+        marginTop: 4, background: '#fff', border: `1.5px solid #cbd5e1`,
+        borderRadius: 10, boxShadow: '0 8px 24px rgba(15,23,42,0.12)',
+        maxHeight: 200, overflowY: 'auto',
+      }}
+    >
+      {loading && suggestions.length === 0 && <div style={{ padding: '10px 14px', fontSize: '0.82rem', color: '#475569', fontStyle: 'italic' }}>Searching addresses…</div>}
+      {suggestions.map((s, i) => (
+        <div
+          key={i} role="option" aria-selected={false}
+          onMouseDown={(e) => { e.preventDefault(); pick(s); }}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = '#f8fafc'; }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = '#fff'; }}
+          style={{ padding: '10px 14px', cursor: 'pointer', borderBottom: i < suggestions.length - 1 ? '1px solid #f1f5f9' : 'none', fontSize: '0.85rem' }}
+        >
+          <div style={{ fontWeight: 700, color: '#0f172a' }}>{s.formatted}</div>
+          {s.display && s.display !== s.formatted && <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: 2 }}>{s.display}</div>}
+        </div>
+      ))}
+    </div>
+  );
+
+  // Manual-only mode (residential addresses): plain inline text field with the
+  // type-to-search autocomplete, NO GPS-capture pop-up — the crew types the
+  // address. Selecting a suggestion still fills suburb + code.
+  if (manualOnly) {
+    return (
+      <div style={{ position: 'relative', marginBottom: 14 }}>
+        <input
+          type="text"
+          value={val}
+          onChange={e => onTextChange(e.target.value)}
+          onFocus={(e) => { focusedRef.current = true; onF(e); if (val.length >= 3 && suggestions.length > 0) setOpen(true); }}
+          onBlur={(e) => { focusedRef.current = false; onB(e); window.setTimeout(() => { if (!focusedRef.current) setOpen(false); }, 180); }}
+          onKeyDown={(e) => { if (e.key === 'Escape') { setOpen(false); (e.currentTarget as HTMLInputElement).blur(); } }}
+          autoComplete="off"
+          placeholder={ph || 'Type street address…'}
+          style={{ ...base, marginBottom: 0, borderColor: '#e2e8f0', ...containerStyle, ...inputStyle }}
+        />
+        {suggestionDropdown}
+      </div>
+    );
+  }
+
   return (
     <>
-      <div 
+      <div
         onClick={() => setModalOpen(true)}
         style={{ ...base, display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', marginBottom: 14, borderColor: '#e2e8f0', color: val ? S900 : S400, ...containerStyle }}
       >
@@ -2783,7 +2841,7 @@ const DodFormBody = ({ showDeclaration = true }: { showDeclaration?: boolean }) 
         <div><Lbl t="Tel (H)" /><Inp fk="med_aid_dec_death_deceased_tel_home" ph="Home" type="tel" /></div>
       </DodG2>
       <Lbl t="Tel (W)" /><Inp fk="med_aid_dec_death_deceased_tel_work" ph="Work number" type="tel" />
-      <Lbl t="Residential Address" /><AddrInp fk="med_aid_dec_death_deceased_address" ph="Street address" suburbKey="med_aid_dec_death_deceased_suburb" />
+      <Lbl t="Residential Address" /><AddrInp fk="med_aid_dec_death_deceased_address" ph="Street address" suburbKey="med_aid_dec_death_deceased_suburb" codeKey="med_aid_dec_death_deceased_postal_code" manualOnly />
       <DodG2>
         <div><Lbl t="Suburb" /><Inp fk="med_aid_dec_death_deceased_suburb" ph="Suburb" /></div>
         <div><Lbl t="Code" /><Inp fk="med_aid_dec_death_deceased_postal_code" ph="Code" /></div>
@@ -6334,7 +6392,7 @@ export default function DigitalPRFForm() {
           <div><Lbl t="Tel (H)" /><Inp fk="patient_phone_home" ph="Home" type="tel" /></div>
         </G2>
         <Lbl t="Tel (W)" /><Inp fk="patient_phone_work" ph="Work number" type="tel" />
-        <Lbl t="Residential Address" /><AddrInp fk="patient_address" ph="Street address" suburbKey="patient_suburb" />
+        <Lbl t="Residential Address" /><AddrInp fk="patient_address" ph="Street address" suburbKey="patient_suburb" codeKey="patient_postal_code" manualOnly />
         <G2>
           <div><Lbl t="Suburb" /><Inp fk="patient_suburb" ph="Suburb" /></div>
           <div><Lbl t="Code" /><Inp fk="patient_postal_code" ph="Code" /></div>
@@ -6601,7 +6659,7 @@ export default function DigitalPRFForm() {
               <div><Lbl t="Cell" /><Inp fk="debtor_phone_cell" ph="Cell" type="tel" /></div>
               <div><Lbl t="Tel (H)" /><Inp fk="debtor_phone_home" ph="Home" type="tel" /></div>
             </G2>
-            <Lbl t="Residential Address" /><AddrInp fk="debtor_address" ph="Street address" suburbKey="debtor_suburb" />
+            <Lbl t="Residential Address" /><AddrInp fk="debtor_address" ph="Street address" suburbKey="debtor_suburb" codeKey="debtor_postal_code" manualOnly />
             <G2>
               <div><Lbl t="Suburb" /><Inp fk="debtor_suburb" ph="Suburb" /></div>
               <div><Lbl t="Code" /><Inp fk="debtor_postal_code" ph="Code" /></div>
