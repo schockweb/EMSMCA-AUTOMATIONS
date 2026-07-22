@@ -2060,7 +2060,9 @@ const VoiceTxt = ({ fk, rows = 3 }: { fk: string; ph?: string; rows?: number }) 
     try {
       recog.start();
       setRecording(true);
-      requestAnimationFrame(() => taRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
+      // NB: do NOT scrollIntoView here — starting dictation must leave the page
+      // exactly where it is. Auto-scrolling on press moved the field out from
+      // under the crew's thumb mid-hold (reported "screen scrolls into place").
     } catch {
       setRecording(false);
       recogRef.current = null;
