@@ -6555,10 +6555,10 @@ export default function DigitalPRFForm() {
         <>
           {/* WCA_IOD call type implies billing — skip the picker */}
           {fd.call_type !== 'WCA_IOD' && (
-            <>
+            <div id="billing-type-anchor">
               <SHdr t="Billing Type" />
               <BillingTypePicker />
-            </>
+            </div>
           )}
 
       {fd.billing_type === 'PVT' && (
@@ -6957,17 +6957,29 @@ export default function DigitalPRFForm() {
           <SHdr t="Available" />
           {TimeTable({ rows: ALL_TIME_ROWS.filter(r => r.timeKey === 'time_available') })}
 
-          {/* Submit stays disabled until a Billing Type is picked — a DOD PRF
-              submitted without one renders "—" on the certificate and can't be
-              billed. Affordance-disable only (no error banner). */}
+          {/* A DOD PRF needs a Billing Type (without one the certificate
+              renders "—" and can't be billed). The button is NOT disabled via
+              the DOM `disabled` attribute for this — Samsung Internet does not
+              reliably re-enable a disabled control after React clears the flag,
+              so crews reported "even after picking a billing type I can't
+              submit". Instead the button is always tappable; the billing check
+              lives in the handler and just scrolls the crew back to the picker
+              when it's genuinely missing. It only truly disables while a submit
+              is in flight. */}
           <button
             type="button"
-            onClick={handleSubmit}
-            disabled={submitting || !fd.billing_type}
+            onClick={() => {
+              if (!fd.billing_type) {
+                document.getElementById('billing-type-anchor')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                return;
+              }
+              void handleSubmit();
+            }}
+            disabled={submitting}
             style={{
               width: '100%', padding: 18, borderRadius: 14,
               fontSize: '1.05rem', fontWeight: 800, border: 'none',
-              cursor: submitting ? 'wait' : !fd.billing_type ? 'not-allowed' : 'pointer',
+              cursor: submitting ? 'wait' : 'pointer',
               background: (submitting || !fd.billing_type) ? S400 : `linear-gradient(135deg,${ROSE},#be123c)`,
               color: W,
               boxShadow: (submitting || !fd.billing_type) ? 'none' : `0 6px 24px rgba(225,29,72,0.3)`,
@@ -8774,8 +8786,14 @@ export default function DigitalPRFForm() {
                   </button>
                   <button
                     type="button"
-                    disabled={!allSigned}
-                    onClick={() => { setCrewSignOffOpen(false); submitInFlightRef.current = false; void handleSubmit(); }}
+                    // Not DOM-disabled while awaiting signatures — Samsung
+                    // Internet can leave a disabled button inert after the flag
+                    // clears, stranding the crew on "can't submit". Always
+                    // tappable; the all-signed check lives in the handler.
+                    onClick={() => {
+                      if (!allSigned) return;
+                      setCrewSignOffOpen(false); submitInFlightRef.current = false; void handleSubmit();
+                    }}
                     style={{
                       flex: 2, padding: '12px 0', borderRadius: 10, fontWeight: 800, border: 'none', color: W,
                       background: allSigned ? `linear-gradient(135deg,${ROSE},#be123c)` : S400,
