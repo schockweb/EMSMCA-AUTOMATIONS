@@ -6669,7 +6669,7 @@ export default function DigitalPRFForm() {
         {(fd.billing_type === 'WCA / IOD' || fd.call_type === 'WCA_IOD') && (
           <Card>
             <Lbl t="Company Name" req /><Inp fk="wca_employer" ph="e.g. Eskom Holdings" req />
-            <Lbl t="Company Address" /><AddrInp fk="wca_employer_address" ph="Physical address of employer" />
+            <Lbl t="Company Address" /><AddrInp fk="wca_employer_address" ph="Physical address of employer" manualOnly />
             <Lbl t="Employer Responsible Person" /><Inp fk="wca_employer_responsible_person" ph="Name of person responsible for the claim" />
             <G2>
               <div><Lbl t="Employer Contact Number" /><Inp fk="wca_employer_contact" ph="Office / HR number" type="tel" /></div>
