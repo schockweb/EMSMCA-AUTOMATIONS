@@ -7999,7 +7999,9 @@ export default function DigitalPRFForm() {
             below (history, mechanism, surveys, injury diagram, vitals, oxygen,
             airway, circulation, immobilisation, equipment, IV/meds): there is
             nothing to record when the patient declines care. Tap again to undo
-            and restore the sections. */}
+            and restore the sections. Hidden for Resus — the patient is dead or
+            dying, so a treatment refusal doesn't apply. */}
+        {fd.call_type !== 'RESUS' && (
         <button
           type="button"
           onClick={() => sf('patient_refused_treatment', !fd.patient_refused_treatment)}
@@ -8014,6 +8016,7 @@ export default function DigitalPRFForm() {
         >
           {fd.patient_refused_treatment ? '✓ Patient Refused Treatment — tap to undo' : 'Patient Refuses Treatment'}
         </button>
+        )}
 
         <div ref={chiefComplaintRef} style={{ scrollMarginTop: 80 }}>
           {fd.call_type !== 'DOD' && (
@@ -10479,7 +10482,7 @@ export default function DigitalPRFForm() {
             <button type="button" onClick={() => setRhtCallOutFeeOpen(false)} style={{ width: 32, height: 32, borderRadius: 16, border: 'none', background: S200, color: S600, fontSize: '1.2rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', touchAction: 'manipulation' }}>×</button>
           </div>
           <div style={{ overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 10 }}>
-            {['Standard', 'After Hours', 'Public Holiday', 'Standby Cancellation', 'No Patient Loaded', 'None'].map(reason => {
+            {['Standard', 'After Hours', 'Public Holiday', 'Standby Cancellation', 'No Patient Loaded', 'Refusal Of Treatment', 'None'].map(reason => {
               const on = fd.rht_call_out_fee === reason;
               return (
                 <button
