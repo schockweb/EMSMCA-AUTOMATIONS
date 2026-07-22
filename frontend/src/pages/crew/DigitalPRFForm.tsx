@@ -696,7 +696,13 @@ function VitalsReminder({ lastVitalAt, level, onClick }: { lastVitalAt: number |
   const bg = overdue ? '#dc2626' : warn ? '#f59e0b' : '#3b6fde';
   const border = overdue ? '#b91c1c' : warn ? '#d97706' : '#2f5ac7';
   const mins = Math.max(0, Math.ceil(Math.abs(remaining) / 60000));
-  const text = overdue ? `Vitals overdue +${mins}m` : `Next vitals in ${mins}m`;
+  // Label: just "Vitals" until the last 5 minutes, then a plain-language
+  // countdown ("Vitals in 5 minutes" → "... 1 minute"), then overdue.
+  const text = overdue
+    ? `Vitals overdue +${mins}m`
+    : mins <= 5
+    ? `Vitals in ${mins} minute${mins === 1 ? '' : 's'}`
+    : 'Vitals';
   return (
     <button
       type="button"
@@ -712,7 +718,7 @@ function VitalsReminder({ lastVitalAt, level, onClick }: { lastVitalAt: number |
         whiteSpace: 'nowrap', fontFamily: 'inherit',
       }}
     >
-      <span style={{ fontSize: '0.95rem', lineHeight: 1 }}>{overdue ? '⚠' : '⏱'}</span>
+      {overdue && <span style={{ fontSize: '0.95rem', lineHeight: 1 }}>⚠</span>}
       <span>{text}</span>
     </button>
   );
