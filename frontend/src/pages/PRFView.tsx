@@ -1011,11 +1011,15 @@ export default function PRFView() {
             {/* Assessment level + Billing Type. PVT shows its payment method
                 too ("PVT — Cash") so cash settlements are visible at a glance. */}
             {fd.call_type !== 'DOD' && <FieldRow label="Assessment"   value={fd.assessment_level} />}
-            <FieldRow label="Billing Type" value={
-              fd.billing_type === 'PVT' && fd.pvt_payment_method
-                ? `PVT — ${fd.pvt_payment_method}`
-                : fd.billing_type
-            } />
+            {/* Courtesy calls are non-billable transfers — no billing type is
+                captured, so the row (which would render an empty "—") is hidden. */}
+            {fd.call_type !== 'COURTESY' && (
+              <FieldRow label="Billing Type" value={
+                fd.billing_type === 'PVT' && fd.pvt_payment_method
+                  ? `PVT — ${fd.pvt_payment_method}`
+                  : fd.billing_type
+              } />
+            )}
             {/* Call type — rendered as a standard labelled field row; flex:1
                 stretches it to fill the remaining column height. */}
             {(() => {
@@ -1340,8 +1344,14 @@ export default function PRFView() {
 
           {/* Billing Information — content follows the selected billing type so
               the section reflects the actual payer (Med Aid / WCA / IOD / RAF / PVT /
-              Event / Call-Out) rather than always showing medical-aid fields. */}
+              Event / Call-Out) rather than always showing medical-aid fields.
+              Omitted entirely for Courtesy calls: they are non-billable transfers,
+              so no payer block is captured or shown. The Handover Signature +
+              Hospital Sticker below still render — they are handover artefacts,
+              not billing. */}
           <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
+            {fd.call_type !== 'COURTESY' && (
+              <>
             <SectionHead label="Billing Information" />
             {billingType === 'WCA / IOD' ? (
               <>
@@ -1420,6 +1430,8 @@ export default function PRFView() {
               <SubBlock title="Quoted (Med-Aid Decline)" rows={[
                 ['Amount (R)', fd.med_aid_quoted_amount],
               ]} />
+            )}
+              </>
             )}
             {/* Handover Signature — moved here per user request, but hidden for DOD since it is in the DOD block */}
             {!(fd.call_type === 'DOD' && fd.med_aid_dec_death) && (
