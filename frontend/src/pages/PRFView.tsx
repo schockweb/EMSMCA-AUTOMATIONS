@@ -1535,31 +1535,37 @@ export default function PRFView() {
             ] as Array<[string, any]>)
               .filter(([, v]) => !isBlank(v)))
               .map(([label, v]) => <FieldRow key={label} label={label} value={v} />)}
-            {fd.call_type !== 'DOD' && (
-              <>
-                <SectionHead label="Mechanism" />
-                {(() => {
-                  const selected = Array.isArray(fd.mechanism)
-                    ? fd.mechanism.filter(Boolean)
-                    : (fd.mechanism ? [fd.mechanism] : []);
-                  if (selected.length === 0) return <FieldRow label="Mechanism" value="" />;
-                  return selected.map((m: string) => <Chk key={m} label={m} checked />);
-                })()}
-                {fd.mechanism_other && (
-                  <FieldRow label="Detail" value={fd.mechanism_other} valueMin={24} />
-                )}
-                
-                {/* Resus never captures a triage priority (the form hides the
-                    picker — the crew is already running the resus), so the row
-                    is omitted rather than printing a permanent "—". */}
-                {fd.call_type !== 'RESUS' && (
-                  <>
-                    <SectionHead label="Patient Priority" />
-                    <FieldRow label="Priority" value={fd.priority || '—'} />
-                  </>
-                )}
-              </>
-            )}
+            {fd.call_type !== 'DOD' && (() => {
+              const selected = Array.isArray(fd.mechanism)
+                ? fd.mechanism.filter(Boolean)
+                : (fd.mechanism ? [fd.mechanism] : []);
+              const hasMechanism = selected.length > 0 || !isBlank(fd.mechanism_other);
+              // Resus never captures a triage priority (the form hides the
+              // picker), so it's always omitted there; otherwise show only when
+              // a priority was actually captured.
+              const hasPriority = fd.call_type !== 'RESUS' && !isBlank(fd.priority);
+              return (
+                <>
+                  {/* Mechanism — hidden entirely when nothing was captured. */}
+                  {hasMechanism && (
+                    <>
+                      <SectionHead label="Mechanism" />
+                      {selected.map((m: string) => <Chk key={m} label={m} checked />)}
+                      {fd.mechanism_other && (
+                        <FieldRow label="Detail" value={fd.mechanism_other} valueMin={24} />
+                      )}
+                    </>
+                  )}
+                  {/* Patient Priority — hidden when not captured. */}
+                  {hasPriority && (
+                    <>
+                      <SectionHead label="Patient Priority" />
+                      <FieldRow label="Priority" value={fd.priority} />
+                    </>
+                  )}
+                </>
+              );
+            })()}
             <FillLines />
           </div>
           )}
@@ -2009,11 +2015,12 @@ export default function PRFView() {
         }}>
           {/* COL 1 — Oxygen / Airway / Circ / Immob / Primary + Secondary Survey */}
           <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
-            <SectionHead label="Oxygen Admin" />
-            {/* Hide the rows when no oxygen was administered — keep just the
-                section tag so the PDF isn't a column of empty "—" rows. */}
+            {/* Hide the whole Oxygen Admin section (header + rows) when no
+                oxygen was administered, so the PDF isn't a block of empty
+                "—" rows under a stray title. */}
             {[fd.o2_flow_rate, fd.o2_percent, fd.o2_device, fd.o2_bvm, fd.o2_start_time, fd.o2_stop_time].some(v => !isBlank(v)) && (
               <>
+                <SectionHead label="Oxygen Admin" />
                 <FieldRow label="L / Min"    value={fd.o2_flow_rate} />
                 <FieldRow label="% Oxygen"   value={fd.o2_percent} />
                 <FieldRow label="Device"     value={fd.o2_device} />
