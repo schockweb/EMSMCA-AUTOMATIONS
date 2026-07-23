@@ -300,6 +300,23 @@ export default function PRFView() {
   const [sharePdfFile, setSharePdfFile] = useState<File | null>(null);
   const pdfBuildStartedRef = useRef(false);
 
+  // ── One-tap "email PRF to receiving facility" ──
+  // When the provider has a sending account configured (smtp_configured on
+  // the by-case payload), the post-submit popup shows the recipient email
+  // for verification and a single Send button — the backend then emails the
+  // PDF FROM the provider's own Gmail/Outlook. Falls back to the manual
+  // share-sheet flow when unconfigured or on failure.
+  const [sendEmailTo, setSendEmailTo] = useState('');
+  const [sendStatus, setSendStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+  const [sendError, setSendError] = useState('');
+  // 'queued' = accepted by the server (worker still sending); 'delivered' =
+  // the sent-stamp confirmed. The UI wording distinguishes them — claiming
+  // "sent" on queue-acceptance hid real SMTP failures behind a checkmark.
+  const [sentPhase, setSentPhase] = useState<'queued' | 'delivered'>('queued');
+  // The PRF was already emailed on a previous open — show that state instead
+  // of re-offering the send form; "Send again" flips this to re-enable it.
+  const [resendMode, setResendMode] = useState(false);
+
   useEffect(() => {
     // Tenant guard for the crew route (/:providerSlug/crew/prf-view/...):
     // a crew session from a DIFFERENT provider is wiped and the user routed
@@ -332,6 +349,9 @@ export default function PRFView() {
           };
         }
         setPrf(data);
+        // Prefill the send-to-facility recipient from the handover email the
+        // crew captured; the popup lets them verify / correct it before sending.
+        setSendEmailTo((data.form_data?.handover_doctor_email || '').trim());
       })
       .catch(e => setErr(e.response?.data?.detail || 'Failed to load PRF'));
   }, [caseId]);
@@ -678,6 +698,89 @@ export default function PRFView() {
     handleShare();
   };
 
+  const SEND_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+  // Terminal send-failure codes stamped by the backend, in crew language.
+  const FACILITY_EMAIL_ERRORS: Record<string, string> = {
+    smtp_auth_failed: "The provider's sending email rejected its app password — update it in Client Settings, or send manually below.",
+    smtp_recipient_refused: 'The receiving address rejected the email — check the address and try again.',
+    smtp_not_configured: 'No PRF sending email is configured for this provider yet — send manually below.',
+  };
+  const friendlySendError = (code: string) =>
+    FACILITY_EMAIL_ERRORS[code] || 'Sending failed — you can send the PRF manually below.';
+
+  // One-tap send: upload the rendered PDF; the backend emails it to the
+  // receiving facility FROM the provider's own account (Celery + provider
+  // SMTP). Guarded in-handler (not via the disabled attribute — Samsung
+  // Internet can leave a disabled control inert after the flag clears).
+  // After the server accepts (202 queued), poll briefly for the sent-stamp /
+  // error so the crew sees the real outcome, not just queue-acceptance.
+  const handleAutoSend = async () => {
+    if (sendStatus === 'sending') return;
+    const to = sendEmailTo.trim();
+    if (!SEND_EMAIL_RE.test(to)) {
+      setSendError('Enter a valid email address for the receiving facility.');
+      return;
+    }
+    setSendError('');
+    setSendStatus('sending');
+    try {
+      // Prefer the pre-warmed PDF; build on demand if the crew tapped fast.
+      let file = sharePdfFile;
+      if (!file) {
+        const pdf = await buildPrfPdf();
+        if (!pdf) throw new Error('pdf_build_failed');
+        file = new File([pdf.output('blob')], buildPrfFileName(prf), { type: 'application/pdf' });
+        setSharePdfFile(file);
+      }
+      const token = localStorage.getItem('access_token') || getCrewToken() || '';
+      const form = new FormData();
+      form.append('recipient', to);
+      // Re-sending an already-sent PRF (corrected address / deliberate
+      // resend) needs the explicit force flag past the duplicate guard.
+      if (prf.facility_email_sent_at || resendMode) form.append('force', 'true');
+      form.append('file', file);
+      const res = await axios.post(`/api/digital-prf/admin/by-case/${caseId}/email-facility`, form, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.data?.status === 'already_sent') {
+        setSentPhase('delivered');
+        setSendStatus('sent');
+        return;
+      }
+      setSentPhase('queued');
+      setSendStatus('sent');
+      // Short poll for the actual outcome (worker sends within seconds when
+      // healthy). Give up quietly after ~30s — the queued wording stays
+      // honest and the admin surfaces carry the final state.
+      for (let i = 0; i < 6; i++) {
+        await new Promise(r => setTimeout(r, 5000));
+        try {
+          const check = await axios.get(`/api/digital-prf/admin/by-case/${caseId}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (check.data?.facility_email_sent_at) {
+            setSentPhase('delivered');
+            return;
+          }
+          if (check.data?.facility_email_error) {
+            setSendStatus('error');
+            setSendError(friendlySendError(check.data.facility_email_error));
+            return;
+          }
+        } catch { /* transient — keep polling */ }
+      }
+    } catch (e: any) {
+      const detail = e?.response?.data?.detail;
+      setSendStatus('error');
+      setSendError(
+        detail === 'smtp_not_configured'
+          ? 'No PRF sending email is configured for this provider yet — send manually below, or add the sending account in Client Settings.'
+          : (typeof detail === 'string' && detail) || 'Could not send the PRF — you can send it manually below.',
+      );
+    }
+  };
+
   if (err) return <div style={{ padding: 48, color: '#b91c1c', fontWeight: 700, textAlign: 'center' }}>{err}</div>;
   if (!prf) return <div style={{ padding: 48, color: MUT, textAlign: 'center' }}>Loading PRF...</div>;
 
@@ -792,26 +895,128 @@ export default function PRFView() {
             <div style={{
               fontSize: '1.1rem', fontWeight: 800, color: INK, marginBottom: 8,
             }}>PRF submitted</div>
-            <div style={{ fontSize: '0.9rem', color: MUT, lineHeight: 1.5, marginBottom: 22 }}>
-              Send a copy of the PRF for <strong style={{ color: INK }}>{patientFullName}</strong> to the receiving facility?
-              {recipientEmail
-                ? <> Gmail will open with the address <strong style={{ color: INK }}>{recipientEmail}</strong> and the PDF ready to attach.</>
-                : <> Gmail will open with the PDF — type the receiving facility's email address in the To field.</>
-              }
-            </div>
-            <div style={{ display: 'flex', gap: 10, flexDirection: 'column' }}>
-              <button onClick={handleConfirmSend} style={{
-                padding: '12px 18px', border: 'none', borderRadius: 8,
-                background: `linear-gradient(135deg, ${GREEN}, ${GREEN_DK})`,
-                color: '#fff', fontWeight: 800, fontSize: '0.92rem', cursor: 'pointer',
-                boxShadow: `0 4px 14px rgba(47,143,74,0.3)`, letterSpacing: '0.02em',
-              }}>Send a copy to receiving facility</button>
-              <button onClick={() => setShowSharePrompt(false)} style={{
-                padding: '11px 18px', border: `1px solid #cbd5e1`, borderRadius: 8,
-                background: '#fff', color: INK, fontWeight: 700, fontSize: '0.86rem',
-                cursor: 'pointer',
-              }}>Skip</button>
-            </div>
+            {prf.smtp_configured ? (
+              sendStatus === 'sent' ? (
+                <>
+                  {/* Honest status: 'queued' until the worker's sent-stamp
+                      confirms actual delivery to the mail server. */}
+                  <div style={{ fontSize: '0.92rem', color: '#15803d', fontWeight: 700, lineHeight: 1.5, marginBottom: 22 }}>
+                    {sentPhase === 'delivered' ? '✓ PRF sent to ' : '✓ PRF queued — sending to '}
+                    <span style={{ wordBreak: 'break-word' }}>{sendEmailTo.trim()}</span>
+                  </div>
+                  <button onClick={() => setShowSharePrompt(false)} style={{
+                    width: '100%', padding: '12px 18px', border: 'none', borderRadius: 8,
+                    background: `linear-gradient(135deg, ${GREEN}, ${GREEN_DK})`,
+                    color: '#fff', fontWeight: 800, fontSize: '0.92rem', cursor: 'pointer',
+                  }}>Done</button>
+                </>
+              ) : (prf.facility_email_sent_at && !resendMode && sendStatus === 'idle') ? (
+                <>
+                  {/* Already emailed on a previous open — don't re-offer the
+                      send form; the duplicate guard makes resends deliberate. */}
+                  <div style={{ fontSize: '0.92rem', color: '#15803d', fontWeight: 700, lineHeight: 1.5, marginBottom: 8 }}>
+                    ✓ Already sent to <span style={{ wordBreak: 'break-word' }}>{prf.facility_email_sent_to}</span>
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: MUT, marginBottom: 18 }}>
+                    {fmtDate(prf.facility_email_sent_at)} {fmtTime(prf.facility_email_sent_at)}
+                  </div>
+                  <div style={{ display: 'flex', gap: 10, flexDirection: 'column' }}>
+                    <button onClick={() => setShowSharePrompt(false)} style={{
+                      padding: '12px 18px', border: 'none', borderRadius: 8,
+                      background: `linear-gradient(135deg, ${GREEN}, ${GREEN_DK})`,
+                      color: '#fff', fontWeight: 800, fontSize: '0.92rem', cursor: 'pointer',
+                    }}>Done</button>
+                    <button onClick={() => setResendMode(true)} style={{
+                      padding: '11px 18px', border: `1px solid #cbd5e1`, borderRadius: 8,
+                      background: '#fff', color: INK, fontWeight: 700, fontSize: '0.86rem',
+                      cursor: 'pointer',
+                    }}>Send again</button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={{ fontSize: '0.9rem', color: MUT, lineHeight: 1.5, marginBottom: 14 }}>
+                    Email the PRF for <strong style={{ color: INK }}>{patientFullName}</strong> to
+                    the receiving facility. Check the address, then tap Send.
+                  </div>
+                  {prf.facility_email_error && sendStatus === 'idle' && !sendError && (
+                    <div style={{
+                      fontSize: '0.78rem', color: '#92400e', background: '#fffbeb',
+                      border: '1px solid #fcd34d', borderRadius: 8, padding: '9px 11px',
+                      lineHeight: 1.45, marginBottom: 12,
+                    }}>
+                      Previous attempt did not go through: {friendlySendError(prf.facility_email_error)}
+                    </div>
+                  )}
+                  <div style={{ fontSize: '0.68rem', fontWeight: 800, color: MUT, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>
+                    Receiving Facility Email
+                  </div>
+                  <input
+                    type="email"
+                    value={sendEmailTo}
+                    onChange={e => { setSendEmailTo(e.target.value); if (sendError) setSendError(''); }}
+                    autoComplete="off"
+                    style={{
+                      width: '100%', boxSizing: 'border-box', padding: '11px 12px',
+                      fontSize: '0.92rem', border: `1.5px solid ${sendError ? '#fca5a5' : '#cbd5e1'}`,
+                      borderRadius: 8, marginBottom: sendError ? 6 : 16, outline: 'none',
+                      fontFamily: 'inherit', color: INK,
+                    }}
+                  />
+                  {sendError && (
+                    <div style={{ fontSize: '0.78rem', color: '#b91c1c', lineHeight: 1.45, marginBottom: 12 }}>
+                      {sendError}
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', gap: 10, flexDirection: 'column' }}>
+                    <button onClick={() => { void handleAutoSend(); }} style={{
+                      padding: '12px 18px', border: 'none', borderRadius: 8,
+                      background: sendStatus === 'sending' ? '#94a3b8' : `linear-gradient(135deg, ${GREEN}, ${GREEN_DK})`,
+                      color: '#fff', fontWeight: 800, fontSize: '0.92rem',
+                      cursor: sendStatus === 'sending' ? 'wait' : 'pointer',
+                      boxShadow: sendStatus === 'sending' ? 'none' : `0 4px 14px rgba(47,143,74,0.3)`,
+                      letterSpacing: '0.02em',
+                    }}>{sendStatus === 'sending' ? 'Sending…' : 'Send PRF to Facility'}</button>
+                    {sendStatus === 'error' && (
+                      <button onClick={handleConfirmSend} style={{
+                        padding: '11px 18px', border: `1.5px solid ${GREEN_DK}`, borderRadius: 8,
+                        background: '#fff', color: GREEN_DK, fontWeight: 800, fontSize: '0.88rem',
+                        cursor: 'pointer',
+                      }}>Send manually instead</button>
+                    )}
+                    <button onClick={() => setShowSharePrompt(false)} style={{
+                      padding: '11px 18px', border: `1px solid #cbd5e1`, borderRadius: 8,
+                      background: '#fff', color: INK, fontWeight: 700, fontSize: '0.86rem',
+                      cursor: 'pointer',
+                    }}>Skip</button>
+                  </div>
+                </>
+              )
+            ) : (
+              <>
+                {/* No provider sending account configured — manual share flow. */}
+                <div style={{ fontSize: '0.9rem', color: MUT, lineHeight: 1.5, marginBottom: 22 }}>
+                  Send a copy of the PRF for <strong style={{ color: INK }}>{patientFullName}</strong> to the receiving facility?
+                  {recipientEmail
+                    ? <> Gmail will open with the address <strong style={{ color: INK }}>{recipientEmail}</strong> and the PDF ready to attach.</>
+                    : <> Gmail will open with the PDF — type the receiving facility's email address in the To field.</>
+                  }
+                </div>
+                <div style={{ display: 'flex', gap: 10, flexDirection: 'column' }}>
+                  <button onClick={handleConfirmSend} style={{
+                    padding: '12px 18px', border: 'none', borderRadius: 8,
+                    background: `linear-gradient(135deg, ${GREEN}, ${GREEN_DK})`,
+                    color: '#fff', fontWeight: 800, fontSize: '0.92rem', cursor: 'pointer',
+                    boxShadow: `0 4px 14px rgba(47,143,74,0.3)`, letterSpacing: '0.02em',
+                  }}>Send a copy to receiving facility</button>
+                  <button onClick={() => setShowSharePrompt(false)} style={{
+                    padding: '11px 18px', border: `1px solid #cbd5e1`, borderRadius: 8,
+                    background: '#fff', color: INK, fontWeight: 700, fontSize: '0.86rem',
+                    cursor: 'pointer',
+                  }}>Skip</button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

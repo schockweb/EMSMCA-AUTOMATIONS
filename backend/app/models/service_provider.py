@@ -50,6 +50,23 @@ class ServiceProvider(Base):
     )
     portal_login_password_hash: Mapped[Union[str, None]] = mapped_column(String(255), nullable=True)
 
+    # Outbound PRF email account — each provider sends "PRF to receiving
+    # facility" PDFs from its OWN Gmail / Outlook mailbox. The app password is
+    # Fernet-encrypted at rest (app/utils/crypto.py) and never returned by any
+    # API. smtp_service picks the host/port (app/utils/emailer.SMTP_SERVICES).
+    smtp_service: Mapped[Union[str, None]] = mapped_column(
+        String(20), nullable=True,
+        comment="'gmail' | 'outlook' — outbound SMTP service for PRF emails"
+    )
+    smtp_email: Mapped[Union[str, None]] = mapped_column(
+        String(255), nullable=True,
+        comment="Sending address / SMTP username for PRF emails"
+    )
+    smtp_password_encrypted: Mapped[Union[str, None]] = mapped_column(
+        Text, nullable=True,
+        comment="Fernet-encrypted app password for smtp_email"
+    )
+
     # Per-provider PRF numbering baseline. Set once by the admin at onboarding
     # (the count of PRFs the company has already completed). The next digital
     # PRF continues from here — see `_next_prf_number` in api/digital_prf.py.

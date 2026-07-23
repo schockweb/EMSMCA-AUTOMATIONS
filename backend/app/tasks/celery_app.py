@@ -17,6 +17,7 @@ celery_app = Celery(
         "app.tasks.preprocessing",
         "app.tasks.extraction",
         "app.tasks.prf_processing",
+        "app.tasks.prf_email",
         "app.tasks.dlq_setup",
     ],
 )

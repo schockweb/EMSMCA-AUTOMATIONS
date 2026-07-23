@@ -106,6 +106,11 @@ class ProviderCreate(BaseModel):
     portal_login_password: str | None = None
     admin_email: str | None = None
     admin_password: str | None = None
+    # PRF outbound email account — the address submitted PRF PDFs are sent
+    # FROM to the receiving facility. Gmail/Outlook app password required.
+    smtp_service: str | None = None
+    smtp_email: str | None = None
+    smtp_password: str | None = None
 
 class ProviderUpdate(BaseModel):
     name: str | None = None
@@ -130,6 +135,11 @@ class ProviderUpdate(BaseModel):
     # existing counter untouched so re-saving other fields never resets it.
     # Accepts alphanumeric values like "JEM0690" — the numeric part seeds the counter.
     current_prf_number: int | str | None = None
+    # PRF outbound email account (Gmail/Outlook). smtp_password is
+    # omit-to-keep like the other credentials; smtp_email = "" clears it.
+    smtp_service: str | None = None
+    smtp_email: str | None = None
+    smtp_password: str | None = None
 
 class CrewMemberCreate(BaseModel):
     full_name: str
@@ -201,6 +211,62 @@ def _coerce_prf_baseline(value: int | str | None) -> int | None:
     if value < 0:
         raise HTTPException(400, "Current PRF number cannot be negative.")
     return value
+
+
+_SMTP_EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+
+
+def _apply_smtp_settings(provider: ServiceProvider, data: dict) -> None:
+    """PRF outbound email account (per-provider Gmail / Outlook).
+
+    Shared by the admin CRUD and the provider-settings endpoints. Field
+    semantics (all keys optional — only keys present in `data` are touched):
+      • smtp_email = ""     → clears the whole account (sending disabled)
+      • smtp_email = value  → validated + stored lowercase
+      • smtp_service        → must be 'gmail' or 'outlook'
+      • smtp_password       → stored Fernet-encrypted; blank/omitted keeps
+                              the existing password (never echoed back)
+    """
+    if "smtp_email" in data:
+        email = (data.get("smtp_email") or "").strip().lower()
+        if not email:
+            provider.smtp_email = None
+            provider.smtp_service = None
+            provider.smtp_password_encrypted = None
+        else:
+            if not _SMTP_EMAIL_RE.match(email):
+                raise HTTPException(400, "PRF sending email address is not valid.")
+            provider.smtp_email = email
+    if "smtp_service" in data and (data.get("smtp_service") or "").strip():
+        svc = str(data["smtp_service"]).strip().lower()
+        if svc not in ("gmail", "outlook"):
+            raise HTTPException(400, "PRF sending service must be Gmail or Outlook.")
+        provider.smtp_service = svc
+    pw = data.get("smtp_password")
+    if pw and str(pw).strip():
+        from app.utils.crypto import encrypt_str
+        provider.smtp_password_encrypted = encrypt_str(str(pw).strip())
+
+
+async def _verify_new_smtp_credential(data: dict, provider: ServiceProvider) -> None:
+    """When a NEW app password was typed, attempt a real SMTP login BEFORE the
+    save commits — a typo'd Gmail/Outlook app password would otherwise fail
+    silently on every later PRF send. Auth rejection blocks the save with a
+    clear message; network trouble fails open (the password may be right)."""
+    pw = str(data.get("smtp_password") or "").strip()
+    if not pw or not (provider.smtp_email and provider.smtp_service):
+        return
+    import asyncio
+    from app.utils.emailer import test_smtp_login
+    ok, reason = await asyncio.to_thread(
+        test_smtp_login, provider.smtp_service, provider.smtp_email, pw
+    )
+    if not ok and reason == "smtp_auth_failed":
+        raise HTTPException(
+            400,
+            "Gmail/Outlook rejected this app password. Generate an App Password "
+            "in the account's security settings and enter it here.",
+        )
 
 
 def _slugify(name: str) -> str:
@@ -384,6 +450,9 @@ async def list_providers(
             "is_active": p.is_active,
             "portal_login_username": p.portal_login_email,
             "admin_email": admin_email,
+            "smtp_service": p.smtp_service,
+            "smtp_email": p.smtp_email,
+            "smtp_configured": bool(p.smtp_email and p.smtp_password_encrypted),
             "crew_count": crew_count.scalar() or 0,
             "vehicle_count": vehicle_count.scalar() or 0,
             "prf_count": prf_count.scalar() or 0,
@@ -429,6 +498,9 @@ async def create_provider(
         portal_login_email=portal_email,
         portal_login_password_hash=hash_password(body.portal_login_password) if body.portal_login_password else None,
     )
+    # PRF outbound email account (Gmail/Outlook), validated + encrypted.
+    _apply_smtp_settings(provider, body.model_dump(exclude_unset=True))
+    await _verify_new_smtp_credential(body.model_dump(exclude_unset=True), provider)
     db.add(provider)
     await db.flush()  # To get provider.id for the crew member
 
@@ -509,6 +581,9 @@ async def get_provider(
         "address": provider.address,
         "logo_url": provider.logo_url,
         "is_active": provider.is_active,
+        "smtp_service": provider.smtp_service,
+        "smtp_email": provider.smtp_email,
+        "smtp_configured": bool(provider.smtp_email and provider.smtp_password_encrypted),
         "created_at": provider.created_at.isoformat() if provider.created_at else None,
     }
 
@@ -542,6 +617,10 @@ async def update_provider(
     baseline = _coerce_prf_baseline(body.current_prf_number)
     if baseline is not None:
         provider.prf_start_number = baseline
+
+    # PRF outbound email account (Gmail/Outlook), validated + encrypted.
+    _apply_smtp_settings(provider, body.model_dump(exclude_unset=True))
+    await _verify_new_smtp_credential(body.model_dump(exclude_unset=True), provider)
 
     # EMSMCA Client Login (portal_login_email / portal_login_password_hash on ServiceProvider)
     if body.portal_login_username is not None:
@@ -648,6 +727,10 @@ class ProviderSettingsUpdate(BaseModel):
     # from here. Never echoed back on GET (the field stays blank on return).
     # Accepts alphanumeric values like "JEM0690" — the numeric part seeds the counter.
     current_prf_number: int | str | None = None
+    # PRF outbound email account (Gmail/Outlook + app password).
+    smtp_service: str | None = None
+    smtp_email: str | None = None
+    smtp_password: str | None = None
 
 
 def _assert_settings_access(principal, provider_id: uuid.UUID) -> None:
@@ -696,6 +779,9 @@ async def get_provider_settings(
         "logo_url": provider.logo_url,
         "portal_login_username": provider.portal_login_email,
         "admin_email": admin_res.scalar_one_or_none(),
+        "smtp_service": provider.smtp_service,
+        "smtp_email": provider.smtp_email,
+        "smtp_configured": bool(provider.smtp_email and provider.smtp_password_encrypted),
     }
 
 
@@ -745,6 +831,10 @@ async def update_provider_settings(
     baseline = _coerce_prf_baseline(body.current_prf_number)
     if baseline is not None:
         provider.prf_start_number = baseline
+
+    # PRF outbound email account (Gmail/Outlook), validated + encrypted.
+    _apply_smtp_settings(provider, body.model_dump(exclude_unset=True))
+    await _verify_new_smtp_credential(body.model_dump(exclude_unset=True), provider)
 
     # Portal Admin Login (admin crew member)
     if body.admin_email or (body.admin_password and body.admin_password.strip()):

@@ -143,6 +143,20 @@ class DigitalPRF(Base):
         DateTime(timezone=True), nullable=True
     )
 
+    # ── Receiving-facility email (post-submit PDF send) ───
+    facility_email_sent_to: Mapped[Union[str, None]] = mapped_column(
+        String(255), nullable=True,
+        comment="Recipient the PRF PDF was emailed to (audit + duplicate-send guard)",
+    )
+    facility_email_sent_at: Mapped[Union[datetime, None]] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+        comment="When the PRF PDF was emailed to the receiving facility",
+    )
+    facility_email_error: Mapped[Union[str, None]] = mapped_column(
+        String(50), nullable=True,
+        comment="Terminal failure reason from the last facility-email attempt (e.g. smtp_auth_failed); cleared on re-queue and on success",
+    )
+
     # ── Processing / failure tracking ─────────────────────
     processing_error: Mapped[Union[str, None]] = mapped_column(
         Text, nullable=True,

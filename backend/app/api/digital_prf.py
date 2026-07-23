@@ -3,11 +3,12 @@ Digital PRF API — Create, auto-save (5s), and submit digital Patient Report Fo
 Crew members use these endpoints from their mobile phones.
 """
 from __future__ import annotations
+import re
 import uuid
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import select, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1362,21 +1363,14 @@ async def get_prf(
 
 # ── Admin: fetch full PRF + branding for scheme-facing rendering ─────────────
 
-@router.get("/admin/by-case/{case_id}")
-async def get_prf_by_case_for_admin(
-    case_id: str,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-):
-    """Return the full submitted PRF joined with provider + crew + vehicle
-    info. Used by the admin-side PRF viewer (medical-scheme submission) AND
-    by the crew's post-submit PDF-share flow, so the auth is dual-mode:
+async def _resolve_case_prf_access(
+    request: Request, db: AsyncSession, case_id: str
+) -> tuple[DigitalPRF, CrewMember | None]:
+    """Dual-mode auth + load for the /admin/by-case/* family.
 
-      • An admin User JWT — full access (used by the admin viewer).
-      • A crew JWT — only when the authenticated crew member created
-        the PRF being requested. This lets the crew immediately render
-        and share their just-submitted PRF as a PDF without granting
-        them blanket access to every case in the system.
+    Accepts either an admin User JWT (full access) or a crew JWT (the crew
+    member must own the PRF, or be their provider's admin for a same-provider
+    PRF). Returns (prf, crew_member-or-None-for-admin). Raises 401/403/404.
     """
     # Both admin and crew JWTs come through Authorization: Bearer <token>.
     # `decode_token` validates the signature; the scope distinction comes
@@ -1428,6 +1422,27 @@ async def get_prf_by_case_for_admin(
         )
         if not is_provider_admin and prf.crew_member_1_id != crew_member.id:
             raise HTTPException(403, "This PRF was not created by you")
+
+    return prf, crew_member
+
+
+@router.get("/admin/by-case/{case_id}")
+async def get_prf_by_case_for_admin(
+    case_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the full submitted PRF joined with provider + crew + vehicle
+    info. Used by the admin-side PRF viewer (medical-scheme submission) AND
+    by the crew's post-submit PDF-share flow, so the auth is dual-mode:
+
+      • An admin User JWT — full access (used by the admin viewer).
+      • A crew JWT — only when the authenticated crew member created
+        the PRF being requested. This lets the crew immediately render
+        and share their just-submitted PRF as a PDF without granting
+        them blanket access to every case in the system.
+    """
+    prf, _crew = await _resolve_case_prf_access(request, db, case_id)
 
     # Provider (for branding)
     provider_res = await db.execute(
@@ -1515,6 +1530,15 @@ async def get_prf_by_case_for_admin(
         "crew_2": crew2,
         "vehicle": vehicle,
         "submitted_at": prf.submitted_at.isoformat() if prf.submitted_at else None,
+        # Facility-email stamps — PRFView shows "already sent" instead of
+        # re-offering the send popup, and surfaces a terminal send failure
+        # (e.g. smtp_auth_failed) with the manual-share fallback.
+        "facility_email_sent_to": prf.facility_email_sent_to,
+        "facility_email_sent_at": prf.facility_email_sent_at.isoformat() if prf.facility_email_sent_at else None,
+        "facility_email_error": prf.facility_email_error,
+        # Provider outbound-email readiness — the send popup falls back to the
+        # manual share flow when the provider hasn't configured an account.
+        "smtp_configured": bool(provider and provider.smtp_email and provider.smtp_password_encrypted),
         # Optimistic-concurrency token — the client stores this and echoes it
         # back on saves; without it the 409-recovery refetch could never
         # converge (it always read null and retried against a stale base).
@@ -1523,17 +1547,100 @@ async def get_prf_by_case_for_admin(
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# EMAIL HELPER — currently UNUSED (no automatic email-on-submit exists)
+# EMAIL PRF TO RECEIVING FACILITY
 # ═══════════════════════════════════════════════════════════════════════════
-# STATUS (2026-07-22 audit): automatic "PDF to receiving facility on submit"
-# is NOT implemented. The referenced Celery task (app/tasks/prf_email.py)
-# does not exist and nothing calls _send_email. What DOES exist is the
-# MANUAL flow in PRFView.tsx: staff export the PDF and the app opens Gmail
-# pre-addressed to the Receiving Facility Email captured at handover.
-#
-# _send_email is kept as the ready-made SMTP wrapper (with attachment
-# support) for when the automatic flow is actually built. Do not describe
-# the automatic flow as existing until a task calls this.
+# The crew's post-submit popup (PRFView.tsx) uploads the client-rendered PDF
+# here; a Celery task (app/tasks/prf_email.py) then emails it to the
+# receiving facility FROM the provider's own Gmail/Outlook account
+# (ServiceProvider.smtp_*). The recipient defaults to the Receiving Facility
+# Email captured at handover but the crew can correct it in the popup.
+
+_RECIPIENT_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+_PRF_EMAIL_MAX_PDF_BYTES = 15 * 1024 * 1024
+
+
+@router.post("/admin/by-case/{case_id}/email-facility", status_code=202)
+async def email_prf_to_facility(
+    case_id: str,
+    request: Request,
+    recipient: str = Form(...),
+    force: bool = Form(False),
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Queue the uploaded PRF PDF for emailing to the receiving facility.
+
+    Auth is the same dual-mode as the by-case viewer (admin User JWT, or the
+    crew member who owns the PRF / their provider admin). The PDF travels
+    from the device because the pixel-perfect render only exists client-side.
+    Safeguards: submitted/processed PRFs only, provider must have an outbound
+    email account configured, PDF magic-byte + size checks, and a
+    duplicate-send guard (same recipient re-queues only with force=true).
+    """
+    prf, _crew = await _resolve_case_prf_access(request, db, case_id)
+
+    if prf.status not in (PRFStatus.SUBMITTED, PRFStatus.PROCESSED):
+        raise HTTPException(400, "Only submitted PRFs can be emailed to the facility.")
+
+    to = (recipient or "").strip()
+    if not _RECIPIENT_RE.match(to):
+        raise HTTPException(400, "Receiving facility email address is not valid.")
+
+    provider_res = await db.execute(
+        select(ServiceProvider).where(ServiceProvider.id == prf.provider_id)
+    )
+    provider = provider_res.scalar_one_or_none()
+    if not provider or not (provider.smtp_email and provider.smtp_password_encrypted and provider.smtp_service):
+        # Distinct machine-readable detail — the frontend falls back to the
+        # manual share flow on this exact string.
+        raise HTTPException(400, "smtp_not_configured")
+
+    pdf_bytes = await file.read()
+    if len(pdf_bytes) > _PRF_EMAIL_MAX_PDF_BYTES:
+        raise HTTPException(400, "PDF is too large to email (limit 15 MB).")
+    if not pdf_bytes.startswith(b"%PDF-"):
+        raise HTTPException(400, "Uploaded file is not a PDF.")
+
+    # Duplicate-send guard: the same PRF to the same recipient goes out once.
+    # A different (corrected) recipient, or force=true, re-queues.
+    if (
+        prf.facility_email_sent_at
+        and not force
+        and (prf.facility_email_sent_to or "").lower() == to.lower()
+    ):
+        return {"status": "already_sent", "recipient": prf.facility_email_sent_to}
+
+    # Persist the PDF on the shared uploads volume so the Celery worker
+    # (separate container, same volume) can attach it. The prf_email/ dir is
+    # explicitly blocked from the public /uploads static mount (see
+    # _HardenedUploads in main.py) — these are confidential patient records.
+    # Filename is unique PER ENQUEUE: a fixed per-PRF name let a retrying
+    # earlier send delete the file out from under a corrected-recipient
+    # resend (which then died as 'pdf_missing').
+    import os
+    from app.config import get_settings as _gs
+    out_dir = os.path.join(_gs().UPLOAD_DIR, "prf_email")
+    os.makedirs(out_dir, exist_ok=True)
+    pdf_path = os.path.join(out_dir, f"{prf.id}_{uuid.uuid4().hex}.pdf")
+    with open(pdf_path, "wb") as fh:
+        fh.write(pdf_bytes)
+
+    # Fresh attempt — clear any previous terminal failure stamp so the
+    # admin surfaces reflect the current attempt, not a stale one.
+    prf.facility_email_error = None
+    await db.commit()
+
+    from app.tasks.prf_email import send_prf_facility_email
+    send_prf_facility_email.delay(str(prf.id), to, pdf_path)
+    return {"status": "queued", "recipient": to}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# EMAIL HELPER
+# ═══════════════════════════════════════════════════════════════════════════
+# Global-settings SMTP wrapper (SMTP_* env). The per-provider facility-email
+# flow uses app/utils/emailer.send_email_via with the provider's own account;
+# this wrapper delegates to the same util and remains for any global sends.
 
 def _send_email(
     to: str,
@@ -1548,46 +1655,8 @@ def _send_email(
     `smtp_not_configured` so callers (including Celery tasks) can log a
     helpful diagnostic instead of crashing.
     """
-    from app.config import get_settings
-    settings = get_settings()
-    if not settings.SMTP_HOST:
-        return False, "smtp_not_configured"
-
-    import smtplib
-    from email.message import EmailMessage
-
-    msg = EmailMessage()
-    sender = settings.SMTP_FROM_EMAIL or settings.SMTP_USERNAME or "noreply@emsclaims.local"
-    msg["From"] = f"{settings.SMTP_FROM_NAME} <{sender}>"
-    msg["To"] = to
-    msg["Subject"] = subject
-    msg.set_content(body)
-
-    for att in (attachments or []):
-        filename = att.get("filename") or "attachment.bin"
-        content = att.get("content") or b""
-        mime = att.get("mime_type") or "application/octet-stream"
-        maintype, _, subtype = mime.partition("/")
-        if not subtype:
-            maintype, subtype = "application", "octet-stream"
-        msg.add_attachment(content, maintype=maintype, subtype=subtype, filename=filename)
-
-    try:
-        if settings.SMTP_USE_TLS:
-            with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=30) as s:
-                s.starttls()
-                if settings.SMTP_USERNAME:
-                    s.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD)
-                s.send_message(msg)
-        else:
-            with smtplib.SMTP_SSL(settings.SMTP_HOST, settings.SMTP_PORT, timeout=30) as s:
-                if settings.SMTP_USERNAME:
-                    s.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD)
-                s.send_message(msg)
-        return True, None
-    except Exception as exc:
-        logger.warning("SMTP send failed: %s", exc)
-        return False, "smtp_error"
+    from app.utils.emailer import send_email
+    return send_email(to, subject, body, attachments)
 
 
 def _public_app_url() -> str:

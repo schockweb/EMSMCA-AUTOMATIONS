@@ -24,6 +24,11 @@ interface Provider {
   logo_url?: string | null;
   portal_login_username?: string | null;
   admin_email?: string | null;
+  // PRF outbound email account — the address submitted PRF PDFs are emailed
+  // FROM to receiving facilities. Password is write-only (never returned).
+  smtp_service?: string | null;
+  smtp_email?: string | null;
+  smtp_configured?: boolean;
 }
 
 interface CrewMember {
@@ -120,7 +125,7 @@ export default function ProviderManagement() {
 
   // Edit client modal state
   const [showEditClient, setShowEditClient] = useState(false);
-  const [editForm, setEditForm] = useState({ name: '', pr_number: '', prf_name: '', phone: '', email: '', address: '', is_active: true, portal_username: '', portal_password: '', admin_email: '', admin_password: '', prfNumber: '' });
+  const [editForm, setEditForm] = useState({ name: '', pr_number: '', prf_name: '', phone: '', email: '', address: '', is_active: true, portal_username: '', portal_password: '', admin_email: '', admin_password: '', prfNumber: '', smtp_service: 'gmail', smtp_email: '', smtp_password: '' });
   const [editSaving, setEditSaving] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -134,7 +139,7 @@ export default function ProviderManagement() {
   const [crewLoading, setCrewLoading] = useState(false);
 
   // Add forms
-  const [newProvider, setNewProvider] = useState({ name: '', phone: '', email: '', prNumber: '', ptyRegNumber: '', prfName: '', address: '', prfNumber: '', clientEmail: '', clientPassword: '', adminEmail: '', adminPassword: '' });
+  const [newProvider, setNewProvider] = useState({ name: '', phone: '', email: '', prNumber: '', ptyRegNumber: '', prfName: '', address: '', prfNumber: '', clientEmail: '', clientPassword: '', adminEmail: '', adminPassword: '', smtpService: 'gmail', smtpEmail: '', smtpPassword: '' });
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [newCrew, setNewCrew] = useState({ full_name: '', email: '', initials: '', hpcsa_number: '', qualification: 'ILS', phone: '' });
   const [newVehicle, setNewVehicle] = useState({ callsign: '', registration: '', vehicle_type: 'Ambulance' });
@@ -203,6 +208,11 @@ export default function ProviderManagement() {
       // Always blank on load — the baseline is write-only. Pre-filling it would
       // let a re-save silently reset the provider's PRF sequence.
       prfNumber: '',
+      // PRF sending account — service + email prefill; app password is
+      // write-only (blank = keep the stored one).
+      smtp_service: selectedProvider.smtp_service || 'gmail',
+      smtp_email: selectedProvider.smtp_email || '',
+      smtp_password: '',
     });
     setLogoPreview(selectedProvider.logo_url || null);
     setShowEditClient(true);
@@ -232,6 +242,11 @@ export default function ProviderManagement() {
         // field leaves the existing counter untouched. Sent as-typed; the
         // backend extracts the digits (JEM0690 → 690).
         current_prf_number: editForm.prfNumber.trim() || undefined,
+        // PRF sending account — email always sent (empty string clears the
+        // account); password only when typed (blank keeps the stored one).
+        smtp_email: editForm.smtp_email.trim(),
+        smtp_service: editForm.smtp_service || undefined,
+        smtp_password: editForm.smtp_password.trim() || undefined,
       });
       const updated = { ...selectedProvider, ...editForm };
       setSelectedProvider(updated);
@@ -301,6 +316,11 @@ export default function ProviderManagement() {
         portal_login_password: newProvider.clientPassword || undefined,
         admin_email: newProvider.adminEmail || undefined,
         admin_password: newProvider.adminPassword || undefined,
+        // PRF sending account (Gmail/Outlook + app password) — optional at
+        // onboarding; can be added later via Edit Client Settings.
+        smtp_service: newProvider.smtpEmail.trim() ? newProvider.smtpService : undefined,
+        smtp_email: newProvider.smtpEmail.trim() || undefined,
+        smtp_password: newProvider.smtpPassword.trim() || undefined,
       };
       const res = await api.post('/api/providers', payload);
       const providerId = res.data.id;
@@ -314,7 +334,7 @@ export default function ProviderManagement() {
       }
 
       setShowAddProvider(false);
-      setNewProvider({ name: '', phone: '', email: '', prNumber: '', ptyRegNumber: '', prfName: '', address: '', prfNumber: '', clientEmail: '', clientPassword: '', adminEmail: '', adminPassword: '' });
+      setNewProvider({ name: '', phone: '', email: '', prNumber: '', ptyRegNumber: '', prfName: '', address: '', prfNumber: '', clientEmail: '', clientPassword: '', adminEmail: '', adminPassword: '', smtpService: 'gmail', smtpEmail: '', smtpPassword: '' });
       setLogoFile(null);
       fetchProviders();
     } catch (e: any) {
@@ -603,6 +623,34 @@ export default function ProviderManagement() {
                     </div>
                   </div>
                 </div>
+
+                {/* PRF sending account — submitted PRF PDFs are emailed to the
+                    receiving facility FROM this address. */}
+                <div style={{ background: 'var(--surface-50)', padding: 16, borderRadius: 8, border: '1px solid var(--surface-100)' }}>
+                  <h4 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: 12, color: 'var(--text)' }}>PRF Sending Email</h4>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <div>
+                      <label style={labelStyle}>Email Service</label>
+                      <select style={inputStyle} value={newProvider.smtpService}
+                        onChange={e => setNewProvider({ ...newProvider, smtpService: e.target.value })}>
+                        <option value="gmail">Gmail</option>
+                        <option value="outlook">Outlook</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style={labelStyle}>Sending Email Address</label>
+                      <input style={inputStyle} type="email" value={newProvider.smtpEmail}
+                        onChange={e => setNewProvider({ ...newProvider, smtpEmail: e.target.value })}
+                        autoComplete="off" data-lpignore="true" data-form-type="other" />
+                    </div>
+                  </div>
+                  <div style={{ marginTop: 12 }}>
+                    <label style={labelStyle}>App Password</label>
+                    <input style={inputStyle} type="password" value={newProvider.smtpPassword}
+                      onChange={e => setNewProvider({ ...newProvider, smtpPassword: e.target.value })}
+                      autoComplete="new-password" data-lpignore="true" data-form-type="other" />
+                  </div>
+                </div>
               </div>
 
               <div style={{ display: 'flex', gap: 8, marginTop: 24, justifyContent: 'flex-end' }}>
@@ -827,6 +875,48 @@ export default function ProviderManagement() {
                       autoComplete="new-password" data-lpignore="true" data-form-type="other"
                     />
                   </div>
+                </div>
+              </div>
+
+              {/* ── PRF Sending Email — submitted PRF PDFs are emailed to the
+                    receiving facility FROM this account. App password is
+                    write-only: blank keeps the stored one. ── */}
+              <div style={{ background: 'var(--surface-50)', padding: '14px 16px', borderRadius: 10, border: '1px solid var(--surface-200)' }}>
+                <div style={{ fontSize: '0.7rem', fontWeight: 800, color: teal, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
+                  PRF Sending Email{selectedProvider?.smtp_configured ? ' — configured' : ''}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <div>
+                    <label style={labelStyle}>Email Service</label>
+                    <select
+                      style={inputStyle}
+                      value={editForm.smtp_service}
+                      onChange={e => setEditForm({ ...editForm, smtp_service: e.target.value })}
+                    >
+                      <option value="gmail">Gmail</option>
+                      <option value="outlook">Outlook</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Sending Email Address</label>
+                    <input
+                      style={inputStyle}
+                      type="email"
+                      value={editForm.smtp_email}
+                      onChange={e => setEditForm({ ...editForm, smtp_email: e.target.value })}
+                      autoComplete="off" data-lpignore="true" data-form-type="other"
+                    />
+                  </div>
+                </div>
+                <div style={{ marginTop: 10 }}>
+                  <label style={labelStyle}>App Password</label>
+                  <input
+                    style={inputStyle}
+                    type="password"
+                    value={editForm.smtp_password}
+                    onChange={e => setEditForm({ ...editForm, smtp_password: e.target.value })}
+                    autoComplete="new-password" data-lpignore="true" data-form-type="other"
+                  />
                 </div>
               </div>
             </div>

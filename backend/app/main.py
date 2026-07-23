@@ -264,7 +264,18 @@ class _HardenedUploads(StaticFiles):
     `<img src="/uploads/...">` embedding from the SPA still renders normally.
     """
 
+    # Worker-spool subdirectories on the shared uploads volume that hold
+    # confidential documents (patient PRF PDFs awaiting the email task).
+    # They are NOT web assets and must never be served — without this guard
+    # anyone holding the PRF UUID could fetch the full patient record
+    # unauthenticated at /uploads/prf_email/<uuid>.pdf.
+    _PRIVATE_PREFIXES = ("prf_email/", "prf_email\\")
+
     async def get_response(self, path, scope):
+        norm = (path or "").lstrip("/\\")
+        if norm.startswith(self._PRIVATE_PREFIXES):
+            from starlette.responses import PlainTextResponse
+            return PlainTextResponse("Not Found", status_code=404)
         response = await super().get_response(path, scope)
         response.headers["Content-Security-Policy"] = (
             "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox"
