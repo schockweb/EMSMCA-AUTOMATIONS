@@ -30,6 +30,8 @@ from fastapi import Request, status
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import Response, JSONResponse
 
+from app.utils.client_ip import get_trusted_client_ip, is_loopback_peer
+
 logger = logging.getLogger("ems.rate_limit")
 
 
@@ -47,7 +49,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     def __init__(
         self,
         app,
-        auth_limit: int = 100,        # 100 login attempts per window
+        auth_limit: int = 15,         # login/refresh attempts per window, per real client IP
         api_limit: int = 600,
         window: int = 60,             # sliding window in seconds
         max_body_bytes: int = 15 * 1024 * 1024,  # 15 MB
@@ -60,12 +62,6 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     # ── Helpers ────────────────────────────────────────────────────────────
 
-    def _get_client_ip(self, request: Request) -> str:
-        forwarded = request.headers.get("x-forwarded-for")
-        if forwarded:
-            return forwarded.split(",")[0].strip()
-        return request.client.host if request.client else "unknown"
-
     def _get_identity_key(self, request: Request) -> str:
         """Per-token identity when authenticated, else per-IP.
 
@@ -76,7 +72,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             token = auth[7:].strip()
             if token:
                 return "tok:" + hashlib.sha256(token.encode()).hexdigest()[:16]
-        return "ip:" + self._get_client_ip(request)
+        return "ip:" + get_trusted_client_ip(request)
 
     async def _check_limit(self, redis_client, key: str, limit: int) -> tuple[bool, int]:
         """
@@ -110,21 +106,17 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         # Password-login paths are brute-force targets and must NEVER be exempted
-        # by the internal-IP shortcut below: client_ip is derived from the
-        # attacker-controlled X-Forwarded-For header, so a spoofed
-        # `X-Forwarded-For: 127.0.0.1` (or 172.x / 192.168.x) would otherwise skip
-        # all rate limiting on /login. Decide auth-strict first, then bypass.
+        # by the loopback shortcut below. Decide auth-strict first, then bypass.
         AUTH_STRICT_PATHS = {"/api/auth/login", "/api/auth/refresh", "/api/crew/login"}
         is_auth = path in AUTH_STRICT_PATHS
 
-        # Skip rate limiting for localhost / loopback — docker health checks, CI,
-        # dev logins — but only for non-auth paths (see note above).
-        client_ip = self._get_client_ip(request)
-        if not is_auth and (
-            client_ip in ("127.0.0.1", "::1", "localhost")
-            or client_ip.startswith("172.")
-            or client_ip.startswith("192.168.")
-        ):
+        # Skip rate limiting for in-container callers only — docker health
+        # checks, CI, `docker exec` test harnesses. This checks the raw TCP
+        # peer and ignores every forwarded header, so no external request can
+        # qualify no matter what headers it sends. (The old prefix checks on
+        # X-Forwarded-For let `X-Forwarded-For: 192.168.1.1` skip limiting,
+        # and "172." also matched public ranges like Google's 172.217.x.x.)
+        if not is_auth and is_loopback_peer(request):
             return await call_next(request)
 
         # ── Request body size cap (cheap header check) ──────────────────
@@ -146,7 +138,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         # ── Redis-backed rate limiting ───────────────────────────────────
         if is_auth:
-            bucket_key = f"rl:auth:{self._get_client_ip(request)}"
+            bucket_key = f"rl:auth:{get_trusted_client_ip(request)}"
             limit = self.auth_limit
         else:
             bucket_key = f"rl:api:{self._get_identity_key(request)}"

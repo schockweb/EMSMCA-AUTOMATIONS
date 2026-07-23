@@ -30,18 +30,12 @@ from app.utils.security import (
     LOCKOUT_DURATION_MINUTES,
 )
 
+from app.utils.client_ip import get_trusted_client_ip
+
 import logging
 logger = logging.getLogger("ems.auth")
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
-
-
-def _get_client_ip(request: Request) -> str:
-    """Extract client IP, respecting X-Forwarded-For from reverse proxy."""
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
 
 
 async def _record_login_audit(
@@ -70,7 +64,7 @@ async def login(
     db: AsyncSession = Depends(get_db),
 ):
     """Authenticate user and return JWT tokens. Enforces account lockout after repeated failures."""
-    client_ip = _get_client_ip(request)
+    client_ip = get_trusted_client_ip(request)
     logger.info("Login attempt for user=%s from ip=%s", form_data.username, client_ip)
 
     result = await db.execute(select(User).where(User.email == form_data.username))
@@ -82,17 +76,56 @@ async def login(
             select(ServiceProvider).where(func.lower(ServiceProvider.portal_login_email) == form_data.username.lower())
         )
         provider = provider_res.scalar_one_or_none()
-        
+
         if provider and provider.portal_login_password_hash:
+            # Same lockout policy as admin users: 5 fails → 45 min lock.
+            if provider.locked_until and provider.locked_until > datetime.now(timezone.utc):
+                await _record_login_audit(
+                    db, None, "PORTAL_LOGIN_FAILED_LOCKED", client_ip,
+                    {"provider_id": str(provider.id), "provider_slug": provider.slug},
+                )
+                await db.commit()
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Account locked due to too many failed attempts. Try again later.",
+                )
+
             if await verify_password_async(form_data.password, provider.portal_login_password_hash):
+                provider.failed_login_attempts = 0
+                provider.locked_until = None
+                await _record_login_audit(
+                    db, None, "PORTAL_LOGIN_SUCCESS", client_ip,
+                    {"provider_id": str(provider.id), "provider_slug": provider.slug},
+                )
+                await db.commit()
                 # Valid client redirect! Return custom response bypassing TokenResponse
                 return JSONResponse(content={
-                    "client_redirect": True, 
+                    "client_redirect": True,
                     "slug": provider.slug,
                     "provider_name": provider.name,
                     "logo_url": provider.logo_url,
                     "pr_number": provider.pr_number,
                 })
+
+            # Wrong portal password — count it and lock at the threshold.
+            provider.failed_login_attempts = (provider.failed_login_attempts or 0) + 1
+            if provider.failed_login_attempts >= MAX_FAILED_ATTEMPTS:
+                provider.locked_until = datetime.now(timezone.utc) + timedelta(minutes=LOCKOUT_DURATION_MINUTES)
+            await _record_login_audit(
+                db, None, "PORTAL_LOGIN_FAILED", client_ip,
+                {
+                    "provider_id": str(provider.id),
+                    "provider_slug": provider.slug,
+                    "failed_attempts": provider.failed_login_attempts,
+                    "locked_until": provider.locked_until.isoformat() if provider.locked_until else None,
+                },
+            )
+            await db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Incorrect email or password",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
     # ── Check if locked out ──
     if user and user.locked_until and user.locked_until > datetime.now(timezone.utc):
@@ -232,7 +265,7 @@ async def logout(
 
     await db.commit()
 
-    client_ip = _get_client_ip(request)
+    client_ip = get_trusted_client_ip(request)
     logger.info("User %s logged out from ip=%s", user_id, client_ip)
 
     return {"message": "Logged out successfully"}

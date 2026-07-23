@@ -184,13 +184,20 @@ app.add_middleware(
 from fastapi.middleware.gzip import GZipMiddleware
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
-# 2. Rate Limiting — DISABLED (was blocking legitimate login attempts)
-# app.add_middleware(
-#     RateLimitMiddleware,
-#     auth_limit=30,
-#     api_limit=300,
-#     window=60,
-# )
+# 2. Rate Limiting — RE-ENABLED with trustworthy per-client keying.
+#    The old limiter keyed buckets on the FIRST X-Forwarded-For entry, which
+#    (a) attackers could rotate for a fresh bucket per request, and (b) merged
+#    every legitimate user behind one proxy hop into a single shared bucket —
+#    the "blocking legitimate login attempts" incident that got it disabled.
+#    Buckets now key on get_trusted_client_ip (nginx-set X-Real-IP), so each
+#    real client gets its own budget and the header cannot be forged through
+#    our proxy. Auth paths: 15/min per client IP. Fails open without Redis.
+app.add_middleware(
+    RateLimitMiddleware,
+    auth_limit=15,
+    api_limit=300,
+    window=60,
+)
 
 # 3. XSS Protection — query param scanning + security headers
 app.add_middleware(XSSProtectionMiddleware)

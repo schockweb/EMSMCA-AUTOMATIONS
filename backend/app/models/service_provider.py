@@ -50,6 +50,16 @@ class ServiceProvider(Base):
     )
     portal_login_password_hash: Mapped[Union[str, None]] = mapped_column(String(255), nullable=True)
 
+    # ── Portal-login account lockout (mirrors User) ──
+    failed_login_attempts: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0",
+        comment="Consecutive failed portal-login attempts"
+    )
+    locked_until: Mapped[Union[datetime, None]] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+        comment="Portal login locked until this timestamp (NULL = not locked)"
+    )
+
     # Outbound PRF email account — each provider sends "PRF to receiving
     # facility" PDFs from its OWN Gmail / Outlook mailbox. The app password is
     # Fernet-encrypted at rest (app/utils/crypto.py) and never returned by any

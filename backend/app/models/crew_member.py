@@ -5,7 +5,7 @@ Crew members self-assign to shifts by typing their name + HPCSA#.
 from typing import Union
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import String, Boolean, ForeignKey, DateTime
+from sqlalchemy import String, Boolean, ForeignKey, DateTime, Integer
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
@@ -52,6 +52,16 @@ class CrewMember(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     last_login: Mapped[Union[datetime, None]] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+
+    # ── Account lockout (mirrors User) ──
+    failed_login_attempts: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0",
+        comment="Consecutive failed login attempts"
+    )
+    locked_until: Mapped[Union[datetime, None]] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+        comment="Account locked until this timestamp (NULL = not locked)"
     )
 
     created_at: Mapped[datetime] = mapped_column(

@@ -22,6 +22,26 @@ MIGRATIONS = [
     ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMP WITH TIME ZONE;
     """,
 
+    # ── Account lockout columns on service_providers (portal login) ──
+    """
+    ALTER TABLE service_providers
+    ADD COLUMN IF NOT EXISTS failed_login_attempts INTEGER DEFAULT 0;
+    """,
+    """
+    ALTER TABLE service_providers
+    ADD COLUMN IF NOT EXISTS locked_until TIMESTAMP WITH TIME ZONE;
+    """,
+
+    # ── Account lockout columns on crew_members ──
+    """
+    ALTER TABLE crew_members
+    ADD COLUMN IF NOT EXISTS failed_login_attempts INTEGER DEFAULT 0;
+    """,
+    """
+    ALTER TABLE crew_members
+    ADD COLUMN IF NOT EXISTS locked_until TIMESTAMP WITH TIME ZONE;
+    """,
+
     # ── Token blacklist table ──
     """
     CREATE TABLE IF NOT EXISTS token_blacklist (

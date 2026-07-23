@@ -6,21 +6,25 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.models.audit_log import AuditLog
 from app.models.crew_member import CrewMember
 from app.models.service_provider import ServiceProvider
+from app.utils.client_ip import get_trusted_client_ip
 from app.utils.security import (
     verify_password,
     verify_password_async,
     hash_password,
     create_access_token,
     decode_token,
+    MAX_FAILED_ATTEMPTS,
+    LOCKOUT_DURATION_MINUTES,
 )
 
 logger = logging.getLogger("ems.crew_auth")
@@ -88,17 +92,48 @@ async def get_current_crew(
 
 # ── Endpoints ────────────────────────────────────────────────
 
+def _crew_login_audit(db: AsyncSession, crew: CrewMember, action: str, ip: str, details: dict | None = None):
+    """Audit-log a crew login event. user_id stays NULL — crew aren't Users."""
+    db.add(AuditLog(
+        user_id=None,
+        action=action,
+        entity_type="auth_crew",
+        entity_id=crew.id,
+        details={"crew_email": crew.email, "provider_id": str(crew.provider_id), **(details or {})},
+        ip_address=ip,
+    ))
+
+
 @router.post("/login", response_model=CrewLoginResponse)
-async def crew_login(body: CrewLoginRequest, db: AsyncSession = Depends(get_db)):
-    """Authenticate a crew member and return a JWT."""
+async def crew_login(body: CrewLoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    """Authenticate a crew member and return a JWT. Enforces account lockout."""
+    client_ip = get_trusted_client_ip(request)
     result = await db.execute(
         select(CrewMember).where(CrewMember.email == body.email.strip().lower())
     )
     crew = result.scalar_one_or_none()
 
+    # Same lockout policy as admin users: 5 fails → 45 min lock.
+    if crew and crew.locked_until and crew.locked_until > datetime.now(timezone.utc):
+        _crew_login_audit(db, crew, "CREW_LOGIN_FAILED_LOCKED", client_ip)
+        await db.commit()
+        raise HTTPException(
+            status_code=403,
+            detail="Account locked due to too many failed attempts. Try again later.",
+        )
+
     # Run bcrypt in a thread executor so the event loop (and DB pool) isn't
     # blocked by the ~200 ms CPU-bound hash check.
     if not crew or not await verify_password_async(body.password, crew.hashed_password):
+        if crew:
+            crew.failed_login_attempts = (crew.failed_login_attempts or 0) + 1
+            if crew.failed_login_attempts >= MAX_FAILED_ATTEMPTS:
+                crew.locked_until = datetime.now(timezone.utc) + timedelta(minutes=LOCKOUT_DURATION_MINUTES)
+            _crew_login_audit(db, crew, "CREW_LOGIN_FAILED", client_ip, {
+                "failed_attempts": crew.failed_login_attempts,
+                "locked_until": crew.locked_until.isoformat() if crew.locked_until else None,
+            })
+            await db.commit()
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     if not crew.is_active:
@@ -112,8 +147,11 @@ async def crew_login(body: CrewLoginRequest, db: AsyncSession = Depends(get_db))
     if not provider or not provider.is_active:
         raise HTTPException(status_code=403, detail="Service provider is inactive")
 
-    # Update last_login
+    # Success — reset lockout counters, update last_login
+    crew.failed_login_attempts = 0
+    crew.locked_until = None
     crew.last_login = datetime.now(timezone.utc)
+    _crew_login_audit(db, crew, "CREW_LOGIN_SUCCESS", client_ip)
     await db.commit()
 
     # Create JWT with crew-specific claims

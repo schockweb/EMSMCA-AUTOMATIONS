@@ -1,6 +1,7 @@
 # Security Fixes — Pre-Go-Live Hardening
 
-**Status:** OPEN — deferred, not yet applied to code.
+**Status:** CRITICAL items 1 + 2 FIXED 2026-07-23 (lockout on all three login paths;
+trusted client-IP + limiter re-enabled + Redis added to prod). Items 3–8 still open.
 **When to apply:** Before `portal.emsmca.co.za` is opened to external service providers.
 **Owner:** Tom
 **Related:** `deploy/GO-LIVE-RUNBOOK.md`, memory `project_golive_deploy`, `project_provider_authz_guard`.
@@ -161,8 +162,16 @@ both systems.
 ---
 
 ## Pre-go-live checklist
-- [ ] 1 — Lockout on provider portal login + crew login (+ audit entries)
-- [ ] 2 — Trustworthy client-IP (nginx header + shared helper); lower auth limit; fix `172.` check
+- [x] 1 — Lockout on provider portal login + crew login (+ audit entries) — DONE 2026-07-23:
+      `failed_login_attempts`/`locked_until` on ServiceProvider + CrewMember (5 fails → 45 min,
+      same constants as User); PORTAL_/CREW_ audit actions; idempotent ALTERs in
+      `migrate_security.py` + alembic `c7d9e1f3a5b8`.
+- [x] 2 — Trustworthy client-IP — DONE 2026-07-23: `app/utils/client_ip.get_trusted_client_ip`
+      (X-Real-IP from our nginx, honoured only when the TCP peer is internal; else rightmost
+      XFF; else raw peer) shared by rate limiter + auth audit; internal bypass now
+      loopback-peer-only (72./192.168. prefix checks removed); RateLimitMiddleware
+      RE-ENABLED in main.py (auth 15/min per client IP, api 300/min); `redis` service added
+      to docker-compose.prod.yml (limiter previously failed open on prod — no Redis there).
 - [ ] 3 — `/me` permission fallback only on `None`
 - [ ] 4 — Refresh-token reuse → revoke family
 - [ ] 5 — `/refresh` checks `is_active`
