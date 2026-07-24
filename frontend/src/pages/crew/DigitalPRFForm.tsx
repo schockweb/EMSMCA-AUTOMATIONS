@@ -5350,6 +5350,10 @@ export default function DigitalPRFForm() {
     has_ecg_attached: 0,
     closest_facility_bypassed: 4, direct_admission: 4,
     receiving_facility: 5, handover_qualification: 5, handover_name: 5,
+    ward: 5, handover_doctor_email: 5, handover_notes: 5,
+    hospital_sticker: 5, tc_patient_signature: 5,
+    gender: 2, patient_phone_cell: 2, dependent_number: 2, main_member_id: 2,
+    debtor_gender: 2, debtor_name: 2, debtor_surname: 2, debtor_phone_cell: 2,
     patient_index_of_total: 6,
     emed_notified: 6, lifesaving_intervention_required: 6, second_vehicle_present: 6,
     cardiac_incident: 6, rosc_achieved: 6, perfusing_rhythm_on_handover: 6,
@@ -8403,10 +8407,12 @@ export default function DigitalPRFForm() {
               </div>
             </div>
 
-            <Lbl t="Practitioner Number" /><Inp fk="handover_qualification" ph="e.g. PR0123456" />
+            {/* noMic: a practitioner number is a reference code — dictation only
+                mangles it, so the voice button is deliberately hidden. */}
+            <Lbl t="Practitioner Number" /><Inp fk="handover_qualification" ph="e.g. PR0123456" noMic />
             <Lbl t="Receiving Facility Email" /><Inp fk="handover_doctor_email" ph="dr@hospital.co.za" type="email" />
             <Lbl t="Condition on Handover" /><VoiceTxt fk="handover_notes" ph="Patient condition at time of handover..." rows={2} />
-            <div style={{ marginTop: 14 }}>
+            <div style={{ marginTop: 14 }} id="prf-field-hospital_sticker">
               <Lbl t="Patient Documents" />
               <PatientDocumentsCapture
                 docs={{
@@ -8602,7 +8608,7 @@ export default function DigitalPRFForm() {
               </div>
             );
           })()}
-          <div style={{ marginTop: 8 }}>
+          <div style={{ marginTop: 8 }} id="prf-field-tc_patient_signature">
             {fd.call_type !== 'DOD' && (
               <FullscreenSignaturePad
                 label="Patient / Representative Signature"
@@ -9237,59 +9243,63 @@ export default function DigitalPRFForm() {
           // Skipped entirely when the patient refused treatment/transport or
           // for a Declaration of Death — those calls legitimately leave these
           // sections empty, so they are never gated.
-          const reviewWarnings: string[] = (() => {
-            const warn: string[] = [];
+          // Each warning carries the field key it flags, so tapping the item
+          // closes the popup and jumps the crew straight to that field
+          // (scroll + amber flash via jumpToField, incl. cross-phase).
+          const reviewWarnings: { text: string; field: string }[] = (() => {
+            const warn: { text: string; field: string }[] = [];
             if (fd.call_type === 'DOD' || fd.call_type === 'RHT' || fd.patient_refused_treatment) return warn;
             const missing = (v: any) => v === undefined || v === null || String(v).trim() === '';
+            const push = (text: string, field: string) => warn.push({ text, field });
 
             // Patient information (ID, passport, DOB, age, home/work phones,
             // address, suburb and code are intentionally not flagged).
-            if (missing(fd.gender)) warn.push('Patient gender');
-            if (missing(fd.patient_name)) warn.push('Patient first name');
-            if (missing(fd.patient_surname)) warn.push('Patient surname');
-            if (missing(fd.patient_phone_cell)) warn.push('Patient cell number');
+            if (missing(fd.gender)) push('Patient gender', 'gender');
+            if (missing(fd.patient_name)) push('Patient first name', 'patient_name');
+            if (missing(fd.patient_surname)) push('Patient surname', 'patient_surname');
+            if (missing(fd.patient_phone_cell)) push('Patient cell number', 'patient_phone_cell');
 
             // Priority — Resus never captures one, so skip there.
-            if (fd.call_type !== 'RESUS' && missing(fd.priority)) warn.push('Patient priority');
+            if (fd.call_type !== 'RESUS' && missing(fd.priority)) push('Patient priority', 'priority');
 
             // Handover details — every field; the destination→email pairing
             // gets its own message because the auto-email depends on it.
             if (missing(fd.receiving_facility)) {
-              warn.push('Destination (handover details)');
+              push('Destination (handover details)', 'receiving_facility');
             } else if (missing(fd.handover_doctor_email)) {
-              warn.push('Receiving facility email — the destination is filled in but no email was captured, so the PRF cannot be emailed to the facility');
+              push('Receiving facility email — the destination is filled in but no email was captured, so the PRF cannot be emailed to the facility', 'handover_doctor_email');
             }
-            if (missing(fd.ward)) warn.push('Ward (handover details)');
-            if (missing(fd.handover_name)) warn.push('Receiving practitioner (handover details)');
-            if (missing(fd.handover_qualification)) warn.push('Practitioner number (handover details)');
-            if (missing(fd.handover_notes)) warn.push('Condition on handover');
+            if (missing(fd.ward)) push('Ward (handover details)', 'ward');
+            if (missing(fd.handover_name)) push('Receiving practitioner (handover details)', 'handover_name');
+            if (missing(fd.handover_qualification)) push('Practitioner number (handover details)', 'handover_qualification');
+            if (missing(fd.handover_notes)) push('Condition on handover', 'handover_notes');
 
             // Hospital sticker — not expected for private cash patients.
             const pvtCash = fd.billing_type === 'PVT' && fd.pvt_payment_method === 'Cash';
-            if (!pvtCash && missing(fd.hospital_sticker)) warn.push('Hospital sticker');
+            if (!pvtCash && missing(fd.hospital_sticker)) push('Hospital sticker', 'hospital_sticker');
 
             // Patient / representative signature.
             if (missing(sigs.patient_signature) && missing(fd.tc_patient_signature)) {
-              warn.push('Patient / representative signature');
+              push('Patient / representative signature', 'tc_patient_signature');
             }
 
             // Medical aid billing — every field on the card.
             if (fd.billing_type === 'MED AID') {
-              if (missing(fd.medical_scheme)) warn.push('Medical scheme');
-              if (missing(fd.medical_aid_number)) warn.push('Membership number (med aid)');
-              if (missing(fd.dependent_number)) warn.push('Dependent code (med aid)');
-              if (missing(fd.scheme_option)) warn.push('Plan / option (med aid)');
-              if (missing(fd.main_member_id)) warn.push('Main member ID (med aid)');
+              if (missing(fd.medical_scheme)) push('Medical scheme', 'medical_scheme');
+              if (missing(fd.medical_aid_number)) push('Membership number (med aid)', 'medical_aid_number');
+              if (missing(fd.dependent_number)) push('Dependent code (med aid)', 'dependent_number');
+              if (missing(fd.scheme_option)) push('Plan / option (med aid)', 'scheme_option');
+              if (missing(fd.main_member_id)) push('Main member ID (med aid)', 'main_member_id');
             }
 
             // Debtor — same rules as the patient, unless marked same-as-patient
             // (PVT billing has no debtor section at all).
             const debtorSame = Array.isArray(fd.flags) && fd.flags.includes('debtor_same_as_patient');
             if (fd.billing_type !== 'PVT' && !debtorSame) {
-              if (missing(fd.debtor_gender)) warn.push('Debtor gender');
-              if (missing(fd.debtor_name)) warn.push('Debtor first name');
-              if (missing(fd.debtor_surname)) warn.push('Debtor surname');
-              if (missing(fd.debtor_phone_cell)) warn.push('Debtor cell number');
+              if (missing(fd.debtor_gender)) push('Debtor gender', 'debtor_gender');
+              if (missing(fd.debtor_name)) push('Debtor first name', 'debtor_name');
+              if (missing(fd.debtor_surname)) push('Debtor surname', 'debtor_surname');
+              if (missing(fd.debtor_phone_cell)) push('Debtor cell number', 'debtor_phone_cell');
             }
             return warn;
           })();
@@ -9596,15 +9606,34 @@ export default function DigitalPRFForm() {
                         ⚠ {reviewWarnings.length} item{reviewWarnings.length > 1 ? 's' : ''} not filled in
                       </div>
                       <div style={{ fontSize: '0.78rem', color: '#92400e', lineHeight: 1.5, marginBottom: 12 }}>
-                        These fields still need to be completed before you can submit. Tap “Go Back &amp; Complete”, fill them in, then submit again.
+                        These fields still need to be completed before you can submit. Tap an item to go straight to that field.
                       </div>
-                      <ul style={{ margin: 0, paddingLeft: 20, display: 'flex', flexDirection: 'column', gap: 7 }}>
-                        {reviewWarnings.map((wtext, wi) => (
-                          <li key={wi} style={{ fontSize: '0.82rem', fontWeight: 700, color: '#7f1d1d', lineHeight: 1.45 }}>
-                            {wtext}
-                          </li>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                        {reviewWarnings.map((w, wi) => (
+                          <button
+                            key={wi}
+                            type="button"
+                            onClick={() => {
+                              setSummaryReviewOpen(false);
+                              submitInFlightRef.current = false;
+                              // Let the popup unmount before scrolling/sweeping
+                              // so the flashed field isn't behind the overlay.
+                              window.setTimeout(() => jumpToField(w.field), 60);
+                            }}
+                            style={{
+                              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                              gap: 10, width: '100%', textAlign: 'left',
+                              padding: '10px 12px', borderRadius: 10,
+                              border: '1.5px solid #fecaca', background: W,
+                              fontSize: '0.82rem', fontWeight: 700, color: '#7f1d1d',
+                              lineHeight: 1.45, cursor: 'pointer',
+                            }}
+                          >
+                            <span>{w.text}</span>
+                            <span style={{ flexShrink: 0, fontWeight: 900, color: '#b91c1c' }}>›</span>
+                          </button>
                         ))}
-                      </ul>
+                      </div>
                     </div>
                   </div>
                 ) : (
