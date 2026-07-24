@@ -3,7 +3,7 @@
  * Renders the submitted Digital PRF in a clean, print-ready paper-form layout
  * with the provider's branding (logo, PR number, address, phone) prominent.
  */
-import { useEffect, useRef, useState, Fragment } from 'react';
+import { useEffect, useRef, useState, useCallback, Fragment } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import axios from '../api/client';
 import { getCrewToken, ensureProviderSession } from '../utils/crewSession';
@@ -414,6 +414,35 @@ export default function PRFView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prf]);
 
+  // ── On-screen fit-to-width ────────────────────────────────────────────────
+  // The PRF sheet is a FIXED 1220px A4 design. In the admin viewport that's
+  // frequently wider than the available column, so the right edge (the alpha-
+  // unit time grid) was clipped. Shrink the sheet with CSS `zoom` — which
+  // reduces the layout box (unlike transform), so the page simply centres with
+  // no horizontal scroll — to fit the container. `zoom` is CLEARED during PDF
+  // capture and print (both read each .prf-page's offsetWidth, which Chrome's
+  // zoom would scale) so the export always renders at full 1220px resolution.
+  const clearScreenFit = () => {
+    const el = document.getElementById('prf-pdf-content');
+    if (el) el.style.zoom = '';
+  };
+  const applyScreenFit = useCallback(() => {
+    const el = document.getElementById('prf-pdf-content');
+    const wrap = el?.closest('.prf-screen-wrap') as HTMLElement | null;
+    if (!el || !wrap) return;
+    el.style.zoom = '';                        // measure at the true 1220px width
+    const avail = wrap.clientWidth - 8;        // small breathing room
+    const scale = Math.min(1, avail / 1240);   // 1220 design width + margin
+    el.style.zoom = scale < 1 ? String(scale) : '';
+  }, []);
+  useEffect(() => {
+    applyScreenFit();
+    window.addEventListener('resize', applyScreenFit);
+    // Re-fit once fonts / logo settle and whenever the PRF data changes.
+    const t = setTimeout(applyScreenFit, 150);
+    return () => { window.removeEventListener('resize', applyScreenFit); clearTimeout(t); };
+  }, [applyScreenFit, prf]);
+
   // Build the PDF by snapshotting each .prf-page independently and placing
   // it on its own A4 landscape sheet. This bypasses the browser's CSS print
   // pagination (which fought with the 1220px-wide layout and produced 5–7
@@ -433,6 +462,10 @@ export default function PRFView() {
   const buildPrfPdf = async () => {
     const pages = Array.from(document.querySelectorAll<HTMLElement>('.prf-page'));
     if (pages.length === 0) return null;
+
+    // Capture at the full 1220px design width — the on-screen fit `zoom` would
+    // otherwise shrink each page's offsetWidth and the snapshot with it.
+    clearScreenFit();
 
     // A4 landscape printable area with a 5mm safety inset on every edge.
     const PAGE_W_MM = 297;
@@ -542,6 +575,9 @@ export default function PRFView() {
       // and made toDataURL throw — must never silently brick the whole export.
       // Returning null lets callers show their "couldn't build" fallback.
       return null;
+    } finally {
+      // Restore the on-screen fit-to-width zoom regardless of outcome.
+      applyScreenFit();
     }
 
     return pdf;
@@ -595,6 +631,9 @@ export default function PRFView() {
     const frameH = 203 * PX_PER_MM;   // 2mm under frame height
     const SHEET_RATIO = frameH / frameW;   // sheet aspect the page must match
     const fit = () => {
+      // Drop the on-screen fit zoom first — the measurements below read each
+      // page's true offsetWidth, and an ancestor `zoom` would scale them.
+      clearScreenFit();
       document.querySelectorAll<HTMLElement>('.prf-page').forEach(p => {
         p.style.transform = 'none';
         // Remember the design width so afterprint can restore it exactly.
@@ -632,6 +671,8 @@ export default function PRFView() {
           delete p.dataset.prfPrevMinWidth;
         }
       });
+      // Re-apply the on-screen fit zoom once printing is done.
+      applyScreenFit();
     };
     window.addEventListener('beforeprint', fit);
     window.addEventListener('afterprint', reset);
