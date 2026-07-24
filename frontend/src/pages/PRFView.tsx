@@ -1208,6 +1208,12 @@ export default function PRFView() {
           // (which would reset the dashboard to its default tab).
           if (searchParams.get('from') === 'admin' && providerSlug) {
             navigate(`/${providerSlug}/admin/dashboard?tab=prfs`);
+          } else if (searchParams.get('send') === '1' && providerSlug) {
+            // Post-submit flow: the previous history entry is the now-locked
+            // FORM — navigate(-1) reopened the submitted PRF on its last
+            // phase. After submit the only sensible Back is the shift
+            // dashboard.
+            navigate(`/${providerSlug}/crew/dashboard`);
           } else {
             navigate(-1);
           }
