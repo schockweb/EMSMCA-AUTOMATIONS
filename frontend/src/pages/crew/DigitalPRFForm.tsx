@@ -6534,6 +6534,25 @@ export default function DigitalPRFForm() {
         break;
     }
 
+    // Primary + MED AID also exercises a DISTINCT debtor (not same-as-patient)
+    // so the Debtor Information block is populated on the PDF for QA.
+    if (callType === 'PRIMARY' && billingType === 'MED AID') {
+      base.flags = (base.flags || []).filter((f: string) => f !== 'debtor_same_as_patient');
+      Object.assign(base, {
+        debtor_gender: 'Female',
+        debtor_name: 'Debby',
+        debtor_surname: 'Debtor',
+        debtor_id_number: '8506152300085',
+        debtor_dob: '1985-06-15',
+        debtor_age: '41',
+        debtor_phone_cell: '0820000010',
+        debtor_phone_home: '0310000010',
+        debtor_address: '78 Debtor Street',
+        debtor_suburb: 'Debtorville',
+        debtor_postal_code: '4002',
+      });
+    }
+
     setFd(prev => ({ ...prev, ...base }));
 
     // Times + odometer
