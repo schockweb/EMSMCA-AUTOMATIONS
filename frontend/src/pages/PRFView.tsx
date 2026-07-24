@@ -848,12 +848,14 @@ export default function PRFView() {
     }
   };
 
-  // ── Auto-send on the post-submit flow ──
-  // When the crew lands here from Confirm & Submit (?send=1) and the PRF
-  // carries a receiving-facility email + the provider has a sending account,
-  // the send starts by ITSELF: the popup becomes a live status screen and
-  // only offers "Return to Dashboard" once delivery is confirmed. One-shot
-  // per page load; skipped when the PRF was already emailed.
+  // ── Gated send session on the post-submit flow ──
+  // When the crew lands here from Confirm & Submit (?send=1) with a
+  // receiving-facility email + a configured sending account, the popup runs
+  // as a GATED session: the crew first VERIFIES the address and taps Send
+  // (deliberately NOT auto-fired — an auto-start yanked the popup into
+  // "sending" before the crew could review the address), then the status
+  // screen holds them until delivery is confirmed. The ref marks the gated
+  // session (longer delivery poll, no Skip).
   useEffect(() => {
     if (!prf || autoSendFiredRef.current) return;
     if (searchParams.get('send') !== '1') return;
@@ -861,10 +863,6 @@ export default function PRFView() {
     const to = (prf.form_data?.handover_doctor_email || '').trim();
     if (!SEND_EMAIL_RE.test(to)) return;
     autoSendFiredRef.current = true;
-    // Small head start so the PDF prewarm effect registers first — the send
-    // then awaits that build instead of starting a second one.
-    const t = window.setTimeout(() => { void handleAutoSend(); }, 800);
-    return () => window.clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prf]);
 
