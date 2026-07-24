@@ -9318,11 +9318,13 @@ export default function DigitalPRFForm() {
 
           type SummarySection = { title: string; items: { label: string; value: string }[] };
 
-          // ── Missing-info warnings (soft — never blocks submission) ──
-          // Shown as the FIRST panel of the review so gaps get a deliberate
-          // look before signing. Skipped entirely when the patient refused
-          // treatment/transport or for a Declaration of Death — those calls
-          // legitimately leave these sections empty.
+          // ── Missing-info gate ──
+          // When any of these are empty the review modal shows ONLY this list
+          // (full page) and hides the phase carousel + submit path, so the crew
+          // must go back and complete them instead of skipping to submission.
+          // Skipped entirely when the patient refused treatment/transport or
+          // for a Declaration of Death — those calls legitimately leave these
+          // sections empty, so they are never gated.
           const reviewWarnings: string[] = (() => {
             const warn: string[] = [];
             if (fd.call_type === 'DOD' || fd.call_type === 'RHT' || fd.patient_refused_treatment) return warn;
@@ -9652,74 +9654,101 @@ export default function DigitalPRFForm() {
                   flexShrink: 0,
                 }}>
                   <div style={{ fontSize: '1.05rem', fontWeight: 900, color: S900, marginBottom: 3 }}>
-                    Review Before Submitting
+                    {reviewWarnings.length > 0 ? 'Complete Before Submitting' : 'Review Before Submitting'}
                   </div>
                   <div style={{ fontSize: '0.78rem', color: S600, lineHeight: 1.5 }}>
-                    Swipe through each card to check for accuracy and spelling errors.
+                    {reviewWarnings.length > 0
+                      ? 'Some required fields are still empty. Fill them in before you can submit.'
+                      : 'Swipe through each card to check for accuracy and spelling errors.'}
                   </div>
                 </div>
 
-                {/* Missing-info warnings — first thing the crew sees. Soft
-                    only: submission stays fully available below. */}
-                {reviewWarnings.length > 0 && (
+                {reviewWarnings.length > 0 ? (
+                  /* ── GATE: items still outstanding ──
+                     Only the missing-items list is shown — it fills the whole
+                     body, the phase carousel is hidden, and there is no submit
+                     path — so the crew cannot skip past the fields that still
+                     need completing. */
                   <div style={{
-                    margin: '12px 16px 0', padding: '12px 14px', borderRadius: 12,
-                    background: '#fef2f2', border: '1.5px solid #f59e0b',
-                    maxHeight: '26vh', overflowY: 'auto', overscrollBehavior: 'contain',
-                    flexShrink: 0,
+                    flex: 1, overflowY: 'auto', overscrollBehavior: 'contain',
+                    padding: '14px 16px', minHeight: 0,
                   }}>
                     <div style={{
-                      fontSize: '0.8rem', fontWeight: 900, color: '#b91c1c',
-                      marginBottom: 4, letterSpacing: '0.02em',
+                      padding: '14px 16px', borderRadius: 14,
+                      background: '#fef2f2', border: '1.5px solid #f59e0b',
                     }}>
-                      ⚠ {reviewWarnings.length} item{reviewWarnings.length > 1 ? 's' : ''} not filled in
+                      <div style={{
+                        fontSize: '0.92rem', fontWeight: 900, color: '#b91c1c',
+                        marginBottom: 6, letterSpacing: '0.02em',
+                      }}>
+                        ⚠ {reviewWarnings.length} item{reviewWarnings.length > 1 ? 's' : ''} not filled in
+                      </div>
+                      <div style={{ fontSize: '0.78rem', color: '#92400e', lineHeight: 1.5, marginBottom: 12 }}>
+                        These fields still need to be completed before you can submit. Tap “Go Back &amp; Complete”, fill them in, then submit again.
+                      </div>
+                      <ul style={{ margin: 0, paddingLeft: 20, display: 'flex', flexDirection: 'column', gap: 7 }}>
+                        {reviewWarnings.map((wtext, wi) => (
+                          <li key={wi} style={{ fontSize: '0.82rem', fontWeight: 700, color: '#7f1d1d', lineHeight: 1.45 }}>
+                            {wtext}
+                          </li>
+                        ))}
+                      </ul>
                     </div>
-                    <div style={{ fontSize: '0.72rem', color: '#92400e', lineHeight: 1.45, marginBottom: 8 }}>
-                      Please check these before submitting. You can still submit if they are intentionally blank.
-                    </div>
-                    <ul style={{ margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 3 }}>
-                      {reviewWarnings.map((wtext, wi) => (
-                        <li key={wi} style={{ fontSize: '0.76rem', fontWeight: 700, color: '#7f1d1d', lineHeight: 1.4 }}>
-                          {wtext}
-                        </li>
-                      ))}
-                    </ul>
+                  </div>
+                ) : (
+                  /* Carousel — only reachable once nothing is outstanding. */
+                  <div style={{ flex: 1, overflow: 'hidden' }}>
+                    <Carousel />
                   </div>
                 )}
-
-                {/* Carousel */}
-                <div style={{ flex: 1, overflow: 'hidden' }}>
-                  <Carousel />
-                </div>
 
                 {/* Footer buttons */}
                 <div style={{
                   padding: '12px 16px 16px', borderTop: `1px solid ${S100}`,
                   display: 'flex', gap: 10, background: S50, flexShrink: 0,
                 }}>
-                  <button
-                    type="button"
-                    onClick={() => { setSummaryReviewOpen(false); submitInFlightRef.current = false; }}
-                    style={{
-                      flex: 1, padding: '13px 0', borderRadius: 12, fontWeight: 700,
-                      border: `2px solid ${S200}`, background: W, color: S600, cursor: 'pointer',
-                      fontSize: '0.85rem',
-                    }}
-                  >
-                    Go Back
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { setSummaryReviewOpen(false); submitInFlightRef.current = false; void handleSubmit(); }}
-                    style={{
-                      flex: 2, padding: '13px 0', borderRadius: 12, fontWeight: 800,
-                      border: 'none', color: W, fontSize: '0.85rem',
-                      background: `linear-gradient(135deg, #16a34a, #15803d)`,
-                      cursor: 'pointer', boxShadow: '0 4px 16px rgba(22,163,74,0.3)',
-                    }}
-                  >
-                    ✓ Looks Good — Continue
-                  </button>
+                  {reviewWarnings.length > 0 ? (
+                    /* No submit path while items are outstanding — the only way
+                       forward is back to the form to complete them. */
+                    <button
+                      type="button"
+                      onClick={() => { setSummaryReviewOpen(false); submitInFlightRef.current = false; }}
+                      style={{
+                        flex: 1, padding: '14px 0', borderRadius: 12, fontWeight: 800,
+                        border: 'none', color: W, fontSize: '0.9rem',
+                        background: `linear-gradient(135deg, ${ROSE}, #be123c)`,
+                        cursor: 'pointer', boxShadow: '0 4px 16px rgba(225,29,72,0.3)',
+                      }}
+                    >
+                      Go Back &amp; Complete
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => { setSummaryReviewOpen(false); submitInFlightRef.current = false; }}
+                        style={{
+                          flex: 1, padding: '13px 0', borderRadius: 12, fontWeight: 700,
+                          border: `2px solid ${S200}`, background: W, color: S600, cursor: 'pointer',
+                          fontSize: '0.85rem',
+                        }}
+                      >
+                        Go Back
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setSummaryReviewOpen(false); submitInFlightRef.current = false; void handleSubmit(); }}
+                        style={{
+                          flex: 2, padding: '13px 0', borderRadius: 12, fontWeight: 800,
+                          border: 'none', color: W, fontSize: '0.85rem',
+                          background: `linear-gradient(135deg, #16a34a, #15803d)`,
+                          cursor: 'pointer', boxShadow: '0 4px 16px rgba(22,163,74,0.3)',
+                        }}
+                      >
+                        ✓ Looks Good — Continue
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             </div>
