@@ -114,9 +114,22 @@ const SpinnerIcon = ({ size = 16 }: IconProps) => (
   </svg>
 );
 
+interface LockedAccount {
+  account_type: 'provider' | 'crew';
+  id: string;
+  name: string;
+  login_email: string | null;
+  phone: string | null;
+  provider_name: string | null;
+  failed_attempts: number;
+  locked_until: string | null;
+}
+
 export default function ProviderManagement() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [loading, setLoading] = useState(true);
+  const [locked, setLocked] = useState<LockedAccount[]>([]);
+  const [unlockingId, setUnlockingId] = useState<string | null>(null);
 
   // Modal states
   const [showAddProvider, setShowAddProvider] = useState(false);
@@ -175,6 +188,61 @@ export default function ProviderManagement() {
   }, []);
 
   useEffect(() => { fetchProviders(); }, [fetchProviders]);
+
+  // ── Locked-account awareness ──────────────────────────────────────────────
+  // Providers (or their crew) locked out after too many failed logins surface
+  // at the TOP of the list with a red/amber "!" — hover explains, and an
+  // Unlock button clears the lock once the admin has verified by phone.
+  const fetchLocked = useCallback(async () => {
+    try {
+      const res = await api.get('/api/account-security/locked');
+      setLocked(res.data || []);
+    } catch { /* ignore — indicators just won't show */ }
+  }, []);
+  useEffect(() => {
+    fetchLocked();
+    const t = setInterval(fetchLocked, 60000);
+    return () => clearInterval(t);
+  }, [fetchLocked]);
+
+  // Locked accounts belonging to a provider: its own portal login (matched by
+  // id) plus any of its crew (matched by provider name).
+  const lockedFor = (p: Provider): LockedAccount[] => locked.filter(a =>
+    (a.account_type === 'provider' && a.id === p.id) ||
+    (a.account_type === 'crew' && a.provider_name === p.name)
+  );
+
+  const lockTooltip = (accts: LockedAccount[]): string => {
+    const lines = accts.map(a => {
+      const when = a.locked_until
+        ? new Date(a.locked_until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        : '';
+      const who = a.account_type === 'provider' ? 'Portal login' : `Crew: ${a.name}`;
+      return `• ${who} — ${a.failed_attempts} failed attempts${when ? `, locked until ${when}` : ''}`;
+    });
+    return `Locked out — too many failed login attempts:\n${lines.join('\n')}\n\nPhone the client to confirm it was really them, then Unlock.`;
+  };
+
+  const unlockProvider = async (p: Provider, accts: LockedAccount[], e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!window.confirm(`Unlock ${p.name}? Only do this once you've confirmed by phone that it was genuinely them.`)) return;
+    setUnlockingId(p.id);
+    try {
+      for (const a of accts) {
+        await api.post('/api/account-security/unlock', { account_type: a.account_type, id: a.id });
+      }
+      await fetchLocked();
+    } catch (err: any) {
+      alert(err?.response?.data?.detail || 'Unlock failed.');
+    } finally {
+      setUnlockingId(null);
+    }
+  };
+
+  // Locked clients float to the top of the list.
+  const sortedProviders = [...providers].sort(
+    (a, b) => (lockedFor(b).length ? 1 : 0) - (lockedFor(a).length ? 1 : 0)
+  );
 
   const fetchProviderDetails = async (provider: Provider) => {
     setSelectedProvider(provider);
@@ -673,10 +741,13 @@ export default function ProviderManagement() {
           </div>
         ) : (
           <div style={{ display: 'grid', gap: 12 }}>
-            {providers.map(p => (
-              <div key={p.id} style={{ ...cardStyle, cursor: 'pointer', transition: 'border-color 0.15s', marginBottom: 0 }} onClick={() => fetchProviderDetails(p)}
-                onMouseEnter={e => (e.currentTarget.style.borderColor = teal)}
-                onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--surface-100)')}>
+            {sortedProviders.map(p => {
+              const lk = lockedFor(p);
+              const isLocked = lk.length > 0;
+              return (
+              <div key={p.id} style={{ ...cardStyle, cursor: 'pointer', transition: 'border-color 0.15s', marginBottom: 0, ...(isLocked ? { borderColor: '#f59e0b', boxShadow: '0 0 0 1px rgba(245,158,11,0.45)' } : {}) }} onClick={() => fetchProviderDetails(p)}
+                onMouseEnter={e => (e.currentTarget.style.borderColor = isLocked ? '#f59e0b' : teal)}
+                onMouseLeave={e => (e.currentTarget.style.borderColor = isLocked ? '#f59e0b' : 'var(--surface-100)')}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                     {p.logo_url ? (
@@ -687,7 +758,12 @@ export default function ProviderManagement() {
                       </div>
                     )}
                     <div>
-                      <div style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--text)' }}>{p.name}</div>
+                      <div style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                        {p.name}
+                        {isLocked && (
+                          <span title={lockTooltip(lk)} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 20, height: 20, borderRadius: 10, background: '#dc2626', color: '#fff', fontSize: '0.8rem', fontWeight: 900, cursor: 'help', flexShrink: 0 }}>!</span>
+                        )}
+                      </div>
                       <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>
                         /{p.slug}/crew • PR: {p.pr_number || '—'} • {p.phone || '—'}
                       </div>
@@ -704,10 +780,21 @@ export default function ProviderManagement() {
                         <div style={{ fontSize: '0.6rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase' }}>{s.label}</div>
                       </div>
                     ))}
+                    {isLocked && (
+                      <button
+                        onClick={(e) => unlockProvider(p, lk, e)}
+                        disabled={unlockingId === p.id}
+                        title={lockTooltip(lk)}
+                        style={{ background: '#dc2626', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 14px', fontSize: '0.75rem', fontWeight: 800, cursor: 'pointer', opacity: unlockingId === p.id ? 0.6 : 1, whiteSpace: 'nowrap' }}
+                      >
+                        {unlockingId === p.id ? 'Unlocking…' : 'Unlock'}
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
