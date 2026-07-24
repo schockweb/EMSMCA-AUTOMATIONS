@@ -66,10 +66,20 @@ class ResponseCacheMiddleware(BaseHTTPMiddleware):
         return None
 
     def _make_key(self, request: Request) -> str:
-        """Cache key = method + path + query + auth-token-hash.
-        Including the auth token means different users get isolated cache entries."""
-        auth = request.headers.get("Authorization", "")[:32]  # first 32 chars enough
-        raw = f"GET:{request.url.path}?{request.url.query}|{auth}"
+        """Cache key = method + path + query + FULL-auth-token fingerprint.
+
+        The token fingerprint MUST vary per user/session. A previous version
+        used Authorization[:32] — but that only captures 'Bearer ' + the JWT
+        header, which is byte-identical for every HS256 token. Every user
+        therefore collided onto ONE cache entry, so a per-crew list like
+        GET /api/digital-prf could serve another session's data for the TTL
+        (drafts "disappearing" until the 30s entry expired — and a
+        cross-tenant leak). Hashing the whole token gives each session its
+        own namespace.
+        """
+        auth = request.headers.get("Authorization", "")
+        auth_fp = hashlib.sha256(auth.encode()).hexdigest() if auth else "anon"
+        raw = f"GET:{request.url.path}?{request.url.query}|{auth_fp}"
         return hashlib.md5(raw.encode()).hexdigest()
 
     def _invalidate_prefix(self, path: str) -> None:
