@@ -94,7 +94,7 @@ Document states: `PENDING → PREPROCESSING → EXTRACTING → COMPLETED`
 ### Authentication & Security
 - JWT (HS256) access tokens + 7-day refresh tokens
 - Roles: `SUPER_ADMIN`, `ADMIN`, `USER`; fine-grained permissions (e.g., `rule_builder`, `dashboard`)
-- Sensitive fields (patient ID numbers) encrypted at rest for POPIA compliance
+- At-rest protection: TLS to the DB + Azure storage encryption + access controls. NOTE: patient ID numbers are NOT field-encrypted (column is String(13) — too small for a Fernet token; no encrypt call on the write path). `ENCRYPTION_KEY`/Fernet currently encrypts provider SMTP app passwords only. Field-level encryption of patient IDs is a tracked post-pilot task — do not claim it anywhere until implemented.
 - Default seed admin: `admin@emsclaims.co.za` / `Admin@2024!` (dev only)
 
 ## Environment Variables
@@ -106,7 +106,7 @@ Copy `.env.example` to `.env`. Required variables:
 | `DATABASE_URL` | PostgreSQL connection string (asyncpg driver) |
 | `CELERY_BROKER_URL` | RabbitMQ URL |
 | `SECRET_KEY` | JWT signing key |
-| `ENCRYPTION_KEY` | POPIA field encryption key |
+| `ENCRYPTION_KEY` | Fernet key — encrypts provider SMTP app passwords (patient-field encryption pending) |
 | `LLAMA_CLOUD_API_KEY` | LlamaParse OCR (primary) |
 | `FRONTEND_URL` | CORS whitelist |
 | `UPLOAD_DIR` | File storage path |

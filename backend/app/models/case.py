@@ -25,7 +25,12 @@ class Case(Base):
     )
     patient_name: Mapped[str] = mapped_column(String(255), nullable=False)
     patient_id_number: Mapped[Union[str, None]] = mapped_column(
-        String(13), nullable=True, comment="SA ID number — encrypted at rest"
+        # NOTE: stored as PLAINTEXT today (a Fernet token cannot fit in 13 chars).
+        # Protected by TLS in transit + Azure storage encryption + access controls.
+        # Field-level encryption is a tracked post-pilot task: widen to Text,
+        # encrypt via app/utils/crypto.py, add a hash column for lookups, and
+        # backfill existing rows. Do NOT claim field encryption until then.
+        String(13), nullable=True, comment="SA ID number (plaintext — see model note)"
     )
     patient_dob: Mapped[Union[date, None]] = mapped_column(Date, nullable=True)
     medical_scheme_name: Mapped[Union[str, None]] = mapped_column(String(255), nullable=True)
