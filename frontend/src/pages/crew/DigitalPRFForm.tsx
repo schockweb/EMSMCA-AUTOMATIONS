@@ -3805,6 +3805,19 @@ function GeoConfirmOverlay({
   const [manualAddress, setManualAddress] = useState('');
   const gpsUnavailable = !capturing && !coords;
   const permissionDenied = error === 'Location permission denied';
+  // GPS got a fix but no street address could be resolved.
+  const geocodeFailed = !!coords && !capturing && !geocoding && !address;
+  // Whenever there's no resolved address, offer a manual field so the crew can
+  // always put a location in — never a dead-end.
+  const needsManual = gpsUnavailable || geocodeFailed;
+  const addressReady = !!(address && String(address.street || '').trim());
+  const manualReady = needsManual && !!manualAddress.trim();
+  const hasTargetField = !!targetFieldLabel;
+  // Confirm is allowed only once a location is actually available for the
+  // field: a resolved GPS address, a manual entry, or a value the crew already
+  // typed. Timestamps that have no associated address field aren't gated.
+  const canConfirm = !capturing && !geocoding &&
+    (!hasTargetField || targetFieldOccupied || addressReady || manualReady);
   // iPadOS 13+ reports as "MacIntel" — the touch-points check catches it.
   const isIOS = typeof navigator !== 'undefined' && (
     /iP(hone|ad|od)/.test(navigator.userAgent) ||
@@ -3840,23 +3853,6 @@ function GeoConfirmOverlay({
                 <div style={{ fontSize: '0.75rem', color: S600 }}>Tap <strong>↻ Re-capture</strong> to try again, or enter the address manually below and tap <strong>Confirm &amp; Mark Time</strong>.</div>
               )}
             </div>
-
-            {/* Manual address entry when GPS fails */}
-            <div style={{ background: '#f8fafc', padding: '16px 14px', borderRadius: 16, border: `1.5px solid ${S200}`, marginBottom: 16 }}>
-              <div style={{ fontSize: '0.7rem', fontWeight: 800, color: S600, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
-                {targetFieldLabel || 'Location'} (manual entry)
-              </div>
-              <input
-                type="text"
-                value={manualAddress}
-                onChange={e => setManualAddress(e.target.value)}
-                onFocus={onF}
-                onBlur={onB}
-                placeholder="e.g. 12 Main Street, Sandton"
-                autoComplete="off"
-                style={{ ...base, background: W, borderColor: '#cbd5e1', width: '100%', marginBottom: 0 }}
-              />
-            </div>
           </>
         )}
 
@@ -3887,6 +3883,27 @@ function GeoConfirmOverlay({
           </div>
         )}
 
+        {/* Manual address entry — shown when GPS is unavailable OR when GPS got
+            a fix but no street address resolved, so the crew always has a way to
+            put a location in the field before confirming. */}
+        {needsManual && (
+          <div style={{ background: '#f8fafc', padding: '16px 14px', borderRadius: 16, border: `1.5px solid ${S200}`, marginBottom: 16 }}>
+            <div style={{ fontSize: '0.7rem', fontWeight: 800, color: S600, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
+              {targetFieldLabel || 'Location'} (manual entry)
+            </div>
+            <input
+              type="text"
+              value={manualAddress}
+              onChange={e => setManualAddress(e.target.value)}
+              onFocus={onF}
+              onBlur={onB}
+              placeholder="e.g. 12 Main Street, Sandton"
+              autoComplete="off"
+              style={{ ...base, background: W, borderColor: '#cbd5e1', width: '100%', marginBottom: 0 }}
+            />
+          </div>
+        )}
+
         <div style={{ marginBottom: 10 }}>
           <button
             type="button"
@@ -3904,19 +3921,28 @@ function GeoConfirmOverlay({
         </div>
         <button
           type="button"
-          onClick={() => onConfirm(gpsUnavailable ? (manualAddress.trim() || undefined) : undefined)}
-          disabled={capturing}
+          onClick={() => onConfirm(needsManual ? (manualAddress.trim() || undefined) : undefined)}
+          disabled={!canConfirm}
           style={{
             width: '100%', padding: 16, borderRadius: 12, fontWeight: 800, fontSize: '1rem',
             border: 'none',
-            background: capturing ? S200 : `linear-gradient(135deg,${G},${GDK})`,
-            color: capturing ? S600 : W,
-            cursor: capturing ? 'not-allowed' : 'pointer',
-            boxShadow: capturing ? 'none' : `0 4px 14px ${G}30`,
+            background: canConfirm ? `linear-gradient(135deg,${G},${GDK})` : S200,
+            color: canConfirm ? W : S600,
+            cursor: canConfirm ? 'pointer' : 'not-allowed',
+            boxShadow: canConfirm ? `0 4px 14px ${G}30` : 'none',
           }}
         >
           ✓ Confirm &amp; Mark Time
         </button>
+        {!canConfirm && (
+          <div style={{ marginTop: 8, textAlign: 'center', fontSize: '0.74rem', color: S600 }}>
+            {capturing || geocoding
+              ? 'Waiting for the location…'
+              : needsManual
+                ? 'Enter the address above to continue.'
+                : 'Waiting for the location…'}
+          </div>
+        )}
       </div>
     </div>
   );
