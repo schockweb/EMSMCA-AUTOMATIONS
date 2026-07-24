@@ -741,7 +741,11 @@ export default function PRFView() {
       if (prf.facility_email_sent_at || resendMode) form.append('force', 'true');
       form.append('file', file);
       const res = await axios.post(`/api/digital-prf/admin/by-case/${caseId}/email-facility`, form, {
-        headers: { Authorization: `Bearer ${token}` },
+        // The shared api client defaults Content-Type to application/json,
+        // which silently corrupts a FormData upload (server saw no multipart
+        // boundary → 422). Overriding to multipart/form-data makes axios set
+        // the real boundary — same pattern as the provider logo upload.
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'multipart/form-data' },
       });
       if (res.data?.status === 'already_sent') {
         setSentPhase('delivered');
