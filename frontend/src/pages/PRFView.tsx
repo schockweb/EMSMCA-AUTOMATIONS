@@ -2929,11 +2929,17 @@ export default function PRFView() {
             <div style={{ background: GREEN, color: '#fff', padding: '12px 24px', fontSize: '1.2rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
               Patient Documents (Attachments) - {doc.label}
             </div>
+            {/* Fixed-height media box (same pattern as the injury-diagram page,
+                which uses maxHeight:770). The previous maxHeight:'100%' resolved
+                against an INDEFINITE flex height — the page grows to its natural
+                content height — so a tall portrait photo blew the sheet out and
+                the whole PDF view rendered squashed. A bounded height keeps the
+                page at A4 proportions and objectFit preserves the aspect. */}
             <div style={{ flex: 1, padding: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', background: SOFT_BG, overflow: 'hidden' }}>
               {(doc as any).isPdf ? (
-                <iframe src={doc.val} title={doc.label} style={{ width: '100%', height: '100%', border: `1px solid ${LN}`, borderRadius: 8 }} />
+                <iframe src={doc.val} title={doc.label} style={{ width: '100%', height: 740, border: `1px solid ${LN}`, borderRadius: 8 }} />
               ) : (
-                <img src={doc.val} alt={doc.label} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', border: `1px solid ${LN}`, borderRadius: 8 }} />
+                <img src={doc.val} alt={doc.label} style={{ maxWidth: '100%', maxHeight: 740, objectFit: 'contain', border: `1px solid ${LN}`, borderRadius: 8 }} />
               )}
             </div>
           </div>

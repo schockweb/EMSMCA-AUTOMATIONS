@@ -5338,6 +5338,10 @@ export default function DigitalPRFForm() {
   //    phase (P3 renders inside Dispatch) via a small candidate-phase sweep.
   const FIELD_ANCHOR: Record<string, string> = {
     vitals_sets: 'vitals-section-anchor',
+    // Two inputs bind receiving_doctor (dispatch "Receiving Dr" + handover
+    // "Receiving Practitioner"); jump to the handover one — that's where the
+    // review panel sends the crew.
+    receiving_doctor: 'prf-handover-receiving-practitioner',
   };
   const FIELD_HOME_PHASE: Record<string, number> = {
     preauth_number: 0, transfer_subtype: 0, incident_classification: 0, pre_planned_event: 0,
@@ -5350,7 +5354,7 @@ export default function DigitalPRFForm() {
     has_ecg_attached: 0,
     closest_facility_bypassed: 4, direct_admission: 4,
     receiving_facility: 5, handover_qualification: 5, handover_name: 5,
-    ward: 5, handover_doctor_email: 5, handover_notes: 5,
+    ward: 5, handover_doctor_email: 5, handover_notes: 5, receiving_doctor: 5,
     hospital_sticker: 5, tc_patient_signature: 5,
     gender: 2, patient_phone_cell: 2, dependent_number: 2, main_member_id: 2,
     debtor_gender: 2, debtor_name: 2, debtor_surname: 2, debtor_phone_cell: 2,
@@ -8340,6 +8344,7 @@ export default function DigitalPRFForm() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
               <div style={{ flex: 1 }}>
                 <input
+                  id="prf-field-handover_name"
                   type="text"
                   value={fd.handover_name ?? ''}
                   onChange={e => sf('handover_name', e.target.value)}
@@ -8388,6 +8393,7 @@ export default function DigitalPRFForm() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
                 <div style={{ flex: 1 }}>
                   <input
+                    id="prf-handover-receiving-practitioner"
                     type="text"
                     value={fd.receiving_doctor ?? ''}
                     onChange={e => sf('receiving_doctor', e.target.value)}
@@ -9270,7 +9276,10 @@ export default function DigitalPRFForm() {
               push('Receiving facility email — the destination is filled in but no email was captured, so the PRF cannot be emailed to the facility', 'handover_doctor_email');
             }
             if (missing(fd.ward)) push('Ward (handover details)', 'ward');
-            if (missing(fd.handover_name)) push('Receiving practitioner (handover details)', 'handover_name');
+            // The handover card's "Receiving Practitioner" input saves to
+            // receiving_doctor (handover_name is only the DOD/undertaker
+            // variant) — accept either, or a filled field stays falsely flagged.
+            if (missing(fd.receiving_doctor) && missing(fd.handover_name)) push('Receiving practitioner (handover details)', 'receiving_doctor');
             if (missing(fd.handover_qualification)) push('Practitioner number (handover details)', 'handover_qualification');
             if (missing(fd.handover_notes)) push('Condition on handover', 'handover_notes');
 
