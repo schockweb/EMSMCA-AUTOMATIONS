@@ -1049,7 +1049,14 @@ const applyDictation = (e: any, st: DictationState, fk?: string): string => {
   // Session restarted internally (results list shrank) — realign the
   // high-water mark so the new session's finals still commit.
   if (e.results.length < st.finalCount) st.finalCount = 0;
-  let interim = '';
+  // Track only the LAST interim entry rather than concatenating all of them.
+  // Samsung Internet keeps several non-final entries in the results list and
+  // each is CUMULATIVE (re-contains everything spoken so far); concatenating
+  // them produced internal duplication that mergeDictation can't strip (it
+  // only dedups against the committed prefix), garbling the field with
+  // repeated words — the "gibberish" bug. The last interim is the most
+  // complete phrase on every engine (Chrome only ever has one anyway).
+  let lastInterim = '';
   for (let i = 0; i < e.results.length; i++) {
     const res = e.results[i];
     if (res.isFinal) {
@@ -1061,14 +1068,14 @@ const applyDictation = (e: any, st: DictationState, fk?: string): string => {
         st.committed = mergeDictation(st.committed, pickTranscript(res, fk, st.committed));
       }
     } else {
-      interim += ' ' + (res[0]?.transcript ?? '');
+      lastInterim = res[0]?.transcript ?? '';
     }
   }
   // Interim words layer on transiently (never persisted into `committed`),
   // deduped against the committed text the same way. Homophone corrections
   // apply to the returned string only — `committed` stays raw so dedup
   // still matches the engine's re-emissions verbatim.
-  return correctDictation(mergeDictation(st.committed, interim), fk);
+  return correctDictation(mergeDictation(st.committed, lastInterim), fk);
 };
 
 // ── Global "fields expand downwards" rule ─────────────────────────────────
