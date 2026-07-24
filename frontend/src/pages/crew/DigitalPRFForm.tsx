@@ -9226,6 +9226,68 @@ export default function DigitalPRFForm() {
 
           type SummarySection = { title: string; items: { label: string; value: string }[] };
 
+          // ── Missing-info warnings (soft — never blocks submission) ──
+          // Shown as the FIRST panel of the review so gaps get a deliberate
+          // look before signing. Skipped entirely when the patient refused
+          // treatment/transport or for a Declaration of Death — those calls
+          // legitimately leave these sections empty.
+          const reviewWarnings: string[] = (() => {
+            const warn: string[] = [];
+            if (fd.call_type === 'DOD' || fd.call_type === 'RHT' || fd.patient_refused_treatment) return warn;
+            const missing = (v: any) => v === undefined || v === null || String(v).trim() === '';
+
+            // Patient information (ID, passport, DOB, age, home/work phones,
+            // address, suburb and code are intentionally not flagged).
+            if (missing(fd.gender)) warn.push('Patient gender');
+            if (missing(fd.patient_name)) warn.push('Patient first name');
+            if (missing(fd.patient_surname)) warn.push('Patient surname');
+            if (missing(fd.patient_phone_cell)) warn.push('Patient cell number');
+
+            // Priority — Resus never captures one, so skip there.
+            if (fd.call_type !== 'RESUS' && missing(fd.priority)) warn.push('Patient priority');
+
+            // Handover details — every field; the destination→email pairing
+            // gets its own message because the auto-email depends on it.
+            if (missing(fd.receiving_facility)) {
+              warn.push('Destination (handover details)');
+            } else if (missing(fd.handover_doctor_email)) {
+              warn.push('Receiving facility email — the destination is filled in but no email was captured, so the PRF cannot be emailed to the facility');
+            }
+            if (missing(fd.ward)) warn.push('Ward (handover details)');
+            if (missing(fd.handover_name)) warn.push('Receiving practitioner (handover details)');
+            if (missing(fd.handover_qualification)) warn.push('Practitioner number (handover details)');
+            if (missing(fd.handover_notes)) warn.push('Condition on handover');
+
+            // Hospital sticker — not expected for private cash patients.
+            const pvtCash = fd.billing_type === 'PVT' && fd.pvt_payment_method === 'Cash';
+            if (!pvtCash && missing(fd.hospital_sticker)) warn.push('Hospital sticker');
+
+            // Patient / representative signature.
+            if (missing(sigs.patient_signature) && missing(fd.tc_patient_signature)) {
+              warn.push('Patient / representative signature');
+            }
+
+            // Medical aid billing — every field on the card.
+            if (fd.billing_type === 'MED AID') {
+              if (missing(fd.medical_scheme)) warn.push('Medical scheme');
+              if (missing(fd.medical_aid_number)) warn.push('Membership number (med aid)');
+              if (missing(fd.dependent_number)) warn.push('Dependent code (med aid)');
+              if (missing(fd.scheme_option)) warn.push('Plan / option (med aid)');
+              if (missing(fd.main_member_id)) warn.push('Main member ID (med aid)');
+            }
+
+            // Debtor — same rules as the patient, unless marked same-as-patient
+            // (PVT billing has no debtor section at all).
+            const debtorSame = Array.isArray(fd.flags) && fd.flags.includes('debtor_same_as_patient');
+            if (fd.billing_type !== 'PVT' && !debtorSame) {
+              if (missing(fd.debtor_gender)) warn.push('Debtor gender');
+              if (missing(fd.debtor_name)) warn.push('Debtor first name');
+              if (missing(fd.debtor_surname)) warn.push('Debtor surname');
+              if (missing(fd.debtor_phone_cell)) warn.push('Debtor cell number');
+            }
+            return warn;
+          })();
+
           // ── Card 1: Patient Information + Billing ──
           const card1Sections: SummarySection[] = [];
           const patient = [
@@ -9504,6 +9566,34 @@ export default function DigitalPRFForm() {
                     Swipe through each card to check for accuracy and spelling errors.
                   </div>
                 </div>
+
+                {/* Missing-info warnings — first thing the crew sees. Soft
+                    only: submission stays fully available below. */}
+                {reviewWarnings.length > 0 && (
+                  <div style={{
+                    margin: '12px 16px 0', padding: '12px 14px', borderRadius: 12,
+                    background: '#fef2f2', border: '1.5px solid #f59e0b',
+                    maxHeight: '26vh', overflowY: 'auto', overscrollBehavior: 'contain',
+                    flexShrink: 0,
+                  }}>
+                    <div style={{
+                      fontSize: '0.8rem', fontWeight: 900, color: '#b91c1c',
+                      marginBottom: 4, letterSpacing: '0.02em',
+                    }}>
+                      ⚠ {reviewWarnings.length} item{reviewWarnings.length > 1 ? 's' : ''} not filled in
+                    </div>
+                    <div style={{ fontSize: '0.72rem', color: '#92400e', lineHeight: 1.45, marginBottom: 8 }}>
+                      Please check these before submitting. You can still submit if they are intentionally blank.
+                    </div>
+                    <ul style={{ margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                      {reviewWarnings.map((wtext, wi) => (
+                        <li key={wi} style={{ fontSize: '0.76rem', fontWeight: 700, color: '#7f1d1d', lineHeight: 1.4 }}>
+                          {wtext}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
 
                 {/* Carousel */}
                 <div style={{ flex: 1, overflow: 'hidden' }}>
