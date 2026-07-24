@@ -5703,6 +5703,22 @@ export default function DigitalPRFForm() {
     return getCrewSignList().every(c => !!(sigs[c.key] && String(sigs[c.key]).trim()));
   };
 
+  // The billing pipeline creates the Case asynchronously after submit, so a
+  // fresh 202 carries no case_id. When a facility email was captured we need
+  // that id to route to the PRF view (where the email auto-sends), so poll
+  // the uncached /case-status endpoint until it lands — normally 2-8s, capped
+  // at ~45s so a stalled worker can't strand the crew on the submit button.
+  const waitForCaseId = async (id: string): Promise<string | null> => {
+    for (let i = 0; i < 22; i++) {
+      await new Promise(r => setTimeout(r, 2000));
+      try {
+        const r = await api().get(`/api/digital-prf/${id}/case-status`);
+        if (r.data?.case_id) return r.data.case_id;
+      } catch { /* transient — keep waiting */ }
+    }
+    return null;
+  };
+
   const handleSubmit = async () => {
     // Vitals-shortfall motivation gate. Three sets of vitals is the norm; in
     // rare cases (e.g. very short transport) the crew can record fewer — that's
@@ -5813,14 +5829,23 @@ export default function DigitalPRFForm() {
       // already processed (idempotent replay), it returns status:"processed"
       // with the existing case_id.
       if (status === 'submitted' || status === 'processed') {
-        // Only trigger the share-to-receiving-facility flow when we have a
-        // case_id (already processed) AND a valid handover email.
         const rawEmail = (fd.handover_doctor_email || '').trim();
         const hasEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawEmail);
 
-        if (newCaseId && hasEmail) {
+        // A fresh submit has NO case_id yet — the Case is created seconds
+        // later by the async pipeline. When a facility email was captured we
+        // WAIT for it here (uncached /case-status micro-poll), because the
+        // email flow lives on the PRF view page and skipping the wait meant
+        // real submissions never saw the send popup at all. The button keeps
+        // showing "Submitting PRF..." during the wait.
+        let finalCaseId: string | null = newCaseId || null;
+        if (!finalCaseId && hasEmail) {
+          finalCaseId = await waitForCaseId(prfId!);
+        }
+
+        if (finalCaseId && hasEmail) {
           clearLocalDraft();
-          navigate(`/${providerSlug}/crew/prf-view/${newCaseId}?send=1`);
+          navigate(`/${providerSlug}/crew/prf-view/${finalCaseId}?send=1`);
         } else {
           clearLocalDraft();
           alert('PRF submitted successfully.');
@@ -5874,8 +5899,10 @@ export default function DigitalPRFForm() {
               clearLocalDraft();
               const rawEmail = (fd.handover_doctor_email || '').trim();
               const hasEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawEmail);
-              if (caseId && hasEmail) {
-                navigate(`/${providerSlug}/crew/prf-view/${caseId}?send=1`);
+              // Same async-pipeline wait as the main submit path.
+              const healedCaseId = caseId || (hasEmail ? await waitForCaseId(newId) : null);
+              if (healedCaseId && hasEmail) {
+                navigate(`/${providerSlug}/crew/prf-view/${healedCaseId}?send=1`);
               } else {
                 alert('PRF submitted successfully.');
                 navigate(`/${providerSlug}/crew/dashboard`);

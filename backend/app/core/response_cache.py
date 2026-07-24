@@ -38,6 +38,12 @@ CACHE_RULES: dict[str, int] = {
 # Paths that should NEVER be cached
 NEVER_CACHE = {"/api/auth", "/api/metrics", "/api/geocode", "/api/member-lookup"}
 
+# Suffix-matched exemptions for micro-poll endpoints that live under an
+# otherwise-cached prefix. /case-status exists precisely because the crew app
+# polls it right after submit for the async pipeline's case_id — serving a
+# 30s-stale null would defeat its purpose.
+NEVER_CACHE_SUFFIXES = ("/case-status",)
+
 
 class ResponseCacheMiddleware(BaseHTTPMiddleware):
     def __init__(self, app: ASGIApp):
@@ -49,6 +55,8 @@ class ResponseCacheMiddleware(BaseHTTPMiddleware):
 
     def _ttl_for(self, path: str) -> int | None:
         """Return TTL in seconds for path, or None if not cacheable."""
+        if path.endswith(NEVER_CACHE_SUFFIXES):
+            return None
         for prefix in NEVER_CACHE:
             if path.startswith(prefix):
                 return None

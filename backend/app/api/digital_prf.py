@@ -1091,6 +1091,27 @@ def _validate_prf_for_submission(prf: DigitalPRF) -> list[str]:
     return errors
 
 
+@router.get("/{prf_id}/case-status")
+async def get_prf_case_status(
+    prf_id: str,
+    crew: CrewMember = Depends(get_current_crew),
+    db: AsyncSession = Depends(get_db),
+):
+    """Uncached micro-poll for the post-submit flow.
+
+    The billing pipeline creates the Case ASYNCHRONOUSLY (Celery), so a fresh
+    submit's 202 carries no case_id — but the crew app needs it to open the
+    PRF view where the facility email auto-sends. The full GET /{prf_id} is
+    response-cached (1h once submitted) and would serve a stale null case_id
+    forever, hence this tiny always-fresh endpoint.
+    """
+    prf = await _load_crew_prf(db, prf_id, crew)
+    return {
+        "status": prf.status.value,
+        "case_id": str(prf.case_id) if prf.case_id else None,
+    }
+
+
 @router.post("/{prf_id}/submit", status_code=202)
 async def submit_prf(
     prf_id: str,
