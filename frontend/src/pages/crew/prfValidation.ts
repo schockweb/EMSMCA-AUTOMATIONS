@@ -1087,7 +1087,7 @@ const GEMS_RULES: ValidationRule[] = [
     field: 'preauth_number',
     check: (d) => has(d, 'preauth_number') || has(d, 'emed_reference_number'),
     message:
-      'GEMS requires an EMED pre-/post-authorisation reference number on every claim. Phone EMED (Europ Assistance), record the reference on the PRF, or the claim will not be adjudicated.',
+      'GEMS requires an EMED pre-authorisation reference number on every claim. Phone EMED (Europ Assistance), record the reference on the PRF, or the claim will not be adjudicated.',
     source: 'GEMS EMS Claims Manual Sec 3-5, 10.1.2 and 11 - reference number required for all calls',
   },
   // -- Sec 10 / 11: IFT/IHT needs pre-authorisation --

@@ -448,79 +448,6 @@ const SCHEME_PLANS: Record<string, string[]> = {
   ],
 };
 
-// ── Schemes that require a post-authorisation number ────────────────────────
-// Per SAPAESA Medical Scheme Administration List (01 Jan 2026):
-//   • Netcare 911-administered schemes (incl. their insurance clients)
-//   • AZOZA-administered schemes (incl. their insurance clients)
-//   • Polmed Medical Scheme
-//   • Regular Force Medical Continuation Fund
-// When the crew picks any of these in the Medical Scheme field, the form
-// reveals an additional Post-Authorisation Number input.
-const POSTAUTH_REQUIRED_SCHEMES = new Set<string>([
-  // ── Netcare 911 ────────────────────────────────────────────
-  'AECI',
-  'Anglo Medical Scheme',
-  'Bankmed Medical Aid',
-  'Barlow World Medical Scheme',
-  'Bestmed',
-  'BPMAS (BP Medical Scheme)',
-  'BEMAS (BMW Employees Medical Aid)',
-  'BIBC / BCIMA Building & Construction Medical Aid',
-  'CAMAF SA & Namibia',
-  'Compcare Wellness Medical Scheme',
-  'EMBF (Engen Benefit Medical Fund)',
-  'Golden Arrow',
-  'Health Squared Medical Scheme',
-  'Keyhealth',
-  'Libcare Medical Scheme',
-  'MBMED (Mercedes Benz Medical Scheme)',
-  'Medihelp Medical Scheme',
-  'Medimed Medical Scheme',
-  'Medshield Medical Scheme',
-  'Momentum Health',
-  'Netcare Medical Aid Scheme',
-  'Opmed (Optimum Medical Scheme)',
-  'Parmed Medical Aid',
-  'PG Group Health',
-  'Profmed',
-  'SABC Medical Aid Scheme',
-  'SABMAS (South African Breweries Medical Aid)',
-  'Samwumed',
-  'Sisonke Health Medical Scheme',
-  'Sizwe-Hosmed Medical Fund',
-  'Thebemed Medical Scheme',
-  'Umvuzo Health',
-  'Wooltru Medical Aid',
-  'ADT Security',
-  'Get Savi Health',
-  'Momentum Health4me',
-  // ── AZOZA ──────────────────────────────────────────────────
-  'Alliance Midmed Medical Scheme',
-  'Bonitas Medical Scheme',
-  'Fedhealth Medical Scheme',
-  'Glencore Medical Aid Scheme',
-  'GEMS (Government Employees Medical Scheme)',
-  'Imperial Med (Imperial Group Medical Scheme)',
-  'Moto Health Medical Scheme',
-  'Platinum Health',
-  'Transmed Medical Fund',
-  '21st Century Life',
-  'Adcorp',
-  'African Unity',
-  'Covision Life',
-  'Crisis On Call',
-  'Crisis Shield',
-  'Hollard Fenominal Women',
-  'Infusion Financial Services',
-  'KGA Life',
-  'Liberty Medical Lifestyle Plus',
-  'Nedlife',
-  'New Apostolic Church',
-  'Old Mutual Family Support Services',
-  // ── Standalone schemes flagged by user ─────────────────────
-  'Polmed Medical Scheme',
-  'Regular Force Medical Continuation Fund',
-]);
 
 const TRANSFER_SUBTYPES = [
   'Return Trip',
@@ -2178,21 +2105,9 @@ const DateInp = ({ fk }: { fk: string }) => {
   );
 };
 
-// Reveals a Post-Authorisation Number input when the selected medical scheme
-// is administered by Netcare 911, AZOZA, or is Polmed / Regular Force —
-// per SAPAESA Medical Scheme Administration List (01 Jan 2026), these all
-// require post-auth submission within 72 hours of case completion.
-const PostAuthField = () => {
-  const { fd } = useContext(FormContext);
-  const scheme = (fd.medical_scheme || '').trim();
-  if (!POSTAUTH_REQUIRED_SCHEMES.has(scheme)) return null;
-  return (
-    <>
-      <Lbl t="Post-Authorisation Number" />
-      <Inp fk="post_auth_number" ph="Post-auth ref, or N/A / Nill if not required" />
-    </>
-  );
-};
+// NOTE: Post-authorisation is requested by EMSMCA admin after submission —
+// crews cannot request it, so the form deliberately has NO post-auth field
+// or warning. The PDF still prints a Post-Auth row if admin adds a number.
 
 // Plan / Option input that adapts to the selected medical scheme:
 //   • If the scheme has a published 2026 plan list in SCHEME_PLANS, render a
@@ -6534,7 +6449,6 @@ export default function DigitalPRFForm() {
     if (callType === 'IHT') {
       base.transfer_subtype = 'IHT';
       base.preauth_number = 'PRE-TEST-001';
-      base.post_auth_number = 'POST-TEST-001';
     }
     if (callType === 'RHT') {
       base.rht_call_out_fee = '750';
@@ -7144,7 +7058,6 @@ export default function DigitalPRFForm() {
               <div><Lbl t="Plan / Option" /><SchemeOptionField /></div>
             </G2>
             <Lbl t="Main Member ID" /><Inp fk="main_member_id" ph="13-digit SA ID" />
-            <PostAuthField />
 
             {fd.call_type !== 'RESUS' && fd.call_type !== 'DOD' && <MedAidMore />}
           </Card>
@@ -8608,7 +8521,6 @@ export default function DigitalPRFForm() {
         <Card>
           <Lbl t="Medical Aid" /><ComboInp fk="medical_scheme" opts={MEDICAL_SCHEMES} listId="medical-schemes-list" ph="Type to search…" />
           <Lbl t="Medical Aid Number" /><Inp fk="medical_aid_number" ph="Member number" />
-          <PostAuthField />
           <G2>
             <div><Lbl t="Dependent No." /><DepCodePicker /></div>
             <div><Lbl t="Main Member ID" /><Inp fk="main_member_id" ph="ID number" /></div>
@@ -9400,7 +9312,7 @@ export default function DigitalPRFForm() {
             v('scheme_name', 'Medical Aid Scheme'), v('scheme_option', 'Plan / Option'),
             v('med_aid_number', 'Med Aid Number'), v('main_member_name', 'Main Member'),
             v('main_member_id', 'Main Member ID'), v('main_member_surname', 'Main Member Surname'),
-            v('dependant_code', 'Dependant Code'), v('post_auth_number', 'Post-Auth Number'),
+            v('dependant_code', 'Dependant Code'),
             v('pvt_payment_method', 'Payment Method'), v('pvt_amount_quoted', 'Amount Quoted'),
             v('pvt_account_holder', 'Account Holder'), v('pvt_account_holder_id', 'Account Holder ID'),
           ].filter(Boolean) as { label: string; value: string }[];
