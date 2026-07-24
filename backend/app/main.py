@@ -36,6 +36,7 @@ from app.api.member_lookup import router as member_lookup_router
 from app.api.geocode import router as geocode_router
 from app.api.crew_auth import router as crew_auth_router
 from app.api.providers import router as providers_router
+from app.api.account_security import router as account_security_router
 from app.api.digital_prf import router as digital_prf_router
 from app.api.rate_schemas import router as rate_schemas_router
 from app.api.failed_prfs import router as failed_prfs_router
@@ -250,6 +251,7 @@ app.include_router(member_lookup_router)
 app.include_router(geocode_router, prefix="/api/geocode", tags=["Geocoding"])
 app.include_router(crew_auth_router)
 app.include_router(providers_router)
+app.include_router(account_security_router)
 app.include_router(digital_prf_router)
 app.include_router(rate_schemas_router)
 app.include_router(failed_prfs_router)
