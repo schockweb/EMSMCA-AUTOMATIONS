@@ -5824,6 +5824,14 @@ export default function DigitalPRFForm() {
       const status: string = r.data?.status;
       const newCaseId: string | undefined = r.data?.case_id;
 
+      // The PRF is now locked server-side. Stop EVERY further autosave —
+      // including the unmount flush that fires when we navigate to the PRF
+      // view. Without this, that flush hit the locked PRF, got 423, and its
+      // handler alerted "already been submitted... returning to the
+      // dashboard" OVER the PRF view — killing the send-status popup and
+      // yanking the crew to the dashboard mid-send.
+      prfLockedRef.current = true;
+
       // The submit endpoint now returns 202 with status:"submitted" when the
       // billing pipeline runs in the background (Celery task). If the PRF was
       // already processed (idempotent replay), it returns status:"processed"
@@ -5896,6 +5904,9 @@ export default function DigitalPRFForm() {
             const st = subRes.data?.status;
             const caseId = subRes.data?.case_id;
             if (st === 'submitted' || st === 'processed') {
+              // Same as the main path: the (re-created) PRF is locked now —
+              // no further autosave may fire during/after navigation.
+              prfLockedRef.current = true;
               clearLocalDraft();
               const rawEmail = (fd.handover_doctor_email || '').trim();
               const hasEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawEmail);
