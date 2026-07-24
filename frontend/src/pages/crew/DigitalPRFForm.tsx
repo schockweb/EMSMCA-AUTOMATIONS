@@ -17,6 +17,7 @@ import FullscreenSignaturePad, { FullscreenCanvas } from '../../components/Fulls
 import PatientDocumentsCapture from '../../components/PatientDocumentsCapture';
 import DocumentsCapture from '../../components/DocumentsCapture';
 import BodyDiagram from '../../components/BodyDiagram';
+import { TEST_HOSPITAL_STICKER, TEST_PATIENT_ID_IMAGE } from './testFillAssets';
 import {
   validatePhase as validatePhaseRules,
   buildContext as buildValidationContext,
@@ -6445,6 +6446,9 @@ export default function DigitalPRFForm() {
       findings_on_arrival: 'Test findings', allergies: 'NKDA', current_medications: 'None',
       past_medical_history: 'None', last_meal: 'Breakfast', last_meal_time: '07:00',
       events_hpi: 'Test HPI narrative',
+      // Sample document images so the PDF has a Hospital Sticker + Patient ID.
+      hospital_sticker: TEST_HOSPITAL_STICKER,
+      id_document_image: TEST_PATIENT_ID_IMAGE,
     };
 
     // Call-type-specific extras
