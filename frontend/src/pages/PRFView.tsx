@@ -1212,6 +1212,16 @@ export default function PRFView() {
 
       <style>{`
         @keyframes prfPdfSpin { to { transform: rotate(360deg); } }
+        /* On phones the 1220px A4 sheets are wider than the viewport, and the
+           app's global overflow-x:hidden (html/body/#root) clips them with no
+           way to pan. Make the PRF screen its own horizontal scroll container
+           so the crew can scroll left-right across the sheet (touch momentum
+           kept for older iOS). Screen only — print/PDF pipelines are
+           unaffected (print styles below reset this wrapper anyway). */
+        .prf-screen-wrap {
+          overflow-x: auto;
+          -webkit-overflow-scrolling: touch;
+        }
         /* Print pipeline — fit each PRF page to ONE A4 landscape sheet:
              - @page is A4 landscape with zero printer margins (form has
                its own outer border, no need for OS margins).
