@@ -7557,8 +7557,8 @@ export default function DigitalPRFForm() {
   );
 
 
-  const IvAndMedsSection = (options: { hideCheckboxes?: boolean; showOnly?: 'both' | 'med_only'; forceOpen?: boolean } = {}) => {
-    const { hideCheckboxes = false, showOnly = 'both', forceOpen = false } = options;
+  const IvAndMedsSection = (options: { hideCheckboxes?: boolean; showOnly?: 'both' | 'med_only'; forceOpen?: boolean; hideHeader?: boolean } = {}) => {
+    const { hideCheckboxes = false, showOnly = 'both', forceOpen = false, hideHeader = false } = options;
     const isIft = ['IFT', 'IHT'].includes(fd.call_type);
     const isPrimary = ['PRIMARY', 'COURTESY'].includes(fd.call_type);
     const requiresToggle = !hideCheckboxes && (isIft || isPrimary) && !forceOpen;
@@ -7786,7 +7786,7 @@ export default function DigitalPRFForm() {
           {/* Reason checkboxes */}
 
           {/* Medication cards */}
-          <SHdr t="Medication / Infusion" />
+          {!hideHeader && <SHdr t="Medication / Infusion" />}
           {/* Native typeahead — crew can pick from the HPCSA medication catalogue
             but free-text entry is still permitted so a missing drug never blocks
             documentation. Source of truth: frontend/src/data/hpcsaScope.ts
@@ -8342,7 +8342,11 @@ export default function DigitalPRFForm() {
               clinical capture — hidden when the patient refused treatment (only
               Management Notes stays so the crew can narrate the refusal). */}
           {!fd.patient_refused_treatment && (<>
-          {IvAndMedsSection({ showOnly: 'med_only', forceOpen: true })}
+          {/* Medication was already captured on the On Scene phase; collapse it
+              here into a tag so the Transport layout stays clean. */}
+          <CollapsibleSection t="Medication / Infusion">
+            {IvAndMedsSection({ showOnly: 'med_only', forceOpen: true, hideHeader: true })}
+          </CollapsibleSection>
 
           {/* Vitals trend — last 3 sets side by side */}
           {vitals.length > 0 && (
