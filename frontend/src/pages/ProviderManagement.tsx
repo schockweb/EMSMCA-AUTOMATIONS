@@ -196,7 +196,11 @@ export default function ProviderManagement() {
   const fetchLocked = useCallback(async () => {
     try {
       const res = await api.get('/api/account-security/locked');
-      setLocked(res.data || []);
+      const data = res.data || [];
+      setLocked(data);
+      // Keep the Clients nav-tab badge in sync (updates it instantly after an
+      // unlock instead of waiting for its own 60s poll).
+      window.dispatchEvent(new CustomEvent('locked-accounts-changed', { detail: { count: data.length } }));
     } catch { /* ignore — indicators just won't show */ }
   }, []);
   useEffect(() => {

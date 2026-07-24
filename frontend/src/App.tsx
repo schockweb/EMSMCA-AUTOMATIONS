@@ -91,7 +91,15 @@ function AppLayout({ children }: { children: React.ReactNode }) {
       .catch(() => { /* ignore — badge just won't show */ });
     load();
     const t = setInterval(load, 60000);
-    return () => { alive = false; clearInterval(t); };
+    // The Clients page fires this after an unlock so the tab badge updates
+    // immediately instead of waiting out the 60s poll.
+    const onChange = (e: Event) => {
+      const c = (e as CustomEvent).detail?.count;
+      if (typeof c === 'number') setLockedCount(c);
+      else load();
+    };
+    window.addEventListener('locked-accounts-changed', onChange);
+    return () => { alive = false; clearInterval(t); window.removeEventListener('locked-accounts-changed', onChange); };
   }, [canSeeClients]);
 
   const initials = user?.full_name
