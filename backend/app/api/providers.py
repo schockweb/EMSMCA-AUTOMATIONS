@@ -245,7 +245,10 @@ def _apply_smtp_settings(provider: ServiceProvider, data: dict) -> None:
     pw = data.get("smtp_password")
     if pw and str(pw).strip():
         from app.utils.crypto import encrypt_str
-        provider.smtp_password_encrypted = encrypt_str(str(pw).strip())
+        # Strip ALL whitespace, not just ends: Gmail displays app passwords in
+        # spaced groups ("abcd efgh ijkl mnop") and admins paste them that way —
+        # the real credential is the 16 characters without spaces.
+        provider.smtp_password_encrypted = encrypt_str(re.sub(r"\s+", "", str(pw)))
 
 
 async def _verify_new_smtp_credential(data: dict, provider: ServiceProvider) -> None:
@@ -253,7 +256,8 @@ async def _verify_new_smtp_credential(data: dict, provider: ServiceProvider) -> 
     save commits — a typo'd Gmail/Outlook app password would otherwise fail
     silently on every later PRF send. Auth rejection blocks the save with a
     clear message; network trouble fails open (the password may be right)."""
-    pw = str(data.get("smtp_password") or "").strip()
+    # Same whitespace-stripping as storage — test exactly what will be stored.
+    pw = re.sub(r"\s+", "", str(data.get("smtp_password") or ""))
     if not pw or not (provider.smtp_email and provider.smtp_service):
         return
     import asyncio
