@@ -323,6 +323,12 @@ export default function PRFView() {
   // the popup then runs as a gated status screen (no Skip) until delivery
   // is confirmed or the crew explicitly falls back to manual sending.
   const autoSendFiredRef = useRef(false);
+  // Manual-send fallback bookkeeping: after the crew opens their mail app we
+  // ask them to CONFIRM the send, then stamp the PRF as sent so no automatic
+  // send (now or on a later open) can deliver a duplicate to the facility.
+  const [manualConfirm, setManualConfirm] = useState(false);
+  const [manualSent, setManualSent] = useState(false);
+  const [manualMarkBusy, setManualMarkBusy] = useState(false);
 
   useEffect(() => {
     // Tenant guard for the crew route (/:providerSlug/crew/prf-view/...):
@@ -706,6 +712,37 @@ export default function PRFView() {
     handleShare();
   };
 
+  // Manual fallback inside the auto-send flow: open the crew's mail app but
+  // KEEP the popup up in a confirmation state — the PRF is only stamped as
+  // sent once the crew explicitly says they sent it (stamping on a mere tap
+  // would mark PRFs sent that never left the phone).
+  const handleManualFallback = () => {
+    handleShare();
+    setManualConfirm(true);
+  };
+
+  const markManualSent = async () => {
+    if (manualMarkBusy) return;
+    setManualMarkBusy(true);
+    try {
+      const token = localStorage.getItem('access_token') || getCrewToken() || '';
+      const to = sendEmailTo.trim();
+      await axios.post(
+        `/api/digital-prf/admin/by-case/${caseId}/email-facility/manual`,
+        { recipient: SEND_EMAIL_RE.test(to) ? to : null },
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      setManualSent(true);
+      setManualConfirm(false);
+      setSentPhase('delivered');
+      setSendStatus('sent');
+    } catch {
+      setSendError('Could not record the manual send — check your connection and tap again.');
+    } finally {
+      setManualMarkBusy(false);
+    }
+  };
+
   const SEND_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
   // Terminal send-failure codes stamped by the backend, in crew language.
@@ -969,10 +1006,12 @@ export default function PRFView() {
               sendStatus === 'sent' ? (
                 sentPhase === 'delivered' ? (
                   <>
-                    {/* Delivery confirmed by the worker's sent-stamp — the
-                        crew may now leave the page. */}
+                    {/* Delivery confirmed (or manual send confirmed by the
+                        crew) — they may now leave the page. */}
                     <div style={{ fontSize: '0.92rem', color: '#15803d', fontWeight: 700, lineHeight: 1.5, marginBottom: 22 }}>
-                      ✓ PRF sent to <span style={{ wordBreak: 'break-word' }}>{sendEmailTo.trim()}</span>
+                      {manualSent
+                        ? '✓ Marked as sent to the facility — no automatic copy will be sent'
+                        : <>✓ PRF sent to <span style={{ wordBreak: 'break-word' }}>{sendEmailTo.trim()}</span></>}
                     </div>
                     <div style={{ display: 'flex', gap: 10, flexDirection: 'column' }}>
                       <button onClick={returnToDashboard} style={{
@@ -1005,6 +1044,34 @@ export default function PRFView() {
                     )}
                   </>
                 )
+              ) : manualConfirm ? (
+                <>
+                  {/* Mail app opened — the PRF stays "unsent" until the crew
+                      confirms, so a dismissed share can never suppress the
+                      automatic send OR create an untracked gap. */}
+                  <div style={{ fontSize: '0.9rem', color: MUT, lineHeight: 1.5, marginBottom: 8 }}>
+                    Send the PRF from your email app, then confirm below.
+                  </div>
+                  <div style={{ fontSize: '0.8rem', color: '#92400e', background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 8, padding: '9px 11px', lineHeight: 1.45, marginBottom: 14 }}>
+                    Confirming stops the system from emailing another copy automatically.
+                  </div>
+                  {sendError && (
+                    <div style={{ fontSize: '0.78rem', color: '#b91c1c', lineHeight: 1.45, marginBottom: 12 }}>{sendError}</div>
+                  )}
+                  <div style={{ display: 'flex', gap: 10, flexDirection: 'column' }}>
+                    <button onClick={() => { void markManualSent(); }} style={{
+                      padding: '12px 18px', border: 'none', borderRadius: 8,
+                      background: manualMarkBusy ? '#94a3b8' : `linear-gradient(135deg, ${GREEN}, ${GREEN_DK})`,
+                      color: '#fff', fontWeight: 800, fontSize: '0.92rem',
+                      cursor: manualMarkBusy ? 'wait' : 'pointer',
+                    }}>{manualMarkBusy ? 'Recording…' : 'I sent it — mark as sent'}</button>
+                    <button onClick={() => { setManualConfirm(false); setSendError(''); }} style={{
+                      padding: '11px 18px', border: `1px solid #cbd5e1`, borderRadius: 8,
+                      background: '#fff', color: INK, fontWeight: 700, fontSize: '0.86rem',
+                      cursor: 'pointer',
+                    }}>I did not send it</button>
+                  </div>
+                </>
               ) : (sendStatus === 'sending' && autoSendActive) ? (
                 <>
                   {/* Auto-send in flight — pure status, nothing to tap. */}
@@ -1083,7 +1150,7 @@ export default function PRFView() {
                       letterSpacing: '0.02em',
                     }}>{sendStatus === 'sending' ? 'Sending…' : 'Send PRF to Facility'}</button>
                     {sendStatus === 'error' && (
-                      <button onClick={handleConfirmSend} style={{
+                      <button onClick={handleManualFallback} style={{
                         padding: '11px 18px', border: `1.5px solid ${GREEN_DK}`, borderRadius: 8,
                         background: '#fff', color: GREEN_DK, fontWeight: 800, fontSize: '0.88rem',
                         cursor: 'pointer',

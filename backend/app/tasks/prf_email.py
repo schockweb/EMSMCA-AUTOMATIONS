@@ -54,8 +54,15 @@ def _make_celery_session():
     soft_time_limit=120,
     time_limit=180,
 )
-def send_prf_facility_email(self, prf_id: str, recipient: str, pdf_path: str):
-    """Send the PRF PDF at `pdf_path` to `recipient` via the provider's SMTP."""
+def send_prf_facility_email(self, prf_id: str, recipient: str, pdf_path: str, force: bool = False):
+    """Send the PRF PDF at `pdf_path` to `recipient` via the provider's SMTP.
+
+    `force` marks a deliberate resend (corrected recipient / explicit "send
+    again"). Without it, an already-stamped PRF is SKIPPED — this is the
+    duplicate guard for the race where the crew sends manually (stamping the
+    PRF) while an earlier automatic attempt is still retrying in the
+    background: the stale retry must abort, not deliver a second copy.
+    """
 
     async def _run() -> tuple[bool, str | None]:
         from sqlalchemy import select
@@ -71,6 +78,10 @@ def send_prf_facility_email(self, prf_id: str, recipient: str, pdf_path: str):
                 prf = prf_res.scalar_one_or_none()
                 if not prf:
                     return False, "prf_not_found"
+                # Already sent (automatically or marked manual by the crew)
+                # and this isn't a deliberate resend — abort without emailing.
+                if prf.facility_email_sent_at and not force:
+                    return True, "already_sent_skip"
                 prov_res = await db.execute(
                     select(ServiceProvider).where(ServiceProvider.id == prf.provider_id)
                 )
@@ -170,6 +181,9 @@ def send_prf_facility_email(self, prf_id: str, recipient: str, pdf_path: str):
 
     if sent:
         _cleanup_pdf()
+        if reason == "already_sent_skip":
+            logger.info("PRF %s already sent — stale retry skipped (no duplicate)", prf_id)
+            return {"sent": False, "reason": reason}
         logger.info("PRF %s emailed to facility %s", prf_id, recipient)
         return {"sent": True, "recipient": recipient}
 

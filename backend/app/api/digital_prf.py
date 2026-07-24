@@ -1652,8 +1652,42 @@ async def email_prf_to_facility(
     await db.commit()
 
     from app.tasks.prf_email import send_prf_facility_email
-    send_prf_facility_email.delay(str(prf.id), to, pdf_path)
+    # Any queue-after-a-previous-send is a deliberate resend: pass force so
+    # the task's already-sent guard (which protects against duplicates from
+    # stale background retries) doesn't skip it.
+    is_resend = bool(prf.facility_email_sent_at)
+    send_prf_facility_email.delay(str(prf.id), to, pdf_path, is_resend)
     return {"status": "queued", "recipient": to}
+
+
+class ManualEmailMark(BaseModel):
+    recipient: str | None = None
+
+
+@router.post("/admin/by-case/{case_id}/email-facility/manual")
+async def mark_prf_facility_email_manual(
+    case_id: str,
+    request: Request,
+    body: ManualEmailMark,
+    db: AsyncSession = Depends(get_db),
+):
+    """Record that the crew sent the PRF to the facility MANUALLY (share
+    sheet / their own mail app), after explicitly confirming they did.
+
+    This stamps the same sent markers the automatic path uses, so every
+    duplicate guard holds: the post-submit auto-send skips the PRF on later
+    opens, the popup shows 'already sent', and any still-retrying background
+    send task aborts instead of delivering a second copy.
+    """
+    prf, _crew = await _resolve_case_prf_access(request, db, case_id)
+    if prf.status not in (PRFStatus.SUBMITTED, PRFStatus.PROCESSED):
+        raise HTTPException(400, "Only submitted PRFs can be marked as sent.")
+    to = (body.recipient or "").strip()
+    prf.facility_email_sent_to = (to or "receiving facility (sent manually)")[:255]
+    prf.facility_email_sent_at = datetime.now(timezone.utc)
+    prf.facility_email_error = None
+    await db.commit()
+    return {"status": "marked_manual", "recipient": prf.facility_email_sent_to}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
