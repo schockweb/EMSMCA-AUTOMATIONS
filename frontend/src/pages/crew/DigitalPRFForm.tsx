@@ -3712,6 +3712,34 @@ const SHdr = ({ t, c = '#3b6fde' }: { t: string; c?: string }) => (
   <div style={{ fontSize: '0.72rem', fontWeight: 800, color: c, textTransform: 'uppercase', letterSpacing: '0.1em', borderBottom: `2px solid ${c}28`, paddingBottom: 8, marginBottom: 16, marginTop: 6 }}>{t}</div>
 );
 
+// Collapsible section: the title is a tappable tag (styled like SHdr); tapping
+// it drops the fields down / folds them away. Own state so it's a real
+// component (hooks-safe) rather than inline render logic.
+const CollapsibleSection = ({ t, c = '#3b6fde', defaultOpen = false, children }: { t: string; c?: string; defaultOpen?: boolean; children: React.ReactNode }) => {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div style={{ marginTop: 6, marginBottom: 16 }}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        aria-expanded={open}
+        style={{
+          width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          gap: 10, cursor: 'pointer', textAlign: 'left',
+          background: open ? `${c}12` : '#f8fafc',
+          border: `1.5px solid ${c}28`, borderRadius: 10, padding: '12px 14px',
+          fontSize: '0.72rem', fontWeight: 800, color: c,
+          textTransform: 'uppercase', letterSpacing: '0.1em',
+        }}
+      >
+        <span>{t}</span>
+        <span style={{ transition: 'transform 0.2s ease', transform: open ? 'rotate(180deg)' : 'rotate(0deg)', fontSize: '0.85rem', lineHeight: 1 }}>▾</span>
+      </button>
+      {open && <div style={{ marginTop: 12 }}>{children}</div>}
+    </div>
+  );
+};
+
 const Card = ({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) => (
   <div style={{ background: '#ffffff', borderRadius: 14, border: `1.5px solid #e2e8f0`, boxShadow: '0 1px 4px rgba(0,0,0,0.04)', padding: 18, marginBottom: 16, ...style }}>{children}</div>
 );
@@ -8203,7 +8231,7 @@ export default function DigitalPRFForm() {
         <SHdr t="Vitals Monitoring" />
         {VitalsSection({ showFull: true })}
 
-        <SHdr t="Oxygen Administration" />
+        <CollapsibleSection t="Oxygen Administration">
         <Card>
           <G2>
             <div><Lbl t="Flow Rate (L/Min)" /><Sel fk="o2_flow_rate" opts={['1', '1.5', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15']} /></div>
@@ -8213,8 +8241,9 @@ export default function DigitalPRFForm() {
           </G2>
           <Lbl t="BVM" /><Inp fk="o2_bvm" ph="Rate (bpm) / notes" noMic />
         </Card>
+        </CollapsibleSection>
 
-        <SHdr t="Airway" />
+        <CollapsibleSection t="Airway">
         <Card>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
             {['Self-maintained', 'Suction', 'OP Airway', 'Supraglottic Airway', 'Intubation', 'Advanced Airway', 'Chest Decompression', 'Surg. Airway'].map(i => {
@@ -8244,8 +8273,9 @@ export default function DigitalPRFForm() {
           )}
           <Lbl t="NG Tube Size" /><ScopedInp fk="ng_tube_size" capabilityKey="airway_oro_nasogastric_tube" ph="Size if applicable" noMic />
         </Card>
+        </CollapsibleSection>
 
-        <SHdr t="Circulation" />
+        <CollapsibleSection t="Circulation">
         <Card>
           {/* Circulation interventions — matches the paper PRF: yes/no checkboxes
             for each intervention performed. "Defib J/NR" is a checkbox flag
@@ -8279,12 +8309,14 @@ export default function DigitalPRFForm() {
             <ScopedInp fk="iv_attempts" capabilityKey="circ_iv_cannulation_limbs_over_1yr" type="number" ph="0" />
           </div>
         </Card>
+        </CollapsibleSection>
 
-        <SHdr t="Immobilisation Equipment" />
+        <CollapsibleSection t="Immobilisation Equipment">
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
           {IMMOB_OPTS.map(i => <Chk key={i} fk="immob_equipment" val={i} />)}
         </div>
         <Card><Lbl t="Other Equipment / Adjuncts" /><Inp fk="other_equipment" ph="e.g. M17, other items" /></Card>
+        </CollapsibleSection>
 
         {IvAndMedsSection()}
         </>)}
