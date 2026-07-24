@@ -299,6 +299,9 @@ export default function PRFView() {
   // is usually ready by the time the crew taps.
   const [sharePdfFile, setSharePdfFile] = useState<File | null>(null);
   const pdfBuildStartedRef = useRef(false);
+  // Ref mirror of sharePdfFile so the auto-send flow can await the prewarm
+  // without racing React state (and without double-building on slow phones).
+  const sharePdfFileRef = useRef<File | null>(null);
 
   // ── One-tap "email PRF to receiving facility" ──
   // When the provider has a sending account configured (smtp_configured on
@@ -316,6 +319,10 @@ export default function PRFView() {
   // The PRF was already emailed on a previous open — show that state instead
   // of re-offering the send form; "Send again" flips this to re-enable it.
   const [resendMode, setResendMode] = useState(false);
+  // True once the post-submit auto-send has kicked off for this page load —
+  // the popup then runs as a gated status screen (no Skip) until delivery
+  // is confirmed or the crew explicitly falls back to manual sending.
+  const autoSendFiredRef = useRef(false);
 
   useEffect(() => {
     // Tenant guard for the crew route (/:providerSlug/crew/prf-view/...):
@@ -394,6 +401,7 @@ export default function PRFView() {
         buildPrfFileName(prf),
         { type: 'application/pdf' },
       );
+      sharePdfFileRef.current = file;
       setSharePdfFile(file);
     }, 400);
     return () => window.clearTimeout(t);
@@ -725,12 +733,21 @@ export default function PRFView() {
     setSendError('');
     setSendStatus('sending');
     try {
-      // Prefer the pre-warmed PDF; build on demand if the crew tapped fast.
-      let file = sharePdfFile;
+      // Prefer the pre-warmed PDF. In the auto-send flow the prewarm is
+      // usually still rendering on phones — wait for it (up to ~20s) rather
+      // than kicking off a second, competing html2canvas build.
+      let file = sharePdfFileRef.current || sharePdfFile;
+      if (!file && pdfBuildStartedRef.current) {
+        for (let i = 0; i < 40 && !sharePdfFileRef.current; i++) {
+          await new Promise(r => setTimeout(r, 500));
+        }
+        file = sharePdfFileRef.current;
+      }
       if (!file) {
         const pdf = await buildPrfPdf();
         if (!pdf) throw new Error('pdf_build_failed');
         file = new File([pdf.output('blob')], buildPrfFileName(prf), { type: 'application/pdf' });
+        sharePdfFileRef.current = file;
         setSharePdfFile(file);
       }
       const token = localStorage.getItem('access_token') || getCrewToken() || '';
@@ -754,10 +771,13 @@ export default function PRFView() {
       }
       setSentPhase('queued');
       setSendStatus('sent');
-      // Short poll for the actual outcome (worker sends within seconds when
-      // healthy). Give up quietly after ~30s — the queued wording stays
-      // honest and the admin surfaces carry the final state.
-      for (let i = 0; i < 6; i++) {
+      // Poll for the actual outcome (worker sends within seconds when
+      // healthy). The auto-send flow GATES the crew's return-to-dashboard on
+      // confirmed delivery, so it polls much longer (~2 min) than a manual
+      // tap. On timeout, surface an honest still-sending message with the
+      // manual fallback rather than trapping the crew on scene.
+      const attempts = autoSendFiredRef.current ? 24 : 6;
+      for (let i = 0; i < attempts; i++) {
         await new Promise(r => setTimeout(r, 5000));
         try {
           const check = await axios.get(`/api/digital-prf/admin/by-case/${caseId}`, {
@@ -774,6 +794,12 @@ export default function PRFView() {
           }
         } catch { /* transient — keep polling */ }
       }
+      if (autoSendFiredRef.current) {
+        setSendStatus('error');
+        setSendError(
+          'The email is still sending in the background. You can wait and try again, or send it manually below so the facility definitely has it.',
+        );
+      }
     } catch (e: any) {
       const detail = e?.response?.data?.detail;
       setSendStatus('error');
@@ -784,6 +810,26 @@ export default function PRFView() {
       );
     }
   };
+
+  // ── Auto-send on the post-submit flow ──
+  // When the crew lands here from Confirm & Submit (?send=1) and the PRF
+  // carries a receiving-facility email + the provider has a sending account,
+  // the send starts by ITSELF: the popup becomes a live status screen and
+  // only offers "Return to Dashboard" once delivery is confirmed. One-shot
+  // per page load; skipped when the PRF was already emailed.
+  useEffect(() => {
+    if (!prf || autoSendFiredRef.current) return;
+    if (searchParams.get('send') !== '1') return;
+    if (!prf.smtp_configured || prf.facility_email_sent_at) return;
+    const to = (prf.form_data?.handover_doctor_email || '').trim();
+    if (!SEND_EMAIL_RE.test(to)) return;
+    autoSendFiredRef.current = true;
+    // Small head start so the PDF prewarm effect registers first — the send
+    // then awaits that build instead of starting a second one.
+    const t = window.setTimeout(() => { void handleAutoSend(); }, 800);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prf]);
 
   if (err) return <div style={{ padding: 48, color: '#b91c1c', fontWeight: 700, textAlign: 'center' }}>{err}</div>;
   if (!prf) return <div style={{ padding: 48, color: MUT, textAlign: 'center' }}>Loading PRF...</div>;
@@ -880,6 +926,26 @@ export default function PRFView() {
   const recipientEmail = (fd.handover_doctor_email || '').trim();
   const patientFullName = [fd.patient_name, fd.patient_surname].filter(Boolean).join(' ') || 'the patient';
 
+  // Auto-send session: the post-submit popup runs as a gated status screen
+  // (no Skip; exit only on confirmed delivery or explicit manual fallback).
+  // Derived eagerly (not just from the fired-ref) so the gate applies from
+  // the very first paint, before the 800ms auto-fire.
+  const autoSendActive = autoSendFiredRef.current || (
+    searchParams.get('send') === '1' &&
+    !!prf.smtp_configured &&
+    !prf.facility_email_sent_at &&
+    SEND_EMAIL_RE.test(recipientEmail)
+  );
+  const returnToDashboard = () => {
+    if (searchParams.get('from') === 'admin' && providerSlug) {
+      navigate(`/${providerSlug}/admin/dashboard?tab=prfs`);
+    } else if (providerSlug) {
+      navigate(`/${providerSlug}/crew/dashboard`);
+    } else {
+      navigate(-1);
+    }
+  };
+
   return (
     <div className="prf-screen-wrap" style={{
       background: '#eef1f4', minHeight: '100vh', padding: '28px 0',
@@ -901,18 +967,53 @@ export default function PRFView() {
             }}>PRF submitted</div>
             {prf.smtp_configured ? (
               sendStatus === 'sent' ? (
+                sentPhase === 'delivered' ? (
+                  <>
+                    {/* Delivery confirmed by the worker's sent-stamp — the
+                        crew may now leave the page. */}
+                    <div style={{ fontSize: '0.92rem', color: '#15803d', fontWeight: 700, lineHeight: 1.5, marginBottom: 22 }}>
+                      ✓ PRF sent to <span style={{ wordBreak: 'break-word' }}>{sendEmailTo.trim()}</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: 10, flexDirection: 'column' }}>
+                      <button onClick={returnToDashboard} style={{
+                        padding: '12px 18px', border: 'none', borderRadius: 8,
+                        background: `linear-gradient(135deg, ${GREEN}, ${GREEN_DK})`,
+                        color: '#fff', fontWeight: 800, fontSize: '0.92rem', cursor: 'pointer',
+                      }}>Return to Dashboard</button>
+                      <button onClick={() => setShowSharePrompt(false)} style={{
+                        padding: '11px 18px', border: `1px solid #cbd5e1`, borderRadius: 8,
+                        background: '#fff', color: INK, fontWeight: 700, fontSize: '0.86rem',
+                        cursor: 'pointer',
+                      }}>View PRF</button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    {/* Queued — the popup stays put until delivery confirms. */}
+                    <div style={{ fontSize: '0.92rem', color: '#15803d', fontWeight: 700, lineHeight: 1.5, marginBottom: 6 }}>
+                      Sending PRF to <span style={{ wordBreak: 'break-word' }}>{sendEmailTo.trim()}</span>…
+                    </div>
+                    <div style={{ fontSize: '0.8rem', color: MUT, marginBottom: autoSendActive ? 0 : 18 }}>
+                      Confirming delivery — please stay on this page.
+                    </div>
+                    {!autoSendActive && (
+                      <button onClick={() => setShowSharePrompt(false)} style={{
+                        width: '100%', padding: '12px 18px', border: 'none', borderRadius: 8,
+                        background: `linear-gradient(135deg, ${GREEN}, ${GREEN_DK})`,
+                        color: '#fff', fontWeight: 800, fontSize: '0.92rem', cursor: 'pointer',
+                      }}>Done</button>
+                    )}
+                  </>
+                )
+              ) : (sendStatus === 'sending' && autoSendActive) ? (
                 <>
-                  {/* Honest status: 'queued' until the worker's sent-stamp
-                      confirms actual delivery to the mail server. */}
-                  <div style={{ fontSize: '0.92rem', color: '#15803d', fontWeight: 700, lineHeight: 1.5, marginBottom: 22 }}>
-                    {sentPhase === 'delivered' ? '✓ PRF sent to ' : '✓ PRF queued — sending to '}
-                    <span style={{ wordBreak: 'break-word' }}>{sendEmailTo.trim()}</span>
+                  {/* Auto-send in flight — pure status, nothing to tap. */}
+                  <div style={{ fontSize: '0.92rem', color: MUT, fontWeight: 700, lineHeight: 1.5, marginBottom: 8 }}>
+                    Preparing the PDF and sending to <strong style={{ color: INK, wordBreak: 'break-word' }}>{sendEmailTo.trim()}</strong>…
                   </div>
-                  <button onClick={() => setShowSharePrompt(false)} style={{
-                    width: '100%', padding: '12px 18px', border: 'none', borderRadius: 8,
-                    background: `linear-gradient(135deg, ${GREEN}, ${GREEN_DK})`,
-                    color: '#fff', fontWeight: 800, fontSize: '0.92rem', cursor: 'pointer',
-                  }}>Done</button>
+                  <div style={{ fontSize: '0.8rem', color: MUT }}>
+                    Please stay on this page — this takes a few seconds.
+                  </div>
                 </>
               ) : (prf.facility_email_sent_at && !resendMode && sendStatus === 'idle') ? (
                 <>
@@ -988,11 +1089,16 @@ export default function PRFView() {
                         cursor: 'pointer',
                       }}>Send manually instead</button>
                     )}
-                    <button onClick={() => setShowSharePrompt(false)} style={{
-                      padding: '11px 18px', border: `1px solid #cbd5e1`, borderRadius: 8,
-                      background: '#fff', color: INK, fontWeight: 700, fontSize: '0.86rem',
-                      cursor: 'pointer',
-                    }}>Skip</button>
+                    {/* In the gated post-submit flow there is no Skip — the
+                        crew leaves via confirmed delivery or the explicit
+                        manual fallback above. */}
+                    {!autoSendActive && (
+                      <button onClick={() => setShowSharePrompt(false)} style={{
+                        padding: '11px 18px', border: `1px solid #cbd5e1`, borderRadius: 8,
+                        background: '#fff', color: INK, fontWeight: 700, fontSize: '0.86rem',
+                        cursor: 'pointer',
+                      }}>Skip</button>
+                    )}
                   </div>
                 </>
               )
