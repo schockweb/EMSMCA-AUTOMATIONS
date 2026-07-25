@@ -204,12 +204,14 @@ export default function ProviderLogin() {
               <div style={{ flex: 1, height: 1, background: 'var(--glass-border)' }} />
             </div>
 
-            {/* Start Shift Button */}
+            {/* Start Shift Button — deliberately the same btn-primary teal as
+                "Sign In as Admin" above it, so the two entry points read as one
+                system rather than two different actions. */}
             <div>
               <button
                 type="button"
                 onClick={() => setShowShiftForm(true)}
-                className="btn btn-accent btn-lg"
+                className="btn btn-primary btn-lg"
                 style={{ width: '100%' }}
               >
                 Start Shift
