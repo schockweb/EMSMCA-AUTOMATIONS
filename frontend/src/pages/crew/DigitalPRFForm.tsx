@@ -7723,6 +7723,58 @@ export default function DigitalPRFForm() {
                   const treatingCat = normaliseHpcsaCategory(fd.treating_practitioner_category);
                   const medCap = findMedicationByName(row.type);
                   const medOutOfScope = !!(treatingCat && medCap && !medCap.authorised.includes(treatingCat));
+                  // Dropdown option sets. Drug = the loaded catalogue, split into
+                  // the treating practitioner's in-scope meds vs the rest (out of
+                  // scope) so a drug given by a higher-qualified crew member can
+                  // still be recorded. Every dropdown keeps an "Other…" escape
+                  // that reveals a text box, so an off-list value is never blocked.
+                  const allMeds = medicationNamesForCategory(undefined);
+                  const inScopeSet = new Set(authorised);
+                  const outOfScopeMeds = allMeds.filter(n => !inScopeSet.has(n));
+                  const ROUTE_OPTS = ['IV', 'IM', 'IO', 'ORAL', 'IN', 'SC', 'SL', 'PR', 'Nebulised'];
+                  const DOSE_OPTS = ['0.25mg', '0.5mg', '1mg', '2mg', '5mg', '10mg', '50mg', '100mg', '250mg', '500mg', '1g', '100mcg', '250ml', '500ml', '1000ml'];
+                  const renderMedSelect = (
+                    key: string,
+                    placeholder: string,
+                    groups: Array<{ label?: string; opts: readonly string[] }>,
+                  ) => {
+                    const flatOpts = groups.flatMap(g => g.opts);
+                    const cur = (row[key] ?? '') as string;
+                    const isOther = !!row[`${key}_other`] || (cur !== '' && !flatOpts.includes(cur));
+                    const setVal = (updates: any) => { const r = [...medRows]; r[i] = { ...r[i], ...updates }; setMedRows(r); dirtyRef.current = true; };
+                    return (
+                      <>
+                        <select
+                          value={isOther ? '__other__' : cur}
+                          onChange={e => {
+                            const val = e.target.value;
+                            if (val === '__other__') setVal({ [key]: flatOpts.includes(cur) ? '' : cur, [`${key}_other`]: true });
+                            else setVal({ [key]: val, [`${key}_other`]: false });
+                          }}
+                          onFocus={onF}
+                          onBlur={onB}
+                          style={{ ...base, marginBottom: 8, appearance: 'menulist' }}
+                        >
+                          <option value="">{placeholder}</option>
+                          {groups.map((g, gi) => g.label
+                            ? <optgroup key={gi} label={g.label}>{g.opts.map(o => <option key={o} value={o}>{o}</option>)}</optgroup>
+                            : g.opts.map(o => <option key={o} value={o}>{o}</option>))}
+                          <option value="__other__">Other…</option>
+                        </select>
+                        {isOther && (
+                          <input
+                            autoComplete="off"
+                            value={cur}
+                            placeholder="Type…"
+                            onChange={e => setVal({ [key]: e.target.value, [`${key}_other`]: true })}
+                            onFocus={onF}
+                            onBlur={onB}
+                            style={{ ...base, marginBottom: 8 }}
+                          />
+                        )}
+                      </>
+                    );
+                  };
                   return (
                     <Card key={i} style={{ marginBottom: 8 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10, gap: 8 }}>
@@ -7760,94 +7812,18 @@ export default function DigitalPRFForm() {
                           <div key={f.k}>
                             <Lbl t={f.l} />
                             {f.k === 'type' ? (
-                              <>
-                                <input
-                                  list={`med-type-${i}`}
-                                  value={row.type ?? ''}
-                                  onChange={e => { const r = [...medRows]; r[i] = { ...r[i], type: e.target.value }; setMedRows(r); dirtyRef.current = true; }}
-                                  onFocus={onF}
-                                  onBlur={onB}
-                                  placeholder="Search or type drug name…"
-                                  autoComplete="off"
-                                  style={{ ...base, marginBottom: 8 }}
-                                />
-                                <datalist id={`med-type-${i}`}>
-                                  {authorised.map(n => <option key={n} value={n} />)}
-                                </datalist>
-                              </>
-                            ) : f.k === 'route' ? (() => {
-                              const QUICK_ROUTES = ['IM', 'IV', 'ORAL', 'IN'];
-                              const isCustom = !!row.route && !QUICK_ROUTES.includes(row.route) && row.route !== '__custom__';
-                              const showCustomInput = isCustom || row.route === '__custom__';
-                              const isSelected = !!row.route && QUICK_ROUTES.includes(row.route);
-
-                              if (isSelected) {
-                                return (
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                                    <span style={{
-                                      display: 'inline-flex', alignItems: 'center',
-                                      padding: '7px 18px', borderRadius: 20, fontWeight: 800,
-                                      fontSize: '0.88rem', background: '#0f172a', color: '#ffffff',
-                                      letterSpacing: '0.06em',
-                                    }}>{row.route}</span>
-                                    <button type="button"
-                                      onClick={() => { const r = [...medRows]; r[i] = { ...r[i], route: '' }; setMedRows(r); dirtyRef.current = true; }}
-                                      style={{ fontSize: '0.72rem', fontWeight: 600, color: '#64748b', background: 'none', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline' }}>
-                                      Change
-                                    </button>
-                                  </div>
-                                );
-                              }
-                              if (showCustomInput) {
-                                return (
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                                    <input
-                                      autoFocus
-                                      autoComplete="off"
-                                      value={isCustom ? (row.route ?? '') : ''}
-                                      placeholder="Type route…"
-                                      onChange={e => { const r = [...medRows]; r[i] = { ...r[i], route: e.target.value }; setMedRows(r); dirtyRef.current = true; }}
-                                      onFocus={onF}
-                                      onBlur={onB}
-                                      style={{ ...base, marginBottom: 0, flex: 1 }}
-                                    />
-                                    <button type="button"
-                                      onClick={() => { const r = [...medRows]; r[i] = { ...r[i], route: '' }; setMedRows(r); dirtyRef.current = true; }}
-                                      style={{ fontSize: '0.72rem', fontWeight: 600, color: '#64748b', background: 'none', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline', flexShrink: 0 }}>
-                                      Back
-                                    </button>
-                                  </div>
-                                );
-                              }
-                              // Default: quick-pick pill grid
-                              return (
-                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6, marginBottom: 8 }}>
-                                  {QUICK_ROUTES.map(opt => (
-                                    <button key={opt} type="button"
-                                      onClick={() => { const r = [...medRows]; r[i] = { ...r[i], route: opt }; setMedRows(r); dirtyRef.current = true; }}
-                                      style={{
-                                        padding: '10px 4px', borderRadius: 10, fontWeight: 800,
-                                        fontSize: '0.82rem', border: '2px solid #e2e8f0',
-                                        background: '#f8fafc', color: '#334155', cursor: 'pointer',
-                                        textAlign: 'center', WebkitTapHighlightColor: 'transparent',
-                                      }}>
-                                      {opt}
-                                    </button>
-                                  ))}
-                                  <button type="button"
-                                    onClick={() => { const r = [...medRows]; r[i] = { ...r[i], route: '__custom__' }; setMedRows(r); dirtyRef.current = true; }}
-                                    style={{
-                                      padding: '10px 4px', borderRadius: 10, fontWeight: 800,
-                                      fontSize: '1.1rem', border: '2px dashed #cbd5e1',
-                                      background: '#f8fafc', color: '#94a3b8', cursor: 'pointer',
-                                      textAlign: 'center', letterSpacing: '0.08em',
-                                      WebkitTapHighlightColor: 'transparent',
-                                    }}>
-                                    ···
-                                  </button>
-                                </div>
-                              );
-                            })() : f.k === 'time' ? (
+                              renderMedSelect(
+                                'type',
+                                'Select drug…',
+                                outOfScopeMeds.length > 0
+                                  ? [{ label: 'In scope', opts: authorised }, { label: 'Out of scope', opts: outOfScopeMeds }]
+                                  : [{ opts: authorised }],
+                              )
+                            ) : f.k === 'route' ? (
+                              renderMedSelect('route', 'Select route…', [{ opts: ROUTE_OPTS }])
+                            ) : f.k === 'dose' ? (
+                              renderMedSelect('dose', 'Select dose…', [{ opts: DOSE_OPTS }])
+                            ) : f.k === 'time' ? (
                               <input
                                 type="time"
                                 value={row.time ?? ''}
