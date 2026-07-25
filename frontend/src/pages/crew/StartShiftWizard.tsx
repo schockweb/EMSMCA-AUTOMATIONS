@@ -260,7 +260,10 @@ export default function StartShiftWizard({
                 >
                   Back
                 </button>
-                <button type="submit" className="btn btn-accent btn-lg" style={{ flex: 1, fontSize: '0.82rem', fontWeight: 600 }} disabled={shiftLoading || selectedCrewIds.length === 0}>
+                {/* btn-primary (brand teal) to match the "Start Shift" button on
+                    the login page that opens this wizard, and the admin sign-in
+                    above it - one colour for the whole crew entry flow. */}
+                <button type="submit" className="btn btn-primary btn-lg" style={{ flex: 1, fontSize: '0.82rem', fontWeight: 600 }} disabled={shiftLoading || selectedCrewIds.length === 0}>
                   {shiftLoading ? 'Starting...' : `Start Shift · ${selectedCrewIds.length} selected`}
                 </button>
               </div>
