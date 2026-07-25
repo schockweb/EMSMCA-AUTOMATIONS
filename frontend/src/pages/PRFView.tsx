@@ -274,6 +274,16 @@ const buildPrfFileName = (prf: any): string => {
   return `${base || 'PRF_export'}.pdf`;
 };
 
+// Round buttons either side of the mobile reader-zoom readout.
+const zoomBtn = (off: boolean): React.CSSProperties => ({
+  width: 38, height: 38, padding: 0, border: 'none', borderRadius: '50%',
+  background: off ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.16)',
+  color: off ? 'rgba(255,255,255,0.35)' : '#fff',
+  fontSize: '1.3rem', fontWeight: 700, lineHeight: 1, fontFamily: 'inherit',
+  cursor: off ? 'default' : 'pointer',
+  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+});
+
 // ── Component ────────────────────────────────────────────────────────
 export default function PRFView() {
   const { providerSlug, caseId } = useParams<{ providerSlug: string; caseId: string }>();
@@ -414,7 +424,7 @@ export default function PRFView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prf]);
 
-  // ── On-screen fit-to-width ────────────────────────────────────────────────
+  // ── On-screen fit-to-width + reader zoom ──────────────────────────────────
   // The PRF sheet is a FIXED 1220px A4 design. In the admin viewport that's
   // frequently wider than the available column, so the right edge (the alpha-
   // unit time grid) was clipped. Shrink the sheet with CSS `zoom` — which
@@ -422,6 +432,17 @@ export default function PRFView() {
   // no horizontal scroll — to fit the container. `zoom` is CLEARED during PDF
   // capture and print (both read each .prf-page's offsetWidth, which Chrome's
   // zoom would scale) so the export always renders at full 1220px resolution.
+  //
+  // Fit-to-width is only a sensible DEFAULT on a big screen. On a phone it
+  // resolves to ~0.31 — an A4 landscape form rendered 4px tall — and the
+  // app-wide `maximum-scale=1.0` viewport meant the reader could not pinch out
+  // of it either, so a PRF opened from the client-admin dashboard was simply
+  // unreadable. `userZoom` now overrides the auto-fit, and .prf-screen-wrap
+  // (overflow-x:auto) pans once the sheet is wider than the screen.
+  const [fitScale, setFitScale] = useState(1);
+  const [userZoom, setUserZoom] = useState<number | null>(null);
+  const userZoomRef = useRef<number | null>(null);
+
   const clearScreenFit = () => {
     const el = document.getElementById('prf-pdf-content');
     if (el) el.style.zoom = '';
@@ -432,16 +453,50 @@ export default function PRFView() {
     if (!el || !wrap) return;
     el.style.zoom = '';                        // measure at the true 1220px width
     const avail = wrap.clientWidth - 8;        // small breathing room
-    const scale = Math.min(1, avail / 1240);   // 1220 design width + margin
-    el.style.zoom = scale < 1 ? String(scale) : '';
+    const fit = Math.min(1, avail / 1240);     // 1220 design width + margin
+    setFitScale(fit);
+    const z = userZoomRef.current ?? fit;
+    el.style.zoom = z < 1 ? String(z) : '';
   }, []);
   useEffect(() => {
+    userZoomRef.current = userZoom;
     applyScreenFit();
     window.addEventListener('resize', applyScreenFit);
     // Re-fit once fonts / logo settle and whenever the PRF data changes.
     const t = setTimeout(applyScreenFit, 150);
     return () => { window.removeEventListener('resize', applyScreenFit); clearTimeout(t); };
-  }, [applyScreenFit, prf]);
+  }, [applyScreenFit, prf, userZoom]);
+
+  // Step the reader zoom, keeping whatever is at the centre of the screen at
+  // the centre afterwards — zooming in from the left edge otherwise dumps you
+  // in the middle of the sheet with no idea which column you are looking at.
+  const stepZoom = (dir: 1 | -1) => {
+    const from = userZoomRef.current ?? fitScale;
+    const next = Math.min(2, Math.max(fitScale, Math.round((from + dir * 0.25) * 100) / 100));
+    if (next === from) return;
+    const wrap = document.querySelector('.prf-screen-wrap') as HTMLElement | null;
+    if (wrap) {
+      const centre = (wrap.scrollLeft + wrap.clientWidth / 2) / from;
+      requestAnimationFrame(() => {
+        wrap.scrollLeft = Math.max(0, centre * next - wrap.clientWidth / 2);
+      });
+    }
+    setUserZoom(next <= fitScale ? null : next);
+  };
+
+  // The app ships a `maximum-scale=1.0` viewport — that is what stops iOS
+  // auto-zooming when a crew member focuses a field mid-call, so it stays as
+  // the app-wide default. But this page is a DOCUMENT, and pinching is the
+  // first thing anyone tries on one. Relax the meta while the viewer is
+  // mounted and restore it on the way out, leaving every form page untouched.
+  useEffect(() => {
+    const meta = document.querySelector('meta[name="viewport"]');
+    if (!meta) return;
+    const original = meta.getAttribute('content') || '';
+    meta.setAttribute('content',
+      'width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes, viewport-fit=cover');
+    return () => { meta.setAttribute('content', original); };
+  }, []);
 
   // Build the PDF by snapshotting each .prf-page independently and placing
   // it on its own A4 landscape sheet. This bypasses the browser's CSS print
@@ -1169,7 +1224,10 @@ export default function PRFView() {
                     autoComplete="off"
                     style={{
                       width: '100%', boxSizing: 'border-box', padding: '11px 12px',
-                      fontSize: '0.92rem', border: `1.5px solid ${sendError ? '#fca5a5' : '#cbd5e1'}`,
+                      // 16px exactly: below that iOS auto-zooms the page on
+                      // focus, which this viewer now permits (see the viewport
+                      // effect above).
+                      fontSize: 16, border: `1.5px solid ${sendError ? '#fca5a5' : '#cbd5e1'}`,
                       borderRadius: 8, marginBottom: sendError ? 6 : 16, outline: 'none',
                       fontFamily: 'inherit', color: INK,
                     }}
@@ -1321,6 +1379,32 @@ export default function PRFView() {
           )}
         </button>
       </div>
+
+      {/* Reader zoom — small screens only (fit-to-width under ~0.7, i.e. phones
+          and portrait tablets). The top toolbar is already tight on a phone, so
+          this rides as a floating pill above the safe-area inset where it stays
+          reachable no matter how far down the sheet you have scrolled. */}
+      {fitScale < 0.7 && (
+        <div className="no-print" style={{
+          position: 'fixed', left: '50%', transform: 'translateX(-50%)',
+          bottom: 'calc(16px + env(safe-area-inset-bottom, 0px))',
+          display: 'flex', alignItems: 'center', gap: 2, zIndex: 60,
+          background: 'rgba(15,23,42,0.92)', borderRadius: 999, padding: 4,
+          boxShadow: '0 8px 26px rgba(0,0,0,0.32)',
+        }}>
+          <button onClick={() => stepZoom(-1)} aria-label="Zoom out"
+            disabled={(userZoom ?? fitScale) <= fitScale}
+            style={zoomBtn((userZoom ?? fitScale) <= fitScale)}>−</button>
+          <button onClick={() => setUserZoom(null)} aria-label="Fit the page to the screen" style={{
+            minWidth: 76, height: 38, padding: '0 12px', border: 'none', borderRadius: 999,
+            background: 'transparent', color: '#fff', fontWeight: 800, fontSize: '0.82rem',
+            fontFamily: 'inherit', cursor: 'pointer', letterSpacing: '0.02em',
+          }}>{userZoom ? `${Math.round(userZoom * 100)}%` : 'Fit'}</button>
+          <button onClick={() => stepZoom(1)} aria-label="Zoom in"
+            disabled={(userZoom ?? fitScale) >= 2}
+            style={zoomBtn((userZoom ?? fitScale) >= 2)}>+</button>
+        </div>
+      )}
 
       <style>{`
         @keyframes prfPdfSpin { to { transform: rotate(360deg); } }
