@@ -24,7 +24,12 @@ from app.models.crew_member import CrewMember
 from app.models.vehicle import Vehicle
 from app.models.digital_prf import DigitalPRF, PRFStatus
 from app.utils.security import get_current_user, hash_password, verify_password, verify_password_async
-from app.utils.hpcsa import HPCSA_CATEGORIES, DEFAULT_CATEGORY, normalise_category
+from app.utils.hpcsa import (
+    HPCSA_CATEGORIES,
+    DEFAULT_CATEGORY,
+    CATEGORY_LABELS,
+    normalise_category,
+)
 from app.models.user import User
 
 logger = logging.getLogger("ems.providers")
@@ -162,23 +167,50 @@ class CrewMemberUpdate(BaseModel):
 
 
 def _validate_category(value: str | None, *, required: bool = True) -> str | None:
-    """Coerce + validate an HPCSA category value from request bodies.
+    """Validate an HPCSA registration category from an admin request body.
 
-    Accepts a canonical category code or a legacy tier (BLS/ILS/ALS) which is
-    silently normalised. Rejects anything else with HTTP 400 so the admin sees
-    a clear error rather than letting bad data into the DB.
+    STRICT BY DESIGN: only canonical category codes are accepted, and the value
+    is stored exactly as given. A legacy billing tier (BLS / ILS / ALS) used to
+    be normalised silently here — so an admin who chose "ALS" had it saved as
+    "ECP" and saw a different value when reopening the record. Because the
+    category drives scope-of-practice enforcement, quietly substituting one is
+    a compliance problem, not a convenience: the caller is now told to pick a
+    real category instead.
+
+    NOTE: `normalise_category` remains deliberately lenient for OCR'd / legacy
+    PRF data (see app/rules/hpcsa_scope.py) — that path must keep coping with
+    free text. This strictness applies only to the admin crew endpoints.
     """
     if value is None or value == "":
         if required:
             raise HTTPException(400, f"qualification is required (one of {sorted(HPCSA_CATEGORIES)})")
         return None
-    normalised = normalise_category(value)
-    if normalised is None:
+
+    key = value.strip().upper()
+    if key in HPCSA_CATEGORIES:
+        return key
+
+    # A recognised-but-non-canonical value (a tier, or free text like
+    # "Paramedic"): say what it would have become rather than silently doing it.
+    suggestion = normalise_category(key)
+    if suggestion is not None:
+        tier_note = ""
+        if key in {"BLS", "ILS", "ALS"}:
+            tier_note = (
+                f" '{key}' is a billing tier, not an HPCSA registration category"
+                " — the tier is worked out automatically from the category."
+            )
         raise HTTPException(
             400,
-            f"Invalid qualification '{value}'. Expected an HPCSA category: {sorted(HPCSA_CATEGORIES)}.",
+            f"Invalid qualification '{value}'.{tier_note} Did you mean '{suggestion}'"
+            f" ({CATEGORY_LABELS.get(suggestion, suggestion)})?"
+            f" Choose one of: {sorted(HPCSA_CATEGORIES)}.",
         )
-    return normalised
+
+    raise HTTPException(
+        400,
+        f"Invalid qualification '{value}'. Expected an HPCSA category: {sorted(HPCSA_CATEGORIES)}.",
+    )
 
 class VehicleCreate(BaseModel):
     callsign: str

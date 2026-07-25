@@ -6,6 +6,26 @@ import { useState, useEffect, useCallback } from 'react';
 import api from '../api/client';
 import { useScrollLock } from '../hooks/useScrollLock';
 import { LoadErrorPanel, LoadErrorBar } from '../components/LoadError';
+import { HPCSA_CATEGORIES, CATEGORY_META } from '../data/hpcsaScope';
+
+// Qualification stores an HPCSA REGISTRATION CATEGORY, never a billing tier.
+// This picker previously offered BLS / ILS / ALS as well, which the backend
+// silently normalised on save (ALS -> ECP, ILS -> AEA), so an admin's explicit
+// choice was rewritten behind their back - and ECT / ECA / ANT could not be
+// selected at all. Only the canonical categories are offered now; the tier a
+// category bills at is derived downstream (app/utils/hpcsa.py CATEGORY_TIER).
+const QUAL_OPTIONS = HPCSA_CATEGORIES.map(code => ({
+  value: code as string,
+  label: `${code} — ${CATEGORY_META[code].label} (${CATEGORY_META[code].tier})`,
+}));
+
+/** A stored value that is not a canonical category (legacy tier / OCR text).
+ *  Surfaced in the picker as-is so the admin SEES it and can correct it -
+ *  never silently remapped. */
+const legacyOption = (v: string | undefined | null) =>
+  v && !HPCSA_CATEGORIES.includes(v as never)
+    ? [{ value: v, label: `${v} — legacy value, please re-select` }]
+    : [];
 
 interface Provider {
   id: string;
@@ -154,7 +174,7 @@ export default function ProviderManagement() {
   // Add forms
   const [newProvider, setNewProvider] = useState({ name: '', phone: '', email: '', prNumber: '', ptyRegNumber: '', prfName: '', address: '', prfNumber: '', clientEmail: '', clientPassword: '', adminEmail: '', adminPassword: '', smtpService: 'gmail', smtpEmail: '', smtpPassword: '' });
   const [logoFile, setLogoFile] = useState<File | null>(null);
-  const [newCrew, setNewCrew] = useState({ full_name: '', email: '', initials: '', hpcsa_number: '', qualification: 'ILS', phone: '' });
+  const [newCrew, setNewCrew] = useState({ full_name: '', email: '', initials: '', hpcsa_number: '', qualification: 'AEA', phone: '' });
   const [newVehicle, setNewVehicle] = useState({ callsign: '', registration: '', vehicle_type: 'Ambulance' });
   const [showAddCrew, setShowAddCrew] = useState(false);
   const [showAddVehicle, setShowAddVehicle] = useState(false);
@@ -166,7 +186,7 @@ export default function ProviderManagement() {
   
   const [showEditCrew, setShowEditCrew] = useState(false);
   const [editingCrewId, setEditingCrewId] = useState<string | null>(null);
-  const [editCrewForm, setEditCrewForm] = useState({ full_name: '', email: '', initials: '', hpcsa_number: '', qualification: 'ILS', phone: '' });
+  const [editCrewForm, setEditCrewForm] = useState({ full_name: '', email: '', initials: '', hpcsa_number: '', qualification: 'AEA', phone: '' });
   const [editCrewSaving, setEditCrewSaving] = useState(false);
 
   // Lock the background page while any pop-up on this screen is open.
@@ -419,7 +439,7 @@ export default function ProviderManagement() {
     try {
       const res = await api.post(`/api/providers/${selectedProvider.id}/crew`, newCrew);
       setTempPassword(res.data.temp_password);
-      setNewCrew({ full_name: '', email: '', initials: '', hpcsa_number: '', qualification: 'ILS', phone: '' });
+      setNewCrew({ full_name: '', email: '', initials: '', hpcsa_number: '', qualification: 'AEA', phone: '' });
       fetchProviderDetails(selectedProvider);
     } catch (e: any) {
       alert(e.response?.data?.detail || 'Failed to add crew member');
@@ -431,7 +451,7 @@ export default function ProviderManagement() {
   const closeAddCrew = () => {
     setShowAddCrew(false);
     setTempPassword('');
-    setNewCrew({ full_name: '', email: '', initials: '', hpcsa_number: '', qualification: 'ILS', phone: '' });
+    setNewCrew({ full_name: '', email: '', initials: '', hpcsa_number: '', qualification: 'AEA', phone: '' });
   };
 
   const handleAddVehicle = async () => {
@@ -509,7 +529,7 @@ export default function ProviderManagement() {
       email: member.email,
       initials: member.initials || '',
       hpcsa_number: member.hpcsa_number || '',
-      qualification: member.qualification || 'ILS',
+      qualification: member.qualification || 'AEA',
       phone: member.phone || '',
     });
     setShowEditCrew(true);
@@ -1159,13 +1179,9 @@ export default function ProviderManagement() {
                     <div>
                       <label style={labelStyle}>Qualification</label>
                       <select style={inputStyle} value={newCrew.qualification} onChange={e => setNewCrew({ ...newCrew, qualification: e.target.value })}>
-                        <option value="BLS">BLS</option>
-                        <option value="ILS">ILS</option>
-                        <option value="ALS">ALS</option>
-                        <option value="AEA">AEA</option>
-                        <option value="BAA">BAA</option>
-                        <option value="ECP">ECP</option>
-                        <option value="ART">ART — Doctor</option>
+                        {[...legacyOption(newCrew.qualification), ...QUAL_OPTIONS].map(o => (
+                          <option key={o.value} value={o.value}>{o.label}</option>
+                        ))}
                       </select>
                     </div>
                     <div><label style={labelStyle}>Phone</label><input style={inputStyle} value={newCrew.phone} onChange={e => setNewCrew({ ...newCrew, phone: e.target.value })} /></div>
@@ -1207,13 +1223,9 @@ export default function ProviderManagement() {
                     <div>
                       <label style={labelStyle}>Qualification</label>
                       <select style={inputStyle} value={editCrewForm.qualification} onChange={e => setEditCrewForm({ ...editCrewForm, qualification: e.target.value })}>
-                        <option value="BLS">BLS</option>
-                        <option value="ILS">ILS</option>
-                        <option value="ALS">ALS</option>
-                        <option value="AEA">AEA</option>
-                        <option value="BAA">BAA</option>
-                        <option value="ECP">ECP</option>
-                        <option value="ART">ART — Doctor</option>
+                        {[...legacyOption(editCrewForm.qualification), ...QUAL_OPTIONS].map(o => (
+                          <option key={o.value} value={o.value}>{o.label}</option>
+                        ))}
                       </select>
                     </div>
                     <div><label style={labelStyle}>Phone</label><input style={inputStyle} value={editCrewForm.phone} onChange={e => setEditCrewForm({ ...editCrewForm, phone: e.target.value })} /></div>
