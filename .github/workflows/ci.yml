@@ -186,20 +186,28 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build backend image
+      # Builds the PRODUCTION Dockerfiles — the ones docker-compose.prod.yml
+      # actually deploys. The previous config pointed at the dev Dockerfiles
+      # while naming stages from the prod ones ("serve" does not exist in
+      # frontend/Dockerfile), so this job could never have succeeded even had it
+      # ever been reached. Verifying the deployed image is also the more useful
+      # check: a broken prod build now fails here instead of on the VM.
+      - name: Build backend image (production)
         uses: docker/build-push-action@v5
         with:
           context: ./backend
+          file: ./backend/Dockerfile.prod
           push: false
-          target: production
+          target: runtime
           tags: ems-backend:ci-${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Build frontend image
+      - name: Build frontend image (production)
         uses: docker/build-push-action@v5
         with:
           context: ./frontend
+          file: ./frontend/Dockerfile.prod
           push: false
           target: serve
           tags: ems-frontend:ci-${{ github.sha }}
