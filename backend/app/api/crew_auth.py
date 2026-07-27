@@ -222,6 +222,138 @@ async def crew_change_password(
 
 # ── HPCSA-based shift-start lookup (no password needed) ──────
 
+# ── Portal grant: proof the company password was entered on this device ──────
+#
+# WHY THIS EXISTS
+# ---------------
+# `shift-start-by-id` and `lookup-hpcsa` mint 12-hour crew tokens that can read,
+# edit and delete Patient Report Forms. Both used to run with NO authentication
+# at all: their docstrings asserted "the company-wide portal login already
+# authenticated the user", but nothing on the server ever checked that, and the
+# crew UI never performed such a login. Combined with the public crew list
+# (which returned crew UUIDs and HPCSA numbers), anyone on the internet could
+# collect an ID and exchange it for a patient-record token.
+#
+# A device now has to prove the company portal password was entered before it
+# can mint a crew session. The grant is provider-bound and shift-length, so a
+# crew enters the company password once per device per shift.
+PORTAL_GRANT_HOURS = 12
+PORTAL_GRANT_SCOPE = "portal_grant"
+
+portal_grant_scheme = OAuth2PasswordBearer(tokenUrl="/api/crew/portal-unlock", auto_error=False)
+
+
+class PortalUnlockRequest(BaseModel):
+    provider_slug: str
+    password: str
+
+
+class PortalUnlockResponse(BaseModel):
+    grant: str
+    expires_in_hours: int = PORTAL_GRANT_HOURS
+    provider_name: str
+    provider_slug: str
+
+
+async def require_portal_grant(
+    provider_slug: str,
+    token: str | None,
+    db: AsyncSession,
+) -> ServiceProvider:
+    """Resolve the provider and require a valid grant bound to it.
+
+    Accepts EITHER a portal grant or an already-valid crew token for the same
+    provider — the latter so a crew mid-shift can still add a colleague without
+    re-entering the company password.
+    """
+    result = await db.execute(
+        select(ServiceProvider).where(
+            ServiceProvider.slug == provider_slug.strip().lower(),
+            ServiceProvider.is_active == True,  # noqa: E712
+        )
+    )
+    provider = result.scalar_one_or_none()
+    if not provider:
+        raise HTTPException(status_code=404, detail="Provider not found")
+
+    if not token:
+        raise HTTPException(
+            status_code=401,
+            detail="This device is not unlocked. Enter the company password to start a shift.",
+        )
+
+    payload = decode_token(token)
+    scope = payload.get("token_scope")
+    if scope not in (PORTAL_GRANT_SCOPE, "crew"):
+        raise HTTPException(status_code=401, detail="Invalid device unlock token")
+    if str(payload.get("provider_id")) != str(provider.id):
+        # Never let one company's unlock reach another company's crew.
+        raise HTTPException(status_code=403, detail="Token does not belong to this provider")
+
+    return provider
+
+
+@router.post("/portal-unlock", response_model=PortalUnlockResponse)
+async def portal_unlock(body: PortalUnlockRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    """Exchange the company portal password for a short-lived, provider-bound grant.
+
+    Rate-limited as an auth path and subject to the same 5-fail/45-min lockout as
+    the portal login, since it verifies the same secret.
+    """
+    client_ip = get_trusted_client_ip(request)
+    result = await db.execute(
+        select(ServiceProvider).where(
+            ServiceProvider.slug == body.provider_slug.strip().lower(),
+            ServiceProvider.is_active == True,  # noqa: E712
+        )
+    )
+    provider = result.scalar_one_or_none()
+
+    # Uniform failure for unknown provider / unset password / wrong password so
+    # this cannot be used to enumerate which companies exist or are configured.
+    generic = HTTPException(status_code=401, detail="Incorrect company password")
+
+    if not provider or not provider.portal_login_password_hash:
+        raise generic
+
+    if provider.locked_until and provider.locked_until > datetime.now(timezone.utc):
+        raise HTTPException(
+            status_code=403,
+            detail="Too many incorrect attempts. Try again later.",
+        )
+
+    if not await verify_password_async(body.password, provider.portal_login_password_hash):
+        provider.failed_login_attempts = (provider.failed_login_attempts or 0) + 1
+        if provider.failed_login_attempts >= MAX_FAILED_ATTEMPTS:
+            provider.locked_until = datetime.now(timezone.utc) + timedelta(minutes=LOCKOUT_DURATION_MINUTES)
+        db.add(AuditLog(
+            user_id=None, action="PORTAL_UNLOCK_FAILED", entity_type="auth_portal",
+            entity_id=provider.id, ip_address=client_ip,
+            details={"provider_slug": provider.slug, "failed_attempts": provider.failed_login_attempts},
+        ))
+        await db.commit()
+        raise generic
+
+    provider.failed_login_attempts = 0
+    provider.locked_until = None
+    db.add(AuditLog(
+        user_id=None, action="PORTAL_UNLOCK_SUCCESS", entity_type="auth_portal",
+        entity_id=provider.id, ip_address=client_ip,
+        details={"provider_slug": provider.slug},
+    ))
+    await db.commit()
+
+    grant = create_access_token(
+        {"sub": str(provider.id), "provider_id": str(provider.id),
+         "provider_slug": provider.slug, "token_scope": PORTAL_GRANT_SCOPE},
+        expires_delta=timedelta(hours=PORTAL_GRANT_HOURS),
+    )
+    logger.info("Portal unlocked for %s from ip=%s", provider.slug, client_ip)
+    return PortalUnlockResponse(
+        grant=grant, provider_name=provider.name, provider_slug=provider.slug,
+    )
+
+
 class ShiftLookupRequest(BaseModel):
     hpcsa_number: str
     full_name: str | None = None   # Optional — HPCSA is the sole identifier
@@ -241,18 +373,19 @@ class ShiftLookupResponse(BaseModel):
     shift_started_at: str   # ISO timestamp
 
 @router.post("/lookup-hpcsa", response_model=ShiftLookupResponse)
-async def crew_lookup_by_hpcsa(body: ShiftLookupRequest, db: AsyncSession = Depends(get_db)):
+async def crew_lookup_by_hpcsa(
+    body: ShiftLookupRequest,
+    db: AsyncSession = Depends(get_db),
+    grant: str | None = Depends(portal_grant_scheme),
+):
+    """Identify a crew member by HPCSA number for the shift-start flow.
+
+    REQUIRES a device unlock (portal grant) or an existing crew token for the
+    same provider. An HPCSA number is a semi-public professional registration
+    number and this endpoint mints a 12-hour patient-record token, so it must
+    never stand on the HPCSA number alone.
     """
-    Authenticate a crew member by HPCSA number + name for the shift-start flow.
-    Used on mobile where email/password login is replaced by HPCSA card scan / manual entry.
-    """
-    # Look up by HPCSA number within the given provider
-    provider_result = await db.execute(
-        select(ServiceProvider).where(ServiceProvider.slug == body.provider_slug.strip().lower())
-    )
-    provider = provider_result.scalar_one_or_none()
-    if not provider or not provider.is_active:
-        raise HTTPException(status_code=404, detail="Provider not found")
+    provider = await require_portal_grant(body.provider_slug, grant, db)
 
     crew_result = await db.execute(
         select(CrewMember).where(
@@ -336,20 +469,19 @@ class ShiftStartByIdResponse(BaseModel):
     shift_started_at: str
 
 @router.post("/shift-start-by-id", response_model=ShiftStartByIdResponse)
-async def shift_start_by_id(body: ShiftStartByIdRequest, db: AsyncSession = Depends(get_db)):
+async def shift_start_by_id(
+    body: ShiftStartByIdRequest,
+    db: AsyncSession = Depends(get_db),
+    grant: str | None = Depends(portal_grant_scheme),
+):
     """Start a shift for a crew member selected by name from a dropdown.
-    No password required — the company-wide portal login already authenticated the user.
-    The partner_name (assisting crew) is stored in the token so the PRF form can pre-fill it.
+
+    REQUIRES a device unlock (portal grant) proving the company password was
+    entered on this device, or an existing crew token for the same provider.
+    Selecting a name is identification, not authentication — without this gate
+    anyone holding a crew UUID could mint a 12-hour patient-record token.
     """
-    provider_result = await db.execute(
-        select(ServiceProvider).where(
-            ServiceProvider.slug == body.provider_slug.strip().lower(),
-            ServiceProvider.is_active == True,
-        )
-    )
-    provider = provider_result.scalar_one_or_none()
-    if not provider:
-        raise HTTPException(status_code=404, detail="Provider not found")
+    provider = await require_portal_grant(body.provider_slug, grant, db)
 
     crew_result = await db.execute(
         select(CrewMember).where(

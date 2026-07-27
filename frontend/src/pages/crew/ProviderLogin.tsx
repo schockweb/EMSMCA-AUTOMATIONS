@@ -17,6 +17,7 @@ import InstallAppButton from '../../components/InstallAppButton';
 import StartShiftWizard from './StartShiftWizard';
 import type { CrewOption, VehicleOption } from './StartShiftWizard';
 import { saveAdminSession, ensureProviderSession } from '../../utils/crewSession';
+import { getPortalGrant, savePortalGrant, grantHeaders } from '../../utils/portalGrant';
 
 interface ProviderInfo {
   name: string;
@@ -41,6 +42,34 @@ export default function ProviderLogin() {
   const [crewList, setCrewList] = useState<CrewOption[]>([]);
   const [vehicleList, setVehicleList] = useState<VehicleOption[]>([]);
   const [showShiftForm, setShowShiftForm] = useState(false);
+
+  // ── Device unlock ──────────────────────────────────────────────────────
+  // The crew/vehicle lists and the shift-start endpoints now require proof the
+  // company password was entered on this device. Without it anyone could post a
+  // crew UUID and receive a 12-hour patient-record token.
+  const [unlocked, setUnlocked] = useState<boolean>(() => !!getPortalGrant(providerSlug));
+  const [unlockPassword, setUnlockPassword] = useState('');
+  const [unlockError, setUnlockError] = useState('');
+  const [unlockLoading, setUnlockLoading] = useState(false);
+
+  const handleUnlock = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!providerSlug) return;
+    setUnlockError('');
+    setUnlockLoading(true);
+    try {
+      const res = await axios.post('/api/crew/portal-unlock', {
+        provider_slug: providerSlug,
+        password: unlockPassword,
+      });
+      savePortalGrant(providerSlug, res.data.grant);
+      setUnlockPassword('');
+      setUnlocked(true);
+    } catch (err: any) {
+      setUnlockError(err.response?.data?.detail || 'Incorrect company password');
+    }
+    setUnlockLoading(false);
+  };
 
   // Freeze background scroll for the whole full-screen portal using the shared
   // iOS-safe (position:fixed) lock. Because the page stays locked the entire
@@ -70,20 +99,24 @@ export default function ProviderLogin() {
 
   // Load crew and vehicle list
   useEffect(() => {
-    if (!providerSlug) return;
-    axios.get(`/api/providers/${providerSlug}/public-crew`)
+    if (!providerSlug || !unlocked) return;
+    const cfg = { headers: grantHeaders(providerSlug) };
+    axios.get(`/api/providers/${providerSlug}/public-crew`, cfg)
       .then(res => {
         const data = res.data;
         setCrewList(Array.isArray(data) ? data : []);
       })
-      .catch(() => {});
-    axios.get(`/api/providers/${providerSlug}/public-vehicles`)
+      .catch(err => {
+        // Grant expired or rejected — fall back to the unlock prompt.
+        if (err?.response?.status === 401 || err?.response?.status === 403) setUnlocked(false);
+      });
+    axios.get(`/api/providers/${providerSlug}/public-vehicles`, cfg)
       .then(res => {
         const data = res.data;
         setVehicleList(Array.isArray(data) ? data : []);
       })
       .catch(() => {});
-  }, [providerSlug]);
+  }, [providerSlug, unlocked]);
 
   // ── Admin Login ──
   const handleAdminLogin = async (e: FormEvent) => {
@@ -207,6 +240,44 @@ export default function ProviderLogin() {
             {/* Start Shift Button — deliberately the same btn-primary teal as
                 "Sign In as Admin" above it, so the two entry points read as one
                 system rather than two different actions. */}
+            {/* Device unlock — one company password per device per shift.
+                Selecting a name from a dropdown identifies a crew member; it
+                does not authenticate them, so the shift-start endpoints require
+                this first. */}
+            {!unlocked ? (
+              <form onSubmit={handleUnlock}>
+                <label
+                  htmlFor="portal-unlock"
+                  style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6 }}
+                >
+                  Company password
+                </label>
+                <input
+                  id="portal-unlock"
+                  type="password"
+                  className="input"
+                  autoComplete="current-password"
+                  placeholder="Unlock this device"
+                  value={unlockPassword}
+                  onChange={e => setUnlockPassword(e.target.value)}
+                  style={{ width: '100%', marginBottom: 10 }}
+                />
+                {unlockError && (
+                  <div style={{ color: '#f87171', fontSize: '0.8rem', marginBottom: 10 }}>{unlockError}</div>
+                )}
+                <button
+                  type="submit"
+                  disabled={unlockLoading || !unlockPassword}
+                  className="btn btn-primary btn-lg"
+                  style={{ width: '100%' }}
+                >
+                  {unlockLoading ? 'Unlocking…' : 'Unlock to Start Shift'}
+                </button>
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 8, textAlign: 'center' }}>
+                  Ask your manager for the company password. You only need it once on this device.
+                </div>
+              </form>
+            ) : (
             <div>
               <button
                 type="button"
@@ -217,6 +288,7 @@ export default function ProviderLogin() {
                 Start Shift
               </button>
             </div>
+            )}
 
             {/* Install-as-app affordance — renders only when installable and
                 not already running as an installed PWA. Hidden while the Start

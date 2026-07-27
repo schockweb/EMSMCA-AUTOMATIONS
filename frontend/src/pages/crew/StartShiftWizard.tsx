@@ -13,6 +13,7 @@ import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { grantHeaders } from '../../utils/portalGrant';
 import { saveShiftSession } from '../../utils/crewSession';
 
 export interface CrewOption {
@@ -74,7 +75,7 @@ export default function StartShiftWizard({
         partner_name: partnerName || undefined,
         vehicle_id: selectedVehicleId,
         vehicle_callsign: vehicleCallsign,
-      });
+      }, { headers: grantHeaders(providerSlug) });
       const data = res.data;
 
       // First assisting crew → crew2_profile (backend hand-off).

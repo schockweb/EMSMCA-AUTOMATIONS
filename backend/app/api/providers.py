@@ -18,6 +18,7 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy import select, func, or_, cast, Text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.crew_auth import portal_grant_scheme, require_portal_grant
 from app.config import get_settings
 from app.database import get_db
 from app.models.service_provider import ServiceProvider
@@ -382,17 +383,17 @@ async def portal_login(slug: str, body: PortalLoginRequest, db: AsyncSession = D
 
 
 @router.get("/{slug}/public-vehicles")
-async def list_vehicles_public_by_slug(slug: str, db: AsyncSession = Depends(get_db)):
-    """List active vehicles for a provider by slug. No auth — used in crew shift-start flow."""
-    provider_result = await db.execute(
-        select(ServiceProvider).where(
-            ServiceProvider.slug == slug.strip().lower(),
-            ServiceProvider.is_active == True,
-        )
-    )
-    provider = provider_result.scalar_one_or_none()
-    if not provider:
-        raise HTTPException(status_code=404, detail="Provider not found")
+async def list_vehicles_public_by_slug(
+    slug: str,
+    db: AsyncSession = Depends(get_db),
+    grant: str | None = Depends(portal_grant_scheme),
+):
+    """List active vehicles for the shift-start dropdown.
+
+    Gated behind the same device unlock as public-crew — fleet callsigns and
+    registrations are operational data, and the two lists are fetched together.
+    """
+    provider = await require_portal_grant(slug, grant, db)
 
     vehicle_result = await db.execute(
         select(Vehicle)
@@ -411,21 +412,22 @@ async def list_vehicles_public_by_slug(slug: str, db: AsyncSession = Depends(get
 
 
 @router.get("/{slug}/public-crew")
-async def list_crew_public_by_slug(slug: str, db: AsyncSession = Depends(get_db)):
-    """List active crew members for a provider by slug. No auth — used in
-    the shift-start flow so the crew can pick their name from a dropdown
-    instead of typing an HPCSA number. The HPCSA number is still returned
-    so the existing /lookup-hpcsa flow can run unchanged once the crew
-    selects themselves."""
-    provider_result = await db.execute(
-        select(ServiceProvider).where(
-            ServiceProvider.slug == slug.strip().lower(),
-            ServiceProvider.is_active == True,
-        )
-    )
-    provider = provider_result.scalar_one_or_none()
-    if not provider:
-        raise HTTPException(status_code=404, detail="Provider not found")
+async def list_crew_public_by_slug(
+    slug: str,
+    db: AsyncSession = Depends(get_db),
+    grant: str | None = Depends(portal_grant_scheme),
+):
+    """List active crew for the shift-start dropdown.
+
+    REQUIRES a device unlock (portal grant) or a crew token for this provider.
+    Despite the name this was never safe to expose publicly: it returned each
+    crew member's UUID and HPCSA number, which were exactly the inputs
+    /api/crew/shift-start-by-id and /api/crew/lookup-hpcsa needed to mint a
+    12-hour patient-record token — so it functioned as the directory for an
+    unauthenticated account-takeover. The HPCSA number is no longer returned;
+    nothing in the dropdown needs it.
+    """
+    provider = await require_portal_grant(slug, grant, db)
 
     crew_result = await db.execute(
         select(CrewMember)
@@ -440,7 +442,6 @@ async def list_crew_public_by_slug(slug: str, db: AsyncSession = Depends(get_db)
         {
             "id": str(c.id),
             "full_name": c.full_name,
-            "hpcsa_number": c.hpcsa_number,
             "qualification": c.qualification,
         }
         for c in crew_result.scalars().all()

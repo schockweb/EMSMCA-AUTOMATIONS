@@ -11,6 +11,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 // overwrite the crew token with the admin access_token and, on a 401, redirect
 // to the admin /login instead of the provider login.
 import axios from 'axios';
+import { grantHeaders } from '../../utils/portalGrant';
 import { useScrollLock } from '../../hooks/useScrollLock';
 import {
   getCrewToken,
@@ -147,7 +148,7 @@ export default function CrewDashboard() {
       const r = await axios.post('/api/crew/lookup-hpcsa', {
         hpcsa_number: hpcsa,
         provider_slug: providerSlug,
-      });
+      }, { headers: grantHeaders(providerSlug) });
       const newProfile = {
         id: r.data.crew_id,
         name: r.data.full_name,
@@ -212,7 +213,7 @@ export default function CrewDashboard() {
     // Crew roster for the name-dropdown. Failures here aren't surfaced as
     // a blocker — the start-shift screen still works if the crew types
     // the HPCSA number directly into the underlying value.
-    axios.get(`/api/providers/${providerSlug}/public-crew`)
+    axios.get(`/api/providers/${providerSlug}/public-crew`, { headers: grantHeaders(providerSlug) })
       .then(res => { const d = res.data; setCrewRoster(Array.isArray(d) ? d : []); })
       .catch(() => { /* silent — dropdown just shows empty list */ });
 
@@ -351,7 +352,7 @@ export default function CrewDashboard() {
       const res1 = await axios.post('/api/crew/lookup-hpcsa', {
         hpcsa_number: c1.trim(),
         provider_slug: providerSlug,
-      });
+      }, { headers: grantHeaders(providerSlug) });
       const newToken = res1.data.access_token;
       const crew1Profile = {
         id: res1.data.crew_id,
@@ -373,7 +374,7 @@ export default function CrewDashboard() {
         axios.post('/api/crew/lookup-hpcsa', {
           hpcsa_number: h.trim(),
           provider_slug: providerSlug,
-        })
+        }, { headers: grantHeaders(providerSlug) })
       ));
       const extraProfiles = lookups.map(r => ({
         id: r.data.crew_id,
