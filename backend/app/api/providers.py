@@ -72,18 +72,28 @@ async def get_admin_or_crew_admin(
     crew_token: str = Depends(crew_oauth2_scheme),
     db: AsyncSession = Depends(get_db),
 ):
-    """Accept either an admin user token OR a crew admin token."""
-    from app.utils.security import decode_token as _decode
+    """Accept either an admin user token OR a crew admin token.
+
+    Mirrors the checks get_current_user performs. This used to decode the token
+    and return the user on existence alone: it never consulted the blacklist and
+    never looked at is_active, so on the ~32 endpoints guarded by this dependency
+    logging out did nothing and a deactivated admin kept full access until their
+    token expired.
+    """
+    from app.utils.security import decode_token as _decode, is_token_blacklisted as _blacklisted
     # Try admin token first
     if admin_token:
         try:
             payload = _decode(admin_token)
-            if payload.get("token_scope") != "crew":
-                from app.models.user import User as _U
-                result = await db.execute(select(_U).where(_U.id == payload.get("sub")))
-                user = result.scalar_one_or_none()
-                if user:
-                    return user
+            # A refresh token must not authenticate an API call.
+            if payload.get("token_scope") != "crew" and payload.get("type") == "access":
+                jti = payload.get("jti")
+                if not (jti and await _blacklisted(jti, db)):
+                    from app.models.user import User as _U
+                    result = await db.execute(select(_U).where(_U.id == payload.get("sub")))
+                    user = result.scalar_one_or_none()
+                    if user and user.is_active:
+                        return user
         except Exception:
             pass
     # Try crew token
@@ -91,11 +101,13 @@ async def get_admin_or_crew_admin(
         try:
             payload = _decode(crew_token)
             if payload.get("token_scope") == "crew":
-                crew_id = payload.get("crew_id")
-                result = await db.execute(select(CrewMember).where(CrewMember.id == crew_id))
-                crew = result.scalar_one_or_none()
-                if crew and crew.is_active:
-                    return crew
+                jti = payload.get("jti")
+                if not (jti and await _blacklisted(jti, db)):
+                    crew_id = payload.get("crew_id")
+                    result = await db.execute(select(CrewMember).where(CrewMember.id == crew_id))
+                    crew = result.scalar_one_or_none()
+                    if crew and crew.is_active:
+                        return crew
         except Exception:
             pass
     raise HTTPException(status_code=401, detail="Not authenticated")

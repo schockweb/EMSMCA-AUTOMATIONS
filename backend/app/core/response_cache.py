@@ -46,10 +46,15 @@ NEVER_CACHE_SUFFIXES = ("/case-status",)
 
 
 class ResponseCacheMiddleware(BaseHTTPMiddleware):
+    # Set on construction so logout can purge a session's entries. The cache is
+    # per-worker and in-memory, so this reference is per-worker too.
+    _instance: "ResponseCacheMiddleware | None" = None
+
     def __init__(self, app: ASGIApp):
         super().__init__(app)
-        # store: cache_key → {"body": bytes, "headers": list, "expires": float}
+        # store: cache_key → {"body", "headers", "expires", "path", "auth_fp"}
         self._store: dict[str, dict] = {}
+        ResponseCacheMiddleware._instance = self
 
     # ── helpers ──────────────────────────────────────────────────────────────
 
@@ -82,6 +87,11 @@ class ResponseCacheMiddleware(BaseHTTPMiddleware):
         raw = f"GET:{request.url.path}?{request.url.query}|{auth_fp}"
         return hashlib.md5(raw.encode()).hexdigest()
 
+    @staticmethod
+    def auth_fingerprint(authorization_header: str) -> str:
+        """Fingerprint used to namespace cache entries by session."""
+        return hashlib.sha256((authorization_header or "").encode()).hexdigest()
+
     def _invalidate_prefix(self, path: str) -> None:
         """On write operations, drop all cached entries whose stored path shares
         the same API prefix. Cache keys are MD5 hashes so we cannot match on
@@ -106,12 +116,14 @@ class ResponseCacheMiddleware(BaseHTTPMiddleware):
             return None
         return entry
 
-    def _set_cached(self, key: str, body: bytes, headers: list, ttl: int, path: str = "") -> None:
+    def _set_cached(self, key: str, body: bytes, headers: list, ttl: int,
+                    path: str = "", auth_fp: str = "") -> None:
         self._store[key] = {
             "body": body,
             "headers": headers,
             "expires": time.monotonic() + ttl,
-            "path": path,   # stored so invalidation can match by prefix
+            "path": path,       # stored so invalidation can match by prefix
+            "auth_fp": auth_fp, # stored so logout can purge one session
         }
 
     # ── request handling ─────────────────────────────────────────────────────
@@ -158,7 +170,8 @@ class ResponseCacheMiddleware(BaseHTTPMiddleware):
                 (k, v) for k, v in response.headers.items()
                 if k.lower() not in ("content-length",)
             ]
-            self._set_cached(key, body, headers, ttl, path=path)
+            self._set_cached(key, body, headers, ttl, path=path,
+                             auth_fp=self.auth_fingerprint(request.headers.get("Authorization", "")))
             logger.debug(f"Cache MISS {path} — cached for {ttl}s")
 
             return Response(
@@ -169,3 +182,23 @@ class ResponseCacheMiddleware(BaseHTTPMiddleware):
             )
 
         return response
+
+
+# ── Revocation support ───────────────────────────────────────────────────
+#
+# This middleware answers a cache HIT *before* the route runs, which means the
+# route's auth dependency never executes. A token that has just been logged out
+# (or whose account was deactivated) therefore kept reading cached data until the
+# entry expired — up to 5 minutes on some prefixes. Purging the session's entries
+# on logout forces a MISS, so the next request reaches the dependency and is
+# correctly refused.
+
+def purge_session_cache(authorization_header: str) -> int:
+    """Drop every cached entry belonging to one session. Returns the count."""
+    inst = ResponseCacheMiddleware._instance
+    if inst is None:
+        return 0
+    fp = ResponseCacheMiddleware.auth_fingerprint(authorization_header)
+    before = len(inst._store)
+    inst._store = {k: v for k, v in inst._store.items() if v.get("auth_fp") != fp}
+    return before - len(inst._store)

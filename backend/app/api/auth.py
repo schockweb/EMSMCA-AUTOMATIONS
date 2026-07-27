@@ -213,6 +213,16 @@ async def refresh_token(
             detail="User no longer exists",
         )
 
+    # A deactivated account must stop refreshing immediately. Without this a
+    # disabled user keeps minting fresh token pairs for the refresh token's
+    # remaining 7 days; get_current_user would reject the resulting access
+    # tokens, but the credential should die at the source, not downstream.
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Account is deactivated",
+        )
+
     # Blacklist the old refresh token so it can't be reused
     if old_jti:
         exp = datetime.fromtimestamp(payload.get("exp", 0), tz=timezone.utc)
@@ -265,6 +275,17 @@ async def logout(
 
     await db.commit()
 
+    # The response cache answers a HIT before the route runs, so its auth
+    # dependency never executes. Without this purge a just-logged-out token
+    # keeps reading cached data until the entry expires (up to 5 minutes).
+    try:
+        from app.core.response_cache import purge_session_cache
+        dropped = purge_session_cache(request.headers.get("Authorization", ""))
+        if dropped:
+            logger.info("Logout purged %d cached responses", dropped)
+    except Exception:  # never let cache housekeeping break logout
+        pass
+
     client_ip = get_trusted_client_ip(request)
     logger.info("User %s logged out from ip=%s", user_id, client_ip)
 
@@ -281,5 +302,9 @@ async def get_me(current_user: User = Depends(get_current_user)):
         role=current_user.role.value,
         bhf_practice_number=current_user.bhf_practice_number,
         is_active=current_user.is_active,
-        permissions=current_user.permissions or list(ALL_PERMISSIONS),
+        # `or` would treat an EMPTY list as "unset" and grant EVERY permission —
+        # so deliberately stripping a user to no permissions used to hand them
+        # the full set. Only a genuine NULL means "not configured".
+        permissions=(list(ALL_PERMISSIONS) if current_user.permissions is None
+                     else current_user.permissions),
     )

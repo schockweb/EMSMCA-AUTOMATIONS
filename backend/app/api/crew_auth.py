@@ -25,6 +25,9 @@ from app.utils.security import (
     decode_token,
     MAX_FAILED_ATTEMPTS,
     LOCKOUT_DURATION_MINUTES,
+    blacklist_token,
+    is_token_blacklisted,
+    validate_password_complexity,
 )
 
 logger = logging.getLogger("ems.crew_auth")
@@ -83,6 +86,13 @@ async def get_current_crew(
     crew_id = payload.get("crew_id")
     if not crew_id or payload.get("token_scope") != "crew":
         raise HTTPException(status_code=401, detail="Invalid crew token")
+
+    # Honour revocation. The admin dependency has always done this; the crew one
+    # did not, so a crew token could not be invalidated by ANY means short of
+    # waiting out its 12 hours — End Shift only cleared localStorage.
+    jti = payload.get("jti")
+    if jti and await is_token_blacklisted(jti, db):
+        raise HTTPException(status_code=401, detail="Session ended")
     result = await db.execute(select(CrewMember).where(CrewMember.id == crew_id))
     crew = result.scalar_one_or_none()
     if not crew or not crew.is_active:
@@ -205,17 +215,36 @@ async def crew_profile(
     )
 
 
+class CrewPasswordChange(BaseModel):
+    current_password: str
+    new_password: str
+
+
 @router.post("/change-password")
 async def crew_change_password(
-    current_password: str,
-    new_password: str,
+    body: CrewPasswordChange,
     crew: CrewMember = Depends(get_current_crew),
     db: AsyncSession = Depends(get_db),
 ):
-    """Change the crew member's password."""
-    if not verify_password(current_password, crew.hashed_password):
+    """Change the crew member's password.
+
+    Both fields arrive in the REQUEST BODY. They were previously bare scalar
+    parameters, which FastAPI binds from the QUERY STRING — so every password
+    change sent both the old and the new password in the URL, where they were
+    recorded verbatim in nginx access logs, browser history and any referrer.
+    """
+    # Thread-offloaded: bcrypt is ~200ms of CPU and would stall the event loop.
+    if not await verify_password_async(body.current_password, crew.hashed_password):
         raise HTTPException(status_code=400, detail="Current password is incorrect")
-    crew.hashed_password = hash_password(new_password)
+
+    try:
+        validate_password_complexity(body.new_password)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    crew.hashed_password = hash_password(body.new_password)
+    crew.failed_login_attempts = 0
+    crew.locked_until = None
     await db.commit()
     return {"message": "Password updated successfully"}
 
@@ -533,3 +562,30 @@ async def shift_start_by_id(
         vehicle_callsign=body.vehicle_callsign,
         shift_started_at=now.isoformat(),
     )
+
+
+@router.post("/logout")
+async def crew_logout(
+    token: str = Depends(crew_oauth2_scheme),
+    db: AsyncSession = Depends(get_db),
+):
+    """End a crew session server-side.
+
+    Until this existed a crew token could not be revoked at all: clearing the
+    device only removed the local copy, so a token captured from a lost or
+    shared tablet stayed valid for its full 12 hours and no administrator could
+    do anything about it.
+    """
+    if not token:
+        return {"message": "No active session"}
+    try:
+        payload = decode_token(token)
+    except HTTPException:
+        return {"message": "Session already invalid"}
+
+    jti = payload.get("jti")
+    if jti:
+        exp = datetime.fromtimestamp(payload.get("exp", 0), tz=timezone.utc)
+        await blacklist_token(jti, payload.get("crew_id"), "access", exp, db)
+        await db.commit()
+    return {"message": "Session ended"}

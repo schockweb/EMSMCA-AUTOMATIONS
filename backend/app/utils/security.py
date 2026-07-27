@@ -144,6 +144,17 @@ async def get_current_user(
     db: AsyncSession = Depends(get_db),
 ) -> User:
     payload = decode_token(token)
+
+    # A refresh token must never work as an access token. Both are signed with
+    # the same key and carry `sub`, so without this check a 7-day refresh
+    # credential authenticates every bearer-guarded endpoint — turning a
+    # long-lived token meant only for rotation into a long-lived API key.
+    if payload.get("type") != "access":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token type",
+        )
+
     user_id = payload.get("sub")
     if user_id is None:
         raise HTTPException(
