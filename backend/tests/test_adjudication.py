@@ -28,7 +28,14 @@ async def test_adjudication_scrub_no_claim(client):
         json={"claim_id": fake_id},
         headers=headers,
     )
-    assert response.status_code in (404, 422, 500)
+    # The in-form adjudication scrub is DELIBERATELY PARKED: the handler returns
+    # an empty no-op result before it ever looks the claim up, so that scheme
+    # rules can never block a crew mid-call. A non-existent claim therefore
+    # returns 200 with no findings rather than 404. This test asserted the
+    # pre-parking behaviour. Do not "fix" this by making the endpoint fail on an
+    # unknown claim — that would reintroduce mid-call blocking.
+    assert response.status_code == 200
+    assert not response.json().get("blockers"), "the parked scrub must never emit blockers"
 
 
 @pytest.mark.asyncio
