@@ -12,12 +12,22 @@
 #   docker compose -f docker-compose.prod.yml logs -f
 # ═══════════════════════════════════════════════════════════
 
+# Cap container logs. Docker's json-file driver is unbounded by default:
+# a crash-looping container (ems_flower did 2659 restarts) or an exception
+# storm can fill the disk in hours, which breaks everything at once.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+
 services:
   # ── Redis — rate limiting + response cache ───────────────
   # Backs the login rate limiter (shared sliding-window counters across
   # gunicorn workers) and the response cache. Dev has had this all along;
   # without it both features silently fail open. No ports exposed.
   redis:
+    logging: *default-logging
     image: redis:7.2-alpine
     container_name: ems_redis
     restart: unless-stopped
@@ -43,6 +53,7 @@ services:
   # Gunicorn + Uvicorn workers.
   # No ports exposed — Nginx reverse-proxies to this container.
   ems_backend:
+    logging: *default-logging
     build:
       context: ./backend
       dockerfile: Dockerfile.prod
@@ -75,6 +86,7 @@ services:
   # Ports 80 and 443 are exposed to the host for HTTP/HTTPS.
   # SSL certificates are managed by Certbot (see below).
   ems_nginx:
+    logging: *default-logging
     build:
       context: ./frontend
       dockerfile: Dockerfile.prod
@@ -116,6 +128,7 @@ services:
   #
   # Auto-renewal: the entrypoint runs 'certbot renew' every 12h.
   ems_certbot:
+    logging: *default-logging
     image: certbot/certbot:latest
     container_name: ems_certbot
     restart: unless-stopped

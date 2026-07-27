@@ -13,12 +13,22 @@
 #   docker compose -f docker-compose.worker.yml logs -f
 # ═══════════════════════════════════════════════════════════
 
+# Cap container logs. Docker's json-file driver is unbounded by default:
+# a crash-looping container (ems_flower did 2659 restarts) or an exception
+# storm can fill the disk in hours, which breaks everything at once.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+
 services:
   # ── RabbitMQ Message Broker ─────────────────────────────
   # Handles Celery task queues (OCR, adjudication, email, etc.)
   # Port 5672: AMQP (internal only — not exposed to host)
   # Port 15672: Management UI (localhost only, SSH tunnel access)
   ems_rabbitmq:
+    logging: *default-logging
     image: rabbitmq:3.13-management-alpine
     container_name: ems_rabbitmq
     restart: unless-stopped
@@ -58,6 +68,7 @@ services:
   # - 12 concurrent workers (CX42 has 8 vCPU, allow oversubscription
   #   since many tasks are I/O-bound API calls)
   ems_celery_worker:
+    logging: *default-logging
     build:
       context: ./backend
       dockerfile: Dockerfile.prod
@@ -96,6 +107,7 @@ services:
   # (the worker executes them), so it needs the broker but not the DB.
   # Exactly ONE beat instance must ever run — it's a scheduler, not a worker.
   ems_celery_beat:
+    logging: *default-logging
     build:
       context: ./backend
       dockerfile: Dockerfile.prod
@@ -126,37 +138,14 @@ services:
       disable: true
     networks:
       - ems_worker_net
+  # ── Flower (Celery monitoring UI) — REMOVED 2026-07-27 ──
+  # The image never had the `flower` package installed, so the container
+  # crash-looped 2659 times ('No such command flower') while appearing to be
+  # a running service. It was stopped by hand twice and resurrected both times
+  # by a routine `compose up`, because the service definition still existed.
+  # Deleted rather than left broken. To reinstate: add `flower` to
+  # backend/requirements.txt, rebuild, and restore this service block.
 
-  # ── Flower — Celery Monitoring Dashboard ────────────────
-  # Web UI for monitoring task queues, workers, and task history.
-  # Only bound to localhost:5555 — access via SSH tunnel:
-  #   ssh -L 5555:127.0.0.1:5555 deploy@worker-server
-  ems_flower:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile.prod
-    container_name: ems_flower
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 512M
-    env_file:
-      - .env.prod
-    ports:
-      - "127.0.0.1:5555:5555"         # Localhost only — SSH tunnel access
-    depends_on:
-      ems_rabbitmq:
-        condition: service_healthy
-    command: >
-      celery -A app.tasks.celery_app flower
-      --port=5555
-      --broker_api=http://${RABBITMQ_USER}:${RABBITMQ_PASS}@ems_rabbitmq:15672/api/
-      --persistent=True
-      --db=/app/logs/flower.db
-    networks:
-      - ems_worker_net
 
 # ── Volumes ───────────────────────────────────────────────
 volumes:
