@@ -61,3 +61,17 @@ nul
 backend/golden_claims*.csv
 backend/golden_claims*.json
 backend/golden_claims_report*
+
+# ── Database dumps / backups — NEVER commit these ─────────────────────────
+# Two full PostgreSQL dumps containing user, crew, case and PRF tables were
+# committed on 2026-05-28/06-01 and sat in a PUBLIC repo until 2026-07-27.
+# They were purged from history; these rules stop a recurrence.
+*.sql
+*.sql.gz
+*.dump
+database_backup*
+backup_*.sql
+/backups/
+# ...but real migration SQL must stay tracked:
+!backend/migrations/*.sql
+!backend/alembic/**/*.sql

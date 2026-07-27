@@ -95,7 +95,11 @@ Document states: `PENDING → PREPROCESSING → EXTRACTING → COMPLETED`
 - JWT (HS256) access tokens + 7-day refresh tokens
 - Roles: `SUPER_ADMIN`, `ADMIN`, `USER`; fine-grained permissions (e.g., `rule_builder`, `dashboard`)
 - At-rest protection: TLS to the DB + Azure storage encryption + access controls. NOTE: patient ID numbers are NOT field-encrypted (column is String(13) — too small for a Fernet token; no encrypt call on the write path). `ENCRYPTION_KEY`/Fernet currently encrypts provider SMTP app passwords only. Field-level encryption of patient IDs is a tracked post-pilot task — do not claim it anywhere until implemented.
-- Default seed admin: `admin@emsclaims.co.za` / `Admin@2024!` (dev only)
+- Default seed admin email: `admin@emsclaims.co.za`. The seed password is set from
+  the `SEED_ADMIN_PASSWORD` env var and is NEVER to be written down here — the
+  previous hard-coded default was published in this file while the repo was
+  public (2026-05-27 → 2026-07-27) and is permanently burned. Rotate with
+  `backend/rotate_admin_password.py`; seeding is disabled outside development.
 
 ## Environment Variables
 
