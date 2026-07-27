@@ -26,6 +26,42 @@ const DIM      = '#94a3b8';      // placeholder / empty marker
 const LN       = '#088395';      // borders (brand teal)
 const SOFT_BG  = '#f8fafc';      // empty-state background
 
+// ── Vitals table rows (PRINT schema) ─────────────────────────────────
+// [label, form-data key] for the vitals table, shared by page 2 and the
+// continuation sheet so the two can never drift apart.
+// Deliberately DISTINCT from VS_QUICK/VS_FULL in DigitalPRFForm: those are the
+// crew INPUT schema (widget metadata, units in the label), this is the compact
+// PRINT schema, and it carries `gcs_total`, which is derived rather than typed.
+const VITALS_PDF_ROWS = ([
+  ['Resp. Rate', 'resp_rate'],
+  ['Rhythm',     'rhythm'],
+  ['A/E',        'ae'],
+  ['SpO₂ %',     'spo2'],
+  ['% Oxygen',   'o2_percent'],
+  ['HR',         'hr'],
+  ['ECG/Rhythm', 'ecg'],
+  ['Cap Refill', 'cap_refill'],
+  ['Perfusion',  'perfusion'],
+  ['BP',         'bp'],
+  ['GCS Eyes',   'gcs_e'],
+  ['GCS Voice',  'gcs_v'],
+  ['GCS Motor',  'gcs_m'],
+  ['GCS Total',  'gcs_total'],
+  ['Pupil Size L', 'pupil_size_l'],
+  ['Pupil Size R', 'pupil_size_r'],
+  ['Pupil React','pupil_react'],
+  ['Neuro Def',  'neuro_def'],
+  ['HGT',        'hgt'],
+  ['Temp',       'temp'],
+  ['Pain /10',   'pain'],
+  ['Vent Mode',  'vent_mode'],
+  ['ETCO₂',      'etco2'],
+  ['Tidal Vol',  'tidal_vol'],
+  ['Min Vol',    'min_vol'],
+  ['Peep/CPAP',  'peep_cpap'],
+  ['Pacing',     'pacing'],
+] as const);
+
 // ── Formatters ───────────────────────────────────────────────────────
 const pad = (n: number) => String(n).padStart(2, '0');
 function fmtTime(iso: string | null | undefined): string {
@@ -970,7 +1006,6 @@ export default function PRFView() {
   const km = prf.kms || {};
   const prov = prf.provider || {};
   const vehicle = prf.vehicle || {};
-  const isTransfer = (fd.call_type || '').toUpperCase() !== 'PRIMARY';
 
   const vitals: any[] = Array.isArray(fd.vitals_sets) ? fd.vitals_sets : [];
   // The clinical page (page 2) is sized for at most 3 vital-sets columns
@@ -1018,11 +1053,6 @@ export default function PRFView() {
     ] : []),
     { label: 'Available',           t: 'time_available',      k: 'km_available'      },
   ];
-
-  const priorityColors: Record<string, string> = {
-    RED: '#dc2626', ORANGE: '#ea580c', YELLOW: '#d97706',
-    GREEN: '#16a34a', BLUE: '#2563eb',
-  };
 
   // Must cover EVERY field the Return Trip block renders (see the FieldRow
   // stack below) — a guard that misses one silently drops captured times from
@@ -2537,37 +2567,9 @@ export default function PRFView() {
                   call. Drops vent/ETCO₂/tidal-vol/etc. rows for
                   non-ventilated patients, saving the height we need to keep
                   the page within A4-landscape aspect. */}
-              {(([
-                ['Resp. Rate', 'resp_rate'],
-                ['Rhythm',     'rhythm'],
-                ['A/E',        'ae'],
-                ['SpO₂ %',     'spo2'],
-                ['% Oxygen',   'o2_percent'],
-                ['HR',         'hr'],
-                ['ECG/Rhythm', 'ecg'],
-                ['Cap Refill', 'cap_refill'],
-                ['Perfusion',  'perfusion'],
-                ['BP',         'bp'],
-                ['GCS Eyes',   'gcs_e'],
-                ['GCS Voice',  'gcs_v'],
-                ['GCS Motor',  'gcs_m'],
-                ['GCS Total',  'gcs_total'],
-                ['Pupil Size L', 'pupil_size_l'],
-                ['Pupil Size R', 'pupil_size_r'],
-                ['Pupil React','pupil_react'],
-                ['Neuro Def',  'neuro_def'],
-                ['HGT',        'hgt'],
-                ['Temp',       'temp'],
-                ['Pain /10',   'pain'],
-                ['Vent Mode',  'vent_mode'],
-                ['ETCO₂',      'etco2'],
-                ['Tidal Vol',  'tidal_vol'],
-                ['Min Vol',    'min_vol'],
-                ['Peep/CPAP',  'peep_cpap'],
-                ['Pacing',     'pacing'],
-              ] as const).filter(([, key]) =>
+              {VITALS_PDF_ROWS.filter(([, key]) =>
                 vitals.some((v: any) => !isBlank(v?.[key]))
-              )).map(([label, key]) => (
+              ).map(([label, key]) => (
                 <Row key={key} label={label} keyName={key} vitals={vitalsPage1} cols={vitalsCols} />
               ))}
             </div>
@@ -2677,37 +2679,9 @@ export default function PRFView() {
                 }}>{vitalsOverflow[i]?.time || ''}</div>
               ))}
 
-              {(([
-                ['Resp. Rate', 'resp_rate'],
-                ['Rhythm',     'rhythm'],
-                ['A/E',        'ae'],
-                ['SpO₂ %',     'spo2'],
-                ['% Oxygen',   'o2_percent'],
-                ['HR',         'hr'],
-                ['ECG/Rhythm', 'ecg'],
-                ['Cap Refill', 'cap_refill'],
-                ['Perfusion',  'perfusion'],
-                ['BP',         'bp'],
-                ['GCS Eyes',   'gcs_e'],
-                ['GCS Voice',  'gcs_v'],
-                ['GCS Motor',  'gcs_m'],
-                ['GCS Total',  'gcs_total'],
-                ['Pupil Size L', 'pupil_size_l'],
-                ['Pupil Size R', 'pupil_size_r'],
-                ['Pupil React','pupil_react'],
-                ['Neuro Def',  'neuro_def'],
-                ['HGT',        'hgt'],
-                ['Temp',       'temp'],
-                ['Pain /10',   'pain'],
-                ['Vent Mode',  'vent_mode'],
-                ['ETCO₂',      'etco2'],
-                ['Tidal Vol',  'tidal_vol'],
-                ['Min Vol',    'min_vol'],
-                ['Peep/CPAP',  'peep_cpap'],
-                ['Pacing',     'pacing'],
-              ] as const).filter(([, key]) =>
+              {VITALS_PDF_ROWS.filter(([, key]) =>
                 vitals.some((v: any) => !isBlank(v?.[key]))
-              )).map(([label, key]) => (
+              ).map(([label, key]) => (
                 <Row key={key} label={label} keyName={key} vitals={vitalsOverflow} cols={vitalsOverflowCols} />
               ))}
             </div>

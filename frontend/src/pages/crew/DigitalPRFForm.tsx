@@ -734,6 +734,20 @@ const Lbl = ({ t, req }: { t: string; req?: boolean }) => (
   </div>
 );
 
+// Round tick used by every multi-select option row (mechanism, priority, …).
+// Shared so the call sites can't drift apart in size or colour.
+const CheckDot = ({ on }: { on: boolean }) => (
+  <div style={{
+    width: 22, height: 22, borderRadius: 11, flexShrink: 0,
+    border: `2px solid ${on ? G : S200}`,
+    background: on ? G : 'transparent',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    transition: 'all 0.15s ease',
+  }}>
+    {on && <span style={{ color: '#fff', fontSize: '0.72rem', fontWeight: 900, lineHeight: 1 }}>✓</span>}
+  </div>
+);
+
 // Browser form-history / autofill suppression. PRF data is unique per patient,
 // so the browser re-offering previously typed values (e.g. "23" on a KM field)
 // is never useful and can mislead. `autocomplete="off"` alone is ignored by
@@ -759,8 +773,8 @@ function useNoAutofill(fk?: string): Record<string, any> {
 // live rollout — crew should see clean, empty fields rather than fine-print
 // example text. The `ph` prop is kept on the type signature so the ~120
 // callsites passing it continue to compile; we just ignore it. Re-enable
-// hints by changing `placeholder=""` back to `placeholder={ph}` in Inp,
-// ComboInp and Txt below.
+// hints by changing `placeholder=""` back to `placeholder={ph}` in Inp
+// and ComboInp below.
 const SpeechRecognitionAPI: any =
   (typeof window !== 'undefined' &&
     ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition)) || null;
@@ -1941,31 +1955,7 @@ const AddrInp = ({ fk, suburbKey, codeKey, ph, containerStyle, inputStyle, label
                   placeholder={ph || "Type street address manually..."}
                   style={{ ...base, width: '100%', background: W, borderColor: '#cbd5e1', ...inputStyle }}
                 />
-                {open && (loading || suggestions.length > 0) && (
-                  <div
-                    role="listbox"
-                    style={{
-                      position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 30,
-                      marginTop: 4, background: '#fff', border: `1.5px solid #cbd5e1`,
-                      borderRadius: 10, boxShadow: '0 8px 24px rgba(15,23,42,0.12)',
-                      maxHeight: 200, overflowY: 'auto',
-                    }}
-                  >
-                    {loading && suggestions.length === 0 && <div style={{ padding: '10px 14px', fontSize: '0.82rem', color: '#475569', fontStyle: 'italic' }}>Searching addresses…</div>}
-                    {suggestions.map((s, i) => (
-                      <div
-                        key={i} role="option" aria-selected={false}
-                        onMouseDown={(e) => { e.preventDefault(); pick(s); }}
-                        onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = '#f8fafc'; }}
-                        onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = '#fff'; }}
-                        style={{ padding: '10px 14px', cursor: 'pointer', borderBottom: i < suggestions.length - 1 ? '1px solid #f1f5f9' : 'none', fontSize: '0.85rem' }}
-                      >
-                        <div style={{ fontWeight: 700, color: '#0f172a' }}>{s.formatted}</div>
-                        {s.display && s.display !== s.formatted && <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: 2 }}>{s.display}</div>}
-                      </div>
-                    ))}
-                  </div>
-                )}
+                {suggestionDropdown}
               </div>
             </div>
 
@@ -2255,14 +2245,6 @@ const ComboInp = ({ fk, opts, listId }: { fk: string; ph?: string; opts: string[
       </datalist>
     </>
   );
-};
-
-const Txt = ({ fk, rows = 3 }: { fk: string; ph?: string; rows?: number }) => {
-  const { fd, sf } = useContext(FormContext);
-  // Auto-grows with content (initial `rows` height as the floor) so long
-  // entries expand the field downward instead of scrolling inside it.
-  const taRef = useAutoGrow(fd[fk] ?? '');
-  return <textarea id={`prf-field-${fk}`} ref={taRef} value={fd[fk] ?? ''} onChange={e => sf(fk, e.target.value)} onFocus={onF} onBlur={onB} placeholder="" rows={rows} style={{ ...base, resize: 'none', overflow: 'hidden', marginBottom: 14, fontFamily: 'inherit' }} />
 };
 
 // VoiceTxt — textarea with an overlaid mic-icon trigger that dictates into
@@ -4388,7 +4370,6 @@ export default function DigitalPRFForm() {
   // Dev/QA test-fill — opens a chooser to auto-populate the form for a given
   // call-type × billing-type combination so testers don't retype everything.
   const [testFillOpen, setTestFillOpen] = useState(false);
-  const [vsAlphaKeys, setVsAlphaKeys] = useState<Set<string>>(() => new Set());
   const [ivRows, setIvRows] = useState<any[]>([]);
   const [medRows, setMedRows] = useState<any[]>([]);
   // Toggle buttons: crew activates IV Therapy / Medication sections explicitly
@@ -4414,9 +4395,6 @@ export default function DigitalPRFForm() {
   // Phase-2 (PT INFO) Declaration of Death form: collapsed behind a button until
   // the crew opens it, so the DOD certificate doesn't crowd the billing fields.
   const [dodFormOpen, setDodFormOpen] = useState(false);
-  const [transferSubtypeOpen, setTransferSubtypeOpen] = useState(false);
-  const [quotedAmountModalOpen, setQuotedAmountModalOpen] = useState(false);
-  const [preauthModalOpen, setPreauthModalOpen] = useState(false);
   const [rhtCallOutFeeOpen, setRhtCallOutFeeOpen] = useState(false);
   const [enRouteOverlay, setEnRouteOverlay] = useState(false);
   const [assessmentModalOpen, setAssessmentModalOpen] = useState(false);
@@ -4472,8 +4450,6 @@ export default function DigitalPRFForm() {
   };
 
   const [preauthVisible, setPreauthVisible] = useState(false);
-  const quotedAmountRef = useRef<HTMLInputElement>(null);
-  const preauthRef = useRef<HTMLInputElement>(null);
   const [dispatchPromptOpen, setDispatchPromptOpen] = useState(false);
   const dispatchKmRef = useRef<HTMLInputElement>(null);
   const [onScenePromptOpen, setOnScenePromptOpen] = useState(false);
@@ -5093,15 +5069,6 @@ export default function DigitalPRFForm() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prfId]);
 
-
-  // ── In-form adjudication ──────────────────────────────────────────────────
-  // Calls /api/digital-prf/{id}/scrub-phase before allowing the crew to leave a
-  // phase. Critical / high rules block; medium / low warnings appear inline but
-  // don't stop progression. The same hardcoded scheme rules drive both this and
-  // the back-office adjudication, so what blocks here will block at submit time.
-  type ScrubIssue = { rule: string; reason: string; severity: string; rfi_code?: string | null };
-  const [scrubBlockers, setScrubBlockers] = useState<ScrubIssue[]>([]);
-  const [scrubWarnings, setScrubWarnings] = useState<ScrubIssue[]>([]);
 
   // ── Mark-time + geo capture ──────────────────────────────────────────────
   // Pending capture awaiting crew confirmation. While set, the GeoConfirm
@@ -6036,7 +6003,6 @@ export default function DigitalPRFForm() {
     // Every other leg keeps its own per-row address field. This is the one and
     // only path from the On Scene arrival to the incident address field.
     const addressKey = row.timeKey === 'time_on_scene' ? 'incident_location' : `address_${row.timeKey}`;
-    const addressVal: string = fd[addressKey] || '';
     const isIftDispatch = row.timeKey === 'time_dispatched' && ['IFT', 'IHT'].includes(fd.call_type);
     const handleMark = () => {
       // A leg prompt / geo-capture is already in progress → ignore this tap.
@@ -7498,7 +7464,6 @@ export default function DigitalPRFForm() {
 
     const eitherActive = requiresToggle ? (ivOpen || medOpen) : true;
     const showIvReasons = !hideCheckboxes && (isIft || isPrimary);
-    const showMedReasons = !hideCheckboxes && (isIft || isPrimary);
 
     // Shared warning note — outlined box, no background fill
     const MedAidNote = () => (
@@ -7704,8 +7669,6 @@ export default function DigitalPRFForm() {
           ════════════════════════════════════════════════════ */}
       {(forceOpen || (requiresToggle ? medOpen : showIvAndMeds)) && (
         <>
-          {/* Reason checkboxes */}
-
           {/* Medication cards */}
           {!hideHeader && <SHdr t="Medication / Infusion" />}
           {/* Native typeahead — crew can pick from the HPCSA medication catalogue
@@ -9760,11 +9723,6 @@ export default function DigitalPRFForm() {
         {kmConfirm && (() => {
           const rollback = kmConfirm.delta < 0;
           const close = () => setKmConfirm(null);
-          const clearAndReenter = () => {
-            setKms(prev => ({ ...prev, [kmConfirm.kmKey]: '' }));
-            dirtyRef.current = true;
-            setKmConfirm(null);
-          };
           return ReactDOM.createPortal(
             <div
               onClick={close}
@@ -10042,15 +10000,7 @@ export default function DigitalPRFForm() {
                           </div>
 
                           {/* Checkbox */}
-                          <div style={{
-                            width: 22, height: 22, borderRadius: 11, flexShrink: 0,
-                            border: `2px solid ${isOn ? G : S200}`,
-                            background: isOn ? G : 'transparent',
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            transition: 'all 0.15s ease',
-                          }}>
-                            {isOn && <span style={{ color: '#fff', fontSize: '0.72rem', fontWeight: 900, lineHeight: 1 }}>✓</span>}
-                          </div>
+                          <CheckDot on={isOn} />
                         </button>
                       );
                     })}
@@ -10226,182 +10176,6 @@ export default function DigitalPRFForm() {
           />
         )}
 
-        {/* ── Inline scrub feedback (blockers + warnings) ── */}
-        {(scrubBlockers.length > 0 || scrubWarnings.length > 0) && (
-          <div style={{
-            position: 'fixed', bottom: 80, left: 0, right: 0, zIndex: 41,
-            padding: '0 14px',
-          }}>
-            <div style={{
-              maxWidth: 640, margin: '0 auto',
-              background: '#fff', border: `2px solid ${scrubBlockers.length > 0 ? REDC : AMB}`,
-              borderRadius: 12, padding: '12px 14px',
-              boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
-              maxHeight: '40vh', overflowY: 'auto',
-            }}>
-              <div style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                marginBottom: 8,
-              }}>
-                <div style={{
-                  fontSize: '0.78rem', fontWeight: 900,
-                  color: scrubBlockers.length > 0 ? REDC : '#92400e',
-                  textTransform: 'uppercase', letterSpacing: '0.06em',
-                }}>
-                  {scrubBlockers.length > 0
-                    ? `Cannot continue — ${scrubBlockers.length} ${scrubBlockers.length === 1 ? 'issue' : 'issues'} to fix`
-                    : `${scrubWarnings.length} warning${scrubWarnings.length === 1 ? '' : 's'}`}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => { setScrubBlockers([]); setScrubWarnings([]); }}
-                  style={{
-                    background: 'none', border: 'none', color: S600,
-                    fontSize: '1.1rem', fontWeight: 700, cursor: 'pointer',
-                    padding: '0 6px', lineHeight: 1,
-                  }}>×</button>
-              </div>
-              {scrubBlockers.map((b, i) => (
-                <div key={`b-${i}`} style={{
-                  display: 'flex', gap: 10, padding: '8px 0',
-                  borderTop: i > 0 ? `1px solid ${S200}` : 'none',
-                }}>
-                  <span style={{
-                    fontSize: '0.65rem', fontWeight: 800, color: '#fff',
-                    background: REDC, padding: '2px 7px', borderRadius: 4,
-                    textTransform: 'uppercase', letterSpacing: '0.05em',
-                    flexShrink: 0, alignSelf: 'flex-start', marginTop: 2,
-                  }}>{b.severity}</span>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: '0.82rem', fontWeight: 700, color: S900 }}>{b.rule}</div>
-                    <div style={{ fontSize: '0.78rem', color: S600, marginTop: 2 }}>{b.reason}</div>
-                  </div>
-                </div>
-              ))}
-              {scrubWarnings.map((w, i) => (
-                <div key={`w-${i}`} style={{
-                  display: 'flex', gap: 10, padding: '8px 0',
-                  borderTop: (scrubBlockers.length + i) > 0 ? `1px solid ${S200}` : 'none',
-                }}>
-                  <span style={{
-                    fontSize: '0.65rem', fontWeight: 800, color: '#fff',
-                    background: AMB, padding: '2px 7px', borderRadius: 4,
-                    textTransform: 'uppercase', letterSpacing: '0.05em',
-                    flexShrink: 0, alignSelf: 'flex-start', marginTop: 2,
-                  }}>{w.severity}</span>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: '0.82rem', fontWeight: 700, color: S900 }}>{w.rule}</div>
-                    <div style={{ fontSize: '0.78rem', color: S600, marginTop: 2 }}>{w.reason}</div>
-                  </div>
-                </div>
-              ))}
-              {scrubBlockers.length > 0 && (
-                <div style={{
-                  marginTop: 10, padding: '8px 10px',
-                  background: '#fef2f2', borderRadius: 8,
-                  fontSize: '0.74rem', color: '#7f1d1d',
-                }}>
-                  Fix the items above, then tap <strong>Save & Continue</strong> again.
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-
-
-        {/* ── IFT/IHT Quoted Payout Amount Overlay ── */}
-        <Modal open={quotedAmountModalOpen} onClose={() => setQuotedAmountModalOpen(false)}>
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-              <div style={{ fontSize: '1.2rem', fontWeight: 900, color: S900, letterSpacing: '-0.02em' }}>Quoted Payout Amount</div>
-              <button type="button" onClick={() => setQuotedAmountModalOpen(false)} style={{ width: 32, height: 32, borderRadius: 16, border: 'none', background: S200, color: S600, fontSize: '1.2rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', touchAction: 'manipulation' }}>×</button>
-            </div>
-            <div style={{ marginBottom: 14 }}>
-              <Lbl t="Quoted Payout Amount (R)" />
-              <input
-                ref={quotedAmountRef}
-                type="text"
-                inputMode="decimal"
-                pattern="[0-9. ]*"
-                value={fd.med_aid_quoted_amount ?? ''}
-                onChange={e => {
-                  const val = e.target.value.replace(/[^0-9.]/g, '');
-                  sf('med_aid_quoted_amount', val);
-                }}
-                onFocus={onF}
-                onBlur={onB}
-                placeholder="0.00"
-                style={{ ...base, marginBottom: 0, borderColor: '#e2e8f0' }}
-              />
-            </div>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
-            <button
-              type="button"
-              onClick={() => {
-                setQuotedAmountModalOpen(false);
-                setPreauthVisible(true);
-                setPreauthModalOpen(true);
-                preauthRef.current?.focus();
-              }}
-              style={{
-                padding: '12px 24px', borderRadius: 12, fontSize: '0.9rem',
-                fontWeight: 800, border: 'none', background: G, color: W,
-                cursor: 'pointer', boxShadow: `0 4px 12px ${G}40`,
-                touchAction: 'manipulation',
-                width: '100%', textAlign: 'center'
-              }}
-            >
-              Next →
-            </button>
-          </div>
-        </Modal>
-
-        {/* ── IFT/IHT Pre-Auth No. Overlay ── */}
-        <Modal open={preauthModalOpen} onClose={() => setPreauthModalOpen(false)}>
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-              <div style={{ fontSize: '1.2rem', fontWeight: 900, color: S900, letterSpacing: '-0.02em' }}>Pre-Auth Number</div>
-              <button type="button" onClick={() => setPreauthModalOpen(false)} style={{ width: 32, height: 32, borderRadius: 16, border: 'none', background: S200, color: S600, fontSize: '1.2rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', touchAction: 'manipulation' }}>×</button>
-            </div>
-            <div style={{ marginBottom: 14 }}>
-              <Lbl t="Pre-Auth No." req />
-              <input
-                ref={preauthRef}
-                type="text"
-                value={fd.preauth_number ?? ''}
-                onChange={e => sf('preauth_number', e.target.value)}
-                onFocus={onF}
-                onBlur={onB}
-                placeholder="Pre-authorisation reference"
-                style={{ ...base, marginBottom: 12, borderColor: '#e2e8f0' }}
-              />
-              <div style={{ fontSize: '0.78rem', color: S600, fontWeight: 500 }}>
-                Enter the medical aid pre-authorisation reference number.
-              </div>
-            </div>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
-            <button
-              type="button"
-              onClick={() => {
-                setPreauthModalOpen(false);
-                setDispatchPromptOpen(true);
-                dispatchKmRef.current?.focus();
-              }}
-              style={{
-                padding: '12px 24px', borderRadius: 12, fontSize: '0.9rem',
-                fontWeight: 800, border: 'none', background: G, color: W,
-                cursor: 'pointer', boxShadow: `0 4px 12px ${G}40`,
-                touchAction: 'manipulation',
-                width: '100%', textAlign: 'center'
-              }}
-            >
-              Done →
-            </button>
-          </div>
-        </Modal>
 
         {/* ── Dispatch Time & Location/KM Prompt Overlay ── */}
         <Modal open={dispatchPromptOpen} onClose={() => setDispatchPromptOpen(false)} dismissOnBackdrop={false}>
@@ -10741,15 +10515,7 @@ export default function DigitalPRFForm() {
                       {/* Left spacer balances the checkbox so the level label sits truly centred */}
                       <div style={{ width: 22, flexShrink: 0 }} />
                       <div style={{ flex: 1, minWidth: 0, textAlign: 'center', fontWeight: 800, fontSize: '0.96rem', color: isOn ? GDK : S900 }}>{lvl}</div>
-                      <div style={{
-                        width: 22, height: 22, borderRadius: 11, flexShrink: 0,
-                        border: `2px solid ${isOn ? G : S200}`,
-                        background: isOn ? G : 'transparent',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        transition: 'all 0.15s ease',
-                      }}>
-                        {isOn && <span style={{ color: '#fff', fontSize: '0.72rem', fontWeight: 900, lineHeight: 1 }}>✓</span>}
-                      </div>
+                      <CheckDot on={isOn} />
                     </button>
                   );
                 })}
@@ -10831,15 +10597,7 @@ export default function DigitalPRFForm() {
                         </div>
                         <div style={{ fontSize: '0.72rem', color: isOn ? GDK : S400, marginTop: 2, lineHeight: 1.4 }}>{DESC[lvl]}</div>
                       </div>
-                      <div style={{
-                        width: 22, height: 22, borderRadius: 11, flexShrink: 0,
-                        border: `2px solid ${isOn ? G : S200}`,
-                        background: isOn ? G : 'transparent',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        transition: 'all 0.15s ease',
-                      }}>
-                        {isOn && <span style={{ color: '#fff', fontSize: '0.72rem', fontWeight: 900, lineHeight: 1 }}>✓</span>}
-                      </div>
+                      <CheckDot on={isOn} />
                     </button>
                   );
                 })}
