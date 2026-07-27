@@ -48,6 +48,11 @@ from app.main import app  # noqa: E402 — intentionally after env setup
 
 # Override the get_db dependency so all request handlers use our NullPool session
 from app.database import get_db as _original_get_db  # noqa
+import os
+# Dev/test seed password — matches app.main.DEV_SEED_ADMIN_PASSWORD.
+# The old hard-coded value leaked via a public repo and is burned.
+SEED_ADMIN_PASSWORD = os.getenv("SEED_ADMIN_PASSWORD", "DevSeed!Change#2026")
+
 
 
 async def _override_get_db():
@@ -74,7 +79,7 @@ async def client():
 @pytest_asyncio.fixture
 async def auth_headers(client):
     """Admin auth headers — obtained by logging in as the seeded admin user."""
-    login_data = {"username": "admin@emsclaims.co.za", "password": "Admin@2024!"}
+    login_data = {"username": "admin@emsclaims.co.za", "password": SEED_ADMIN_PASSWORD}
     response = await client.post("/api/auth/login", data=login_data)
     if response.status_code == 200:
         token = response.json().get("access_token", "")

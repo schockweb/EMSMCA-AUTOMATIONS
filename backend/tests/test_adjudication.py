@@ -3,6 +3,11 @@ Test: Adjudication Engine — PMB routing, clinical check logic, ICD-10 crosswal
 """
 import pytest
 import uuid
+import os
+# Dev/test seed password — matches app.main.DEV_SEED_ADMIN_PASSWORD.
+# The old hard-coded value leaked via a public repo and is burned.
+SEED_ADMIN_PASSWORD = os.getenv("SEED_ADMIN_PASSWORD", "DevSeed!Change#2026")
+
 
 
 @pytest.mark.asyncio
@@ -11,7 +16,7 @@ async def test_adjudication_scrub_no_claim(client):
     # Login first
     login_res = await client.post(
         "/api/auth/login",
-        data={"username": "admin@emsclaims.co.za", "password": "Admin@2024!"},
+        data={"username": "admin@emsclaims.co.za", "password": SEED_ADMIN_PASSWORD},
     )
     if login_res.status_code != 200:
         pytest.skip("Login unavailable")
@@ -31,7 +36,7 @@ async def test_rfi_list(client):
     """RFI list returns an array."""
     login_res = await client.post(
         "/api/auth/login",
-        data={"username": "admin@emsclaims.co.za", "password": "Admin@2024!"},
+        data={"username": "admin@emsclaims.co.za", "password": SEED_ADMIN_PASSWORD},
     )
     if login_res.status_code != 200:
         pytest.skip("Login unavailable")
@@ -69,7 +74,7 @@ async def test_bhf_verify_endpoint(client):
     """BHF verify endpoint accepts PCNS number."""
     login_res = await client.post(
         "/api/auth/login",
-        data={"username": "admin@emsclaims.co.za", "password": "Admin@2024!"},
+        data={"username": "admin@emsclaims.co.za", "password": SEED_ADMIN_PASSWORD},
     )
     if login_res.status_code != 200:
         pytest.skip("Login unavailable")

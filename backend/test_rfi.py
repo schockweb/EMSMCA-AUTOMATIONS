@@ -1,7 +1,10 @@
 import httpx
+import os
+SEED_ADMIN_PASSWORD = os.getenv("SEED_ADMIN_PASSWORD", "DevSeed!Change#2026")  # burned value removed
+
 
 client = httpx.Client(base_url='http://localhost:8002')
-res = client.post('/api/auth/login', data={'username':'admin@emsclaims.co.za', 'password':'Admin@2024!'})
+res = client.post('/api/auth/login', data={'username':'admin@emsclaims.co.za', 'password':SEED_ADMIN_PASSWORD})
 token = res.json()['access_token']
 
 rfi_res = client.get('/api/adjudication/rfis', headers={'Authorization': f'Bearer {token}'})

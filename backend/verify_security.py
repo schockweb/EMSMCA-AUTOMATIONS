@@ -5,7 +5,8 @@ from datetime import datetime
 
 BASE_URL = "http://localhost:8000"
 ADMIN_EMAIL = "admin@emsclaims.co.za"
-ADMIN_PASSWORD = "Admin@2024!"
+import os
+ADMIN_PASSWORD = os.getenv("SEED_ADMIN_PASSWORD", "DevSeed!Change#2026")  # burned value removed
 
 async def test_xss_protection():
     print("\n--- Testing XSS Protection ---")

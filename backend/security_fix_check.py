@@ -22,6 +22,11 @@ import urllib.request
 import uuid
 
 from e2e_prf_pipeline_check import run_db  # disposable-engine DB helper
+import os
+# Dev/test seed password — matches app.main.DEV_SEED_ADMIN_PASSWORD.
+# The old hard-coded value leaked via a public repo and is burned.
+SEED_ADMIN_PASSWORD = os.getenv("SEED_ADMIN_PASSWORD", "DevSeed!Change#2026")
+
 
 BASE = "http://localhost:8000"
 PASS, FAIL = [], []
@@ -158,7 +163,7 @@ def main():
 
     print("--- C. admin login unaffected ---")
     st, body = post("/api/auth/login",
-                    form={"username": "admin@emsclaims.co.za", "password": "Admin@2024!"},
+                    form={"username": "admin@emsclaims.co.za", "password": SEED_ADMIN_PASSWORD},
                     headers={"X-Real-IP": "198.51.100.13"})
     check("seed admin login -> 200 tokens", st == 200 and body.get("access_token"), f"HTTP {st}")
 

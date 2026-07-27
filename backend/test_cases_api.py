@@ -1,9 +1,12 @@
 import requests
+import os
+SEED_ADMIN_PASSWORD = os.getenv("SEED_ADMIN_PASSWORD", "DevSeed!Change#2026")  # burned value removed
+
 
 url_login = "http://127.0.0.1:8000/api/auth/login"
 data = {
     "username": "admin@emsclaims.co.za",
-    "password": "Admin@2024!"
+    "password": SEED_ADMIN_PASSWORD
 }
 
 try:

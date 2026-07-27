@@ -78,14 +78,21 @@ async def lifespan(app: FastAPI):
     logger.info("EMS Claims Portal shutting down.")
 
 
+# Development-only seed password. The previous hard-coded value was published
+# in CLAUDE.md while the repository was public (2026-05-27 → 2026-07-27) and is
+# permanently burned — never reinstate it. Override with SEED_ADMIN_PASSWORD;
+# seeding never runs in production (see the APP_ENV guard in lifespan).
+DEV_SEED_ADMIN_PASSWORD = os.getenv("SEED_ADMIN_PASSWORD", "DevSeed!Change#2026")
+
+
 async def seed_admin_user():
-    """Create a default admin user if the users table is empty."""
+    """Create a default admin user if the users table is empty (dev only)."""
     async with AsyncSessionLocal() as db:
         result = await db.execute(select(User).limit(1))
         if result.scalar_one_or_none() is None:
             admin = User(
                 email="admin@emsclaims.co.za",
-                hashed_password=hash_password("Admin@2024!"),
+                hashed_password=hash_password(DEV_SEED_ADMIN_PASSWORD),
                 full_name="System Administrator",
                 role=UserRole.ADMIN,
                 bhf_practice_number="0000000",

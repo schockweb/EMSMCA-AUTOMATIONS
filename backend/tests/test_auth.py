@@ -2,6 +2,9 @@
 Test: Authentication flow — login, token validation, protected routes.
 """
 import pytest
+import os
+SEED_ADMIN_PASSWORD = os.getenv("SEED_ADMIN_PASSWORD", "DevSeed!Change#2026")  # burned value removed
+
 
 
 @pytest.mark.asyncio
@@ -9,7 +12,7 @@ async def test_login_success(client):
     """Admin user can log in with correct credentials."""
     response = await client.post(
         "/api/auth/login",
-        data={"username": "admin@emsclaims.co.za", "password": "Admin@2024!"},
+        data={"username": "admin@emsclaims.co.za", "password": SEED_ADMIN_PASSWORD},
     )
     assert response.status_code == 200
     data = response.json()
@@ -60,7 +63,7 @@ async def test_me_with_valid_login(client):
     # Login
     login_res = await client.post(
         "/api/auth/login",
-        data={"username": "admin@emsclaims.co.za", "password": "Admin@2024!"},
+        data={"username": "admin@emsclaims.co.za", "password": SEED_ADMIN_PASSWORD},
     )
     if login_res.status_code != 200:
         pytest.skip("Login unavailable")
