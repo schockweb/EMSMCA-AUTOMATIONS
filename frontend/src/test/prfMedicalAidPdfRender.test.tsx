@@ -21,13 +21,17 @@ vi.mock('axios');
 
 // jsPDF / html2canvas are only used by the export pipelines (pre-warm effect
 // fires 400ms after load) — stub them so jsdom never tries to rasterise.
+// NOTE: the implementation MUST be a plain `function` expression — an arrow
+// function is not constructible, so `new jsPDF()` inside PRFView throws.
 vi.mock('jspdf', () => ({
-  jsPDF: vi.fn(() => ({
-    addPage: vi.fn(),
-    addImage: vi.fn(),
-    output: vi.fn(() => new Blob()),
-    save: vi.fn(),
-  })),
+  jsPDF: vi.fn(function () {
+    return {
+      addPage: vi.fn(),
+      addImage: vi.fn(),
+      output: vi.fn(() => new Blob()),
+      save: vi.fn(),
+    };
+  }),
 }));
 vi.mock('html2canvas', () => ({
   default: vi.fn(async () => {

@@ -9,12 +9,22 @@
  * Call types  (DigitalPRFForm CALL_TYPE_OPTS):
  *   PRIMARY, IHT (labelled IFT/IHT), RHT, COURTESY, RESUS, DOD
  * Billing types (BILLING_TYPE_OPTS):
- *   MED AID, IOD, RAF, PVT, EVENT, CALL OUT FEE
+ *   MED AID, IOD, RAF, PVT, CALL OUT FEE
  *
  * Billing availability rules (from BillingTypePicker.billingOpts):
+ *   COURTESY → none  (non-billable transfer — no payer block is captured at all)
  *   DOD   → MED AID, PVT          (no IOD / RAF — no third-party patient to bill)
  *   RESUS → MED AID, PVT          (restricted to these two)
- *   else  → MED AID, IOD, RAF, PVT, EVENT, CALL OUT FEE
+ *   else  → MED AID, IOD, RAF, PVT, CALL OUT FEE
+ *
+ * Not every field a call type captures reaches the PDF — the product
+ * deliberately suppresses whole blocks per call type, so the expectations are
+ * assembled from buckets rather than one flat list:
+ *   • transport bucket  — destination / handover / valuables rows, dropped for
+ *     RHT and DOD (`noTransport` in PRFView: the patient was never conveyed).
+ *   • patient bucket    — the Patient Information panel, replaced on a DOD by
+ *     the deceased's particulars in the Declaration of Death block.
+ *   • clinical bucket   — page 2, omitted entirely for a DOD.
  *
  * Each scenario uses unique sentinel values so a missing field is unambiguous:
  * the failing assertion prints the exact value that dropped off the PDF.
@@ -27,11 +37,15 @@ import PRFView from '../pages/PRFView';
 
 // ── Mocks ─────────────────────────────────────────────────────────────────
 vi.mock('axios');
+// NOTE: the implementation MUST be a plain `function` expression — an arrow
+// function is not constructible, so `new jsPDF()` inside PRFView throws.
 vi.mock('jspdf', () => ({
-  jsPDF: vi.fn(() => ({
-    addPage: vi.fn(), addImage: vi.fn(),
-    output: vi.fn(() => new Blob()), save: vi.fn(),
-  })),
+  jsPDF: vi.fn(function () {
+    return {
+      addPage: vi.fn(), addImage: vi.fn(),
+      output: vi.fn(() => new Blob()), save: vi.fn(),
+    };
+  }),
 }));
 vi.mock('html2canvas', () => ({
   default: vi.fn(async () => {
@@ -159,23 +173,48 @@ function commonGroup(tag: string) {
     hospital_sticker: PNG,
   };
 
-  // Sentinels that must be visible. Arrays / row objects / images are checked
-  // structurally elsewhere; here we list the scalar text values.
-  const visible = [
-    // referring_doctor + handover_name are captured but no longer rendered on
-    // the PRF (removed by request), so they're not asserted as visible.
-    fd.incident_location, fd.suburb_ward, fd.receiving_facility,
-    fd.ward, fd.receiving_doctor,
+  // Sentinels that must be visible, split into the buckets PRFView actually
+  // gates on. Arrays / row objects / images are checked structurally
+  // elsewhere; here we list the scalar text values.
+  // referring_doctor + handover_name are captured but no longer rendered on
+  // the PRF (removed by request), so they're not asserted as visible.
+
+  /** Page-1 rows that render for EVERY call type. */
+  const always = [
+    fd.incident_location,
+    fd.debtor_name, fd.debtor_surname, fd.debtor_id_number, fd.debtor_passport_number,
+    fd.debtor_age, fd.debtor_dob, fd.debtor_address, fd.debtor_suburb, fd.debtor_postal_code,
+    fd.debtor_phone_home, fd.debtor_phone_cell,
+  ];
+
+  /**
+   * Patient Information panel (+ the Mechanism detail that hangs off it).
+   * Suppressed on a Declaration of Death — the deceased's particulars render
+   * from the DoD block instead (see callGroup's DOD arm).
+   */
+  const patient = [
     fd.patient_name, fd.patient_surname, fd.patient_id_number, fd.patient_passport_number,
     fd.age, fd.patient_dob, fd.patient_address, fd.patient_suburb, fd.patient_postal_code,
     fd.patient_postal_address, fd.patient_postal_suburb, fd.patient_postal_address_code,
     fd.patient_phone_home, fd.patient_phone_work, fd.patient_phone_cell, fd.accompanying_persons_count,
-    fd.debtor_name, fd.debtor_surname, fd.debtor_id_number, fd.debtor_passport_number,
-    fd.debtor_age, fd.debtor_dob, fd.debtor_address, fd.debtor_suburb, fd.debtor_postal_code,
-    fd.debtor_phone_home, fd.debtor_phone_cell,
     fd.mechanism_other,
-    fd.handover_qualification, fd.handover_doctor_email, fd.handover_notes,
-    fd.valuables_handed_to, fd.valuables_description, fd.management_notes,
+  ];
+
+  /**
+   * Destination / handover rows + the valuables handover. PRFView drops these
+   * whenever the patient was never conveyed to a facility (`noTransport` —
+   * RHT refused transport, DOD deceased at scene), so nobody signs for a
+   * receiving ward, a receiving doctor or the patient's valuables.
+   */
+  const transport = [
+    fd.suburb_ward, fd.receiving_facility, fd.ward, fd.receiving_doctor,
+    fd.handover_qualification, fd.handover_notes, fd.handover_doctor_email,
+    fd.valuables_handed_to, fd.valuables_description,
+  ];
+
+  /** Page 2 (clinical sheet) — omitted entirely for a Declaration of Death. */
+  const clinical = [
+    fd.management_notes,
     fd.o2_flow_rate, fd.o2_percent, fd.o2_device, fd.o2_bvm, fd.o2_start_time, fd.o2_stop_time,
     fd.op_airway_size, fd.intubation_attempts, fd.ett_size, fd.ett_depth, fd.ng_tube_size,
     fd.iv_attempts, fd.defib_joules, fd.other_equipment,
@@ -188,7 +227,8 @@ function commonGroup(tag: string) {
     // vitals scalars
     ...fd.vitals_sets.flatMap((v: any) => [v.resp_rate, v.spo2, v.hr, v.bp, v.gcs_total, v.temp, v.pain]),
   ];
-  return { fd, visible };
+
+  return { fd, always, patient, transport, clinical };
 }
 
 /** Call-type-specific fields + the rendered call-type chip text. */
@@ -237,22 +277,51 @@ function callGroup(callType: string, tag: string): { fd: Record<string, any>; vi
           med_aid_resus_fee: `ResusFee-${tag}`,
         },
         visible: [`ResusLvl-${tag}`, `ResusFee-${tag}`],
-        // PRFView only adds a 2nd chip for IHT/IFT/RHT/COURTESY — RESUS shows
-        // just the "Transfer" chip.
-        chips: ['Transfer'],
+        // Resus is not a transfer — the Call Type row reads plain "Resus".
+        chips: ['Resus'],
       };
-    case 'DOD': // declaration of death — DoD sub-block
+    case 'DOD':
+      // Declaration of death. PRFView renders a death certificate instead of
+      // the standard panel: the Patient Information column, the whole clinical
+      // sheet and the closeout band are suppressed, and the deceased's
+      // identity comes from the med_aid_dec_death_deceased_* fields.
       return {
         fd: {
           call_type: 'DOD',
           med_aid_dec_death: true,
           med_aid_dec_death_time: `DodTime-${tag}`,
-          med_aid_dec_death_declared_by: `DodBy-${tag}`,
-          med_aid_dec_death_hpcsa: `DodHpcsa-${tag}`,
+          med_aid_dec_death_date: `DodDate-${tag}`,
+          med_aid_dec_death_location: `DodLoc-${tag}`,
+          med_aid_dec_death_identified_by: `DodIdBy-${tag}`,
+          // Particulars of the deceased — these stand in for the Patient
+          // Information panel, which is not rendered on a DoD.
+          med_aid_dec_death_deceased_gender: `DodGender-${tag}`,
+          med_aid_dec_death_deceased_first_name: `DodFirst-${tag}`,
+          med_aid_dec_death_deceased_surname: `DodSurname-${tag}`,
+          med_aid_dec_death_deceased_id: `DodId-${tag}`,
+          med_aid_dec_death_deceased_passport: `DodPass-${tag}`,
+          med_aid_dec_death_deceased_dob: `DodDob-${tag}`,
+          med_aid_dec_death_deceased_age: `DodAge-${tag}`,
+          med_aid_dec_death_deceased_cell: `DodCell-${tag}`,
+          med_aid_dec_death_deceased_tel_home: `DodTelH-${tag}`,
+          med_aid_dec_death_deceased_tel_work: `DodTelW-${tag}`,
+          med_aid_dec_death_deceased_address: `DodAddr-${tag}`,
+          med_aid_dec_death_deceased_suburb: `DodSub-${tag}`,
+          med_aid_dec_death_deceased_postal_code: `DodCode-${tag}`,
+          // The signed declaration — the two signatures that replace the
+          // T&C / handover stack on a DoD.
+          med_aid_dec_death_signature: PNG,
+          med_aid_dec_death_crew_attended_signature: PNG,
         },
-        visible: [`DodTime-${tag}`, `DodBy-${tag}`, `DodHpcsa-${tag}`],
-        // DOD likewise renders only the "Transfer" chip on page 1.
-        chips: ['Transfer'],
+        visible: [
+          `DodTime-${tag}`, `DodDate-${tag}`, `DodLoc-${tag}`, `DodIdBy-${tag}`,
+          `DodGender-${tag}`, `DodFirst-${tag}`, `DodSurname-${tag}`, `DodId-${tag}`,
+          `DodPass-${tag}`, `DodDob-${tag}`, `DodAge-${tag}`, `DodCell-${tag}`,
+          `DodTelH-${tag}`, `DodTelW-${tag}`, `DodAddr-${tag}`, `DodSub-${tag}`,
+          `DodCode-${tag}`,
+        ],
+        // Not a transfer — the Call Type row reads plain "DOD".
+        chips: ['DOD'],
       };
     default:
       return { fd: { call_type: callType }, visible: [], chips: [] };
@@ -325,21 +394,6 @@ function billingGroup(billingType: string, tag: string): { fd: Record<string, an
           `PvtPhone-${tag}`, `PvtAddr-${tag}`,
         ],
       };
-    case 'EVENT': // event standby (legacy)
-      return {
-        fd: {
-          billing_type: 'EVENT',
-          event_name: `EventName-${tag}`,
-          event_organiser: `EventOrg-${tag}`,
-          event_date: `EventDate-${tag}`,
-          event_booking_ref: `EventRef-${tag}`,
-          event_contact_person: `EventContact-${tag}`,
-        },
-        visible: [
-          `EventName-${tag}`, `EventOrg-${tag}`, `EventDate-${tag}`,
-          `EventRef-${tag}`, `EventContact-${tag}`,
-        ],
-      };
     case 'CALL OUT FEE': // call-out / stand-down (legacy)
       return {
         fd: {
@@ -351,7 +405,10 @@ function billingGroup(billingType: string, tag: string): { fd: Record<string, an
         visible: [`CoReqBy-${tag}`, `CoAuth-${tag}`, `CoReason-${tag}`],
       };
     default:
-      return { fd: { billing_type: billingType }, visible: [] };
+      // 'NONE' — the billing-free scenario used for Courtesy calls, which
+      // capture no payer at all. Deliberately contributes NO billing_type key
+      // so the fixture matches what the crew form actually stores.
+      return { fd: {}, visible: [] };
   }
 }
 
@@ -362,8 +419,24 @@ function buildPrf(callType: string, billingType: string) {
   const call = callGroup(callType, tag);
   const billing = billingGroup(billingType, tag);
 
+  // PRFView's own guards, mirrored here so the expectations track the product:
+  //   noTransport → the patient was never conveyed (RHT refused transport,
+  //                 DOD deceased at scene): destination / handover / valuables
+  //                 rows and the Depart + Arrival KM rows are dropped.
+  //   isDoD       → a death certificate replaces the standard panel: no
+  //                 Patient Information column and no clinical sheet.
+  const noTransport = callType === 'RHT' || callType === 'DOD';
+  const isDoD = callType === 'DOD';
+
   const fd = { ...common.fd, ...call.fd, ...billing.fd };
-  const visible = [...common.visible, ...call.visible, ...billing.visible];
+  const visible = [
+    ...common.always,
+    ...(isDoD ? [] : common.patient),
+    ...(noTransport ? [] : common.transport),
+    ...(isDoD ? [] : common.clinical),
+    ...call.visible,
+    ...billing.visible,
+  ];
   const chips = call.chips;
 
   const prf = {
@@ -397,15 +470,25 @@ function buildPrf(callType: string, billingType: string) {
     },
   };
 
-  // Provider / vehicle / crew / km sentinels render on every PRF too.
+  // Provider / vehicle / crew / km sentinels render on every PRF too — except
+  // the Depart + Arrival-At-Facility KM readings, which sit on the two time
+  // rows PRFView omits under the same noTransport guard as the transport
+  // bucket above.
   const metaVisible = [
     prf.case_number, prf.provider.name, prf.provider.phone, prf.provider.pr_number,
     prf.provider.address, prf.vehicle.callsign, prf.vehicle.registration,
     prf.crew_1.full_name, prf.crew_1.hpcsa_number, prf.crew_2.full_name, prf.crew_2.hpcsa_number,
-    ...Object.values(prf.kms),
+    prf.kms.km_dispatched, prf.kms.km_on_scene, prf.kms.km_available,
+    ...(noTransport ? [] : [prf.kms.km_depart_scene, prf.kms.km_at_destination]),
   ];
 
-  return { prf, fd, visible: [...visible, ...metaVisible], chips };
+  // The sentinel each test waits on before asserting. A DoD has no Patient
+  // Information panel, so the deceased's first name is the anchor there.
+  const anchor: string = isDoD
+    ? fd.med_aid_dec_death_deceased_first_name
+    : fd.patient_name;
+
+  return { prf, fd, visible: [...visible, ...metaVisible], chips, anchor, noTransport, isDoD };
 }
 
 function renderPrfView() {
@@ -426,13 +509,39 @@ function expectVisible(sentinel: string) {
   expect(matches.length, `"${sentinel}" missing from rendered PRF PDF`).toBeGreaterThan(0);
 }
 
+/**
+ * Assert a labelled FieldRow renders a value containing `expected`.
+ *
+ * An unanchored `queryAllByText(c => c.includes(x))` is worthless here: every
+ * sentinel in this fixture is tagged `<callType>-<billingType>`, so a bare
+ * `includes('IOD')` matches the tag baked into unrelated field values and the
+ * assertion passes without the row ever rendering. Anchoring to the row's own
+ * label makes the test fail when the row is actually gone.
+ */
+function expectFieldRow(label: string, expected: string) {
+  // getAllByText throws when the row isn't rendered at all — which is exactly
+  // the failure we want. Some labels legitimately repeat (e.g. "Depart"
+  // appears on both the outbound time grid and the Return Trip block), so any
+  // matching row satisfies the assertion.
+  const rows = screen.getAllByText(label).map(el => el.parentElement?.textContent ?? '');
+  expect(
+    rows.some(text => text.includes(expected)),
+    `no "${label}" row shows "${expected}" (rows found: ${JSON.stringify(rows)})`,
+  ).toBe(true);
+}
+
 // ── The matrix: every valid (call_type, billing_type) pairing ───────────────
-const ALL_BILLING = ['MED AID', 'IOD', 'RAF', 'PVT', 'EVENT', 'CALL OUT FEE'];
+// 'EVENT' is gone: DigitalPRFForm's BILLING_TYPE_OPTS no longer offers it and
+// coerces any legacy 'EVENT' value to ''.
+const ALL_BILLING = ['MED AID', 'IOD', 'RAF', 'PVT', 'CALL OUT FEE'];
 const MATRIX: Record<string, string[]> = {
   PRIMARY:  ALL_BILLING,
   IHT:      ALL_BILLING,             // IFT/IHT
   RHT:      ALL_BILLING,
-  COURTESY: ALL_BILLING,
+  // Courtesy calls are non-billable transfers: PRFView wraps the whole payer
+  // block (and the page-1 "Billing Type" meta row) in call_type !== 'COURTESY',
+  // so there is exactly one billing-free scenario to cover.
+  COURTESY: ['NONE'],
   RESUS:    ['MED AID', 'PVT'],      // restricted by billingOpts
   DOD:      ['MED AID', 'PVT'],      // restricted by billingOpts (no IOD/RAF)
 };
@@ -448,43 +557,105 @@ describe('PRF PDF field coverage — every call-type × billing-type', () => {
     for (const billingType of MATRIX[callType]) {
       const label = `${CALL_LABEL[callType] ?? callType} + ${billingType}`;
 
+      // Signature count is call-type dependent, so it can't be hard-coded:
+      //   standard  → 3 T&C (patient / witness / next-of-kin) + handover
+      //               + 2 crew sign-offs = 6
+      //   RHT       → the patient refused transport, so there is no facility
+      //               Handover Signature = 5
+      //   DOD       → the death-certificate layout replaces the T&C + handover
+      //               stack with 2 crew sign-offs, the recipient signature and
+      //               the 2 declaration signatures = 5
+      const expectedSignatures =
+        callType === 'RHT' ? 5 :
+        callType === 'DOD' ? 5 : 6;
+
       describe(label, () => {
         it('renders every captured field onto the PDF pages', async () => {
           const built = buildPrf(callType, billingType);
           currentPrf = built.prf;
           renderPrfView();
-          await screen.findByText((c) => c.includes(built.fd.patient_name));
+          await screen.findByText((c) => c.includes(built.anchor));
           built.visible.forEach(expectVisible);
         });
 
-        it('shows the correct call-type and billing-type chips', async () => {
+        it('shows the correct call-type and billing-type rows', async () => {
           const built = buildPrf(callType, billingType);
           currentPrf = built.prf;
           renderPrfView();
-          await screen.findByText((c) => c.includes(built.fd.patient_name));
-          // billing-type chip (e.g. "MED AID") — appears in the Billing Type
-          // section. Substring match so "IOD" still matches the canonical
-          // "WCA / IOD" label that the form stores.
-          expect(screen.queryAllByText((c) => c.includes(billingType)).length).toBeGreaterThan(0);
-          // call-type chip(s). PRFView renders transfer subtypes as a single
-          // combined label (e.g. "Transfer — IHT"), so match by substring
-          // rather than exact text.
-          built.chips.forEach(chip => {
-            const matches = screen.queryAllByText((c) => c.includes(chip));
-            expect(matches.length, `call chip "${chip}" missing`).toBeGreaterThan(0);
-          });
+          await screen.findByText((c) => c.includes(built.anchor));
+
+          if (billingType === 'NONE') {
+            // Courtesy: the payer block AND the page-1 "Billing Type" meta row
+            // are both suppressed — assert their absence rather than a chip.
+            // The neighbouring section head is asserted present first so a
+            // typo in the queries below can't make this pass vacuously.
+            expect(screen.queryByText('Debtor Information')).not.toBeNull();
+            expect(screen.queryByText('Billing Information')).toBeNull();
+            expect(screen.queryByText('Billing Type')).toBeNull();
+          } else {
+            // Substring match inside the row so "IOD" still matches the
+            // canonical "WCA / IOD" label the form stores, and "PVT" matches
+            // the "PVT — <method>" variant.
+            expectFieldRow('Billing Type', billingType);
+          }
+
+          // Call type renders as one labelled row: "Primary", "Resus", "DOD",
+          // or "Transfer — <subtype>" for IHT/IFT/RHT/COURTESY.
+          built.chips.forEach(chip => expectFieldRow('Call Type', chip));
         });
 
-        it('renders all 6 signatures with no "Not captured" placeholders', async () => {
+        it(`renders ${expectedSignatures} signatures with no "Not captured" placeholders`, async () => {
           const built = buildPrf(callType, billingType);
           currentPrf = built.prf;
           const { container } = renderPrfView();
-          await screen.findByText((c) => c.includes(built.fd.patient_name));
-          // 3 T&C + handover + 2 crew = 6 (patient/witness under Valuables removed)
-          expect(container.querySelectorAll('img[alt="signature"]').length).toBe(6);
+          await screen.findByText((c) => c.includes(built.anchor));
+          expect(
+            container.querySelectorAll('img[alt="signature"]').length,
+            `${callType} should render ${expectedSignatures} captured signatures`,
+          ).toBe(expectedSignatures);
           expect(screen.queryAllByText('Not captured')).toHaveLength(0);
         });
       });
     }
+  }
+});
+
+// ── Return Trip: partial capture ────────────────────────────────────────────
+/**
+ * Regression guard for PRFView's `returnTripHasContent`.
+ *
+ * The guard used to test `fd.return_depart_time` — a key the crew form never
+ * writes — and never looked at `fd.return_at_destination_time` at all. A
+ * return leg where the crew captured only "Depart" and/or "At Dest" therefore
+ * evaluated as empty and the ENTIRE Return Trip block was dropped from the PDF
+ * that goes to the scheme, silently losing captured times.
+ *
+ * The guard must cover every key the block renders; these two are the ones
+ * that were missing, so each is exercised on its own.
+ */
+describe('PRF PDF — Return Trip renders on a partially-captured return leg', () => {
+  const CASES: Array<{ key: string; rowLabel: string }> = [
+    { key: 'return_depart_scene_time',   rowLabel: 'Depart'  },
+    { key: 'return_at_destination_time', rowLabel: 'At Dest' },
+  ];
+
+  for (const { key, rowLabel } of CASES) {
+    it(`keeps the Return Trip block when only ${key} was captured`, async () => {
+      const built = buildPrf('PRIMARY', 'MED AID');
+      const sentinel = `ReturnOnly-${rowLabel.replace(/\s/g, '')}`;
+      // The PRIMARY fixture carries no return-trip keys of its own, so this
+      // single value is the ONLY thing that can keep the block alive.
+      const fd = { ...built.fd, [key]: sentinel };
+      currentPrf = { ...built.prf, form_data: fd };
+
+      renderPrfView();
+      await screen.findByText((c) => c.includes(built.anchor));
+
+      expect(
+        screen.queryByText('Return Trip'),
+        `Return Trip block dropped when only ${key} was captured`,
+      ).not.toBeNull();
+      expectFieldRow(rowLabel, sentinel);
+    });
   }
 });
