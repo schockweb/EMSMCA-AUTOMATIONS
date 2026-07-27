@@ -94,6 +94,49 @@ async def auth_headers(client):
 # The global flag ensures this only runs once per test session.
 
 _TEST_CREW_BOOTSTRAPPED = False
+_SCHEMA_READY = False
+
+
+async def _ensure_schema():
+    """Create the schema and the seed admin on an empty database.
+
+    A developer's local database already has both, so this was never needed —
+    but CI starts a fresh postgres service every run, where every fixture query
+    died with 'relation "service_providers" does not exist'. Creating the schema
+    here (rather than relying on the app's startup hook) keeps the tests
+    self-sufficient: ASGITransport does not run the lifespan, so nothing else
+    would ever create these tables.
+    """
+    global _SCHEMA_READY
+    if _SCHEMA_READY:
+        return
+
+    from sqlalchemy import select
+    from app.database import Base
+    from app.models.user import User, UserRole
+    from app.utils.security import hash_password
+
+    # app.main is already imported above, so every model is registered on Base.
+    async with _test_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    # Seed the admin the auth fixtures log in as. Without it every
+    # authenticated test silently skips, which looks like success.
+    async with _TestSession() as db:
+        existing = (await db.execute(
+            select(User).where(User.email == "admin@emsclaims.co.za")
+        )).scalar_one_or_none()
+        if existing is None:
+            db.add(User(
+                email="admin@emsclaims.co.za",
+                hashed_password=hash_password(SEED_ADMIN_PASSWORD),
+                full_name="Test Administrator",
+                role=UserRole.ADMIN,
+                bhf_practice_number="0000000",
+            ))
+            await db.commit()
+
+    _SCHEMA_READY = True
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -103,6 +146,7 @@ async def _ensure_test_crew():
     Uses _TestSession (NullPool) — isolated from any in-flight app requests.
     """
     global _TEST_CREW_BOOTSTRAPPED
+    await _ensure_schema()
     if _TEST_CREW_BOOTSTRAPPED:
         return
 
