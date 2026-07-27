@@ -114,7 +114,7 @@ async def verify_provider_pcns(pcns: str) -> BHFVerificationResult:
         result.facility_name = api_result.get("facility_name")
 
         if result.practice_status == "active":
-            result.checks_passed.append(f"BHF_STATUS: Active provider ✓")
+            result.checks_passed.append("BHF_STATUS: Active provider ✓")
         elif result.practice_status == "suspended":
             result.checks_failed.append("BHF_STATUS: Provider suspended")
             result.is_valid = False

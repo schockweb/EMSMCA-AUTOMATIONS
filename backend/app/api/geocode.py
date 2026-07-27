@@ -11,7 +11,7 @@ async def geocode_query(query: str):
     Proxy to OpenStreetMap Nominatim.
     Bypasses browser CORS rules and user-agent restrictions.
     """
-    url = f"https://nominatim.openstreetmap.org/search"
+    url = "https://nominatim.openstreetmap.org/search"
     params = {
         "format": "json",
         "addressdetails": "1",

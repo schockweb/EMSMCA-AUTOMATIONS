@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+#
+# Pre-push gate: run the frontend regression suite before anything leaves this
+# machine. CI is the backstop; this is the gate that actually blocks, because it
+# fails while you are still looking at the terminal.
+#
+# Enable once per clone:   git config core.hooksPath .githooks
+# Bypass in an emergency:  git push --no-verify
+set -uo pipefail
+
+echo "pre-push: running frontend tests (~50s)…"
+cd "$(git rev-parse --show-toplevel)/frontend" || exit 0
+
+if [ ! -d node_modules ]; then
+  echo "pre-push: node_modules missing — skipping (run 'npm ci' to enable this gate)"
+  exit 0
+fi
+
+if npx vitest run >/tmp/ems-prepush.log 2>&1; then
+  echo "pre-push: $(grep -oE 'Tests +[0-9]+ passed' /tmp/ems-prepush.log | tail -1) — OK"
+  exit 0
+fi
+
+echo
+echo "──────────────────────────────────────────────────────────────"
+echo " PUSH BLOCKED — the frontend test suite failed."
+echo " This suite guards the PRF/PDF output that goes to schemes."
+echo
+tail -25 /tmp/ems-prepush.log
+echo "──────────────────────────────────────────────────────────────"
+echo " Full log: /tmp/ems-prepush.log"
+echo " Override (only if you are certain): git push --no-verify"
+echo
+exit 1

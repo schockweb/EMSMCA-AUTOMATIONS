@@ -663,7 +663,7 @@ async def adjudicate_claim(
                 result.checks.append(AdjudicationCheck(
                     check_name="AUTH_REQUIRED_IFT",
                     passed=True, severity="info",
-                    message=f"IFT Authorization present ✓",
+                    message="IFT Authorization present ✓",
                 ))
 
         # ── 10c: Auth Required — GEMS ──

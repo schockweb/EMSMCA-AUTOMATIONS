@@ -1,7 +1,23 @@
 # ═══════════════════════════════════════════════════════════════════════════
 # EMS Claims Portal — Continuous Integration
-# Runs on every push to main and on pull requests.
-# Jobs: lint → test-backend → build-images (no push)
+#
+# HISTORY / WHY THIS IS SHAPED THIS WAY
+# -------------------------------------
+# This pipeline failed 355 times out of 355 runs between 2026-05 and 2026-07 —
+# it had never once passed. The cause was structural, not flaky:
+#   * `ruff check` ran with ruff's defaults over a never-linted codebase and
+#     reported ~1,200 findings, so the lint job always failed;
+#   * `test-backend` declared `needs: lint`, and `build-images` needed that —
+#     so the backend tests and the image builds LITERALLY NEVER EXECUTED;
+#   * pytest ran with `-x`, and one UTF-16 file in tests/ aborted collection;
+#   * the 218-test frontend suite (the PRF/PDF regression gate) was not
+#     referenced anywhere at all.
+# A permanently red X carries no information, and nobody investigates it.
+#
+# The fixes: test jobs no longer depend on lint (a style opinion must never
+# block a correctness signal), ruff gates on a starter real-defect ruleset
+# (backend/ruff.toml), the Azure probe scripts moved out of tests/, and the
+# frontend suite is now a first-class job.
 # ═══════════════════════════════════════════════════════════════════════════
 
 name: CI
@@ -18,28 +34,17 @@ concurrency:
 
 jobs:
   # ═══════════════════════════════════════════════════════════════════════
-  # 1. Lint — Python (Ruff) + JavaScript / TypeScript
+  # Frontend tests — the PRF/PDF regression gate.
+  # Deliberately has NO `needs:`. This suite is what stops a captured field
+  # silently disappearing from the PDF sent to a medical scheme, so nothing
+  # else in the pipeline may prevent it from running.
   # ═══════════════════════════════════════════════════════════════════════
-  lint:
-    name: "Lint"
+  test-frontend:
+    name: "Frontend Tests (vitest)"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      # ── Python linting with Ruff ──
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-
-      - name: Install Python lint tools
-        run: pip install ruff
-
-      - name: Ruff check (backend)
-        run: ruff check backend/app/ --output-format=github
-
-      # ── JavaScript / TypeScript linting ──
       - name: Set up Node.js 20
         uses: actions/setup-node@v4
         with:
@@ -48,32 +53,31 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install frontend dependencies
-        run: |
-          cd frontend
-          npm ci --no-audit
+        run: cd frontend && npm ci --no-audit
 
-      - name: TypeScript type-check
-        run: |
-          cd frontend
-          npx tsc --noEmit
+      - name: Run vitest
+        run: cd frontend && npx vitest run
 
-      # ESLint — only runs if an ESLint config exists
-      - name: ESLint (if configured)
+      # Guards the failure mode this repo has actually hit: a suite that dies at
+      # import collects 0 tests and still reports green.
+      - name: Assert the suite actually collected tests
         run: |
           cd frontend
-          if [ -f .eslintrc.js ] || [ -f .eslintrc.cjs ] || [ -f .eslintrc.json ] || [ -f eslint.config.js ] || [ -f eslint.config.mjs ]; then
-            npx eslint src/ --max-warnings=0 || true
-          else
-            echo "ℹ️  No ESLint config found — skipping"
+          npx vitest run --reporter=json --outputFile=vitest-out.json >/dev/null 2>&1 || true
+          COUNT=$(node -e "try{console.log(require('./vitest-out.json').numTotalTests||0)}catch(e){console.log(0)}")
+          echo "collected tests: $COUNT"
+          if [ "$COUNT" -lt 150 ]; then
+            echo "::error::Only $COUNT tests collected — expected 150+. A suite probably failed to import."
+            exit 1
           fi
 
   # ═══════════════════════════════════════════════════════════════════════
-  # 2. Backend Tests — pytest with a real PostgreSQL 16 service
+  # Backend tests — pytest against a real PostgreSQL.
+  # No `needs: lint` — that gate is what kept this from ever running.
   # ═══════════════════════════════════════════════════════════════════════
   test-backend:
-    name: "Backend Tests"
+    name: "Backend Tests (pytest)"
     runs-on: ubuntu-latest
-    needs: lint
 
     services:
       postgres:
@@ -91,12 +95,12 @@ jobs:
           --health-retries 5
 
     env:
-      # App-level env vars consumed by backend/app/config.py
       DATABASE_URL: "postgresql+asyncpg://test_user:test_pass@localhost:5432/test_ems"
       SECRET_KEY: "test-secret"
       ENCRYPTION_KEY: "test-encrypt-key-32chars0000000"
       CELERY_BROKER_URL: "memory://"
       APP_ENV: "development"
+      SEED_ADMIN_PASSWORD: "DevSeed!Change#2026"
 
     steps:
       - uses: actions/checkout@v4
@@ -116,22 +120,65 @@ jobs:
       - name: Wait for PostgreSQL
         run: |
           until pg_isready -h localhost -p 5432 -U test_user; do
-            echo "⏳ Waiting for Postgres..."
+            echo "Waiting for Postgres..."
             sleep 2
           done
 
+      # No `-x`: one failure must not hide the state of every other test.
       - name: Run pytest
-        run: |
-          cd backend
-          python -m pytest tests/ -v --tb=short -x
+        run: cd backend && python -m pytest tests/ -v --tb=short
 
   # ═══════════════════════════════════════════════════════════════════════
-  # 3. Build Docker Images (verify they build — no push)
+  # Lint — a quality signal that never gates the test jobs above.
+  # ═══════════════════════════════════════════════════════════════════════
+  lint:
+    name: "Lint"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Ruff
+        run: pip install ruff
+
+      # Gates on backend/ruff.toml — real-defect rules only (F, E9).
+      - name: Ruff check (backend)
+        run: cd backend && ruff check app/ --output-format=github
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: cd frontend && npm ci --no-audit
+
+      - name: TypeScript type-check
+        run: cd frontend && npx tsc --noEmit
+
+      # ESLint is reported but not yet enforced: the codebase carries ~120
+      # findings (mostly no-explicit-any) and failing on them today would
+      # recreate the always-red pipeline this file exists to fix.
+      # `continue-on-error` surfaces the result honestly — unlike the previous
+      # `|| true`, which hid it entirely. Remove once the backlog is cleared.
+      - name: ESLint (reported, not yet enforced)
+        continue-on-error: true
+        run: cd frontend && npx eslint src/
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # Images must build — gated on both test suites, not on lint.
   # ═══════════════════════════════════════════════════════════════════════
   build-images:
     name: "Build Docker Images"
     runs-on: ubuntu-latest
-    needs: [test-backend]
+    needs: [test-frontend, test-backend]
 
     steps:
       - uses: actions/checkout@v4
@@ -139,7 +186,6 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # Build backend image — verify Dockerfile is valid
       - name: Build backend image
         uses: docker/build-push-action@v5
         with:
@@ -150,7 +196,6 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Build frontend image — verify Dockerfile is valid
       - name: Build frontend image
         uses: docker/build-push-action@v5
         with:

@@ -84,7 +84,6 @@ ICD10_REGISTRY: dict[str, dict] = {
 CPT_TARIFF_CODES: dict[str, dict] = {
     # Intermediate Life Support (ILS) — SA EMS no longer uses BLS
     "99211": {"desc": "Office/outpatient visit - minimal", "level": "ILS", "rate_tier": 1},
-    "99281": {"desc": "ED visit - minor", "level": "ILS", "rate_tier": 1},
 
     # EMS-specific SA tariffs
     "99218": {"desc": "Initial observation care - low complexity", "level": "ILS", "rate_tier": 2},

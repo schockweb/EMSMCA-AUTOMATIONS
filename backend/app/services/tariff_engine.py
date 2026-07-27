@@ -1236,7 +1236,7 @@ async def _generate_gems_lines(clinical_context: dict, rules_module) -> dict:
             if price > Decimal("0"):
                 multi_note = ""
                 if patient_count == 2:
-                    multi_note = f" [x0.75 — 2 patients]"
+                    multi_note = " [x0.75 — 2 patients]"
                 elif patient_count >= 3:
                     multi_note = f" [x0.50 — {patient_count} patients]"
 
@@ -1297,7 +1297,7 @@ async def _generate_gems_lines(clinical_context: dict, rules_module) -> dict:
             if price > 0:
                 multi_note = ""
                 if patient_count == 2:
-                    multi_note = f" [x0.75 — 2 patients]"
+                    multi_note = " [x0.75 — 2 patients]"
                 elif patient_count >= 3:
                     multi_note = f" [x0.50 — {patient_count} patients]"
 
