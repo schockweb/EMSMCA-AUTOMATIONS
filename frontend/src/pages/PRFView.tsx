@@ -1024,10 +1024,15 @@ export default function PRFView() {
     GREEN: '#16a34a', BLUE: '#2563eb',
   };
 
+  // Must cover EVERY field the Return Trip block renders (see the FieldRow
+  // stack below) — a guard that misses one silently drops captured times from
+  // the PDF that goes to the scheme. `return_depart_time` was checked here but
+  // is never written by the crew form; the real keys are return_depart_scene_time
+  // and return_at_destination_time.
   const returnTripHasContent = !!(
     fd.return_despatch_time || fd.return_on_scene_time ||
-    fd.return_handover_time || fd.return_available_time ||
-    fd.return_depart_time
+    fd.return_depart_scene_time || fd.return_at_destination_time ||
+    fd.return_handover_time || fd.return_available_time
   );
 
   // The payer-specific block lives in the "Billing Information" column and is
