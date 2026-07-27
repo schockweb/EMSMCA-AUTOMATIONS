@@ -75,3 +75,11 @@ backup_*.sql
 # ...but real migration SQL must stay tracked:
 !backend/migrations/*.sql
 !backend/alembic/**/*.sql
+
+# Container-side artefacts. `pip install` run inside the backend container
+# writes into the bind-mounted /app, so these appear in the repo working tree
+# without ever being part of the project. Committed by accident once (7f2e367).
+backend/.cache/
+backend/.local/
+backend/vt.py
+backend/probe.py
