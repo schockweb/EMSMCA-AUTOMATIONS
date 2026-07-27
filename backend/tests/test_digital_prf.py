@@ -38,26 +38,34 @@ CREW_PASSWORD     = "Test@PRF2026!"
 # Per-test auth header fixtures (function-scoped — safe with pytest-asyncio)
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# Tokens are cached for the whole session. These fixtures used to log in once
+# PER TEST, which trips the login rate limiter (15/min per client IP) partway
+# through the file: every test after that skipped with a 429 and the suite
+# reported success while silently testing nothing. Logging in once also makes
+# the run markedly faster (bcrypt is deliberately slow).
+_CREW_TOKEN_CACHE: dict[str, str] = {}
+
+
+async def _crew_headers(client, email: str, label: str):
+    if email not in _CREW_TOKEN_CACHE:
+        res = await client.post(
+            "/api/crew/login",
+            json={"email": email, "password": CREW_PASSWORD},
+        )
+        if res.status_code != 200:
+            pytest.skip(f"{label} login failed ({res.status_code}): {res.text}")
+        _CREW_TOKEN_CACHE[email] = res.json()["access_token"]
+    return {"Authorization": f"Bearer {_CREW_TOKEN_CACHE[email]}"}
+
+
 @pytest_asyncio.fixture
 async def crew_a_headers(client):
-    res = await client.post(
-        "/api/crew/login",
-        json={"email": CREW_A_EMAIL, "password": CREW_PASSWORD},
-    )
-    if res.status_code != 200:
-        pytest.skip(f"Crew A login failed ({res.status_code}): {res.text}")
-    return {"Authorization": f"Bearer {res.json()['access_token']}"}
+    return await _crew_headers(client, CREW_A_EMAIL, "Crew A")
 
 
 @pytest_asyncio.fixture
 async def crew_b_headers(client):
-    res = await client.post(
-        "/api/crew/login",
-        json={"email": CREW_B_EMAIL, "password": CREW_PASSWORD},
-    )
-    if res.status_code != 200:
-        pytest.skip(f"Crew B login failed ({res.status_code}): {res.text}")
-    return {"Authorization": f"Bearer {res.json()['access_token']}"}
+    return await _crew_headers(client, CREW_B_EMAIL, "Crew B")
 
 
 @pytest_asyncio.fixture
@@ -380,7 +388,9 @@ class TestMarkTimestamp:
             headers=crew_a_headers,
         )
         get_res = await client.get(f"/api/digital-prf/{crew_a_prf}", headers=crew_a_headers)
-        assert get_res.json()["km_depart_scene"] == "45123"
+        # km_* are numeric columns, so the value round-trips as a number rather
+        # than the string that was posted. Compare numerically.
+        assert float(get_res.json()["km_depart_scene"]) == 45123
 
     @pytest.mark.asyncio
     async def test_mark_all_valid_timestamp_fields(self, client, crew_a_headers):
@@ -554,12 +564,30 @@ class TestEndShift:
 # SUBMIT PRF — POST /api/digital-prf/{id}/submit
 # ═══════════════════════════════════════════════════════════════════════════════
 
+async def _submittable_prf(client, headers) -> str:
+    """Create a PRF that passes the server-side submit gate.
+
+    _validate_prf_for_submission rejects a PRF with no form_data ("PRF has no
+    data captured.") and one with no call_type. These tests predate that gate and
+    submitted a completely empty PRF, so they began failing the moment the backend
+    suite actually ran. The gate is correct — a blank record must never reach the
+    billing pipeline — so the tests are what needed fixing.
+    """
+    create = await client.post("/api/digital-prf", json={}, headers=headers)
+    prf_id = create.json()["id"]
+    await client.patch(
+        f"/api/digital-prf/{prf_id}",
+        json={"form_data": {"call_type": "PRIMARY", "patient_name": "Submit", "patient_surname": "Gate"}},
+        headers=headers,
+    )
+    return prf_id
+
+
 class TestSubmitPRF:
 
     @pytest.mark.asyncio
     async def test_submit_returns_202(self, client, crew_a_headers):
-        create_res = await client.post("/api/digital-prf", json={}, headers=crew_a_headers)
-        prf_id = create_res.json()["id"]
+        prf_id = await _submittable_prf(client, crew_a_headers)
         res = await client.post(f"/api/digital-prf/{prf_id}/submit", headers=crew_a_headers)
         assert res.status_code == 202
         data = res.json()
@@ -568,24 +596,21 @@ class TestSubmitPRF:
 
     @pytest.mark.asyncio
     async def test_submit_changes_status_from_draft(self, client, crew_a_headers):
-        create_res = await client.post("/api/digital-prf", json={}, headers=crew_a_headers)
-        prf_id = create_res.json()["id"]
+        prf_id = await _submittable_prf(client, crew_a_headers)
         await client.post(f"/api/digital-prf/{prf_id}/submit", headers=crew_a_headers)
         get_res = await client.get(f"/api/digital-prf/{prf_id}", headers=crew_a_headers)
         assert get_res.json()["status"] != "draft"
 
     @pytest.mark.asyncio
     async def test_submitted_prf_cannot_be_deleted(self, client, crew_a_headers):
-        create_res = await client.post("/api/digital-prf", json={}, headers=crew_a_headers)
-        prf_id = create_res.json()["id"]
+        prf_id = await _submittable_prf(client, crew_a_headers)
         await client.post(f"/api/digital-prf/{prf_id}/submit", headers=crew_a_headers)
         del_res = await client.delete(f"/api/digital-prf/{prf_id}", headers=crew_a_headers)
         assert del_res.status_code == 409
 
     @pytest.mark.asyncio
     async def test_submit_is_idempotent(self, client, crew_a_headers):
-        create_res = await client.post("/api/digital-prf", json={}, headers=crew_a_headers)
-        prf_id = create_res.json()["id"]
+        prf_id = await _submittable_prf(client, crew_a_headers)
         res1 = await client.post(f"/api/digital-prf/{prf_id}/submit", headers=crew_a_headers)
         res2 = await client.post(f"/api/digital-prf/{prf_id}/submit", headers=crew_a_headers)
         assert res1.status_code == 202
