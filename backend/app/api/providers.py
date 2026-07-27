@@ -18,6 +18,7 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy import select, func, or_, cast, Text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.database import get_db
 from app.models.service_provider import ServiceProvider
 from app.models.crew_member import CrewMember
@@ -36,13 +37,24 @@ logger = logging.getLogger("ems.providers")
 
 router = APIRouter(prefix="/api/providers", tags=["Service Providers"])
 
-UPLOAD_DIR = "/app/uploads/logos"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+# Derive from settings.UPLOAD_DIR like main.py and digital_prf.py already do.
+# These were hardcoded to "/app/uploads/..." — the container path — and created
+# at IMPORT time, so importing this module anywhere outside Docker died with
+# PermissionError on '/app'. That is why the backend test suite could never run
+# in CI. The container's WORKDIR is /app, so the configured default "./uploads"
+# resolves to the same /app/uploads in production: no behaviour change.
+_UPLOAD_ROOT = get_settings().UPLOAD_DIR or "./uploads"
+UPLOAD_DIR = os.path.join(_UPLOAD_ROOT, "logos")
+CREW_PHOTO_DIR = os.path.join(_UPLOAD_ROOT, "crew")
+VEHICLE_PHOTO_DIR = os.path.join(_UPLOAD_ROOT, "vehicles")
 
-CREW_PHOTO_DIR = "/app/uploads/crew"
-os.makedirs(CREW_PHOTO_DIR, exist_ok=True)
-VEHICLE_PHOTO_DIR = "/app/uploads/vehicles"
-os.makedirs(VEHICLE_PHOTO_DIR, exist_ok=True)
+# Best-effort at import; the upload handlers create the directory again before
+# writing, so an unwritable path here must not take the whole module down.
+for _d in (UPLOAD_DIR, CREW_PHOTO_DIR, VEHICLE_PHOTO_DIR):
+    try:
+        os.makedirs(_d, exist_ok=True)
+    except OSError as _e:  # pragma: no cover - environment dependent
+        logger.warning("Could not pre-create upload dir %s: %s", _d, _e)
 ALLOWED_PHOTO_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 
 
