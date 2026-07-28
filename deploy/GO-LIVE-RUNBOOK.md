@@ -124,3 +124,23 @@ curl -s http://localhost/health   # uptime_seconds must be small
 - Laptop repo (`8d42d1c`) ≠ VM (`76228d3`). Reconcile before pushing Digital PRF changes.
 - `deploy.yml` `DEPLOY_DIR` is `/opt/ems-claims` but the real dir is `/opt/ems` — fix or the pipeline fails.
 - `/opt/ems` is cluttered with one-off `fix_*.js` / `patch.*` / DB dumps — clean up when convenient.
+
+## ⚠️ Rebuilding the worker stack takes the SITE down until nginx is restarted
+
+`docker compose -f docker-compose.worker.yml up -d --build` recreates the shared
+`ems_shared_net`, which reassigns the BACKEND container a new IP. nginx resolves
+its upstream once at startup and caches it, so it keeps proxying to the old
+address and every request returns **502 Bad Gateway** — even though the backend
+is up and healthy. This caused a ~4 minute production outage on 2026-07-28.
+
+ALWAYS finish a worker-stack rebuild with:
+
+```bash
+sudo docker restart ems_nginx
+curl -sk -o /dev/null -w "%{http_code}
+" https://portal.emsmca.co.za/health   # expect 200
+```
+
+The same applies to anything that recreates the backend container or the shared
+network. If you ever see a 502 while `docker ps` shows the backend healthy, this
+is the cause and restarting nginx is the fix.
