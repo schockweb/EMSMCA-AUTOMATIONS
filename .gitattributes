@@ -1,0 +1,42 @@
+# Line-ending policy.
+#
+# This repo is developed on Windows (core.autocrlf=true) and deployed to Linux.
+# Without this file, shell scripts and container files could be committed with
+# CRLF, and on the VM the shebang line becomes "#!/usr/bin/env bash\r" — which
+# fails with the famously unhelpful:
+#     bash: /opt/ems/deploy/ops/backup-verify.sh: /usr/bin/env: bad interpreter
+# Every ops script (backups, restore rehearsal, TLS reload) would stop running,
+# and cron failures are silent by nature.
+#
+# `text eol=lf` forces LF in the repo AND in the working copy for these types,
+# regardless of any individual developer's autocrlf setting.
+
+* text=auto
+
+# Anything executed on Linux must be LF.
+*.sh        text eol=lf
+*.bash      text eol=lf
+Dockerfile* text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.conf      text eol=lf
+*.ini       text eol=lf
+*.toml      text eol=lf
+.env.example text eol=lf
+
+# Windows-only helpers stay CRLF.
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
+*.ps1       text eol=crlf
+
+# Never touch binaries.
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.ico       binary
+*.pdf       binary
+*.woff      binary
+*.woff2     binary
+*.gz        binary
+*.zip       binary

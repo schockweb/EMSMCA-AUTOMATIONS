@@ -44,10 +44,31 @@ docker run --rm -e PGPASSWORD="$PGPASSWORD" -e PGSSLMODE=require postgres:18-alp
 chmod 600 "$OUT"
 
 # 2. Uploads volume (PRF attachments / logos)
+#
+# The volume name is derived from the compose project ("ems" + upload_data).
+# If it ever stops matching — a renamed project, a recreated stack — docker does
+# NOT error: `-v ems_upload_data:/data` SILENTLY CREATES an empty volume, tar
+# succeeds, and the result is an 85-byte gzip that is perfectly valid and
+# perfectly empty. It would pass an age check, a gzip check and a "file exists"
+# check while every PRF attachment goes unbacked. So assert the volume exists
+# first, and assert afterwards that the archive actually contains files.
+UPVOL=${UPLOAD_VOLUME:-ems_upload_data}
+docker volume inspect "$UPVOL" >/dev/null 2>&1 || {
+  echo "uploads volume '$UPVOL' does not exist — refusing to write an empty attachment backup" >&2
+  exit 1
+}
+
 UPOUT="$UP_DIR/uploads_${STAMP}.tar.gz"
-docker run --rm -v ems_upload_data:/data:ro -v "$UP_DIR":/backup alpine \
+docker run --rm -v "$UPVOL":/data:ro -v "$UP_DIR":/backup alpine \
   tar czf "/backup/uploads_${STAMP}.tar.gz" -C /data .
 chmod 600 "$UPOUT"
+
+up_files=$(tar tzf "$UPOUT" 2>/dev/null | grep -vc '/$' || echo 0)
+if [ "$up_files" -eq 0 ]; then
+  rm -f "$UPOUT"
+  echo "uploads archive contained no files — '$UPVOL' is empty or unreadable" >&2
+  exit 1
+fi
 
 # 3. Monthly long-term copy — first successful run of each calendar month
 if ! ls "$MONTHLY_DIR"/ems_${PGDATABASE}_${MONTH}*.sql.gz >/dev/null 2>&1; then
