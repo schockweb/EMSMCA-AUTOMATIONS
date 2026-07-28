@@ -1,0 +1,20 @@
+# Build context exclusions for frontend/Dockerfile and frontend/Dockerfile.prod.
+# node_modules is the big one: shipping the host's tree into the context is slow
+# and can leak platform-specific binaries into the image.
+
+node_modules/
+dist/
+dist-ssr/
+
+.env
+.env.*
+!.env.example
+
+# One-off codemod scripts that were committed by accident
+patch_*.py
+fix_*.js
+
+.vite/
+coverage/
+*.log
+.DS_Store

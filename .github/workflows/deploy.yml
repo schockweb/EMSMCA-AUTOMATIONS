@@ -82,15 +82,37 @@ jobs:
             git reset --hard origin/main
 
             # ── App services (backend + nginx) ──────────────────────────
+            # NOTE: --remove-orphans is deliberately NOT used here. See below.
             VITE_GOOGLE_MAPS_KEY="${{ secrets.VITE_GOOGLE_MAPS_KEY }}" \
-              docker compose -f docker-compose.prod.yml up -d --build --remove-orphans
+              docker compose -f docker-compose.prod.yml up -d --build
 
             # Run database migrations — only after backend is healthy
             docker compose -f docker-compose.prod.yml exec -T ems_backend \
               python -m alembic upgrade head
 
             # ── Worker services (RabbitMQ + Celery + Flower) ────────────
-            docker compose -f docker-compose.worker.yml up -d --build --remove-orphans
+            # ⚠ NEVER add --remove-orphans to either compose command.
+            # Neither compose file declares `name:`, so both resolve to the SAME
+            # project ("ems", from the directory). --remove-orphans deletes every
+            # container in the project that the current file does not define, so
+            # the sequence would be:
+            #   prod.yml   --remove-orphans → deletes rabbitmq, worker, beat, flower
+            #   worker.yml --remove-orphans → deletes backend, nginx, redis, certbot
+            # and the deploy would END with the entire application deleted and not
+            # recreated. This never fired only because auto-deploy has been broken.
+            #
+            # Giving each file its own project name is NOT the fix: volumes are
+            # declared without an explicit `name:` (upload_data, backend_logs, ...),
+            # so they are project-prefixed. Renaming the project would orphan
+            # ems_upload_data and every PRF attachment in it.
+            docker compose -f docker-compose.worker.yml up -d --build
+
+            # Rebuilding worker services recreates the shared network, which can
+            # reassign the backend's IP. nginx resolves its upstream once at
+            # startup and caches it, so it keeps proxying to the old address and
+            # every request 502s while `docker ps` shows everything healthy.
+            # Reloading nginx last re-resolves the upstream. (Cost: one reload.)
+            docker restart ems_nginx
 
             # Prune dangling images to save disk
             docker image prune -f

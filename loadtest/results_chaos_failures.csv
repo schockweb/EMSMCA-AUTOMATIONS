@@ -1,9 +1,0 @@
-Method,Name,Error,Occurrences
-GET,GET /api/digital-prf/[id],CatchResponseError('get failed: 0'),5
-POST,POST /api/digital-prf (create),CatchResponseError('create failed: 0 '),317
-POST,POST /api/digital-prf/[id]/mark-time,CatchResponseError('mark-time failed: 0 '),16
-POST,POST /api/digital-prf/[id]/submit,CatchResponseError('submit failed: 0 '),8
-PATCH,PATCH /api/digital-prf/[id] (autosave),CatchResponseError('autosave failed: 0 '),48
-POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""e489ad89-2797-41a0-9be0-0220cece97fa""}')",1
-POST,POST /api/digital-prf (create),"CatchResponseError('create failed: 500 {""detail"":""An internal error occurred. Our team has been notified."",""crash_id"":""c7bee128-5473-4da5-9927-2913efea8475""}')",1
-POST,POST /api/digital-prf/[id]/submit,"CatchResponseError('submit failed: 503 {""detail"":""Could not queue PRF for processing. Please try submitting again.""}')",3

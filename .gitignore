@@ -83,3 +83,31 @@ backend/.cache/
 backend/.local/
 backend/vt.py
 backend/probe.py
+
+# ── SQLite databases — they carry bcrypt password hashes ──────────────────
+# backend/ems.db and backend/ems.db.old were tracked from 2026-05-27 and held
+# SUPER_ADMIN and ADMIN password hashes for the whole public-repo window. The
+# app uses PostgreSQL; no SQLite file is ever a project asset.
+*.db
+*.db.old
+*.sqlite
+*.sqlite3
+
+# ── Generated output and pasted scratch ───────────────────────────────────
+# A 34 MB pasted traceback log was tracked and made up ~93% of all repo bloat.
+global_errors.txt
+debug_output.txt
+*_dump.txt
+patch.diff
+
+# Load-test results are regenerated on every run and have no readers.
+loadtest/results_*.csv
+loadtest/*.html
+
+# ── Test / coverage caches ────────────────────────────────────────────────
+.pytest_cache/
+.ruff_cache/
+coverage/
+htmlcov/
+.coverage
+frontend/coverage/

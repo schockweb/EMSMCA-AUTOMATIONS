@@ -1,0 +1,67 @@
+# Build context exclusions for backend/Dockerfile and backend/Dockerfile.prod.
+#
+# WHY THIS FILE EXISTS
+# --------------------
+# Both Dockerfiles do `COPY . .`. Without a .dockerignore that copied the whole
+# backend directory into the runtime image, including tracked SQLite databases
+# holding bcrypt password hashes and ad-hoc scripts holding a live API key.
+# Untracking a file from git does NOT remove it from the build context — only
+# this file does. Keep the two in sync.
+
+# NOTE ON PATTERNS: docker matches these against the path relative to the build
+# context, so `*.db` covers only the context root. Anything that must match at
+# any depth needs an explicit `**/` prefix.
+
+# ── Credentials and local databases ──
+**/*.db
+**/*.db.old
+**/*.sqlite
+**/*.sqlite3
+.env
+.env.*
+!.env.example
+**/*.pem
+**/*.key
+
+# ── Tests and dev-only tooling (not needed at runtime) ──
+# Excluding tests/ from the image is also a safety control: on 2026-07-28 the
+# suite was run via `docker exec ems_backend pytest` and, picking up the
+# container's own DATABASE_URL, wrote fake providers/crew/PRFs into the live
+# database. tests/conftest.py now refuses a non-local database; keeping the
+# suite out of the runtime image removes the opportunity entirely.
+tests/
+pytest.ini
+ruff.toml
+**/.pytest_cache/
+**/.ruff_cache/
+
+# ── Python build artefacts ──
+**/__pycache__/
+**/*.py[cod]
+**/*.egg-info/
+.venv/
+venv/
+
+# ── Local data that must never be baked into an image ──
+uploads/
+logs/
+**/*.log
+global_errors.txt
+
+# ── Scratch, one-off and diagnostic scripts ──
+# These are developer tools run against a live system by hand; they have no
+# business inside a production image.
+add_*.py
+fix_*.py
+tmp_*.py
+migrate_*.py
+script_*.py
+scratch_*.py
+unfix_*.py
+patch_*.py
+probe.py
+debug_*.py
+*_check.py
+*_scorecard.py
+golden_claims_replay.py
+seed_loadtest_data.py

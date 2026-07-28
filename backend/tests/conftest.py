@@ -14,6 +14,7 @@ Database isolation strategy:
   no state leakage between tests.
 """
 import os
+import sys
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
@@ -23,6 +24,65 @@ os.environ["DATABASE_URL"] = os.getenv(
     "TEST_DATABASE_URL",
     os.getenv("DATABASE_URL", "postgresql+asyncpg://ems_admin:ems_secure_2024@localhost:5432/ems_claims"),
 )
+
+# ── 1a. PRODUCTION GUARD ────────────────────────────────────────────────────
+# On 2026-07-28 this suite was run inside the production backend container.
+# The fallback above picked up the container's own DATABASE_URL, so the tests
+# ran against the live Azure database and injected a fake provider, two crew
+# members and four PRFs (with cases, claims and documents) into real patient
+# data. They were removable only because the fixtures happened to be namespaced.
+#
+# The tests are not at fault — they create and commit rows by design. The fault
+# was that nothing checked WHERE they were pointed. A test suite must refuse to
+# start rather than trust the ambient environment.
+#
+# Rule: the database must be local. CI runs postgres as a service on localhost
+# (test_ems) and developers run it on localhost too; production is a managed
+# Azure host, which is exactly what this refuses. Override deliberately with
+# EMS_ALLOW_NONTEST_DB=1 only for a throwaway remote database.
+def _assert_not_production(url: str) -> None:
+    from urllib.parse import urlparse
+
+    if os.getenv("EMS_ALLOW_NONTEST_DB") == "1":
+        return
+
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    dbname = (parsed.path or "").lstrip("/")
+    local_hosts = {"localhost", "127.0.0.1", "::1", "postgres", "db", "ems_postgres"}
+
+    if host not in local_hosts:
+        raise RuntimeError(
+            "\n"
+            "═══════════════════════════════════════════════════════════════\n"
+            " REFUSING TO RUN: tests are pointed at a NON-LOCAL database.\n"
+            "═══════════════════════════════════════════════════════════════\n"
+            f"  host     : {host or '(unset)'}\n"
+            f"  database : {dbname or '(unset)'}\n"
+            "\n"
+            "  This suite CREATES AND COMMITS rows. Running it against a\n"
+            "  managed/remote database writes fake providers, crew and PRFs\n"
+            "  into real patient data.\n"
+            "\n"
+            "  Point TEST_DATABASE_URL at a local throwaway database, e.g.\n"
+            "    TEST_DATABASE_URL=postgresql+asyncpg://u:p@localhost:5432/test_ems\n"
+            "\n"
+            "  If the remote database really is disposable, set\n"
+            "    EMS_ALLOW_NONTEST_DB=1\n"
+            "═══════════════════════════════════════════════════════════════\n"
+        )
+
+    if "test" not in dbname.lower():
+        # Local but not obviously a test database — allowed (a developer's own
+        # box is theirs to pollute) but never silently.
+        sys.stderr.write(
+            f"\nWARNING: tests will write to local database '{dbname}', whose name "
+            f"does not contain 'test'. Rows WILL be created and committed.\n\n"
+        )
+
+
+_assert_not_production(os.environ["DATABASE_URL"])
+
 os.environ["SECRET_KEY"] = "ems-portal-super-secret-key-2024"
 os.environ["LOG_LEVEL"] = "WARNING"
 os.environ["LOG_FORMAT"] = "text"
