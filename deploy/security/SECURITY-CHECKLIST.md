@@ -43,11 +43,13 @@ Legend: ✅ done & verified · 🟡 partial / needs attention · ⬜ not yet don
 
 | Item | Status | Notes |
 |---|---|---|
-| Encryption at rest | ✅ | Azure-managed disk encryption (AES-256); POPIA field encryption for patient IDs |
-| Encryption in transit | 🟡 | App↔DB uses SSL; public HTTPS pending the DNS/cert step above |
-| No hardcoded secrets | ✅ | Secrets in `.env.prod` (git-ignored, chmod 600); not in code/repo |
-| Automated backups | ✅ | `backup-ems.sh` nightly; 14-day daily + 7-year monthly retention |
-| Off-box backup copy | ⬜ | Backups currently on-VM only — copy to Azure Blob for VM-loss protection |
+| Encryption at rest | 🟡 | Azure-managed disk + database encryption (AES-256). **Patient ID numbers are NOT field-encrypted** — see below |
+| Field-level encryption of patient IDs | ⬜ | **NOT IMPLEMENTED.** The column is `String(13)`, too small to hold a Fernet token, and there is no encrypt call on the write path. `ENCRYPTION_KEY`/Fernet currently protects provider SMTP app passwords only. Tracked as a post-pilot task — **do not claim this anywhere until it ships** |
+| Encryption in transit | ✅ | Public HTTPS live since 2026-07-13 (Let's Encrypt, auto-renewing); App↔DB uses SSL (`PGSSLMODE=require`) |
+| No hardcoded secrets | ✅ | As of 2026-07-28. Previously FALSE: `reset_password.py` carried a plaintext admin password and three scripts carried a live LlamaCloud API key, all tracked while the repo was public. Removed in 35f3d2c; **the exposed LlamaCloud key still needs revoking at the provider** |
+| Automated backups | ✅ | `backup-ems.sh` nightly; 14-day daily + 7-year monthly retention; verified nightly by `backup-verify.sh` |
+| Backup restore proven | ✅ | `restore-test.sh` weekly — restores into an isolated container and byte-compares finalised PRFs against production. First ever successful restore: 2026-07-28 |
+| Off-box backup copy | 🟡 | `backup-offsite.sh` written and fault-tested against a mock Blob endpoint, wired to cron at 02:30 — **dormant until `AZURE_SAS_URL` is set** in `/etc/default/ems-backup`. Until then every copy still lives only on this VM |
 
 ---
 

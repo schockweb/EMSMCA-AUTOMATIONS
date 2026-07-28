@@ -1,15 +1,39 @@
-# 🚦 portal.emsmca.co.za — Go-Live Runbook (matches the LIVE VM)
+# 🚦 portal.emsmca.co.za — Go-Live Runbook
 
-Verified against the running VM on 2026-07-12. Deploy dir is **`/opt/ems`** (NOT
-`/opt/ems-claims`). The live nginx already serves HTTP-only with the 443 block
-commented out, so nothing crashes — we just issue the cert and switch HTTPS on.
+> ## ✅ STATUS: infrastructure go-live is COMPLETE (since 2026-07-13)
+> The site serves valid HTTPS today: DNS resolves to 172.209.218.22, the
+> Let's Encrypt certificate is live and auto-renewing, and the 443 block in
+> `nginx/nginx.conf` is active.
+>
+> **Sections 1–4 below are a HISTORICAL record of how that was done. Do not
+> re-run them on the live VM.** Step 1 would re-issue a certificate that already
+> exists (Let's Encrypt rate-limits this), and step 2 tells you to un-comment a
+> 443 block that is already un-commented.
+>
+> They are kept because they are the rebuild procedure: if this VM is ever lost
+> and rebuilt from scratch, follow them in order.
+>
+> **For routine work go to "Manual deploy procedure" and "Operations" below.**
 
-Do this **in order** tomorrow, after the hosting company fixes the DNS typo.
-Run each step, check its "✅ expect", and stop if anything looks different.
+---
 
-> ⚠️ Go live **MANUALLY** using the steps below. Do NOT rely on the GitHub
-> auto-deploy — it points at the wrong folder (`/opt/ems-claims`) and would fail.
-> Also don't push to `main` mid-go-live.
+### Corrections to earlier versions of this document (2026-07-28)
+
+- The old warning that auto-deploy "points at the wrong folder
+  (`/opt/ems-claims`)" is **stale** — `.github/workflows/deploy.yml` has used
+  `DEPLOY_DIR: /opt/ems` for some time.
+- Auto-deploy is nonetheless **still broken, for a different reason**: the
+  workflow connects as `DEPLOY_USER: deploy`, and **that user does not exist on
+  the VM** (`id deploy` → no such user; there is no `/home/deploy/.ssh`). Only
+  `azureuser` exists. So every automated deploy fails at the SSH step.
+- That failure is the *only* reason production survived a landmine: until
+  2026-07-28 the workflow passed `--remove-orphans` to both compose files, which
+  share one project name, so a successful run would have deleted every app
+  container and not recreated them. The flag is gone now — but **fix the deploy
+  user before re-enabling auto-deploy**, and watch the first run.
+- A line in the manual deploy procedure used to copy an HTTP-only
+  `nginx.conf.bak-2026-07-12` over the live config, which would have taken the
+  site off TLS. Removed.
 
 ---
 
@@ -120,10 +144,87 @@ curl -s http://localhost/health   # uptime_seconds must be small
 - Docker network `ems_db_net` must exist (`sudo docker network create ems_db_net` — already created 2026-07-12).
 - Browser check needs Ctrl+F5, possibly Service-Worker unregister (PWA caching).
 
+---
+
+## Operations — backups, restore and the unattended safety net
+
+Everything below is installed by one idempotent script. Re-run it after any
+deploy; it is safe to run repeatedly:
+
+```bash
+sudo bash /opt/ems/deploy/ops/install-ops-crons.sh
+```
+
+It installs `/opt/ems/backup_ems.sh` **from version control** (the live copy had
+previously been edited in place and drifted from the repo) and these jobs:
+
+| When | Job | What it guarantees |
+|---|---|---|
+| 02:00 daily | `backup_ems.sh` | DB dump + uploads tarball; 14-day daily, 7-year monthly retention |
+| 02:30 daily | `backup-offsite.sh` | Copies them to Azure Blob — **dormant until armed**, see below |
+| 07:30 daily | `backup-verify.sh` | Asserts last night's backup exists, is fresh, non-trivial and valid |
+| 04:17 daily | `nginx-cert-reload.sh` | Reloads nginx when certbot renews; warns under 14 days |
+| Sun 05:00 | `restore-test.sh` | Actually restores the newest dump and compares it to production |
+| Sun 03:40 | docker prune | Reclaims build cache so the root filesystem cannot fill |
+
+### Arming the off-site copy (the one remaining data-loss risk)
+
+Until this is done, every copy of the data — nightly dumps, the 7-year POPIA
+archive, and every PRF attachment — exists only on this VM's disk.
+
+1. Create a storage account and a **private** container (e.g. `ems-backups`).
+2. Generate a **container SAS** with `Create + Write + List` and **not Delete**.
+   A compromised VM must not be able to erase the off-site copies using the
+   credential stored on it. Give it a long expiry — a SAS that quietly expires
+   is a silent backup failure.
+3. Add it to `/etc/default/ems-backup` (mode 600):
+   ```
+   AZURE_SAS_URL="https://ACCOUNT.blob.core.windows.net/ems-backups?sv=...&sig=..."
+   ```
+4. Prove it: `sudo /opt/ems/deploy/ops/backup-offsite.sh` — expect one
+   `sent ... (verified)` line per file, then `OK: N file(s) verified off-site`.
+
+### Alerting (backups can fail silently — they already did)
+
+On 2026-07-18/19 the nightly backup produced no file *and no error line*, and
+nobody noticed for 8 days. A script that never starts cannot report its own
+failure, so the alert has to come from outside.
+
+Create a free check at healthchecks.io and add its URL to the same file:
+```
+HEALTHCHECK_URL=https://hc-ping.com/your-uuid-here
+```
+`backup-verify.sh` and `backup-offsite.sh` both ping it on success and
+`/fail` on failure. Because healthchecks.io alerts on a *missing* ping, this
+also catches the VM being down entirely.
+
+### Reading the results
+
+```bash
+sudo tail -20 /var/log/ems-backup-verify.log    # nightly backup health
+sudo tail -30 /var/log/ems-restore-test.log     # weekly restore proof
+sudo tail -20 /var/log/ems-backup-offsite.log   # off-site copy
+```
+
+`restore-test.sh` is the one that matters most. It restores into a throwaway
+container on `--network none` (it cannot reach production) and only ever reads
+live with SELECT. Its verdicts:
+- `LOST <table>` — **emergency**: the backup has rows production is missing.
+- `EMPTY <table>` — the dump has no rows for a table that live populates.
+- `drift <table>` — normal; crews added records after the dump was taken.
+- `content fingerprint MISMATCH` — finalised (non-DRAFT) PRFs differ between
+  backup and live. Those are immutable, so this means either a corrupt dump or
+  altered patient records. Proven to catch a single changed character.
+
 ## Known drift to resolve later (not needed for go-live)
-- Laptop repo (`8d42d1c`) ≠ VM (`76228d3`). Reconcile before pushing Digital PRF changes.
-- `deploy.yml` `DEPLOY_DIR` is `/opt/ems-claims` but the real dir is `/opt/ems` — fix or the pipeline fails.
-- `/opt/ems` is cluttered with one-off `fix_*.js` / `patch.*` / DB dumps — clean up when convenient.
+- `deploy.yml` connects as `DEPLOY_USER: deploy`, which **does not exist** on the
+  VM — fix before re-enabling auto-deploy (see corrections at the top).
+- `ems_flower` crash-loops (Flower isn't installed in the image). Cosmetic; it is
+  a monitoring UI, not part of the request path.
+- nginx and celery_worker report `unhealthy` in `docker ps`. **These flags are
+  false** — verify reality with `curl https://portal.emsmca.co.za/` (expect 200)
+  and `docker exec ems_celery_worker celery -A app.tasks.celery_app inspect ping`
+  (expect `pong`).
 
 ## ⚠️ Rebuilding the worker stack takes the SITE down until nginx is restarted
 

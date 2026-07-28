@@ -34,6 +34,22 @@ httpx==0.28.1
 llama-parse==0.5.19
 mistralai==1.3.1
 
+# ─── Azure Document Intelligence OCR — OPTIONAL, NOT INSTALLED ─────────────
+# app/services/ocr_extraction.py imports these inside _get_layout_azure(), and
+# extract_document() defaults to engine="azure". They are deliberately absent:
+# production has no AZURE_OPENAI_ENDPOINT / AZURE_DOC_INTEL_ENDPOINT and no
+# LLAMA_CLOUD_API_KEY, so document OCR is not configured at all. The pilot runs
+# on the Digital PRF (crew fills the form), not scanned-PDF ingestion.
+#
+# This degrades safely rather than crashing: extract_document() checks
+# AZURE_OPENAI_ENDPOINT first and returns success=False with "Azure OpenAI
+# credentials missing in environment" before the import is ever reached.
+#
+# To actually enable the azure engine you need BOTH these packages AND the
+# endpoint/key settings — installing them alone changes nothing:
+#   azure-ai-documentintelligence==1.0.0
+#   azure-core==1.32.0
+
 # ─── Utilities ──────────────────────────────────
 cryptography==44.0.0
 aiofiles==24.1.0
