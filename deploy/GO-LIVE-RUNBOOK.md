@@ -106,7 +106,11 @@ After pushing from the laptop, on the VM:
 ```bash
 cd /opt/ems
 sudo git fetch origin main && sudo git reset --hard origin/main
-sudo cp /opt/ems/nginx/nginx.conf.bak-2026-07-12 /opt/ems/nginx/nginx.conf   # keep the safe HTTP-only config until HTTPS is live
+# NOTE: a line here used to copy nginx.conf.bak-2026-07-12 over the live config.
+# That backup is HTTP-ONLY (it predates HTTPS going live on 2026-07-13), so
+# following this runbook verbatim would have taken the site off TLS. Removed
+# 2026-07-28. The live config is nginx/nginx.conf from the repo — do not
+# overwrite it from any .bak file.
 sudo VITE_GOOGLE_MAPS_KEY="$(sudo grep -oP '(?<=VITE_GOOGLE_MAPS_KEY=).*' /opt/ems/.env.prod)" docker compose -f docker-compose.prod.yml up -d --build --force-recreate
 sudo docker compose -f docker-compose.prod.yml exec -T ems_backend python -m alembic upgrade head   # ⚠️ MANDATORY — code + database must update together
 sudo docker compose -f docker-compose.worker.yml up -d --build

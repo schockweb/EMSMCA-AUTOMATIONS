@@ -22,13 +22,18 @@ OPS_DIR=/opt/ems/deploy/ops
 
 chmod +x "$OPS_DIR"/*.sh
 echo "==> scripts made executable"
+# The cron entries below invoke these through `bash` explicitly. The exec bit
+# alone is not enough: git tracked these as 100644, so every `git reset --hard`
+# during a deploy stripped it and cron failed with "Permission denied" on every
+# run — silently, for two days. The mode is now tracked as 100755 AND cron no
+# longer depends on it.
 
 # ── 1. TLS: reload nginx when the certificate is renewed (04:17 daily) ──
 cat > /etc/cron.d/ems-nginx-cert <<'EOF'
 # Reload nginx if certbot has renewed the TLS certificate, and warn before expiry.
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-17 4 * * * root /opt/ems/deploy/ops/nginx-cert-reload.sh >> /var/log/ems-nginx-cert.log 2>&1
+17 4 * * * root /bin/bash /opt/ems/deploy/ops/nginx-cert-reload.sh >> /var/log/ems-nginx-cert.log 2>&1
 EOF
 chmod 644 /etc/cron.d/ems-nginx-cert
 echo "==> installed /etc/cron.d/ems-nginx-cert (daily 04:17)"
@@ -38,7 +43,7 @@ cat > /etc/cron.d/ems-backup-verify <<'EOF'
 # Independently assert that the nightly backup produced a fresh, valid dump.
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-30 7 * * * root /opt/ems/deploy/ops/backup-verify.sh >> /var/log/ems-backup-verify.log 2>&1
+30 7 * * * root /bin/bash /opt/ems/deploy/ops/backup-verify.sh >> /var/log/ems-backup-verify.log 2>&1
 EOF
 chmod 644 /etc/cron.d/ems-backup-verify
 echo "==> installed /etc/cron.d/ems-backup-verify (daily 07:30)"
