@@ -2,7 +2,7 @@ import { openDB, type IDBPDatabase } from 'idb';
 
 export interface OfflineEntry {
   id: string;
-  action: 'save' | 'submit';
+  action: 'create' | 'save' | 'submit';
   payload: any;
   timestamp: number;
   retries: number;
@@ -30,6 +30,32 @@ export function initDb() {
     });
   }
   return dbPromise;
+}
+
+/**
+ * Queue the CREATION of a PRF the crew started with no signal.
+ *
+ * The device generates the PRF's UUID itself and hands it to the server as
+ * `client_id` when connectivity returns. Until then the crew works entirely
+ * against the local draft under that same id, so the outbox keys, the
+ * localStorage draft key and the form's route all agree from the first tap.
+ *
+ * The timestamp is what orders this ahead of the PRF's own save/submit entries
+ * in getPending() — the row has to exist server-side before anything can PATCH
+ * it. syncEngine additionally refuses to drain a PRF's save/submit while its
+ * create is still outstanding, so ordering is enforced, not merely likely.
+ */
+export async function queueCreate(prfId: string, payload: any) {
+  const db = await initDb();
+  const key = `${prfId}:create`;
+  await db.put(STORE, {
+    id: key,
+    action: 'create' as const,
+    payload,
+    timestamp: Date.now(),
+    retries: 0,
+    status: 'pending' as const,
+  });
 }
 
 export async function queueSave(prfId: string, payload: any) {

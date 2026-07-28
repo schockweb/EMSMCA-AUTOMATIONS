@@ -20,7 +20,7 @@ import 'fake-indexeddb/auto';
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 
 import {
-  queueSave, queueSubmit, getPending, getAll, getCount, getOutboxSummary,
+  queueCreate, queueSave, queueSubmit, getPending, getAll, getCount, getOutboxSummary,
   markSyncing, markSynced, markFailed, markDead, retryDead, clearAll,
   type OfflineEntry,
 } from '../services/offlineDb';
@@ -322,6 +322,141 @@ describe('syncEngine — giving up must never mean throwing away', () => {
     const byId = Object.fromEntries((await getAll()).map(e => [e.id, e]));
     expect(byId['prf-dead:save'].status).toBe('dead');   // preserved
     expect(byId['prf-live:save']).toBeUndefined();       // synced and cleared
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Starting a PRF with no signal
+// ═══════════════════════════════════════════════════════════════════════════
+describe('offline PRF creation', () => {
+  const CREATE_BODY = { vehicle_id: 'veh-1', crew_member_2_id: 'crew-2' };
+
+  it('queueCreate stores a pending create entry under the device-chosen id', async () => {
+    await queueCreate(PRF, CREATE_BODY);
+    const [entry] = await getAll();
+    expect(entry.id).toBe(`${PRF}:create`);
+    expect(entry.action).toBe('create');
+    expect(entry.status).toBe('pending');
+    expect(entry.payload).toEqual(CREATE_BODY);
+  });
+
+  it('registers the PRF with the id the device already chose', async () => {
+    await queueCreate(PRF, CREATE_BODY);
+    await startSync();
+    expect(mockAxios.post).toHaveBeenCalledWith(
+      '/api/digital-prf',
+      expect.objectContaining({ vehicle_id: 'veh-1', client_id: PRF }),
+      expect.anything(),
+    );
+    expect(await getCount()).toBe(0);
+  });
+
+  it('creates BEFORE saving, so the PATCH has a row to land on', async () => {
+    await queueCreate(PRF, CREATE_BODY);
+    await new Promise(r => setTimeout(r, 5));
+    await queueSave(PRF, { patient_name: 'A' });
+
+    await startSync();
+
+    expect(mockAxios.post.mock.invocationCallOrder[0])
+      .toBeLessThan(mockAxios.patch.mock.invocationCallOrder[0]);
+    expect(await getCount()).toBe(0);
+  });
+
+  // ── The data-loss guard ──────────────────────────────────────────────────
+  // syncEngine treats a 404 on a save as "obsolete, drop it". That is right for
+  // a draft swept server-side, and catastrophic for a PRF whose create simply
+  // hasn't drained yet — it would delete the crew's only copy of a patient
+  // record taken at the roadside.
+  it('does NOT attempt a save while its create is still outstanding', async () => {
+    mockAxios.post.mockRejectedValueOnce(httpError(500, 'server down'));
+    await queueCreate(PRF, CREATE_BODY);
+    await new Promise(r => setTimeout(r, 5));
+    await queueSave(PRF, { patient_name: 'Roadside Patient' });
+
+    await startSync();
+
+    // The save must not have been sent...
+    expect(mockAxios.patch).not.toHaveBeenCalled();
+    // ...and must still be queued, with its payload intact.
+    const byId = Object.fromEntries((await getAll()).map(e => [e.id, e]));
+    expect(byId[`${PRF}:save`].status).toBe('pending');
+    expect(byId[`${PRF}:save`].payload).toEqual({ patient_name: 'Roadside Patient' });
+    expect(byId[`${PRF}:create`].status).toBe('failed');
+    expect(await getCount()).toBe(2);
+  });
+
+  it('does NOT attempt a submit while its create is still outstanding', async () => {
+    mockAxios.post.mockRejectedValueOnce(httpError(500, 'server down'));
+    await queueCreate(PRF, CREATE_BODY);
+    await new Promise(r => setTimeout(r, 5));
+    await queueSubmit(PRF, { patient_name: 'A' });
+
+    await startSync();
+
+    expect(mockAxios.post).toHaveBeenCalledTimes(1);          // only the create
+    expect(mockAxios.post).not.toHaveBeenCalledWith(
+      `/api/digital-prf/${PRF}/submit`, null, expect.anything(),
+    );
+    expect(await getCount()).toBe(2);
+  });
+
+  it('keeps the save blocked even after the create is given up on', async () => {
+    await queueCreate(PRF, CREATE_BODY);
+    for (let i = 0; i < 6; i++) await markFailed(`${PRF}:create`, 'network');
+    await new Promise(r => setTimeout(r, 5));
+    await queueSave(PRF, { patient_name: 'Roadside Patient' });
+
+    await startSync();
+
+    expect(mockAxios.patch).not.toHaveBeenCalled();
+    const byId = Object.fromEntries((await getAll()).map(e => [e.id, e]));
+    expect(byId[`${PRF}:create`].status).toBe('dead');
+    expect(byId[`${PRF}:save`].payload).toEqual({ patient_name: 'Roadside Patient' });
+    expect(await getCount()).toBe(2);   // nothing discarded
+  });
+
+  it('a blocked PRF does not hold up an unrelated PRF', async () => {
+    mockAxios.post.mockRejectedValueOnce(httpError(500));
+    await queueCreate('prf-blocked', CREATE_BODY);
+    await new Promise(r => setTimeout(r, 5));
+    await queueSave('prf-blocked', { x: 1 });
+    await queueSave('prf-healthy', { y: 2 });
+
+    await startSync();
+
+    const ids = (await getAll()).map(e => e.id).sort();
+    expect(ids).toEqual(['prf-blocked:create', 'prf-blocked:save']);
+    expect(mockAxios.patch).toHaveBeenCalledWith(
+      '/api/digital-prf/prf-healthy', { y: 2 }, expect.anything(),
+    );
+  });
+
+  it('drains create then save then submit in one pass once the server is reachable', async () => {
+    await queueCreate(PRF, CREATE_BODY);
+    await new Promise(r => setTimeout(r, 5));
+    await queueSave(PRF, { step: 'save' });
+    await new Promise(r => setTimeout(r, 5));
+    await queueSubmit(PRF, { step: 'submit' });
+
+    await startSync();
+
+    expect(mockAxios.post).toHaveBeenCalledWith(
+      '/api/digital-prf', expect.objectContaining({ client_id: PRF }), expect.anything(),
+    );
+    expect(mockAxios.post).toHaveBeenCalledWith(
+      `/api/digital-prf/${PRF}/submit`, null, expect.anything(),
+    );
+    expect(await getCount()).toBe(0);
+  });
+
+  it('leaves the whole PRF queued while offline, losing nothing', async () => {
+    setOnline(false);
+    await queueCreate(PRF, CREATE_BODY);
+    await queueSave(PRF, { patient_name: 'A' });
+    await startSync();
+    expect(mockAxios.post).not.toHaveBeenCalled();
+    expect(await getCount()).toBe(2);
   });
 });
 

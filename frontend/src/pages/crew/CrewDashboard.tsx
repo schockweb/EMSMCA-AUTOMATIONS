@@ -417,33 +417,123 @@ export default function CrewDashboard() {
 
     if (!vehicle || !tkn) { openVehiclePicker(); return; }
 
+    const createBody = {
+      vehicle_id: vehicle.id,
+      crew_member_2_id: crew2.id || null,
+      // Supervisor only travels with the PRF when the shift was BAA-only.
+      // The backend seeds these into form_data so the rules engine (which
+      // reads `supervising_practitioner_pr`) sees them on every PRF.
+      supervising_practitioner_pr: supervisor?.hpcsa_number || null,
+      supervising_practitioner_name: supervisor?.name || null,
+      supervising_practitioner_qualification: supervisor?.qualification || null,
+    };
+
     setCreating(true);
     setNewPrfError('');
+
+    // Already offline — don't spend the crew's time on a request that cannot
+    // succeed. Go straight to a local PRF.
+    if (!navigator.onLine) { await startPrfOffline(createBody); return; }
+
     try {
-      const prfRes = await axios.post('/api/digital-prf', {
-        vehicle_id: vehicle.id,
-        crew_member_2_id: crew2.id || null,
-        // Supervisor only travels with the PRF when the shift was BAA-only.
-        // The backend seeds these into form_data so the rules engine (which
-        // reads `supervising_practitioner_pr`) sees them on every PRF.
-        supervising_practitioner_pr: supervisor?.hpcsa_number || null,
-        supervising_practitioner_name: supervisor?.name || null,
-        supervising_practitioner_qualification: supervisor?.qualification || null,
-      }, { headers: { Authorization: `Bearer ${tkn}` } });
+      const prfRes = await axios.post('/api/digital-prf', createBody, {
+        headers: { Authorization: `Bearer ${tkn}` },
+      });
       navigate(`/${providerSlug}/crew/prf/${prfRes.data.id}`);
     } catch (err: any) {
-      setCreating(false);
       // Same 401 trap as loadDrafts — silently failing here made the New PRF
       // button "do nothing" when the shift token had expired.
       if (err?.response?.status === 401) {
+        setCreating(false);
         clearCrewSession();
         navigate(`/${providerSlug}/login`, { replace: true });
         return;
       }
+
+      // The server was unreachable rather than unhappy. A crew standing at a
+      // scene in a dead zone previously got "Check your connection and try
+      // again" and could not start a PRF at all — the one moment the form is
+      // most needed. Start it locally instead and let the outbox register it
+      // when signal returns.
+      const networkDown =
+        !navigator.onLine || err?.code === 'ERR_NETWORK' || err?.code === 'ECONNABORTED' ||
+        !err?.response;
+      if (networkDown) { await startPrfOffline(createBody); return; }
+
+      setCreating(false);
       setNewPrfError(
         err?.response?.data?.detail ||
         'Could not start a new PRF. Check your connection and try again.'
       );
+    }
+  };
+
+  /**
+   * Begin a PRF with no server round-trip.
+   *
+   * The device mints the PRF's UUID (the primary key is a UUID anyway), seeds a
+   * local draft under that id so the form can open against it, and queues the
+   * creation. The crew works normally; the PRF registers itself when there is
+   * signal, keeping the same id throughout so the draft, the outbox entries and
+   * the route never diverge.
+   *
+   * prf_number and case_number stay server-assigned — they are a per-provider
+   * counter with a uniqueness constraint, so two offline devices choosing their
+   * own would collide.
+   */
+  const startPrfOffline = async (createBody: Record<string, any>) => {
+    try {
+      const newId =
+        (globalThis.crypto?.randomUUID?.() as string | undefined) ??
+        // Fallback for the rare WebView without randomUUID.
+        'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+          const r = (Math.random() * 16) | 0;
+          return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+        });
+
+      const { queueCreate } = await import('../../services/offlineDb');
+      await queueCreate(newId, createBody);
+
+      // Seed the local draft so DigitalPRFForm can open this PRF while it has
+      // no server row. Without this the form's load falls through to
+      // "Could not reach the server" for a PRF that has never existed remotely.
+      //
+      // The shape MUST match what DigitalPRFForm's saveToLocal writes — its
+      // loadFromLocal bails on `!draft.fd`, so a differently-shaped seed would
+      // be silently ignored and the crew would see the load error anyway.
+      // form_data mirrors what the backend seeds server-side for a BAA-only
+      // shift, so an offline PRF carries the same supervisor fields the rules
+      // engine reads.
+      const seededFd: Record<string, any> = {};
+      if (createBody.supervising_practitioner_pr) {
+        seededFd.supervising_practitioner_pr = String(createBody.supervising_practitioner_pr).trim().toUpperCase();
+      }
+      if (createBody.supervising_practitioner_name) {
+        seededFd.supervising_practitioner_name = String(createBody.supervising_practitioner_name).trim();
+      }
+      if (createBody.supervising_practitioner_qualification) {
+        seededFd.supervising_practitioner_qualification = String(createBody.supervising_practitioner_qualification).trim().toUpperCase();
+      }
+
+      localStorage.setItem(`prf-draft:${newId}`, JSON.stringify({
+        fd: seededFd,
+        vitals: [], ivRows: [], medRows: [],
+        timestamps: {}, kms: {}, geos: {},
+        sigs: {
+          patient_signature: null, witness_signature: null, handover_signature: null,
+          crew_signature: null, valuables_signature: null,
+        },
+        vehicle: createBody.vehicle_id || '',
+        crew2Id: createBody.crew_member_2_id || '',
+        phase: 0,
+        savedAt: Date.now(),
+      }));
+
+      window.dispatchEvent(new CustomEvent('outbox-change'));
+      navigate(`/${providerSlug}/crew/prf/${newId}`);
+    } catch {
+      setCreating(false);
+      setNewPrfError('Could not start a PRF on this device. Please try again.');
     }
   };
 

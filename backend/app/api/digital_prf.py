@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import select, func, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -43,6 +44,21 @@ class PRFCreateRequest(BaseModel):
     supervising_practitioner_pr: str | None = None
     supervising_practitioner_name: str | None = None
     supervising_practitioner_qualification: str | None = None
+    # Client-generated UUID, sent when the crew started this PRF with no signal.
+    # The primary key is a UUID anyway (models/digital_prf.py: default=uuid.uuid4)
+    # so letting the device choose it costs nothing and lets a crew begin a PRF
+    # at the roadside in a dead zone — previously impossible, because the form
+    # could not open without an id the server had already minted.
+    #
+    # prf_number/case_number are deliberately NOT client-supplied: they are a
+    # per-provider monotonic counter under a UNIQUE(provider_id, prf_number)
+    # constraint, so two offline devices would inevitably collide. They are
+    # assigned here, when the PRF reaches the server.
+    #
+    # Sending the same client_id twice returns the existing PRF rather than
+    # creating a second one — the outbox retries, and a lost response must not
+    # produce duplicate patient records.
+    client_id: str | None = None
 
 class PRFSaveRequest(BaseModel):
     """Auto-save payload — sent every 5 seconds from the mobile form."""
@@ -206,7 +222,49 @@ async def create_prf(
     crew: CrewMember = Depends(get_current_crew),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a new draft PRF. Auto-fills crew + provider."""
+    """Create a new draft PRF. Auto-fills crew + provider.
+
+    Idempotent when the client supplies `client_id` (see PRFCreateRequest).
+    """
+    # ── Client-supplied id: validate, then replay-check BEFORE taking the
+    #    provider lock, so a retry never contends for it. ────────────────────
+    client_uuid: uuid.UUID | None = None
+    if body.client_id:
+        try:
+            client_uuid = uuid.UUID(body.client_id)
+        except (ValueError, AttributeError, TypeError):
+            raise HTTPException(status_code=422, detail="client_id must be a UUID")
+
+        existing = await db.scalar(
+            select(DigitalPRF).where(DigitalPRF.id == client_uuid)
+        )
+        if existing is not None:
+            # Cross-tenant guard. A device can name its own id, so it could name
+            # somebody else's. Never return another provider's PRF — that would
+            # leak their prf_number and case_number. UUID4 is 122 bits, so a
+            # genuine accidental collision is not a thing; this is here for the
+            # deliberate case.
+            if existing.provider_id != crew.provider_id:
+                logger.warning(
+                    "Rejected create with client_id belonging to another provider "
+                    "(crew %s, provider %s)", crew.id, crew.provider_id,
+                )
+                raise HTTPException(status_code=409, detail="PRF id already in use")
+
+            # Same provider: this is the outbox retrying after a lost response.
+            # Return the existing row unchanged so the device converges on it
+            # instead of creating a duplicate patient record.
+            logger.info(
+                "Idempotent create replay for PRF #%s (case %s) by crew %s",
+                existing.prf_number, existing.case_number, crew.full_name,
+            )
+            return {
+                "id": str(existing.id),
+                "prf_number": existing.prf_number,
+                "case_number": existing.case_number,
+                "status": existing.status.value,
+            }
+
     # Load provider for case number generation. FOR UPDATE serialises
     # concurrent PRF creation for this one provider so `_next_prf_number`'s
     # max()+1 is race-free (other providers never contend on this row).
@@ -242,8 +300,34 @@ async def create_prf(
         status=PRFStatus.DRAFT,
         form_data=initial_form_data,
     )
+    # Honour the device's id when it offered one, so the offline draft, its
+    # localStorage key and its outbox entries all keep pointing at the same PRF.
+    if client_uuid is not None:
+        prf.id = client_uuid
     db.add(prf)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # Two devices raced the same client_id, or the same device raced itself
+        # between the replay check above and this commit. The row now exists;
+        # return it rather than failing the crew's PRF.
+        await db.rollback()
+        if client_uuid is None:
+            raise
+        existing = await db.scalar(
+            select(DigitalPRF).where(
+                DigitalPRF.id == client_uuid,
+                DigitalPRF.provider_id == crew.provider_id,
+            )
+        )
+        if existing is None:
+            raise
+        return {
+            "id": str(existing.id),
+            "prf_number": existing.prf_number,
+            "case_number": existing.case_number,
+            "status": existing.status.value,
+        }
 
     logger.info(
         "Created draft PRF #%d (case %s) by crew %s",

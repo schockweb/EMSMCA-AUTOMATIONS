@@ -41,7 +41,21 @@ export async function startSync() {
   
   try {
     const pending = await getPending();
+
+    // PRFs whose create has not (yet) landed this pass. Their save/submit
+    // entries MUST NOT be attempted: the row does not exist server-side, the
+    // PATCH would 404, and the 404 branch below deliberately DROPS a save as
+    // "obsolete" — which for an offline-created PRF would silently discard the
+    // crew's only copy of a patient record. Blocked entries are simply left
+    // pending and retried on the next pass.
+    const blockedPrfIds = new Set<string>();
+
     for (const entry of pending) {
+      const entryPrfId = entry.id.split(':')[0];
+      if (entry.action !== 'create' && blockedPrfIds.has(entryPrfId)) {
+        continue;
+      }
+
       if (entry.retries > 5) {
         // Auto-retry exhausted. Do NOT delete — the PRF never reached the server.
         // Mark it 'dead': it stops auto-retrying but stays in the outbox count
@@ -49,6 +63,10 @@ export async function startSync() {
         // markSynced() — a delete — which silently discarded a medical/legal PRF
         // and then falsely showed "✅ All synced".)
         await markDead(entry.id);
+        // A create that has been given up on leaves its PRF non-existent
+        // server-side, so its save/submit must stay blocked rather than being
+        // dropped as "obsolete" against a row that was never there.
+        if (entry.action === 'create') blockedPrfIds.add(entryPrfId);
         window.dispatchEvent(new CustomEvent('outbox-change'));
         continue;
       }
@@ -62,7 +80,16 @@ export async function startSync() {
       await markSyncing(entry.id);
       
       try {
-        if (entry.action === 'save') {
+        if (entry.action === 'create') {
+          // The PRF was started with no signal; register it now under the id
+          // the device already chose. The server treats a repeat client_id as
+          // a replay and returns the existing row, so a lost response cannot
+          // produce a duplicate patient record.
+          await axios.post('/api/digital-prf', {
+            ...entry.payload,
+            client_id: prfId,
+          }, { headers, timeout: 15000 });
+        } else if (entry.action === 'save') {
           try {
             await axios.patch(`/api/digital-prf/${prfId}`, entry.payload, { headers, timeout: 10000 });
           } catch (saveErr: any) {
@@ -112,6 +139,10 @@ export async function startSync() {
       } catch (err: any) {
         const msg = err?.response?.data?.detail || err?.message || 'Unknown error';
         await markFailed(entry.id, msg);
+        // The row does not exist server-side, so hold back this PRF's
+        // save/submit until a later pass gets the create through. Attempting
+        // them now would 404 and the save would be discarded as "obsolete".
+        if (entry.action === 'create') blockedPrfIds.add(entryPrfId);
       }
       
       // Notify UI

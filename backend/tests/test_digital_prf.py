@@ -621,3 +621,132 @@ class TestSubmitPRF:
     async def test_submit_nonexistent_prf_returns_404(self, client, crew_a_headers):
         res = await client.post(f"/api/digital-prf/{uuid.uuid4()}/submit", headers=crew_a_headers)
         assert res.status_code == 404
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Offline PRF creation — client-supplied id
+#
+# A crew arriving at a scene with no signal must be able to start a PRF. The
+# device generates the UUID and hands it over as `client_id` when connectivity
+# returns. Two properties have to hold or this loses or leaks patient records:
+#   1. Replaying the same client_id must NOT create a second PRF. The outbox
+#      retries, and a lost response must not duplicate a medical record.
+#   2. A device must not be able to name an id belonging to another provider —
+#      that would return their prf_number and case_number.
+# ═══════════════════════════════════════════════════════════════════════════════
+class TestOfflineCreateWithClientId:
+
+    @pytest.mark.asyncio
+    async def test_create_honours_the_client_supplied_id(self, client, crew_a_headers):
+        client_id = str(uuid.uuid4())
+        res = await client.post(
+            "/api/digital-prf", json={"client_id": client_id}, headers=crew_a_headers
+        )
+        assert res.status_code == 201
+        assert res.json()["id"] == client_id
+        # The server still owns the numbering.
+        assert isinstance(res.json()["prf_number"], int)
+        assert res.json()["case_number"]
+
+    @pytest.mark.asyncio
+    async def test_replaying_the_same_client_id_does_not_duplicate(self, client, crew_a_headers):
+        client_id = str(uuid.uuid4())
+        first = await client.post(
+            "/api/digital-prf", json={"client_id": client_id}, headers=crew_a_headers
+        )
+        second = await client.post(
+            "/api/digital-prf", json={"client_id": client_id}, headers=crew_a_headers
+        )
+        assert first.status_code == 201
+        assert second.status_code == 201
+        # Same row returned, same number — not a second PRF.
+        assert second.json()["id"] == first.json()["id"] == client_id
+        assert second.json()["prf_number"] == first.json()["prf_number"]
+        assert second.json()["case_number"] == first.json()["case_number"]
+
+        # And it really is one row in the listing, not two.
+        listing = await client.get("/api/digital-prf", headers=crew_a_headers)
+        ids = [p["id"] for p in listing.json()]
+        assert ids.count(client_id) == 1
+
+    @pytest.mark.asyncio
+    async def test_a_crewmate_replaying_the_same_id_gets_the_same_prf(self, client, crew_a_headers, crew_b_headers):
+        """Same provider, different crew member — still a replay, never a duplicate."""
+        client_id = str(uuid.uuid4())
+        first = await client.post(
+            "/api/digital-prf", json={"client_id": client_id}, headers=crew_a_headers
+        )
+        second = await client.post(
+            "/api/digital-prf", json={"client_id": client_id}, headers=crew_b_headers
+        )
+        assert second.status_code == 201
+        assert second.json()["prf_number"] == first.json()["prf_number"]
+
+    @pytest.mark.asyncio
+    async def test_client_id_from_another_provider_is_refused(self, client, crew_a_headers):
+        """
+        The device names its own id, so it could name somebody else's. Returning
+        that PRF would leak another provider's prf_number and case_number.
+        """
+        from app.database import AsyncSessionLocal
+        from app.models.service_provider import ServiceProvider
+        from app.models.digital_prf import DigitalPRF, PRFStatus
+        from sqlalchemy import select, func
+
+        foreign_prf_id = uuid.uuid4()
+        async with AsyncSessionLocal() as db:
+            res = await db.execute(
+                select(ServiceProvider).where(ServiceProvider.slug == "pytest-other-provider")
+            )
+            other = res.scalar_one_or_none()
+            if not other:
+                other = ServiceProvider(
+                    name="PyTest Other Provider",
+                    slug="pytest-other-provider",
+                    is_active=True,
+                )
+                db.add(other)
+                await db.flush()
+
+            # prf_number is UNIQUE per provider, so pick the next free one rather
+            # than a fixed literal — otherwise this test passes once and then
+            # collides with its own leftover row on every later run.
+            max_res = await db.execute(
+                select(func.max(DigitalPRF.prf_number)).where(
+                    DigitalPRF.provider_id == other.id
+                )
+            )
+            foreign_number = (max_res.scalar() or 999000) + 1
+
+            db.add(DigitalPRF(
+                id=foreign_prf_id,
+                provider_id=other.id,
+                prf_number=foreign_number,
+                case_number=f"PYTEST-OTHER-{uuid.uuid4().hex[:8]}",
+                status=PRFStatus.DRAFT,
+                form_data={},
+            ))
+            await db.commit()
+
+        res = await client.post(
+            "/api/digital-prf", json={"client_id": str(foreign_prf_id)}, headers=crew_a_headers
+        )
+        assert res.status_code == 409
+        # Must not disclose the other provider's numbering.
+        body = res.text
+        assert "999001" not in body
+        assert "PYTEST-OTHER" not in body
+
+    @pytest.mark.asyncio
+    async def test_malformed_client_id_is_rejected(self, client, crew_a_headers):
+        res = await client.post(
+            "/api/digital-prf", json={"client_id": "not-a-uuid"}, headers=crew_a_headers
+        )
+        assert res.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_create_without_client_id_still_works(self, client, crew_a_headers):
+        """The online path is unchanged — client_id is purely additive."""
+        res = await client.post("/api/digital-prf", json={}, headers=crew_a_headers)
+        assert res.status_code == 201
+        assert uuid.UUID(res.json()["id"])

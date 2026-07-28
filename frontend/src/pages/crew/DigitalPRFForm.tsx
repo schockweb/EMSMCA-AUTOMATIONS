@@ -5031,6 +5031,15 @@ export default function DigitalPRFForm() {
         // Offline / network error — queue to the outbox so nothing is lost.
         await queueToOutbox(payload);
         setSaveState('offline');
+      } else if (err?.response?.status === 404) {
+        // No server row yet. This is the normal state for a PRF the crew
+        // started with no signal: its creation is still sitting in the outbox,
+        // so a PATCH cannot land until that drains. Queue rather than showing
+        // an error — the outbox registers the PRF first, then applies this
+        // save. (If the PRF was genuinely deleted server-side, the sync engine
+        // resolves that on its own terms.)
+        await queueToOutbox(payload);
+        setSaveState('offline');
       } else {
         // Unknown server error (e.g. 500). Do NOT advance lastSavedPayloadRef so
         // the same data is retried on the next change/cycle.
