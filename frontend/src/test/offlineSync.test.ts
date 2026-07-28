@@ -1,0 +1,340 @@
+/**
+ * Offline outbox + sync engine.
+ *
+ * WHY THIS FILE EXISTS
+ * --------------------
+ * This is the machinery that holds a crew's PRF when there is no signal. If it
+ * loses an entry, a patient record taken at the roadside is gone — and the crew
+ * is told "✅ All synced" while it happens. It had ZERO test coverage.
+ *
+ * These tests import the REAL modules (services/offlineDb, services/syncEngine)
+ * and drive them against fake-indexeddb. They deliberately do NOT re-implement
+ * the logic in the test file: a test that owns its own copy of the code under
+ * test passes happily while production breaks.
+ *
+ * The invariant that matters most, and is asserted several ways below:
+ *   AN ENTRY IS ONLY EVER DELETED WHEN THE SERVER HAS CONFIRMED IT.
+ * Everything else — give-up, network failure, missing token — must preserve it.
+ */
+import 'fake-indexeddb/auto';
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+
+import {
+  queueSave, queueSubmit, getPending, getAll, getCount, getOutboxSummary,
+  markSyncing, markSynced, markFailed, markDead, retryDead, clearAll,
+  type OfflineEntry,
+} from '../services/offlineDb';
+
+// axios and the crew session are the sync engine's only outside world.
+vi.mock('axios', () => ({
+  default: { post: vi.fn(), patch: vi.fn(), get: vi.fn() },
+}));
+vi.mock('../utils/crewSession', () => ({ getCrewToken: vi.fn(() => 'crew-token-abc') }));
+
+import axios from 'axios';
+import { getCrewToken } from '../utils/crewSession';
+import { startSync } from '../services/syncEngine';
+
+const mockAxios = axios as unknown as {
+  post: ReturnType<typeof vi.fn>;
+  patch: ReturnType<typeof vi.fn>;
+};
+const mockToken = getCrewToken as unknown as ReturnType<typeof vi.fn>;
+
+/** Build an axios-shaped rejection, since the engine branches on response.status. */
+function httpError(status: number, detail = 'err') {
+  return Object.assign(new Error(`HTTP ${status}`), {
+    response: { status, data: { detail } },
+  });
+}
+
+function setOnline(online: boolean) {
+  Object.defineProperty(window.navigator, 'onLine', { value: online, configurable: true });
+}
+
+const PRF = '11111111-2222-3333-4444-555555555555';
+
+beforeEach(async () => {
+  await clearAll();
+  vi.clearAllMocks();
+  mockToken.mockReturnValue('crew-token-abc');
+  mockAxios.post.mockResolvedValue({ data: { id: 'new-id' } });
+  mockAxios.patch.mockResolvedValue({ data: {} });
+  setOnline(true);
+});
+
+afterEach(async () => { await clearAll(); });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// The outbox store
+// ═══════════════════════════════════════════════════════════════════════════
+describe('offlineDb — queueing', () => {
+  it('queueSave stores one pending entry keyed <prfId>:save', async () => {
+    await queueSave(PRF, { patient_name: 'A' });
+    const all = await getAll();
+    expect(all).toHaveLength(1);
+    expect(all[0].id).toBe(`${PRF}:save`);
+    expect(all[0].action).toBe('save');
+    expect(all[0].status).toBe('pending');
+    expect(all[0].retries).toBe(0);
+    expect(all[0].payload).toEqual({ patient_name: 'A' });
+  });
+
+  it('queueSubmit stores a separate entry keyed <prfId>:submit', async () => {
+    await queueSave(PRF, { a: 1 });
+    await queueSubmit(PRF, { a: 2 });
+    const ids = (await getAll()).map(e => e.id).sort();
+    expect(ids).toEqual([`${PRF}:save`, `${PRF}:submit`].sort());
+  });
+
+  it('re-queueing the same PRF replaces rather than duplicating, keeping the newest payload', async () => {
+    await queueSave(PRF, { v: 'old' });
+    await queueSave(PRF, { v: 'new' });
+    const all = await getAll();
+    expect(all).toHaveLength(1);
+    expect(all[0].payload).toEqual({ v: 'new' });
+  });
+
+  it('keeps entries for different PRFs separate', async () => {
+    await queueSave('prf-a', { x: 1 });
+    await queueSave('prf-b', { x: 2 });
+    expect(await getCount()).toBe(2);
+  });
+});
+
+describe('offlineDb — retrieval and status', () => {
+  it('getPending returns pending, syncing and failed, oldest first', async () => {
+    await queueSave('prf-a', {});
+    await new Promise(r => setTimeout(r, 5));
+    await queueSave('prf-b', {});
+    await markSyncing('prf-a:save');
+    const pending = await getPending();
+    expect(pending.map(e => e.id)).toEqual(['prf-a:save', 'prf-b:save']);
+  });
+
+  it('getPending includes "syncing" so an entry orphaned mid-upload is retried, not stranded', async () => {
+    await queueSave(PRF, {});
+    await markSyncing(`${PRF}:save`);
+    // Simulates the tab closing during upload: status stays 'syncing' forever.
+    const pending = await getPending();
+    expect(pending.map(e => e.id)).toContain(`${PRF}:save`);
+  });
+
+  it('getPending EXCLUDES dead entries so they stop being auto-retried', async () => {
+    await queueSave(PRF, {});
+    await markDead(`${PRF}:save`);
+    expect(await getPending()).toHaveLength(0);
+  });
+
+  it('markFailed increments retries and records the reason, without dropping the entry', async () => {
+    await queueSave(PRF, {});
+    await markFailed(`${PRF}:save`, 'network down');
+    await markFailed(`${PRF}:save`, 'network down again');
+    const [entry] = await getAll();
+    expect(entry.retries).toBe(2);
+    expect(entry.status).toBe('failed');
+    expect(entry.lastError).toBe('network down again');
+  });
+
+  it('markSynced is the ONLY operation that deletes — and only after server confirmation', async () => {
+    await queueSave(PRF, {});
+    await markSynced(`${PRF}:save`);
+    expect(await getAll()).toHaveLength(0);
+  });
+});
+
+describe('offlineDb — a dead entry is never lost', () => {
+  it('markDead preserves the record and its payload', async () => {
+    await queueSave(PRF, { patient_name: 'Roadside Patient' });
+    await markDead(`${PRF}:save`);
+    const all = await getAll();
+    expect(all).toHaveLength(1);
+    expect(all[0].status).toBe('dead');
+    expect(all[0].payload).toEqual({ patient_name: 'Roadside Patient' });
+  });
+
+  it('getCount still counts dead entries, so the crew never sees a false zero', async () => {
+    await queueSave(PRF, {});
+    await markDead(`${PRF}:save`);
+    expect(await getPending()).toHaveLength(0);   // not retried
+    expect(await getCount()).toBe(1);             // but still visible
+  });
+
+  it('getOutboxSummary separates "will retry" from "gave up"', async () => {
+    await queueSave('prf-a', {});
+    await queueSave('prf-b', {});
+    await markDead('prf-b:save');
+    expect(await getOutboxSummary()).toEqual({ pending: 1, dead: 1 });
+  });
+
+  it('retryDead resurrects give-ups and resets their retry count', async () => {
+    await queueSave(PRF, {});
+    for (let i = 0; i < 6; i++) await markFailed(`${PRF}:save`, 'x');
+    await markDead(`${PRF}:save`);
+    await retryDead();
+    const [entry] = await getAll();
+    expect(entry.status).toBe('pending');
+    expect(entry.retries).toBe(0);
+    expect(await getPending()).toHaveLength(1);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// The sync engine
+// ═══════════════════════════════════════════════════════════════════════════
+describe('syncEngine — refuses to run when it cannot succeed', () => {
+  it('does nothing while offline, leaving the queue untouched', async () => {
+    setOnline(false);
+    await queueSave(PRF, {});
+    await startSync();
+    expect(mockAxios.patch).not.toHaveBeenCalled();
+    expect(await getCount()).toBe(1);
+  });
+
+  it('stops without discarding anything when there is no crew token', async () => {
+    mockToken.mockReturnValue(null);
+    await queueSave(PRF, {});
+    await startSync();
+    expect(mockAxios.patch).not.toHaveBeenCalled();
+    expect(await getCount()).toBe(1);
+  });
+});
+
+describe('syncEngine — save entries', () => {
+  it('PATCHes the PRF and clears the entry on success', async () => {
+    await queueSave(PRF, { patient_name: 'A' });
+    await startSync();
+    expect(mockAxios.patch).toHaveBeenCalledWith(
+      `/api/digital-prf/${PRF}`,
+      { patient_name: 'A' },
+      expect.objectContaining({ headers: { Authorization: 'Bearer crew-token-abc' } }),
+    );
+    expect(await getCount()).toBe(0);
+  });
+
+  it('drops an autosave the server says is obsolete (404 draft swept)', async () => {
+    mockAxios.patch.mockRejectedValueOnce(httpError(404));
+    await queueSave(PRF, {});
+    await startSync();
+    // Not retried forever — the authoritative data rides on the submit entry.
+    expect(await getCount()).toBe(0);
+  });
+
+  it('drops an autosave for an already-submitted PRF (423 Locked)', async () => {
+    mockAxios.patch.mockRejectedValueOnce(httpError(423));
+    await queueSave(PRF, {});
+    await startSync();
+    expect(await getCount()).toBe(0);
+  });
+
+  it('KEEPS the entry on a real server error and records the failure', async () => {
+    mockAxios.patch.mockRejectedValueOnce(httpError(500, 'boom'));
+    await queueSave(PRF, {});
+    await startSync();
+    const [entry] = await getAll();
+    expect(entry.status).toBe('failed');
+    expect(entry.retries).toBe(1);
+    expect(await getCount()).toBe(1);
+  });
+});
+
+describe('syncEngine — submit entries', () => {
+  it('saves then submits, and clears the entry', async () => {
+    await queueSubmit(PRF, { patient_name: 'A' });
+    await startSync();
+    expect(mockAxios.patch).toHaveBeenCalledWith(
+      `/api/digital-prf/${PRF}`, { patient_name: 'A' }, expect.anything(),
+    );
+    expect(mockAxios.post).toHaveBeenCalledWith(
+      `/api/digital-prf/${PRF}/submit`, null, expect.anything(),
+    );
+    expect(await getCount()).toBe(0);
+  });
+
+  it('swallows a 423 on the pre-submit save and still submits', async () => {
+    // The PRF is already submitted server-side (a prior attempt landed but the
+    // response was lost). The save is rejected, but the work IS on the server —
+    // the idempotent submit must still run so the entry can clear. Without this
+    // the entry stranded as "pending upload" forever with no way to clear it.
+    mockAxios.patch.mockRejectedValueOnce(httpError(423));
+    await queueSubmit(PRF, { a: 1 });
+    await startSync();
+    expect(mockAxios.post).toHaveBeenCalledWith(
+      `/api/digital-prf/${PRF}/submit`, null, expect.anything(),
+    );
+    expect(await getCount()).toBe(0);
+  });
+
+  it('re-creates and resubmits when the server row is gone (404)', async () => {
+    mockAxios.post
+      .mockRejectedValueOnce(httpError(404))                 // submit -> gone
+      .mockResolvedValueOnce({ data: { id: 'recreated-id' } }) // create
+      .mockResolvedValueOnce({ data: {} });                  // submit the new row
+    await queueSubmit(PRF, { vehicle_id: 'veh-1', patient_name: 'A' });
+    await startSync();
+
+    expect(mockAxios.post).toHaveBeenCalledWith(
+      '/api/digital-prf',
+      expect.objectContaining({ vehicle_id: 'veh-1' }),
+      expect.anything(),
+    );
+    expect(mockAxios.post).toHaveBeenCalledWith(
+      '/api/digital-prf/recreated-id/submit', null, expect.anything(),
+    );
+    expect(await getCount()).toBe(0);
+  });
+
+  it('KEEPS the entry when submit fails for any other reason', async () => {
+    mockAxios.post.mockRejectedValueOnce(httpError(500, 'server exploded'));
+    await queueSubmit(PRF, {});
+    await startSync();
+    const [entry] = await getAll();
+    expect(entry.status).toBe('failed');
+    expect(entry.lastError).toBe('server exploded');
+    expect(await getCount()).toBe(1);
+  });
+});
+
+describe('syncEngine — giving up must never mean throwing away', () => {
+  it('marks an entry dead after 5 retries instead of deleting it', async () => {
+    await queueSave(PRF, { patient_name: 'Roadside Patient' });
+    for (let i = 0; i < 6; i++) await markFailed(`${PRF}:save`, 'network');
+
+    await startSync();
+
+    const all = await getAll();
+    expect(all).toHaveLength(1);                 // still there
+    expect(all[0].status).toBe('dead');
+    expect(all[0].payload).toEqual({ patient_name: 'Roadside Patient' });
+    expect(await getCount()).toBe(1);            // still counted for the crew
+    // A previous version called markSynced() (a delete) here, silently
+    // discarding a medical/legal record and then reporting "All synced".
+    expect(mockAxios.patch).not.toHaveBeenCalled();
+  });
+
+  it('does not touch other pending entries when one is given up on', async () => {
+    await queueSave('prf-dead', {});
+    for (let i = 0; i < 6; i++) await markFailed('prf-dead:save', 'network');
+    await queueSave('prf-live', { ok: true });
+
+    await startSync();
+
+    const byId = Object.fromEntries((await getAll()).map(e => [e.id, e]));
+    expect(byId['prf-dead:save'].status).toBe('dead');   // preserved
+    expect(byId['prf-live:save']).toBeUndefined();       // synced and cleared
+  });
+});
+
+describe('syncEngine — ordering', () => {
+  it('drains oldest first, so a save queued before a submit is sent first', async () => {
+    await queueSave(PRF, { step: 1 });
+    await new Promise(r => setTimeout(r, 5));
+    await queueSubmit(PRF, { step: 2 });
+
+    await startSync();
+
+    const patchOrder = mockAxios.patch.mock.calls.map(c => (c[1] as any).step);
+    expect(patchOrder).toEqual([1, 2]);
+    expect(await getCount()).toBe(0);
+  });
+});
