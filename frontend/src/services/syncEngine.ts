@@ -4,6 +4,16 @@ import { getCrewToken } from '../utils/crewSession';
 
 let syncing = false;
 
+/** The provider whose crew is logged in on this device right now. */
+function currentProviderId(): string | undefined {
+  try {
+    const raw = localStorage.getItem('crew_profile');
+    return raw ? (JSON.parse(raw)?.provider_id || undefined) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 // Re-create a PRF whose server row is gone (404) from a queued payload, then
 // submit the fresh row. Mirrors the live form's inline 404 self-heal: an End
 // Shift in another tab (or a draft created offline that never persisted) can
@@ -11,7 +21,24 @@ let syncing = false;
 // A 404 is deterministic — the row truly doesn't exist — so this can never
 // duplicate a live PRF. The vehicle/crew2 travel in the payload; the shift
 // supervisor is read from local storage (same source the New-PRF button uses).
-async function recreateAndSubmit(prfId: string, payload: any, headers: Record<string, string>) {
+async function recreateAndSubmit(
+  prfId: string,
+  payload: any,
+  headers: Record<string, string>,
+  entryProviderId: string | undefined,
+) {
+  // This is the ONE operation that mints a brand-new server row under whoever
+  // is logged in now, so it is the only path that can launder a queued record
+  // into a different provider's tenant. The save/submit paths target an
+  // existing prfId and are already refused server-side for a foreign PRF.
+  //
+  // Entries queued before authorship stamping exist in the wild and are
+  // unsynced patient records, so they are NOT discarded — but they may not be
+  // re-created either, because there is no way to prove which provider they
+  // belong to. They stay pending and stay visible in the outbox count.
+  if (!entryProviderId) {
+    throw new Error('Cannot re-create an unattributed PRF — it may belong to another provider');
+  }
   const supervisor = (() => {
     try { return JSON.parse(localStorage.getItem('shift_supervisor') || 'null'); }
     catch { return null; }
@@ -50,9 +77,24 @@ export async function startSync() {
     // pending and retried on the next pass.
     const blockedPrfIds = new Set<string>();
 
+    // The outbox outlives a shift — End Shift and logout do not clear it — so a
+    // queued entry can still be here when a different crew, possibly from a
+    // different provider, logs in on the same device. Draining then uses THEIR
+    // token, which the server accepts because it is genuinely valid.
+    const providerNow = currentProviderId();
+
     for (const entry of pending) {
       const entryPrfId = entry.id.split(':')[0];
       if (entry.action !== 'create' && blockedPrfIds.has(entryPrfId)) {
+        continue;
+      }
+
+      // Refuse to send another provider's queued record under this provider's
+      // credentials. Left pending, never dropped: it is an unsynced patient
+      // record and belongs to the crew that captured it, so it must survive
+      // until their device (or their session) drains it.
+      if (entry.providerId && providerNow && entry.providerId !== providerNow) {
+        blockedPrfIds.add(entryPrfId);
         continue;
       }
 
@@ -129,7 +171,7 @@ export async function startSync() {
             // from the queued payload and submit the fresh row rather than
             // stranding the crew's work as "pending upload" forever.
             if (subErr?.response?.status === 404) {
-              await recreateAndSubmit(prfId, entry.payload, headers);
+              await recreateAndSubmit(prfId, entry.payload, headers, entry.providerId);
             } else {
               throw subErr;
             }

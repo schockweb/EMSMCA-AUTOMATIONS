@@ -10,6 +10,37 @@ export interface OfflineEntry {
   // 'dead' = gave up auto-retrying after too many failures. NEVER deleted (the
   // PRF never reached the server) — kept for the crew to see and manually resend.
   status: 'pending' | 'syncing' | 'failed' | 'dead';
+  // ── Who queued this ────────────────────────────────────────────────────
+  // Entries used to be anonymous, and the outbox outlives a shift: it is not
+  // cleared on End Shift or logout. A queued entry could therefore still be
+  // sitting on a shared roadside tablet when a DIFFERENT crew — possibly from a
+  // different provider — logs in. syncEngine drains with whatever crew_token is
+  // current, and its 404 self-heal CREATES a fresh PRF, so one provider's
+  // patient record could be re-created inside another provider's tenant as a
+  // genuinely-authorised row. No server-side isolation check fires, because the
+  // token really is the second provider's.
+  //
+  // Stamping the author lets the drain refuse a foreign entry instead of
+  // laundering it. `undefined` means the entry predates this field; see
+  // syncEngine for how those are handled (they are NOT discarded — an unsynced
+  // entry is a patient record).
+  providerId?: string;
+  crewId?: string;
+}
+
+/**
+ * Identity of the crew queueing an entry, read at queue time rather than at
+ * drain time — that difference is the whole point.
+ */
+function authorStamp(): { providerId?: string; crewId?: string } {
+  try {
+    const raw = localStorage.getItem('crew_profile');
+    if (!raw) return {};
+    const p = JSON.parse(raw);
+    return { providerId: p?.provider_id || undefined, crewId: p?.id || undefined };
+  } catch {
+    return {};
+  }
 }
 
 const DB_NAME = 'ems-offline';
@@ -55,6 +86,7 @@ export async function queueCreate(prfId: string, payload: any) {
     timestamp: Date.now(),
     retries: 0,
     status: 'pending' as const,
+    ...authorStamp(),
   });
 }
 
@@ -68,6 +100,7 @@ export async function queueSave(prfId: string, payload: any) {
     timestamp: Date.now(),
     retries: 0,
     status: 'pending' as const,
+    ...authorStamp(),
   });
 }
 
@@ -81,6 +114,7 @@ export async function queueSubmit(prfId: string, payload: any) {
     timestamp: Date.now(),
     retries: 0,
     status: 'pending' as const,
+    ...authorStamp(),
   });
 }
 

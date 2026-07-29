@@ -12,6 +12,10 @@ import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { getCrewToken, getCrewProfile, ensureProviderSession, CREW_SESSION_KEYS } from '../../utils/crewSession';
 import { inferResumePhase } from '../../utils/prfResumePhase';
+import {
+  buildSavePayload as buildPrfSavePayload,
+  classifySaveError,
+} from './prfSaveContract';
 import SignaturePad from '../../components/SignaturePad';
 import FullscreenSignaturePad, { FullscreenCanvas } from '../../components/FullscreenSignaturePad';
 import PatientDocumentsCapture from '../../components/PatientDocumentsCapture';
@@ -4937,23 +4941,13 @@ export default function DigitalPRFForm() {
   // `submitting` state flips a render later, which is too slow on laggy phones).
   const submitInFlightRef = useRef(false);
 
-  const buildSavePayload = (): any => {
-    // Strip empty strings from kms and timestamps — the backend's Numeric
-    // columns reject '' and the entire save crashes.
-    const cleanKms: Record<string, string | null> = {};
-    for (const [k, v] of Object.entries(kms)) {
-      cleanKms[k] = v && String(v).trim() ? v : null;
-    }
-    const cleanTs: Record<string, string | null> = {};
-    for (const [k, v] of Object.entries(timestamps)) {
-      cleanTs[k] = v || null;
-    }
-    return {
-      form_data: { ...fd, vitals_sets: vitals, iv_therapy: ivRows, medications: medRows },
-      vehicle_id: vehicle || null, crew_member_2_id: crew2Id || null,
-      ...cleanTs, ...cleanKms, ...sigs,
-    };
-  };
+  // The payload shape and the save-failure routing live in ./prfSaveContract as
+  // pure functions, so they can be unit-tested — no test mounts this component,
+  // and these two decisions are what determine whether a crew's roadside
+  // patient record survives a bad network.
+  const buildSavePayload = (): any => buildPrfSavePayload({
+    fd, vitals, ivRows, medRows, timestamps, kms, sigs, vehicle, crew2Id,
+  });
 
   const queueToOutbox = async (payload: any) => {
     try {
@@ -4996,14 +4990,16 @@ export default function DigitalPRFForm() {
       setLastSaved(new Date());
       setSaveState('saved');
     } catch (err: any) {
-      const statusCode = err?.response?.status;
-      if (statusCode === 401) {
+      // Routing decision comes from the tested classifier; the handling of each
+      // outcome stays here because it touches component state and navigation.
+      const action = classifySaveError(err, { online: navigator.onLine });
+      if (action === 'session-expired') {
         // Expired session — preserve the work offline, then route to login.
         await queueToOutbox(payload);
         handleSessionExpired();
         return;
       }
-      if (statusCode === 423) {
+      if (action === 'locked') {
         // The PRF was submitted (possibly from another device) — it is now a
         // billing record and permanently uneditable. Stop saving for good and
         // send the crew back to the dashboard; retrying would loop forever
@@ -5015,7 +5011,7 @@ export default function DigitalPRFForm() {
         navigate(`/${providerSlug}/crew/dashboard`, { replace: true });
         return;
       }
-      if (statusCode === 409) {
+      if (action === 'conflict') {
         // Another writer touched this PRF. Refresh the version token and force a
         // retry on the next pass so this device's data still persists — but
         // back the retry off so two live devices can't hammer the API.
@@ -5027,23 +5023,20 @@ export default function DigitalPRFForm() {
         savePendingRef.current = true;
         retryDelayRef.current = 1500;
         setSaveState('saving');
-      } else if (!navigator.onLine || err?.code === 'ECONNABORTED' || err?.code === 'ERR_NETWORK') {
-        // Offline / network error — queue to the outbox so nothing is lost.
-        await queueToOutbox(payload);
-        setSaveState('offline');
-      } else if (err?.response?.status === 404) {
-        // No server row yet. This is the normal state for a PRF the crew
-        // started with no signal: its creation is still sitting in the outbox,
-        // so a PATCH cannot land until that drains. Queue rather than showing
-        // an error — the outbox registers the PRF first, then applies this
-        // save. (If the PRF was genuinely deleted server-side, the sync engine
-        // resolves that on its own terms.)
-        await queueToOutbox(payload);
-        setSaveState('offline');
       } else {
-        // Unknown server error (e.g. 500). Do NOT advance lastSavedPayloadRef so
-        // the same data is retried on the next change/cycle.
-        setSaveState('error');
+        // 'queue' — offline, network error, 404 (a PRF created offline whose
+        // creation has not drained yet), AND unknown server errors (500/502/504).
+        //
+        // The unknown-server-error case used only to set an error flag and drop
+        // the payload. Not advancing lastSavedPayloadRef meant a retry WOULD
+        // happen — but only while the crew stayed on this screen with the data
+        // still in memory. A 500 during a backend restart therefore discarded
+        // the crew's work the moment they navigated away, with nothing queued
+        // and nothing said. Every other failure branch preserves the payload;
+        // this one now does too. Queueing is idempotent (one fixed key per PRF),
+        // so a later successful save simply overwrites the queued copy.
+        await queueToOutbox(payload);
+        setSaveState('offline');
       }
     } finally {
       savingInFlightRef.current = false;

@@ -56,10 +56,22 @@ const PRF = '11111111-2222-3333-4444-555555555555';
 
 beforeEach(async () => {
   await clearAll();
-  vi.clearAllMocks();
+  // mockReset, not clearAllMocks: clearAllMocks empties `mock.calls` but leaves
+  // any UNCONSUMED mockResolvedValueOnce/mockRejectedValueOnce queued, so a test
+  // that sets up three one-shot responses and consumes one silently poisons the
+  // next two. Reset drains the queue as well.
+  mockAxios.post.mockReset();
+  mockAxios.patch.mockReset();
+  mockToken.mockReset();
   mockToken.mockReturnValue('crew-token-abc');
   mockAxios.post.mockResolvedValue({ data: { id: 'new-id' } });
   mockAxios.patch.mockResolvedValue({ data: {} });
+  // A queued entry is stamped with the crew that queued it; without a profile
+  // every entry would be unattributed, which is the legacy path rather than the
+  // normal one. Default to a signed-in crew so tests exercise reality.
+  localStorage.setItem('crew_profile', JSON.stringify({
+    id: 'crew-default', provider_id: 'provider-default',
+  }));
   setOnline(true);
 });
 
@@ -457,6 +469,116 @@ describe('offline PRF creation', () => {
     await startSync();
     expect(mockAxios.post).not.toHaveBeenCalled();
     expect(await getCount()).toBe(2);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Cross-tenant protection
+//
+// The outbox outlives a shift — End Shift and logout do not clear it — so a
+// queued entry can still be present when a DIFFERENT crew logs in on the same
+// device. Draining used whatever crew_token was current, and the 404 self-heal
+// CREATES a fresh PRF, so one provider's patient record could be re-created
+// inside another provider's tenant as a genuinely-authorised row. No
+// server-side isolation check fires, because the token really is theirs.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('outbox authorship', () => {
+  const PROVIDER_A = 'aaaaaaaa-0000-0000-0000-000000000001';
+  const PROVIDER_B = 'bbbbbbbb-0000-0000-0000-000000000002';
+
+  function loginAs(providerId: string, crewId = 'crew-1') {
+    localStorage.setItem('crew_profile', JSON.stringify({ id: crewId, provider_id: providerId }));
+  }
+
+  beforeEach(() => localStorage.clear());
+  afterEach(() => localStorage.clear());
+
+  it('stamps the queueing crew and provider onto every entry', async () => {
+    loginAs(PROVIDER_A, 'crew-alpha');
+    await queueCreate(PRF, { vehicle_id: 'v1' });
+    await queueSave(PRF, { a: 1 });
+    await queueSubmit(PRF, { a: 2 });
+    for (const e of await getAll()) {
+      expect(e.providerId, `${e.id} lost its provider stamp`).toBe(PROVIDER_A);
+      expect(e.crewId).toBe('crew-alpha');
+    }
+  });
+
+  it('refuses to drain another provider\'s entry, and does NOT discard it', async () => {
+    loginAs(PROVIDER_A);
+    await queueSave(PRF, { patient_name: 'Provider A Patient' });
+
+    // A different provider's crew now takes the same device.
+    loginAs(PROVIDER_B);
+    await startSync();
+
+    expect(mockAxios.patch).not.toHaveBeenCalled();
+    const [entry] = await getAll();
+    expect(entry.status).toBe('pending');                    // untouched
+    expect(entry.providerId).toBe(PROVIDER_A);               // still attributed
+    expect(entry.payload).toEqual({ patient_name: 'Provider A Patient' });
+    expect(await getCount()).toBe(1);                        // still visible
+  });
+
+  it('blocks the whole PRF, not just one entry, when it belongs to another provider', async () => {
+    loginAs(PROVIDER_A);
+    await queueCreate(PRF, { vehicle_id: 'v1' });
+    await new Promise(r => setTimeout(r, 5));
+    await queueSubmit(PRF, { a: 1 });
+
+    loginAs(PROVIDER_B);
+    await startSync();
+
+    expect(mockAxios.post).not.toHaveBeenCalled();
+    expect(await getCount()).toBe(2);
+  });
+
+  it('drains normally when the same provider is logged in', async () => {
+    loginAs(PROVIDER_A);
+    await queueSave(PRF, { a: 1 });
+    await startSync();
+    expect(mockAxios.patch).toHaveBeenCalled();
+    expect(await getCount()).toBe(0);
+  });
+
+  it('still drains an entry queued before authorship stamping existed', async () => {
+    // Legacy entries are unsynced patient records; stranding them would be the
+    // data-loss bug all over again. Save/submit target an existing prfId, which
+    // the server already refuses for a foreign PRF.
+    loginAs(PROVIDER_A);
+    await queueSave(PRF, { a: 1 });
+    const db = await (await import('../services/offlineDb')).initDb();
+    const e = await db.get('outbox', `${PRF}:save`);
+    delete e.providerId; delete e.crewId;
+    await db.put('outbox', e);
+
+    await startSync();
+    expect(mockAxios.patch).toHaveBeenCalled();
+    expect(await getCount()).toBe(0);
+  });
+
+  it('refuses to RE-CREATE an unattributed entry — that is the laundering path', async () => {
+    // A 404 on submit triggers recreateAndSubmit, which mints a brand-new row
+    // under whoever is logged in now. Without provenance we cannot prove the
+    // record belongs to this provider, so it must not be re-created.
+    loginAs(PROVIDER_A);
+    await queueSubmit(PRF, { patient_name: 'Unattributed Patient' });
+    const db = await (await import('../services/offlineDb')).initDb();
+    const e = await db.get('outbox', `${PRF}:submit`);
+    delete e.providerId;
+    await db.put('outbox', e);
+
+    mockAxios.post.mockRejectedValueOnce(httpError(404));
+    await startSync();
+
+    // No fresh PRF was created...
+    expect(mockAxios.post).not.toHaveBeenCalledWith(
+      '/api/digital-prf', expect.anything(), expect.anything(),
+    );
+    // ...and the crew's work is preserved.
+    const [kept] = await getAll();
+    expect(kept.payload).toEqual({ patient_name: 'Unattributed Patient' });
+    expect(await getCount()).toBe(1);
   });
 });
 
