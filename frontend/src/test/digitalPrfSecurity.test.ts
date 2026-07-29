@@ -1,9 +1,20 @@
 /**
- * Unit tests: Auto-save deduplication logic (security optimization from walkthrough)
+ * Auto-save deduplication and GPS-velocity logic, tested against a MODEL.
  *
- * The `doSave` function in DigitalPRFForm compares the current payload JSON
- * against the last sent payload to skip redundant API calls. These tests
- * verify that logic in isolation (extracted as a pure utility so it's testable).
+ * ⚠ NOTHING HERE IMPORTS APPLICATION CODE. The functions under test
+ * (`shouldSkipSave`, `haversineKm`) are re-implemented in this file — the
+ * comment below says so ("extracted as a pure utility", but it was COPIED, not
+ * extracted, and the original still lives in DigitalPRFForm). These tests would
+ * pass unchanged if DigitalPRFForm.tsx were deleted, and they cannot detect a
+ * change to the real doSave.
+ *
+ * They are kept because the algorithms themselves are worth pinning down, but a
+ * green run here says "this model is self-consistent" — not "the form does
+ * this". Do not count these toward coverage of the form.
+ *
+ * The real save behaviour IS covered, by prfSaveContract.test.ts, which imports
+ * the module DigitalPRFForm actually calls. If you extend this file, prefer
+ * moving the logic into pages/crew/prfSaveContract.ts and testing it there.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 

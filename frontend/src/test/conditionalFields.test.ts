@@ -1,5 +1,27 @@
 /**
- * conditionalFields.test.ts — Layer 2: Conditional Field Visibility & Data Integrity Tests
+ * conditionalFields.test.ts — conditional field visibility, tested against a MODEL
+ *
+ * ⚠ READ THIS BEFORE TRUSTING A GREEN RUN.
+ *
+ * Most of this file tests a hand-written MODEL of the form's visibility rules
+ * (`isFieldVisible`, `pickCallType`, `pickBillingType` below), NOT the form
+ * itself. Nothing here mounts DigitalPRFForm. These tests would still pass if
+ * DigitalPRFForm.tsx were deleted.
+ *
+ * That is not hypothetical: the model had already drifted from the product.
+ * It asserted a billing type 'WCA' that has never existed, a field
+ * `mechanism_detail` (the real key is `mechanism_other`), a `raf_claim_number`
+ * (the real keys are raf_police_case_number / raf_accident_date /
+ * raf_oar_report_pdf), and a mechanism 'Medical' (the option is 'Medical
+ * Emergency'). All of it passed for as long as it was checking its own copy.
+ *
+ * The billing tables are now IMPORTED from ../pages/crew/prfCallTypeModel, so
+ * that class of drift is impossible — a rename breaks this file. The remaining
+ * hand-written rules are still a model; treat a green run as "the model is
+ * self-consistent", not as "the form behaves this way".
+ *
+ * For tests that exercise the real component, see digitalPrfMount.test.tsx.
+ * For the real save behaviour, see prfSaveContract.test.ts.
  *
  * Tests the "hide this field when X is selected" logic across the Digital PRF form.
  *
@@ -24,6 +46,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { BILLING_TYPE_OPTS, billingOptsFor } from '../pages/crew/prfCallTypeModel';
 
 // ── Simulation helpers ────────────────────────────────────────────────────────
 // We simulate the form's fd state machine directly — pure function tests, no DOM.
@@ -64,14 +87,15 @@ function toggleArr(fd: Fd, key: string, value: string): Fd {
   return { ...fd, [key]: arr };
 }
 
-/** Mirror the billing options filter from BillingTypePicker */
-const ALL_BILLING_OPTS = ['MED AID', 'PVT', 'RAF', 'WCA', 'CALL OUT FEE'];
+// Billing options come from the REAL module the form uses. This block used to
+// hand-copy them, and the copy had drifted: it listed a billing type 'WCA' that
+// has never existed in BILLING_TYPE_OPTS. Every assertion about it passed,
+// because the test was checking its own copy. Importing makes drift impossible
+// — a rename or a removed option breaks this file instead of silently lying.
+const ALL_BILLING_OPTS: readonly string[] = BILLING_TYPE_OPTS;
 
 function availableBillingOpts(callType: string): string[] {
-  const base = ALL_BILLING_OPTS.filter(o => o !== 'CALL OUT FEE');
-  if (callType === 'DOD') return base.filter(o => o !== 'RAF');
-  if (callType === 'RESUS') return base.filter(o => o === 'MED AID' || o === 'PVT');
-  return base;
+  return billingOptsFor(callType) as unknown as string[];
 }
 
 /** Mirror the field visibility rules from DigitalPRFForm.tsx JSX */
@@ -221,13 +245,19 @@ describe('Billing Type Availability Per Call Type', () => {
     expect(opts).toEqual(['MED AID', 'PVT']);
   });
 
-  it('PRIMARY call can use MED AID, RAF, WCA, PVT (no WCA/IOD — that is a call type now)', () => {
+  it('PRIMARY call offers MED AID, RAF and PVT — and nothing else', () => {
     const opts = availableBillingOpts('PRIMARY');
-    expect(opts).toContain('MED AID');
+    expect(opts).toEqual(['MED AID', 'RAF', 'PVT']);
+    // 'WCA' is NOT a billing type and never has been — this test used to assert
+    // it was, and passed, because it was checking a hand-copied table rather
+    // than the real one. WCA_IOD is a CALL type; the test's own title said so
+    // while the assertion said the opposite.
+    expect(opts).not.toContain('WCA');
     expect(opts).not.toContain('WCA / IOD');
-    expect(opts).toContain('RAF');
-    expect(opts).toContain('WCA');
-    expect(opts).toContain('PVT');
+    // CALL OUT FEE is a member of BILLING_TYPE_OPTS but is never offered in the
+    // picker — it is set elsewhere and kept so legacy records still render.
+    expect(BILLING_TYPE_OPTS).toContain('CALL OUT FEE');
+    expect(opts).not.toContain('CALL OUT FEE');
   });
 
   it('IFT call can use RAF (WCA/IOD is now a call type, not billing)', () => {

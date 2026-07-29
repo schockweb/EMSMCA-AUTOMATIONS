@@ -17,6 +17,7 @@ import {
   classifySaveError,
 } from './prfSaveContract';
 import { writeDraft } from './prfDraftStore';
+import { CALL_TYPE_OPTS, billingOptsFor } from './prfCallTypeModel';
 import SignaturePad from '../../components/SignaturePad';
 import FullscreenSignaturePad, { FullscreenCanvas } from '../../components/FullscreenSignaturePad';
 import PatientDocumentsCapture from '../../components/PatientDocumentsCapture';
@@ -2633,7 +2634,8 @@ const DepCodePicker = () => {
 // animation, then a single highlighted pill at the top-left that opens a
 // dropdown of all call types. Replaces the generic Toggle for call_type so
 // the dispatch phase reclaims vertical space once the type is locked in.
-const CALL_TYPE_OPTS = ['PRIMARY', 'IHT', 'RHT', 'WCA_IOD', 'COURTESY', 'RESUS', 'DOD'] as const;
+// CALL_TYPE_OPTS / BILLING_TYPE_OPTS live in ./prfCallTypeModel so tests can
+// import them instead of hand-copying them (which had already drifted).
 const CALL_TYPE_LABELS: Record<string, string> = {
   IHT: 'IFT/IHT',
   WCA_IOD: 'WCA / IOD',
@@ -2880,7 +2882,7 @@ const CallTypePicker = ({ onPick }: { onPick?: (o: string) => void }) => {
 // Billing Type picker — same UX as CallTypePicker. Full grid until first pick,
 // then non-selected chips slide toward the top-left while the chosen chip
 // highlights, finally collapsing to a single pill that opens a dropdown.
-const BILLING_TYPE_OPTS = ['MED AID', 'RAF', 'PVT', 'CALL OUT FEE'] as const;
+
 
 const BillingTypePicker = () => {
   const { fd, sf } = useContext(FormContext);
@@ -2898,12 +2900,7 @@ const BillingTypePicker = () => {
   // Declaration of Death call-outs cannot bill third-party payers (no live
   // patient to bill, no incident exposure) — strip RAF.
   // Resus calls are restricted to MED AID and PVT only.
-  const baseOpts = BILLING_TYPE_OPTS.filter(o => o !== 'CALL OUT FEE');
-  const billingOpts = fd.call_type === 'DOD'
-    ? baseOpts.filter(o => o !== 'RAF')
-    : fd.call_type === 'RESUS'
-    ? baseOpts.filter(o => o === 'MED AID' || o === 'PVT')
-    : baseOpts;
+  const billingOpts = billingOptsFor(fd.call_type);
 
   useEffect(() => {
     if (!open) return;
