@@ -16,6 +16,7 @@ import {
   buildSavePayload as buildPrfSavePayload,
   classifySaveError,
 } from './prfSaveContract';
+import { writeDraft } from './prfDraftStore';
 import SignaturePad from '../../components/SignaturePad';
 import FullscreenSignaturePad, { FullscreenCanvas } from '../../components/FullscreenSignaturePad';
 import PatientDocumentsCapture from '../../components/PatientDocumentsCapture';
@@ -4485,6 +4486,14 @@ export default function DigitalPRFForm() {
   // whole form.
   const profile = getCrewProfile();
   const dirtyRef = useRef(false);
+  // Set when a localStorage draft write fails (quota exhausted by base64
+  // attachments). While true the device has NO local safety net, so the server
+  // is the only copy — see saveToLocal for why the draft is deleted rather than
+  // left to go stale. Deliberately NOT surfaced to the crew: recovery is
+  // automatic (the work is pushed to the server immediately) and there is
+  // nothing for them to do about it mid-call, which is exactly the kind of
+  // interruption this form is designed to avoid.
+  const localDraftBrokenRef = useRef(false);
 
   // (Live header timer is owned by the <LiveTimer> component — keeping the
   //  ticker out of this component prevents form re-renders mid-keystroke,
@@ -4498,14 +4507,28 @@ export default function DigitalPRFForm() {
 
   const saveToLocal = () => {
     if (!prfId) return;
-    try {
-      const draft = {
-        fd, vitals, ivRows, medRows, timestamps, kms, sigs, geos,
-        vehicle, crew2Id, phase,
-        savedAt: Date.now(),
-      };
-      localStorage.setItem(LOCAL_DRAFT_KEY, JSON.stringify(draft));
-    } catch { /* localStorage full or unavailable — non-fatal */ }
+    const result = writeDraft(localStorage, LOCAL_DRAFT_KEY, {
+      fd, vitals, ivRows, medRows, timestamps, kms, sigs, geos,
+      vehicle, crew2Id, phase,
+      savedAt: Date.now(),
+    });
+    if (result === 'ok') {
+      localDraftBrokenRef.current = false;
+      return;
+    }
+    // The write failed (quota exhausted by base64 attachments) and writeDraft
+    // has already DELETED the draft rather than leaving a stale one to shadow
+    // and later overwrite the server. The device now has no local safety net,
+    // so push what is in memory to the server immediately — it has no
+    // comparable size limit.
+    //
+    // React only on the TRANSITION into the broken state: saveToLocal runs on a
+    // 400ms debounce off every keystroke, so reacting each time would fire a
+    // server save per keystroke once the quota is full.
+    if (!localDraftBrokenRef.current) {
+      localDraftBrokenRef.current = true;
+      doSaveRef.current();
+    }
   };
 
   const loadFromLocal = (): boolean => {
@@ -4594,6 +4617,20 @@ export default function DigitalPRFForm() {
     // If there is an active local draft, DO NOT overwrite the form state
     // with the server's version. The local draft contains the user's
     // most recent auto-saved keystrokes that haven't been pushed yet.
+    //
+    // This arbitrates on the draft EXISTING, not on which copy is newer, which
+    // used to mean a STALE draft could shadow a newer server row and then
+    // overwrite it on the next save. The cause was saveToLocal swallowing a
+    // quota failure, leaving the previous draft frozen while the crew kept
+    // working; saveToLocal now DELETES the draft in that case, so a stale one
+    // no longer exists to be preferred.
+    //
+    // Deliberately NOT switching to a `draft.savedAt > prf.updated_at`
+    // comparison: savedAt is the device clock and updated_at is the server
+    // clock. A device running a few minutes slow would lose every unsaved
+    // keystroke on reload — trading a rare failure for a routine one. If this
+    // is ever revisited, the server would have to echo back the savedAt it was
+    // given so both sides of the comparison come from the same clock.
     if (!localStorage.getItem(`prf-draft:${prfId}`)) {
       setFd(normalizeFormData(data));
       setVehicle(prf.vehicle_id || '');
