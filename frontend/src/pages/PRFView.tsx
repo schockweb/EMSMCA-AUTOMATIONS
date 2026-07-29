@@ -20,6 +20,10 @@ const GREEN_DK = '#005f6b';      // accent + provider brand (dark teal)
 const GREEN_TINT = '#e7f3f5';    // label cell background (teal tint)
 
 import { PrintableInjuryDiagram } from '../components/BodyDiagram';
+import {
+  INSET_MM, MAX_W_MM, MAX_H_MM, SHEET_RATIO,
+  DESIGN_W_PX, MAX_FIT_W, planPlacement,
+} from './prfPdfLayout';
 const INK      = '#0b1020';      // body text
 const MUT      = '#5b6478';      // secondary text
 const DIM      = '#94a3b8';      // placeholder / empty marker
@@ -558,26 +562,19 @@ export default function PRFView() {
     // otherwise shrink each page's offsetWidth and the snapshot with it.
     clearScreenFit();
 
-    // A4 landscape printable area with a 5mm safety inset on every edge.
-    const PAGE_W_MM = 297;
-    const PAGE_H_MM = 210;
-    const INSET_MM = 5;
-    const maxW = PAGE_W_MM - INSET_MM * 2;   // 287mm
-    const maxH = PAGE_H_MM - INSET_MM * 2;   // 200mm
-    // Beyond this height we slice instead of shrinking, so a very tall page
-    // never scales text below ~70% (1 / 1.4) and stays legible.
-    const SHRINK_LIMIT_MM = maxH * 1.4;
+    // A4 geometry and the sizing policy live in ./prfPdfLayout so they can be
+    // unit-tested: jsdom has no layout engine, which is why a defect that
+    // printed the clinical page at ~3pt survived a green 72-test suite.
+    const maxW = MAX_W_MM;   // 287mm
+    const maxH = MAX_H_MM;   // 200mm
 
     const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'landscape', compress: true });
     let firstSheet = true;
+    let skippedSheets = 0;
     const newSheet = () => {
       if (!firstSheet) pdf.addPage('a4', 'landscape');
       firstSheet = false;
     };
-
-    // Sheet aspect (height / width) the page layout must match to fill the
-    // printable area edge-to-edge.
-    const SHEET_RATIO = maxH / maxW;               // ≈ 0.697
 
     try {
       for (let i = 0; i < pages.length; i++) {
@@ -593,16 +590,27 @@ export default function PRFView() {
         const prevWidth = el.style.width;
         const prevMinWidth = el.style.minWidth;
         let canvas: HTMLCanvasElement | null = null;
+        // Hoisted: the placement branches below need the width the sheet was
+        // actually reflowed to in order to know how small its text will print.
+        let reflowW = DESIGN_W_PX;
         try {
-          let w = el.offsetWidth || 1220;
+          let w = el.offsetWidth || DESIGN_W_PX;
           let h = el.offsetHeight || 862;
           for (let pass = 0; pass < 4 && h / w > SHEET_RATIO + 0.002; pass++) {
-            w = Math.min(Math.ceil(h / SHEET_RATIO), 2400);   // cap: sanity bound
+            // Capped at MAX_FIT_W, not at an arbitrary 2400. The reflow's
+            // premise is that widening lets text re-wrap and the page get
+            // shorter — true for the prose rows, FALSE for the IV, medication
+            // and vitals stacks, whose height comes from ROW COUNT. Those never
+            // shorten, so the loop used to run to the cap and simply shrink the
+            // whole sheet. Overflow is now the slicer's job, not the reflow's.
+            w = Math.min(Math.ceil(h / SHEET_RATIO), MAX_FIT_W);
             el.style.width = `${w}px`;
             el.style.minWidth = `${w}px`;
             h = el.offsetHeight;                  // reflowed height
             w = el.offsetWidth || w;
+            if (w >= MAX_FIT_W) break;            // no further widening is allowed
           }
+          reflowW = w;
           canvas = await html2canvas(el, {
             // Scale 1.5 gives ~150 DPI on A4 — crisp enough for medical
             // forms while keeping canvas memory and PDF size manageable.
@@ -619,7 +627,16 @@ export default function PRFView() {
 
         const cw = canvas?.width || 0;
         const ch = canvas?.height || 0;
-        if (!canvas || !cw || !ch) continue;      // skip a zero-size snapshot
+        if (!canvas || !cw || !ch) {
+          // A sheet failed to rasterise. This used to `continue` silently, so
+          // buildPrfPdf returned a valid, savable PDF that was simply missing a
+          // page — and handleAutoSend would email that truncated document to the
+          // receiving facility, stamp facility_email_sent_at, and show the crew
+          // "sent". A PRF missing its clinical sheet must never be transmitted,
+          // so record it and abort the whole build below.
+          skippedSheets++;
+          continue;
+        }
 
         // Use JPEG at 0.72 quality — shrinks the PDF from ~64MB (PNG) to
         // ~2-4MB while keeping text perfectly readable on A4 printouts.
@@ -627,20 +644,24 @@ export default function PRFView() {
         const imgFormat = 'JPEG';
 
         const wScale = maxW / cw;                  // mm per source px at full width
-        const fullH = ch * wScale;                 // page height in mm rendered full-width
 
-        if (fullH <= maxH + 0.5) {
-          const drawH = fullH >= maxH * 0.92 ? maxH : fullH;
+        // The placement decision (fit / shrink / slice, and the legibility
+        // floor that governs it) is pure arithmetic and lives in prfPdfLayout
+        // so it can be unit-tested without a layout engine.
+        const plan = planPlacement(cw, ch, reflowW);
+
+        if (plan.kind === 'fit') {
           newSheet();
-          pdf.addImage(imgData, imgFormat, INSET_MM, INSET_MM, maxW, drawH, undefined, 'FAST');
-        } else if (fullH <= SHRINK_LIMIT_MM) {
+          pdf.addImage(imgData, imgFormat, INSET_MM, INSET_MM, maxW, plan.drawHmm, undefined, 'FAST');
+        } else if (plan.kind === 'shrink') {
           // Modest overflow — shrink uniformly onto ONE clean sheet, centred.
           // Aspect ratio is preserved so fields can never smear or overlap.
-          const scale = Math.min(maxW / cw, maxH / ch);
-          const drawW = cw * scale;
-          const drawH = ch * scale;
           newSheet();
-          pdf.addImage(imgData, imgFormat, INSET_MM + (maxW - drawW) / 2, INSET_MM, drawW, drawH, undefined, 'FAST');
+          pdf.addImage(
+            imgData, imgFormat,
+            INSET_MM + (maxW - plan.drawWmm) / 2, INSET_MM,
+            plan.drawWmm, plan.drawHmm, undefined, 'FAST',
+          );
         } else {
           // Very tall page — slice into full-width A4 bands across consecutive
           // sheets so every row stays full size and readable, never clipped.
@@ -669,6 +690,15 @@ export default function PRFView() {
     } finally {
       // Restore the on-screen fit-to-width zoom regardless of outcome.
       applyScreenFit();
+    }
+
+    if (skippedSheets > 0) {
+      // Refuse to hand back a PDF that is missing pages. Callers already treat
+      // null as "couldn't build": Save-as-PDF falls back to the native print
+      // dialog, the share pre-warm caches nothing, and handleAutoSend raises
+      // pdf_build_failed instead of emailing a truncated medical-legal record.
+      // Silently returning the short document was the worse failure by far.
+      return null;
     }
 
     return pdf;
@@ -738,14 +768,20 @@ export default function PRFView() {
         // Widen its layout box instead — text re-wraps, the page gets
         // shorter — until the aspect matches, then scale by width so the
         // form fills the sheet edge-to-edge.
-        let w = p.offsetWidth || 1220;
+        let w = p.offsetWidth || DESIGN_W_PX;
         let h = p.offsetHeight || 862;
         for (let pass = 0; pass < 4 && h / w > SHEET_RATIO + 0.002; pass++) {
-          w = Math.min(Math.ceil(h / SHEET_RATIO), 2400);
+          // Same MAX_FIT_W cap as buildPrfPdf. Widening only shortens a page
+          // whose height comes from text WRAPPING; the IV, medication and
+          // vitals stacks are row-count-driven and never shorten, so an
+          // uncapped reflow just made this path width-bound and shrank the
+          // whole sheet at `s` below.
+          w = Math.min(Math.ceil(h / SHEET_RATIO), MAX_FIT_W);
           p.style.width = `${w}px`;
           p.style.minWidth = `${w}px`;
           h = p.offsetHeight;                 // reflowed height
           w = p.offsetWidth || w;
+          if (w >= MAX_FIT_W) break;
         }
         const s = Math.min(frameW / w, frameH / h, 1);
         p.style.transformOrigin = 'top left';
@@ -1611,6 +1647,21 @@ export default function PRFView() {
             {/* Assessment level + Billing Type. PVT shows its payment method
                 too ("PVT — Cash") so cash settlements are visible at a glance. */}
             {fd.call_type !== 'DOD' && <FieldRow label="Assessment"   value={fd.assessment_level} />}
+            {/* Monitoring level — the level of care actually delivered DURING
+                transport, as opposed to the level assessed on scene. The crew
+                is required to record it and the form warns when the two differ,
+                but only "Assessment" used to reach the PDF, so a call assessed
+                BLS and monitored ALS printed as plain BLS. Hidden when it is
+                the same as the assessment, to keep the band compact. */}
+            {fd.call_type !== 'DOD' && fd.monitoring_level
+              && fd.monitoring_level !== fd.assessment_level && (
+              <FieldRow label="Monitoring" value={fd.monitoring_level} />
+            )}
+            {/* Transfer reason (IFT/IHT). A Social Transfer and an Upgrade
+                Transfer are reimbursed completely differently — one is often
+                not a benefit at all — yet both used to print only as the call
+                type, so the scheme could not adjudicate what it was billed. */}
+            {fd.transfer_subtype && <FieldRow label="Transfer Reason" value={fd.transfer_subtype} />}
             {/* Courtesy calls are non-billable transfers — no billing type is
                 captured, so the row (which would render an empty "—") is hidden. */}
             {fd.call_type !== 'COURTESY' && (
@@ -2023,6 +2074,13 @@ export default function PRFView() {
                   <>
                     <SectionHead label="Cash Verification" />
                     <FieldRow label="Amount Paid" value={fd.pvt_cash_amount_paid ? `R ${fd.pvt_cash_amount_paid}` : ''} />
+                    {/* Who actually handed the cash over. The crew captures it,
+                        but it never reached the PDF — so the cash-receipt block
+                        was an unattributed signature against a rand amount. If
+                        the payer later disputes paying, or money goes missing
+                        between crew and office, the record could not say who
+                        handed it over. */}
+                    <FieldRow label="Payer" value={fd.pvt_cash_payer_name} />
                     <div style={{ padding: '4px 6px', borderTop: `1px solid ${LN}` }}>
                       <div style={{ fontSize: '0.48rem', fontWeight: 800, color: MUT, textTransform: 'uppercase', marginBottom: 2 }}>Payer Signature</div>
                       <SignatureBox src={fd.pvt_cash_payer_signature} minHeight={40} />
@@ -2475,6 +2533,23 @@ export default function PRFView() {
             {ivRows.length > 0 && (
               <>
             <SectionHead label="Intravenous Therapy" />
+            {/* Clinical justification for the IV. The crew must answer these
+                ("Reason for IV Therapy") before the section opens, and it is
+                the first thing a scheme asks for when it queries an IV charge —
+                yet none of the four answers reached the PDF, so the line and
+                its consumables were billed with the indication missing and the
+                crew's contemporaneous justification unavailable to defend it. */}
+            {(() => {
+              const reasons = [
+                fd.ift_ongoing_iv_treatment && 'On-going IV treatment',
+                fd.primary_iv_profuse_bleeding && 'Profuse bleeding',
+                fd.primary_iv_fluid_resuscitation && 'Fluid resuscitation',
+                fd.iv_medication_administration && 'Medication administered via IV',
+              ].filter(Boolean) as string[];
+              return reasons.length > 0
+                ? <FieldRow label="Indication" value={reasons.join(' · ')} valueMin={24} />
+                : null;
+            })()}
             {ivRows.map((row: any, i: number) => (
               <Fragment key={`iv-${i}`}>
                 {i > 0 && <div style={{ borderTop: `2px solid ${GREEN_DK}` }} />}

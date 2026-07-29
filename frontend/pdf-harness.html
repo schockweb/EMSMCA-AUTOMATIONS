@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>PRF PDF harness (dev only)</title>
+    <style>
+      body { margin: 0; font-family: system-ui, sans-serif; }
+      #harness-bar {
+        position: fixed; top: 0; left: 0; right: 0; z-index: 99999;
+        background: #111; color: #eee; padding: 8px 12px; font-size: 13px;
+        display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+      }
+      #harness-bar button { padding: 4px 10px; cursor: pointer; }
+      #harness-out { white-space: pre; font-family: ui-monospace, monospace; font-size: 12px; }
+      #root { padding-top: 44px; }
+    </style>
+  </head>
+  <body>
+    <div id="harness-bar">
+      <strong>PDF harness</strong>
+      <span>rows: <span id="harness-rows"></span></span>
+      <button id="btn-measure">Measure geometry</button>
+      <button id="btn-export">Build real PDF</button>
+      <span id="harness-out"></span>
+    </div>
+    <div id="root"></div>
+    <script type="module" src="/src/devPdfHarness.tsx"></script>
+  </body>
+</html>
