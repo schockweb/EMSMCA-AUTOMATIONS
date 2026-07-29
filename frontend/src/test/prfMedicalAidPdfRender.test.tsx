@@ -385,3 +385,41 @@ describe('PRF PDF render — PRIMARY call, MED AID billing', () => {
     expect(screen.getByText(/Attachments\) - Medical Aid Card/)).toBeInTheDocument();
   });
 });
+
+// ── Passport rows are omitted when blank ──────────────────────────────────
+// Passport is the alternative to an SA ID rather than an extra field, so on a
+// local patient/debtor it is always empty. It used to print a permanent row of
+// "—"; it must now disappear entirely, matching how the rest of the Patient
+// Information block already treats blank values.
+describe('PRF PDF render — blank passport rows', () => {
+  const withPassports = (patient: string | undefined, debtor: string | undefined) => ({
+    ...PRF_FIXTURE,
+    form_data: {
+      ...FD,
+      patient_passport_number: patient,
+      debtor_passport_number: debtor,
+    },
+  });
+
+  it('hides both Passport rows when neither was captured', async () => {
+    vi.mocked(axios.get).mockResolvedValue({ data: withPassports(undefined, undefined) });
+    renderPrfView();
+    await screen.findByText(/Sipho-Sentinel/);
+    expect(screen.queryAllByText('Passport')).toHaveLength(0);
+  });
+
+  it('still shows a Passport row for whichever party has one', async () => {
+    vi.mocked(axios.get).mockResolvedValue({ data: withPassports(undefined, 'PP-DEBT-ONLY') });
+    renderPrfView();
+    await screen.findByText(/Sipho-Sentinel/);
+    expect(screen.queryAllByText('Passport')).toHaveLength(1);
+    expectVisible('PP-DEBT-ONLY');
+  });
+
+  it('treats a whitespace-only passport as blank', async () => {
+    vi.mocked(axios.get).mockResolvedValue({ data: withPassports('   ', '   ') });
+    renderPrfView();
+    await screen.findByText(/Sipho-Sentinel/);
+    expect(screen.queryAllByText('Passport')).toHaveLength(0);
+  });
+});

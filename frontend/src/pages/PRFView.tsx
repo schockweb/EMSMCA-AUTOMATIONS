@@ -1723,7 +1723,9 @@ export default function PRFView() {
               <FieldRow label="First Name"   value={fd.med_aid_dec_death_deceased_first_name} />
               <FieldRow label="Surname"      value={fd.med_aid_dec_death_deceased_surname} />
               <FieldRow label="ID Number"    value={fd.med_aid_dec_death_deceased_id} />
-              <FieldRow label="Passport No"  value={fd.med_aid_dec_death_deceased_passport} />
+              {!isBlank(fd.med_aid_dec_death_deceased_passport) && (
+                <FieldRow label="Passport No" value={fd.med_aid_dec_death_deceased_passport} />
+              )}
               <FieldRow label="Date of Birth" value={fd.med_aid_dec_death_deceased_dob} />
               <FieldRow label="Age"          value={fd.med_aid_dec_death_deceased_age} />
               <FieldRow label="Cell"         value={fd.med_aid_dec_death_deceased_cell} />
@@ -1950,7 +1952,13 @@ export default function PRFView() {
                 <FieldRow label="Name"     value={fd.debtor_name} />
                 <FieldRow label="Surname"  value={fd.debtor_surname} />
                 <FieldRow label="ID No"    value={fd.debtor_id_number} />
-                <FieldRow label="Passport" value={fd.debtor_passport_number} />
+                {/* Passport is the alternative to an SA ID, not an extra field —
+                    on a local debtor it is always blank, so a permanent row of
+                    "—" is noise. Omit it unless captured (same rule the Patient
+                    Information block already applies). */}
+                {!isBlank(fd.debtor_passport_number) && (
+                  <FieldRow label="Passport" value={fd.debtor_passport_number} />
+                )}
                 <FieldRow label="Age"      value={fd.debtor_age} />
                 <FieldRow label="DOB"      value={fmtDateValue(fd.debtor_dob)} />
                 <FieldRow label="Address"  value={fd.debtor_address} />
@@ -2840,7 +2848,9 @@ export default function PRFView() {
                 <FieldRow label="First Name"   value={fd.med_aid_dec_death_deceased_first_name} />
                 <FieldRow label="Surname"      value={fd.med_aid_dec_death_deceased_surname} />
                 <FieldRow label="ID Number"    value={fd.med_aid_dec_death_deceased_id} />
-                <FieldRow label="Passport No"  value={fd.med_aid_dec_death_deceased_passport} />
+                {!isBlank(fd.med_aid_dec_death_deceased_passport) && (
+                  <FieldRow label="Passport No" value={fd.med_aid_dec_death_deceased_passport} />
+                )}
                 <FieldRow label="Date of Birth" value={fd.med_aid_dec_death_deceased_dob} />
                 <FieldRow label="Age"          value={fd.med_aid_dec_death_deceased_age} />
                 <FieldRow label="Cell"         value={fd.med_aid_dec_death_deceased_cell} />
