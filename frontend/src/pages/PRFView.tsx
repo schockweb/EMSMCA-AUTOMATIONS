@@ -682,7 +682,7 @@ export default function PRFView() {
           }
         }
       }
-    } catch (_e) {
+    } catch {
       // A single bad image — e.g. a cross-origin logo that tainted the canvas
       // and made toDataURL throw — must never silently brick the whole export.
       // Returning null lets callers show their "couldn't build" fallback.
@@ -1758,7 +1758,19 @@ export default function PRFView() {
           </div>
         </div>
 
-        {/* ── BAND B — For DOD calls the Declaration of Death renders first ── */}
+        {/* ── BAND B — For DOD calls the Declaration of Death renders first ──
+            ⚠ SECOND IMPLEMENTATION EXISTS. The same statutory block is also
+            rendered as its own dedicated A4 sheet further down this file,
+            under the complementary guard `fd.med_aid_dec_death &&
+            fd.call_type !== 'DOD'` — search for "DECLARATION OF DEATH SHEET".
+            The two guards are mutually exclusive, so nothing renders twice and
+            neither is dead; but roughly 40 FieldRows are repeated verbatim
+            between them, so ANY change to the deceased/informant/sign-off
+            fields must be made in BOTH places or the two drift apart.
+            Deliberately NOT merged: the columns, grid ratios, masthead and
+            sign-off placement genuinely differ, so a shared component would
+            need enough props that the abstraction buys little while risking
+            layout shift on a legal document. Revisit post-pilot. */}
         {fd.call_type === 'DOD' && fd.med_aid_dec_death && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', borderTop: `2px solid ${LN}` }}>
             {/* Column 1 — event + deceased */}
@@ -2860,14 +2872,23 @@ export default function PRFView() {
         </div>
       ))}
 
-      {/* ═══════════════════ DECLARATION OF DEATH ═══════════════════
+      {/* ═══════════ DECLARATION OF DEATH SHEET ═══════════
           Rendered on its own dedicated A4-landscape sheet, and ONLY when a
           Declaration of Death was actually completed on the PRF. Previously
           these fields were crammed into the narrow Billing-Information column;
           giving them a full page lets every field (particulars of deceased,
           healthcare professional, medical confirmation, handover, and the
           signed declaration) render legibly. Picked up by the PDF/print
-          pipeline via the shared .prf-page selector. */}
+          pipeline via the shared .prf-page selector.
+
+          ⚠ SECOND IMPLEMENTATION EXISTS. The same statutory block is also
+          rendered inline as "BAND B" on page 1, under the complementary guard
+          `fd.call_type === 'DOD' && fd.med_aid_dec_death`. The two guards are
+          mutually exclusive — this sheet covers a Declaration of Death raised
+          on a NON-DOD call — so nothing renders twice. But roughly 40
+          FieldRows are repeated verbatim, so ANY change to the deceased /
+          informant / sign-off fields must be made in BOTH places. See the
+          matching note at BAND B for why they are deliberately not merged. */}
       {fd.med_aid_dec_death && fd.call_type !== 'DOD' && (
         <div className="prf-print-frame">
           <div className="prf-page" style={{
@@ -3061,11 +3082,13 @@ export default function PRFView() {
           label: `Declaration of Death Document #${i + 1}`,
           val: n.data_url
         })),
-        ...(fd.raf_oar_report_pdf ? [{
-          label: `RAF OAR Report: ${fd.raf_oar_report_pdf.name || 'PDF'}`,
-          val: fd.raf_oar_report_pdf.data_url,
-          isPdf: true
-        }] : [])
+        // NOTE: raf_oar_report_pdf is deliberately NOT listed here. It is a
+        // single form field that used to be fed into BOTH this loop and the
+        // `attachedDocs` loop above, so a RAF OAR produced TWO sheets — and
+        // this one rendered it in an <iframe>, which html2canvas cannot
+        // rasterise, so the exported PDF carried a blank page. attachedDocs
+        // serves it correctly, degrading to a labelled record block because a
+        // canvas snapshot cannot render PDF pages at all.
       ].filter(d => d.val).map((doc, i) => (
         <div key={`attachment-${i}`} className="prf-print-frame">
           <div className="prf-page" style={{
@@ -3084,11 +3107,12 @@ export default function PRFView() {
                 the whole PDF view rendered squashed. A bounded height keeps the
                 page at A4 proportions and objectFit preserves the aspect. */}
             <div style={{ flex: 1, padding: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', background: SOFT_BG, overflow: 'hidden' }}>
-              {(doc as any).isPdf ? (
-                <iframe src={doc.val} title={doc.label} style={{ width: '100%', height: 740, border: `1px solid ${LN}`, borderRadius: 8 }} />
-              ) : (
-                <img src={doc.val} alt={doc.label} style={{ maxWidth: '100%', maxHeight: 740, objectFit: 'contain', border: `1px solid ${LN}`, borderRadius: 8 }} />
-              )}
+              {/* Every entry in this loop is a captured IMAGE. The former
+                  `isPdf` <iframe> branch was reachable only via
+                  raf_oar_report_pdf, which now renders through attachedDocs;
+                  an iframe could never appear in the exported PDF anyway, so
+                  keeping the branch would only invite the duplicate back. */}
+              <img src={doc.val} alt={doc.label} style={{ maxWidth: '100%', maxHeight: 740, objectFit: 'contain', border: `1px solid ${LN}`, borderRadius: 8 }} />
             </div>
           </div>
         </div>

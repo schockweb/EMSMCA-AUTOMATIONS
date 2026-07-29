@@ -8,14 +8,21 @@
  *
  * Call types  (DigitalPRFForm CALL_TYPE_OPTS):
  *   PRIMARY, IHT (labelled IFT/IHT), RHT, COURTESY, RESUS, DOD
- * Billing types (BILLING_TYPE_OPTS):
- *   MED AID, IOD, RAF, PVT, CALL OUT FEE
+ * Billing types (BILLING_TYPE_OPTS, DigitalPRFForm.tsx:2877):
+ *   MED AID, RAF, PVT, CALL OUT FEE
+ *   NOTE: 'IOD' is NOT a member. This docstring used to list it, and used to
+ *   claim the default arm offered CALL OUT FEE from the picker. Both were
+ *   wrong — a drifted comment on the file that documents what the scheme
+ *   legally receives is worse than no comment, so it is corrected here.
+ *   Scenarios below may still exercise IOD/legacy arms for backward
+ *   compatibility with PRFs captured before the option was removed.
  *
- * Billing availability rules (from BillingTypePicker.billingOpts):
+ * Billing availability rules (BillingTypePicker.billingOpts, ~line 2895):
+ *   baseOpts = BILLING_TYPE_OPTS minus CALL OUT FEE  (never offered in the picker)
  *   COURTESY → none  (non-billable transfer — no payer block is captured at all)
- *   DOD   → MED AID, PVT          (no IOD / RAF — no third-party patient to bill)
- *   RESUS → MED AID, PVT          (restricted to these two)
- *   else  → MED AID, IOD, RAF, PVT, CALL OUT FEE
+ *   DOD   → baseOpts minus RAF     → MED AID, PVT
+ *   RESUS → MED AID, PVT           (restricted to these two)
+ *   else  → baseOpts               → MED AID, RAF, PVT
  *
  * Not every field a call type captures reaches the PDF — the product
  * deliberately suppresses whole blocks per call type, so the expectations are
@@ -30,7 +37,7 @@
  * the failing assertion prints the exact value that dropped off the PDF.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, cleanup } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import axios from 'axios';
 import PRFView from '../pages/PRFView';
@@ -658,4 +665,103 @@ describe('PRF PDF — Return Trip renders on a partially-captured return leg', (
       expectFieldRow(rowLabel, sentinel);
     });
   }
+});
+
+/**
+ * ATTACHMENT / EXTRA-PAGE FAMILY
+ *
+ * This whole family had ZERO coverage: a keyword scan of both PDF test files
+ * found 0 hits for raf_oar_report_pdf, attachedDocs, 'Attached Document',
+ * body_marks and nursing_notes, while med_aid_dec_death had 22. Everything
+ * beyond page 1 / page 2 / the Declaration of Death was untested.
+ *
+ * That gap hid a real defect: `raf_oar_report_pdf` is ONE form field that was
+ * fed into TWO independent page loops, so a RAF OAR produced two sheets — and
+ * the second rendered the PDF inside an <iframe>, which html2canvas cannot
+ * rasterise, so the exported document carried a blank page.
+ *
+ * These assert SHEET COUNT and header text, which needs no un-mocking of
+ * html2canvas and would have caught the duplicate immediately.
+ */
+describe('PRF PDF — attachments and extra sheets', () => {
+  const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==';
+  const PDF = 'data:application/pdf;base64,JVBERi0xLjQK';
+
+  /** Sheets rendered for a fixture, after waiting for the PRF to load. */
+  async function sheetsFor(extraFd: Record<string, any>) {
+    const built = buildPrf('PRIMARY', 'MED AID');
+    currentPrf = { ...built.prf, form_data: { ...built.fd, ...extraFd } };
+    const { container } = renderPrfView();
+    // findAllByText, not findByText: each attached-document sheet repeats the
+    // patient identity in its own mini-header, so the anchor legitimately
+    // appears more than once and the singular query would throw.
+    await screen.findAllByText((c) => c.includes(built.anchor));
+    return { container, sheets: container.querySelectorAll('.prf-print-frame').length };
+  }
+
+  /**
+   * The PRIMARY fixture already carries attachments of its own, so these assert
+   * the DELTA a field adds rather than an absolute count — that way the tests
+   * keep meaning if the fixture gains or loses an attachment later.
+   */
+  async function baselineSheets() {
+    const { sheets } = await sheetsFor({});
+    cleanup();
+    return sheets;
+  }
+
+  it('adds EXACTLY ONE sheet for a RAF OAR report, not two', async () => {
+    // The regression this pins: raf_oar_report_pdf is ONE form field that was
+    // listed in BOTH attachedDocs and the Patient Documents loop, so a single
+    // uploaded OAR produced two sheets — and the second was an <iframe>, which
+    // html2canvas cannot rasterise, so the exported PDF carried a blank page.
+    const base = await baselineSheets();
+    const { sheets } = await sheetsFor({
+      raf_oar_report_pdf: { name: 'oar-report.pdf', size: 1024, data_url: PDF },
+    });
+    expect(sheets - base).toBe(1);
+  });
+
+  it('routes the OAR through the attached-document sheet, which handles a PDF honestly', async () => {
+    await sheetsFor({
+      raf_oar_report_pdf: { name: 'oar-report.pdf', size: 1024, data_url: PDF },
+    });
+    // attachedDocs renders "Attached Document — OAR Report" and degrades to a
+    // labelled record block, because a canvas snapshot cannot render PDF pages.
+    expect(screen.getAllByText(/Attached Document/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/OAR Report/i).length).toBeGreaterThan(0);
+  });
+
+  it('never renders an <iframe> — html2canvas cannot rasterise one, so it exports blank', async () => {
+    const { container } = await sheetsFor({
+      raf_oar_report_pdf: { name: 'oar-report.pdf', size: 1024, data_url: PDF },
+    });
+    expect(container.querySelectorAll('iframe')).toHaveLength(0);
+  });
+
+  it('adds one sheet per nursing note', async () => {
+    const base = await baselineSheets();
+    const { sheets } = await sheetsFor({
+      nursing_notes: [{ data_url: PNG }, { data_url: PNG }],
+    });
+    expect(sheets - base).toBe(2);
+  });
+
+  it('counts WCA documents and an OAR together without double-counting', async () => {
+    const base = await baselineSheets();
+    const { sheets } = await sheetsFor({
+      wca_payslip_pdf:        { name: 'payslip.pdf', data_url: PDF },
+      wca_medical_report_pdf: { name: 'medreport.pdf', data_url: PDF },
+      raf_oar_report_pdf:     { name: 'oar.pdf', data_url: PDF },
+    });
+    expect(sheets - base).toBe(3);   // three documents, one sheet each
+  });
+
+  it('ignores an attachment field with no data_url rather than emitting a blank sheet', async () => {
+    const base = await baselineSheets();
+    const { sheets } = await sheetsFor({
+      raf_oar_report_pdf: { name: 'oar.pdf', size: 0 },   // no data_url
+    });
+    expect(sheets - base).toBe(0);
+  });
 });
