@@ -37,6 +37,7 @@ import {
   medicationNamesForCategory,
   normaliseHpcsaCategory,
   scopeForFormLabel,
+  shouldHideScopeOption,
 } from '../../data/hpcsaScope';
 
 // Empty baseURL → axios uses relative paths → requests go to whatever origin
@@ -4206,6 +4207,15 @@ const EnRouteOverlay = ({ dispatchedAt, onDoubleTap }: { dispatchedAt: string; o
 const PRF_TEXT_FIELDS = [
   'allergies', 'handover_doctor_email', 'medical_scheme',
   'preauth_number', 'rht_call_out_fee',
+  // Identifier fields. A 13-digit SA ID is all digits, so it is exactly the
+  // kind of value that arrives as a NUMBER from a JSON API — and
+  // autofillAgeFromId calls .replace() on it inside a mount-time useEffect, so
+  // a numeric one took the whole form down through the ErrorBoundary before the
+  // crew could type anything. Found by the first test that ever mounted this
+  // component. The same applies to the debtor's ID and both passport fields.
+  'patient_id_number', 'debtor_id_number',
+  'patient_passport_number', 'debtor_passport_number',
+  'age', 'debtor_age',
 ];
 const PRF_ARRAY_FIELDS = [
   'airway_interventions', 'circulation_interventions',
@@ -4750,7 +4760,15 @@ export default function DigitalPRFForm() {
   // performing ANT/ECP procedures). Auto-opens the picker; closing without
   // selecting drops back to Phase 2 (handled inside the picker's Cancel).
   useEffect(() => {
-    if (phase !== 3) return;
+    // Leaving the clinical phase clears the dismissal, so coming back asks
+    // again. `dismissedTreating` used to latch for the entire mount: one tap on
+    // Cancel turned HPCSA scope enforcement off for the rest of the PRF, and
+    // because scopeForFormLabel fails open with no practitioner set, every
+    // restricted procedure stayed selectable for the whole call.
+    if (phase !== 3) {
+      if (dismissedTreating) setDismissedTreating(false);
+      return;
+    }
     if (fd.treating_practitioner_category) return;
     if (dismissedTreating) return;
     if (crewPicker) return;
@@ -4814,12 +4832,17 @@ export default function DigitalPRFForm() {
   // Both the patient (Patient Information) and the debtor (Debtor Information)
   // sections share this logic — only the field-key prefixes differ.
   const autofillAgeFromId = (
-    idValue: string | undefined,
+    idValue: string | number | undefined | null,
     ageKey: string,
     dobKey: string,
   ) => {
-    const idDigits = (idValue || '').replace(/\D/g, '');
-    const dob = parseSaIdDob(idValue || '');
+    // Coerce before touching string methods. normalizeFormData covers this on
+    // the SERVER load path, but loadFromLocal calls setFd(draft.fd) with no
+    // normalisation at all, so a draft written from bad data would re-crash
+    // here. Defend at the point of use as well as at the boundary.
+    const idText = idValue == null ? '' : String(idValue);
+    const idDigits = idText.replace(/\D/g, '');
+    const dob = parseSaIdDob(idText);
     setFd(prev => {
       const next = { ...prev };
       let changed = false;
@@ -8151,7 +8174,18 @@ export default function DigitalPRFForm() {
               const hint = verdict.kind === 'authorised' && verdict.condition
                 ? 'Senior ECP / MO consultation required'
                 : undefined;
-              if (disabled) return null;
+              // Hide an out-of-scope option ONLY when nothing is recorded
+              // against it. An already-ticked one must stay visible: this used
+              // to `return null` whenever disabled, so changing the treating
+              // practitioner mid-call made a recorded Intubation or Surgical
+              // Airway VANISH from the screen while remaining in fd and in the
+              // submitted record — the crew could not see it and could not
+              // untick it, and the PRF went on to assert that a practitioner
+              // performed a procedure outside their scope.
+              // Chk's disabled branch was built for exactly this ("surface that
+              // with an amber accent so it can be reviewed"); the early return
+              // meant that branch could never render for an on value.
+              if (shouldHideScopeOption(disabled, inArr('airway_interventions', i))) return null;
               return <Chk key={i} fk="airway_interventions" val={i} disabled={disabled} hint={hint} />;
             })}
           </div>
@@ -8192,7 +8226,10 @@ export default function DigitalPRFForm() {
               const hint = verdict.kind === 'authorised' && verdict.condition
                 ? 'Senior ECP / MO consultation required'
                 : undefined;
-              if (disabled) return null;
+              // Same rule as Airway above: hide an out-of-scope option only
+              // while nothing is recorded against it. Applies to IO Line,
+              // Central Line, Pacing, Cardio Version and Defib.
+              if (shouldHideScopeOption(disabled, inArr('circulation_interventions', i))) return null;
               return <Chk key={i} fk="circulation_interventions" val={i} disabled={disabled} hint={hint} />;
             })}
             {(inArr('circulation_interventions', 'Bleeding') || !!fd.primary_iv_profuse_bleeding) && (
@@ -10048,7 +10085,22 @@ export default function DigitalPRFForm() {
                   <div style={{ padding: '12px 20px 22px', display: 'flex', gap: 10 }}>
                     <button
                       type="button"
-                      onClick={() => { setDismissedTreating(true); setCrewPicker(null); }}
+                      onClick={() => {
+                        // Cancelling leaves no treating practitioner, and
+                        // scopeForFormLabel deliberately FAILS OPEN in that
+                        // state ("Phase 2 gate normally prevents this") — so
+                        // every restricted procedure becomes selectable again.
+                        // The crew is not trapped here (blocking mid-call is
+                        // exactly what this form avoids), but the record must
+                        // show that scope enforcement was off, otherwise an
+                        // unscoped PRF and a properly-scoped one are
+                        // indistinguishable afterwards.
+                        if (!fd.treating_practitioner_category) {
+                          sf('scope_gate_dismissed', true);
+                        }
+                        setDismissedTreating(true);
+                        setCrewPicker(null);
+                      }}
                       style={{
                         flex: 1, padding: '12px 0', borderRadius: 12,
                         border: `1.5px solid ${S200}`, background: '#fff', color: S600,

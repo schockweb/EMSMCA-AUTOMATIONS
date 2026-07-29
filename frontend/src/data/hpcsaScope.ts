@@ -1309,3 +1309,30 @@ export function conditionFor(category: HpcsaCategory, capabilityKey: string): st
 export function crewCanExceedBls(categories: readonly HpcsaCategory[]): boolean {
   return categories.some(c => c !== 'BAA');
 }
+
+/**
+ * Should an out-of-scope intervention option be hidden from the crew entirely?
+ *
+ * Hide it ONLY while nothing is recorded against it. This is the difference
+ * between a clean grid and a falsified record:
+ *
+ *   The form used to unmount every out-of-scope option unconditionally
+ *   (`if (disabled) return null`). So if a procedure was ticked while a
+ *   permitted practitioner was selected and the treating practitioner was then
+ *   changed to a narrower scope — routine when a second crew member takes over
+ *   mid-call — the recorded procedure VANISHED from the screen while remaining
+ *   in form_data and in the submitted PRF. The crew could not see it and could
+ *   not untick it, and the document went on to assert that a BAA-registered
+ *   practitioner had performed, say, an intubation or a surgical airway.
+ *
+ *   Chk's disabled branch exists precisely for this ("never silently strip an
+ *   already-on selection — that would erase audit data ... surface that with an
+ *   amber accent so it can be reviewed"), but the early return meant that
+ *   branch could never render for an on value.
+ *
+ * @param outOfScope true when the treating practitioner may not perform it
+ * @param isRecorded true when the crew has already ticked it
+ */
+export function shouldHideScopeOption(outOfScope: boolean, isRecorded: boolean): boolean {
+  return outOfScope && !isRecorded;
+}
