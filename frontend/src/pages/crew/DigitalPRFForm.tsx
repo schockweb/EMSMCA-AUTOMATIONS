@@ -2510,6 +2510,79 @@ const VoiceTxt = ({ fk, rows = 3 }: { fk: string; ph?: string; rows?: number }) 
   );
 };
 
+// MedDrugAutocomplete — the medication Drug/Type field. Free-typeable (an
+// off-list drug is never blocked) with a live auto-suggest dropdown capped at
+// THREE matches. Suggestions come from the loaded catalogue: the treating
+// practitioner's in-scope meds first, then out-of-scope (tagged) so a drug
+// given by a higher-qualified crew member can still be picked. With no text yet,
+// it hints the first three in-scope meds; as the crew types, it filters.
+const MedDrugAutocomplete = ({ value, onChange, authorised, outOfScope }: {
+  value: string;
+  onChange: (v: string) => void;
+  authorised: readonly string[];
+  outOfScope: readonly string[];
+}) => {
+  const [open, setOpen] = useState(false);
+  const q = (value || '').trim().toLowerCase();
+  const pool = [
+    ...authorised.map(n => ({ n, out: false })),
+    ...outOfScope.map(n => ({ n, out: true })),
+  ];
+  const matches = (q ? pool.filter(m => m.n.toLowerCase().includes(q)) : pool).slice(0, 3);
+  // Hide the list once the field already holds an exact match.
+  const showList = open && matches.length > 0 && !(matches.length === 1 && matches[0].n.toLowerCase() === q);
+
+  return (
+    <div style={{ position: 'relative', marginBottom: 8 }}>
+      <input
+        value={value}
+        onChange={e => { onChange(e.target.value); setOpen(true); }}
+        onFocus={e => { onF(e); setOpen(true); }}
+        onBlur={e => { onB(e); setTimeout(() => setOpen(false), 160); }}
+        placeholder="Type or pick a drug…"
+        autoComplete="off"
+        style={{ ...base, marginBottom: 0 }}
+      />
+      {showList && (
+        <div style={{
+          position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 30,
+          background: W, border: `1.5px solid ${S200}`, borderTop: 'none',
+          borderRadius: '0 0 10px 10px', boxShadow: '0 8px 20px rgba(0,0,0,0.14)',
+          overflow: 'hidden',
+        }}>
+          {matches.map((m, mi) => (
+            <button
+              key={m.n}
+              type="button"
+              // onMouseDown (not onClick) so the pick registers before the
+              // input's blur closes the list.
+              onMouseDown={e => { e.preventDefault(); onChange(m.n); setOpen(false); }}
+              style={{
+                display: 'flex', width: '100%', alignItems: 'center', justifyContent: 'space-between',
+                gap: 8, padding: '11px 12px', border: 'none',
+                borderBottom: mi < matches.length - 1 ? `1px solid ${S100}` : 'none',
+                background: W, cursor: 'pointer', textAlign: 'left',
+                fontSize: '0.86rem', color: S900, fontWeight: 600,
+              }}
+            >
+              <span>{m.n}</span>
+              {m.out && (
+                <span style={{
+                  fontSize: '0.56rem', fontWeight: 800, textTransform: 'uppercase',
+                  letterSpacing: '0.05em', color: '#78350f', background: '#fffbeb',
+                  border: '1px solid #f59e0b', padding: '2px 5px', borderRadius: 4, flexShrink: 0,
+                }}>
+                  Out of scope
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const Sel = ({ fk, opts }: { fk: string; opts: string[] }) => {
   const { fd, sf } = useContext(FormContext);
   const val = fd[fk] ?? '';
@@ -7833,13 +7906,12 @@ export default function DigitalPRFForm() {
                           <div key={f.k}>
                             <Lbl t={f.l} />
                             {f.k === 'type' ? (
-                              renderMedSelect(
-                                'type',
-                                'Select drug…',
-                                outOfScopeMeds.length > 0
-                                  ? [{ label: 'In scope', opts: authorised }, { label: 'Out of scope', opts: outOfScopeMeds }]
-                                  : [{ opts: authorised }],
-                              )
+                              <MedDrugAutocomplete
+                                value={row.type ?? ''}
+                                onChange={v => { const r = [...medRows]; r[i] = { ...r[i], type: v }; setMedRows(r); dirtyRef.current = true; }}
+                                authorised={authorised}
+                                outOfScope={outOfScopeMeds}
+                              />
                             ) : f.k === 'route' ? (
                               renderMedSelect('route', 'Select route…', [{ opts: ROUTE_OPTS }])
                             ) : f.k === 'dose' ? (
