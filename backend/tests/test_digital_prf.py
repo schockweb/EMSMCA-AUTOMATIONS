@@ -750,3 +750,85 @@ class TestOfflineCreateWithClientId:
         res = await client.post("/api/digital-prf", json={}, headers=crew_a_headers)
         assert res.status_code == 201
         assert uuid.UUID(res.json()["id"])
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PRF viewer endpoint — revocation and token-type enforcement
+#
+# /api/digital-prf/admin/by-case/* hand-rolls its auth instead of using the
+# shared get_current_user / get_current_crew dependencies, so the hardening
+# applied to those in 7f2e367 never reached it. It validated the token SIGNATURE
+# and nothing else, which meant a logged-out token kept reading patient PRFs, a
+# deactivated admin kept reading patient PRFs, and a REFRESH token worked as an
+# API key — a 7-day credential granting read access to patient names, ID numbers
+# and clinical notes.
+#
+# Auth is enforced before the PRF is looked up, so these assert on the auth
+# outcome without needing a real case.
+# ═══════════════════════════════════════════════════════════════════════════════
+class TestPrfViewerAuthHardening:
+
+    @pytest.mark.asyncio
+    async def test_no_token_is_rejected(self, client):
+        res = await client.get(f"/api/digital-prf/admin/by-case/{uuid.uuid4()}")
+        assert res.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_garbage_token_is_rejected(self, client):
+        res = await client.get(
+            f"/api/digital-prf/admin/by-case/{uuid.uuid4()}",
+            headers={"Authorization": "Bearer not-a-jwt"},
+        )
+        assert res.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_refresh_token_cannot_read_patient_prfs(self, client):
+        """A refresh token is a rotation credential, never an API credential."""
+        from app.utils.security import create_refresh_token
+        token = create_refresh_token(data={"sub": str(uuid.uuid4())})
+        res = await client.get(
+            f"/api/digital-prf/admin/by-case/{uuid.uuid4()}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert res.status_code == 401, (
+            "a refresh token was accepted as an access token on the PRF viewer"
+        )
+        assert "type" in res.text.lower()
+
+    @pytest.mark.asyncio
+    async def test_blacklisted_token_cannot_read_patient_prfs(self, client):
+        """Logout must take effect here, not just on the shared dependencies."""
+        from datetime import datetime, timezone, timedelta
+        from app.utils.security import create_access_token, decode_token, blacklist_token
+        from app.database import AsyncSessionLocal
+
+        user_id = str(uuid.uuid4())
+        token = create_access_token(data={"sub": user_id})
+        jti = decode_token(token).get("jti")
+        assert jti, "access tokens must carry a jti or they cannot be revoked"
+
+        async with AsyncSessionLocal() as db:
+            await blacklist_token(
+                jti, user_id, "access",
+                datetime.now(timezone.utc) + timedelta(hours=1), db,
+            )
+            await db.commit()
+
+        res = await client.get(
+            f"/api/digital-prf/admin/by-case/{uuid.uuid4()}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert res.status_code == 401
+        assert "session ended" in res.text.lower()
+
+    @pytest.mark.asyncio
+    async def test_unknown_admin_user_is_rejected(self, client):
+        """A signature alone is not identity — the user must still exist."""
+        from app.utils.security import create_access_token
+        token = create_access_token(data={"sub": str(uuid.uuid4())})
+        res = await client.get(
+            f"/api/digital-prf/admin/by-case/{uuid.uuid4()}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert res.status_code == 401
+        assert "not found" in res.text.lower() or "inactive" in res.text.lower()

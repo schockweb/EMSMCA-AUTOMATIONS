@@ -226,3 +226,57 @@ describe('HPCSA scope — a recorded procedure must never be hidden', () => {
     expect(shouldHideScopeOption(false, false)).toBe(false);
   });
 });
+
+/**
+ * Tenant isolation must be visible.
+ *
+ * A 403 from the load endpoint is the server's tenant guard: this PRF belongs to
+ * another provider. The load path used to treat ANY error as recoverable when a
+ * local draft existed, so a 403 rendered as a normally-loaded form — the crew
+ * kept editing another provider's patient record and nothing on screen said so.
+ */
+describe('DigitalPRFForm — a 403 is never suppressed by a local draft', () => {
+  function seedDraft(fd: Record<string, any>) {
+    localStorage.setItem(`prf-draft:${PRF_ID}`, JSON.stringify({
+      fd, vitals: [], ivRows: [], medRows: [],
+      timestamps: {}, kms: {}, geos: {},
+      sigs: {
+        patient_signature: null, witness_signature: null, handover_signature: null,
+        crew_signature: null, valuables_signature: null,
+      },
+      vehicle: '', crew2Id: '', phase: 0, savedAt: Date.now(),
+    }));
+  }
+
+  function failWith(status: number) {
+    const inst = {
+      get: vi.fn(async () => { throw Object.assign(new Error('x'), { response: { status } }); }),
+      patch: vi.fn(), post: vi.fn(), delete: vi.fn(),
+    };
+    (axios as any).create = vi.fn(() => inst);
+  }
+
+  it('surfaces a provider mismatch instead of rendering the draft as normal', async () => {
+    seedDraft({ patient_name: 'ForeignTenantPatient' });
+    failWith(403);
+    const { container } = mountForm();
+    await waitFor(() => {
+      expect(container.textContent).toMatch(/different service provider/i);
+    }, { timeout: 4000 });
+  });
+
+  it('still tolerates a network failure by continuing from the local draft', async () => {
+    // The suppression exists for a good reason — offline work must continue.
+    // Only 403 is carved out of it.
+    seedDraft({ patient_name: 'OfflinePatient' });
+    const inst = {
+      get: vi.fn(async () => { throw Object.assign(new Error('net'), { code: 'ERR_NETWORK' }); }),
+      patch: vi.fn(), post: vi.fn(), delete: vi.fn(),
+    };
+    (axios as any).create = vi.fn(() => inst);
+    const { container } = mountForm();
+    await waitFor(() => expect(container.textContent).toBeTruthy());
+    expect(container.textContent).not.toMatch(/different service provider/i);
+    expect(container.textContent).not.toMatch(/could not reach the server/i);
+  });
+});

@@ -1399,6 +1399,21 @@ type ResolvedAddress = {
 
 // Not exported — used only in this file. See the FormContext note above: any
 // non-component runtime export here breaks Fast Refresh for the whole module.
+//
+// ⚠ OPEN PRIVACY DECISION — NOT a bug, a trade-off that needs a business call.
+// This sends the INCIDENT SCENE's GPS coordinates to openstreetmap.org so the
+// crew gets a street address from a mark-time capture. Unlike the personal
+// address fields (see the POPIA note in AddrInp.onTextChange, where the lookup
+// is now suppressed), this one is operationally load-bearing — removing it means
+// the crew hand-types the scene address at the moment they are busiest.
+//
+// It is still a disclosure to a third party: a scene coordinate plus a timestamp
+// implies where a patient was attended. The `email=` parameter satisfies
+// Nominatim's usage policy, which is not the same as satisfying POPIA. Options,
+// in ascending cost: (a) accept it and record it in the processing register,
+// (b) proxy through our own backend so the client's IP is not exposed and the
+// call is logged, (c) self-host Nominatim. Left as-is deliberately pending that
+// decision — do not "clean this up" without making it.
 const reverseGeocode = async (
   lat: number, lng: number, signal: AbortSignal,
 ): Promise<ResolvedAddress | null> => {
@@ -1807,6 +1822,21 @@ const AddrInp = ({ fk, suburbKey, codeKey, ph, containerStyle, inputStyle, label
     sf(fk, next);
     if (debounceRef.current) window.clearTimeout(debounceRef.current);
     if (skipNextRef.current) { skipNextRef.current = false; return; }
+    // ── POPIA: personal addresses are never sent to a third party ──────────
+    // `manualOnly` marks the fields that hold a PERSON's address — the
+    // patient's, the debtor's, the deceased's, the employer's, the private
+    // account holder's. It used to suppress only the GPS-capture pop-up while
+    // still running the Nominatim lookup, so a patient's home address was
+    // transmitted to openstreetmap.org character by character as the crew typed
+    // it. A patient's residential address is identifying personal information
+    // and, attached to an ambulance call, health-adjacent; it must not leave the
+    // tenant boundary to a processor with no agreement in place.
+    //
+    // The crew still types these freely — they simply lose suggestion-based
+    // suburb/postal-code autofill on personal addresses, which is the correct
+    // trade. Operational scene lookups (incident_location, accident location)
+    // are unaffected.
+    if (manualOnly) { setOpen(false); setSuggestions([]); return; }
     setOpen(true);
     debounceRef.current = window.setTimeout(() => runSearch(next), 400);
   };
@@ -1892,9 +1922,10 @@ const AddrInp = ({ fk, suburbKey, codeKey, ph, containerStyle, inputStyle, label
     </div>
   );
 
-  // Manual-only mode (residential addresses): plain inline text field with the
-  // type-to-search autocomplete, NO GPS-capture pop-up — the crew types the
-  // address. Selecting a suggestion still fills suburb + code.
+  // Manual-only mode (a PERSON's address): plain inline text field, no
+  // GPS-capture pop-up AND no third-party lookup — the crew types it. See the
+  // POPIA note in onTextChange: these fields hold identifying personal
+  // information and must not be transmitted to a geocoding service.
   if (manualOnly) {
     return (
       <div style={{ position: 'relative', marginBottom: 14 }}>
@@ -4799,6 +4830,24 @@ export default function DigitalPRFForm() {
       navigate(`/${providerSlug}/login`, { replace: true });
       return;
     }
+    // A 403 must NEVER be suppressed, local draft or not. It is the server's
+    // tenant guard saying this PRF belongs to a DIFFERENT provider — and it is
+    // deterministic, not a transient network condition. Falling through to the
+    // hadLocal branch below rendered another provider's draft as a normally
+    // loaded form, so server-side tenant isolation became invisible to the crew
+    // and to anyone reading over their shoulder, and the crew could keep editing
+    // a record that was never theirs.
+    //
+    // The local draft is deliberately NOT deleted here: if a 403 were ever
+    // spurious, deleting would destroy a crew's work, and the outbox already
+    // refuses to transmit an entry belonging to another provider (see
+    // syncEngine's cross-tenant guard). Surface and stop.
+    if (lastErr?.response?.status === 403) {
+      setLoadError('This PRF belongs to a different service provider and cannot be opened here.');
+      setLoading(false);
+      setRetrying(false);
+      return;
+    }
     // If we already loaded from local, don't show an error — the crew can
     // continue working offline and the next doSave/submit will sync.
     if (hadLocal) {
@@ -7078,7 +7127,10 @@ export default function DigitalPRFForm() {
                   <div><Lbl t="Account Holder ID Number" /><Inp fk="pvt_account_holder_id" ph="13-digit SA ID" /></div>
                   <div><Lbl t="Contact Number" req /><Inp fk="pvt_account_holder_phone" type="tel" ph="082 ..." req /></div>
                 </G2>
-                <Lbl t="Billing Address" /><AddrInp fk="pvt_account_holder_address" ph="For invoice delivery" />
+                {/* manualOnly: this is a named person's billing address — personal
+            information, so no third-party geocoder lookup. It was the only
+            person-address field missing the flag. */}
+        <Lbl t="Billing Address" /><AddrInp fk="pvt_account_holder_address" ph="For invoice delivery" manualOnly />
               </>
             )}
           </Card>

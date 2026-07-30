@@ -97,6 +97,21 @@ export function ensureProviderSession(urlSlug: string | undefined): boolean {
   return !!getCrewToken();
 }
 
+/**
+ * Clear the crew's session keys ONLY.
+ *
+ * Deliberately does NOT touch the `prf-draft:` keys or the IndexedDB outbox.
+ * This runs on session expiry (a 401) and on foreign-provider detection, and in
+ * both cases the unsynced work must SURVIVE: the crew logs back in and the
+ * outbox drains. Purging here would destroy patient records captured at a scene
+ * — the failure mode fixed in b69ea03.
+ *
+ * Device-wide patient data is cleared in exactly one place, End Shift
+ * (CrewDashboard.handleLogout), which is a deliberate end-of-duty action, tells
+ * the crew how many records are unsent, and asks twice. A different provider
+ * logging in is handled by syncEngine refusing to DRAIN a foreign entry, not by
+ * deleting it.
+ */
 export function clearCrewSession(): void {
   localStorage.removeItem(CREW_SESSION_KEYS.token);
   localStorage.removeItem(CREW_SESSION_KEYS.profile);

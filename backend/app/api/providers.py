@@ -38,6 +38,24 @@ logger = logging.getLogger("ems.providers")
 
 router = APIRouter(prefix="/api/providers", tags=["Service Providers"])
 
+
+def _validate_portal_password(pw: str) -> None:
+    """
+    Complexity gate for the provider PORTAL password.
+
+    This is the shared secret a crew types once per device to unlock a shift
+    (the portal-grant device unlock, f80df14). It is therefore the credential
+    that stands between the internet and a provider's patient PRFs — but it was
+    the only password in the system set without any complexity check, while crew
+    and admin passwords both had one.
+    """
+    from app.utils.security import validate_password_complexity
+    try:
+        validate_password_complexity(pw)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Portal password: {e}")
+
+
 # Derive from settings.UPLOAD_DIR like main.py and digital_prf.py already do.
 # These were hardcoded to "/app/uploads/..." — the container path — and created
 # at IMPORT time, so importing this module anywhere outside Docker died with
@@ -557,7 +575,10 @@ async def create_provider(
         address=body.address,
         prf_start_number=_coerce_prf_baseline(body.current_prf_number),
         portal_login_email=portal_email,
-        portal_login_password_hash=hash_password(body.portal_login_password) if body.portal_login_password else None,
+        portal_login_password_hash=(
+            _validate_portal_password(body.portal_login_password)
+            or hash_password(body.portal_login_password)
+        ) if body.portal_login_password else None,
     )
     # PRF outbound email account (Gmail/Outlook), validated + encrypted.
     _apply_smtp_settings(provider, body.model_dump(exclude_unset=True))
@@ -687,6 +708,7 @@ async def update_provider(
     if body.portal_login_username is not None:
         provider.portal_login_email = body.portal_login_username.strip().lower() or None
     if body.portal_login_password is not None and body.portal_login_password.strip():
+        _validate_portal_password(body.portal_login_password)
         provider.portal_login_password_hash = hash_password(body.portal_login_password)
 
     # Admin crew member credentials
@@ -883,6 +905,7 @@ async def update_provider_settings(
                 raise HTTPException(400, "Portal login username is already in use by another client.")
         provider.portal_login_email = new_username
     if body.portal_login_password and body.portal_login_password.strip():
+        _validate_portal_password(body.portal_login_password)
         provider.portal_login_password_hash = hash_password(body.portal_login_password)
 
     # PRF numbering baseline. Only touched when the admin actually entered a

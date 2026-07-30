@@ -1481,7 +1481,7 @@ async def _resolve_case_prf_access(
     # `decode_token` validates the signature; the scope distinction comes
     # from claim shape: admin tokens carry `sub` (user UUID), crew tokens
     # carry `token_scope: "crew"` and `crew_id`.
-    from app.utils.security import decode_token
+    from app.utils.security import decode_token, is_token_blacklisted
     auth_header = request.headers.get("Authorization") or ""
     token = auth_header.removeprefix("Bearer ").strip()
     if not token:
@@ -1493,10 +1493,32 @@ async def _resolve_case_prf_access(
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid token")
 
+    # ── Revocation applies here too ─────────────────────────────────────────
+    # This endpoint hand-rolls its auth instead of using get_current_user /
+    # get_current_crew, so the hardening applied to those in 7f2e367 never
+    # reached it. It validated the SIGNATURE and nothing else, which meant:
+    #   • a logged-out token kept reading patient PRFs until it expired,
+    #   • a deactivated admin kept reading patient PRFs,
+    #   • and a REFRESH token worked as an API key — a 7-day credential granting
+    #     read access to patient names, ID numbers and clinical notes.
+    # Everything below mirrors what the shared dependencies already enforce.
+    jti = payload.get("jti")
+    if jti and await is_token_blacklisted(jti, db):
+        raise HTTPException(status_code=401, detail="Session ended")
+
     is_admin = bool(payload.get("sub")) and payload.get("token_scope") != "crew"
 
     crew_member: CrewMember | None = None
-    if not is_admin:
+    if is_admin:
+        # A refresh token also carries `sub`, so without this check it
+        # authenticates here. Only access tokens may call the API.
+        if payload.get("type") != "access":
+            raise HTTPException(status_code=401, detail="Invalid token type")
+        user_res = await db.execute(select(User).where(User.id == payload.get("sub")))
+        user = user_res.scalar_one_or_none()
+        if not user or not user.is_active:
+            raise HTTPException(status_code=401, detail="User not found or inactive")
+    else:
         if payload.get("token_scope") != "crew":
             raise HTTPException(status_code=401, detail="Invalid token")
         crew_id = payload.get("crew_id")

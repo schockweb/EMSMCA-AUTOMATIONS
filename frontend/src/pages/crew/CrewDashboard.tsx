@@ -251,11 +251,39 @@ export default function CrewDashboard() {
     // the second click did nothing visible.
     if (endingShift) return;
 
+    // ── Anything still in the outbox is a patient record that never reached
+    //    the server. Give it one last chance to sync before we tell the crew
+    //    what they are about to lose.
+    let unsent = 0;
+    try {
+      const { getOutboxSummary } = await import('../../services/offlineDb');
+      if (navigator.onLine) {
+        const { startSync } = await import('../../services/syncEngine');
+        await startSync();
+      }
+      const summary = await getOutboxSummary();
+      unsent = summary.pending + summary.dead;
+    } catch { /* outbox unreadable — fall through and warn generically */ }
+
     const draftCount = drafts.length;
+    // The outbox line comes FIRST and names the consequence plainly. This
+    // dialog already promised patient data was removed from the device while
+    // the outbox was silently retained; it must not now delete unsynced
+    // patient records without saying so.
+    const unsentLine = unsent > 0
+      ? `WARNING: ${unsent} PRF${unsent === 1 ? '' : 's'} on this device ${unsent === 1 ? 'has' : 'have'} NOT reached the server.\n`
+        + `Ending the shift DELETES ${unsent === 1 ? 'it' : 'them'} permanently. If you have signal, cancel and wait for the upload to finish.\n\n`
+      : '';
     const warning = draftCount > 0
-      ? `End this shift?\n\nThis will permanently DELETE ${draftCount} unfinished draft PRF${draftCount === 1 ? '' : 's'} and sign you out. Submitted PRFs are kept.\n\nOnly press End Shift at the end of your duty. If the tablet is just going to sleep, cancel this.`
-      : 'End this shift?\n\nThis will sign you out. Only press End Shift at the end of your duty. If the tablet is just going to sleep, cancel this.';
+      ? `${unsentLine}End this shift?\n\nThis will permanently DELETE ${draftCount} unfinished draft PRF${draftCount === 1 ? '' : 's'} and sign you out. Submitted PRFs are kept.\n\nOnly press End Shift at the end of your duty. If the tablet is just going to sleep, cancel this.`
+      : `${unsentLine}End this shift?\n\nThis will sign you out. Only press End Shift at the end of your duty. If the tablet is just going to sleep, cancel this.`;
     if (!window.confirm(warning)) return;
+
+    // A second, explicit confirmation when unsynced patient records are at
+    // stake. One tap should not be able to destroy a record captured at a scene.
+    if (unsent > 0 && !window.confirm(
+      `Are you sure?\n\n${unsent} unsent PRF${unsent === 1 ? '' : 's'} will be permanently lost.`,
+    )) return;
 
     setEndingShift(true);
 
@@ -286,6 +314,23 @@ export default function CrewDashboard() {
       }
       keysToRemove.forEach(k => localStorage.removeItem(k));
     } catch { /* localStorage unavailable — non-fatal */ }
+
+    // ── Purge the IndexedDB outbox too ──────────────────────────────────────
+    // This dialog has always told the crew their patient data is removed from
+    // the device, and the localStorage sweep above was the only thing honouring
+    // it. The outbox holds FULL PRF payloads — patient names, ID numbers,
+    // clinical notes — and nothing ever cleared it: not End Shift, not logout.
+    // Entries that exhausted their retries are marked 'dead' and no crew- or
+    // admin-facing action removes them, so on a shared roadside tablet records
+    // from every prior crew and every prior shift accumulated indefinitely.
+    //
+    // The crew has now been shown the unsent count and confirmed twice, so this
+    // is a decision they made rather than a silent deletion.
+    try {
+      const { clearAll } = await import('../../services/offlineDb');
+      await clearAll();
+      window.dispatchEvent(new CustomEvent('outbox-change'));
+    } catch { /* IndexedDB unavailable — non-fatal */ }
 
     clearCrewSessionStorage();
     localStorage.removeItem('shift_supervisor');
