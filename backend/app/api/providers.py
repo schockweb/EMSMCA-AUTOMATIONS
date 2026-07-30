@@ -25,16 +25,30 @@ from app.models.service_provider import ServiceProvider
 from app.models.crew_member import CrewMember
 from app.models.vehicle import Vehicle
 from app.models.digital_prf import DigitalPRF, PRFStatus
-from app.utils.security import get_current_user, hash_password, verify_password, verify_password_async
+from app.utils.security import (
+    get_current_user,
+    hash_password,
+    require_role,
+    verify_password,
+    verify_password_async,
+)
 from app.utils.hpcsa import (
     HPCSA_CATEGORIES,
     DEFAULT_CATEGORY,
     CATEGORY_LABELS,
     normalise_category,
 )
-from app.models.user import User
+from app.models.user import User, UserRole
 
 logger = logging.getLogger("ems.providers")
+
+# Provider lifecycle (create / re-credential / logo / delete) is a back-office
+# privilege operation, not something every authenticated account may do. Those
+# routes ran on bare get_current_user, so any active User — and the User model
+# defaults new accounts to PARAMEDIC — could rewrite a provider's portal login
+# (the password that unlocks crew devices) or hard-delete a provider together
+# with all of its crew, vehicles and Patient Report Forms.
+_provider_admin = require_role(UserRole.ADMIN, UserRole.SUPER_ADMIN)
 
 router = APIRouter(prefix="/api/providers", tags=["Service Providers"])
 
@@ -545,7 +559,7 @@ async def list_providers(
 async def create_provider(
     body: ProviderCreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(_provider_admin),
 ):
     """Create a new service provider."""
     slug = body.slug or _slugify(body.name)
@@ -616,7 +630,7 @@ async def upload_provider_logo(
     provider_id: str,
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(_provider_admin),
 ):
     """Upload a logo for a service provider."""
     result = await db.execute(select(ServiceProvider).where(ServiceProvider.id == uuid.UUID(provider_id)))
@@ -675,7 +689,7 @@ async def update_provider(
     provider_id: str,
     body: ProviderUpdate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(_provider_admin),
 ):
     """Update provider details, portal credentials, and admin crew credentials."""
     result = await db.execute(
@@ -750,7 +764,7 @@ async def update_provider(
 async def delete_provider(
     provider_id: str,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(_provider_admin),
 ):
     """Hard-delete a provider and ALL related data (crew, vehicles, PRFs, logos)."""
     from sqlalchemy import delete as sql_delete
@@ -816,12 +830,40 @@ class ProviderSettingsUpdate(BaseModel):
     smtp_password: str | None = None
 
 
+# Back-office User roles allowed to administer ANY provider's settings.
+# Deliberately not "any authenticated User" — see _assert_settings_access.
+_SETTINGS_ADMIN_ROLES = (UserRole.ADMIN, UserRole.SUPER_ADMIN)
+
+
 def _assert_settings_access(principal, provider_id: uuid.UUID) -> None:
-    """Crew tokens may only manage their own provider's settings, and only
-    when they hold the admin role. Full admin User tokens pass unchanged."""
+    """Authorise a principal to administer this provider's settings.
+
+    Two principal types reach here via get_admin_or_crew_admin:
+
+    * CrewMember — must hold the crew "admin" role AND belong to this provider.
+    * User — must be a back-office ADMIN or SUPER_ADMIN.
+
+    The User branch did not exist. get_admin_or_crew_admin is authentication
+    only: it returns ANY active User without inspecting role, and the User model
+    defaults new accounts to PARAMEDIC. So every non-crew login — the lowest
+    privilege account in the system — could administer EVERY provider on the
+    instance: set the portal password that unlocks crew devices, read SMTP
+    credentials, call reset-password and receive a plaintext temporary password
+    in the response, and page through another tenant's PRF history. On a shared
+    client VM that made one back-office account a master key for all tenants.
+    """
     if isinstance(principal, CrewMember):
         if principal.role != "admin" or principal.provider_id != provider_id:
             raise HTTPException(status_code=403, detail="Admin access required")
+        return
+
+    if isinstance(principal, User):
+        if principal.role not in _SETTINGS_ADMIN_ROLES:
+            raise HTTPException(status_code=403, detail="Admin access required")
+        return
+
+    # Unknown principal type — fail closed rather than fall through to allow.
+    raise HTTPException(status_code=403, detail="Admin access required")
 
 
 async def _load_provider(db: AsyncSession, pid: uuid.UUID) -> ServiceProvider:

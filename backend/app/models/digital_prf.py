@@ -9,7 +9,7 @@ import uuid
 import enum
 from datetime import datetime, timezone
 from decimal import Decimal
-from sqlalchemy import String, Text, ForeignKey, DateTime, JSON, Enum as SAEnum, Integer, Numeric, UniqueConstraint
+from sqlalchemy import String, Text, ForeignKey, DateTime, JSON, Enum as SAEnum, Integer, Numeric, UniqueConstraint, Index
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
@@ -29,8 +29,18 @@ class DigitalPRF(Base):
     # PRF numbers count independently per provider, so #1 can exist for every
     # company. Uniqueness is therefore scoped to (provider_id, prf_number) — a
     # global unique on prf_number alone would force one shared counter.
+    # These two indexes exist ONLY as raw op.execute() statements in migrations
+    # (b4c8d2e6f7a3 and a3b7c9d1e5f2), so they were invisible to the ORM. Any
+    # database built from the models rather than from the migration chain — which
+    # is how a brand-new install is created, see backend/bootstrap_schema.py —
+    # came up without them. Both back queries that run on every page load of the
+    # failed-PRF queue, over a table that keeps seven years of records.
+    # Names match the migrations exactly, so existing databases already satisfy
+    # them and nothing is created twice.
     __table_args__ = (
         UniqueConstraint("provider_id", "prf_number", name="uq_digital_prf_provider_number"),
+        Index("ix_digital_prfs_status", "status"),
+        Index("ix_digital_prfs_review_flags", "review_flags", postgresql_using="gin"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(

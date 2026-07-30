@@ -7,7 +7,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.models.user import User, UserRole
 from app.services.gateway import forward_to_scheme
+from app.utils.security import require_role
 
 logger = logging.getLogger("ems.gateway.api")
 
@@ -23,11 +25,18 @@ class GatewayRequest(BaseModel):
 async def submit_gateway_request(
     request: Request,
     gateway_req: GatewayRequest,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_role(UserRole.ADMIN, UserRole.SUPER_ADMIN)),
 ):
     """
     Centralized Gateway for transmitting standardized claims and authorizations.
     Wrapped in Idempotency Lock.
+
+    ADMIN-only. This route forwards a caller-supplied `payload_data` dict to a
+    caller-selected medical scheme's live B2B endpoint, under OUR credentials
+    and practice number. It had no authentication, so anyone who could reach
+    /gateway/ could transmit arbitrary content to a scheme as us — and read the
+    scheme's response back out of the proxied reply.
     """
     from app.utils.idempotency import process_idempotent_request
 

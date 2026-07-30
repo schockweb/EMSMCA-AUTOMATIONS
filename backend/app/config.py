@@ -8,8 +8,27 @@ import os
 from functools import lru_cache
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from pydantic_settings import BaseSettings
+
+# Values that mean "the deployer never set this". Compared upper-cased.
+_PLACEHOLDER_SECRETS = {
+    "CHANGE_ME",
+    "CHANGEME",
+    "CHANGE_ME_IN_PRODUCTION",
+    "CHANGE-ME",
+    "YOUR_SECRET_KEY_HERE",
+    "SECRET",
+    "SECRET_KEY",
+    "ENCRYPTION_KEY",
+    "TEST",
+    "TESTING",
+    "DEV",
+    "DEVELOPMENT",
+    "PLACEHOLDER",
+    "XXX",
+    "TODO",
+}
 
 
 class Settings(BaseSettings):
@@ -120,7 +139,15 @@ class Settings(BaseSettings):
     SMTP_FROM_NAME: str = "EMS Claims Portal"
 
     # ── Logging ──
-    LOG_LEVEL: str = "DEBUG"
+    # INFO, not DEBUG. This is the default a FRESH instance boots with, and
+    # production does not set LOG_LEVEL at all — so the old default meant every
+    # deployment ran at DEBUG. Nothing in the app logs patient data today (SQL
+    # echo is False, and a 24h scan of production logs found no ID numbers,
+    # patient names, tokens or passwords), but these logs are kept for SEVEN
+    # YEARS by logrotate, so a single future debug statement would leave PHI in
+    # a long-lived file. Defaulting to INFO makes that fail safe instead.
+    # Developers opt into DEBUG explicitly via .env.
+    LOG_LEVEL: str = "INFO"
     LOG_FORMAT: str = "text"  # "text" or "json"
 
     # ── POPIA Encryption (MUST be set via environment — no default) ──
@@ -130,6 +157,59 @@ class Settings(BaseSettings):
         env_file = ".env"
         case_sensitive = True
         extra = "ignore"
+
+    @model_validator(mode="after")
+    def _reject_placeholder_secrets(self) -> "Settings":
+        """Refuse to boot a production instance on a shipped placeholder secret.
+
+        SECRET_KEY and ENCRYPTION_KEY have no defaults, which reads as safe — but
+        `.env.example` ships both as the literal `CHANGE_ME`, and a deployer who
+        copies the example and fills in the database URL gets a fully working
+        instance. Nothing complained, because:
+
+          * SECRET_KEY is only ever handed to jose, which signs happily with any
+            string. Every access token, refresh token and portal-grant on that
+            box is then forgeable by anyone who has read our public example file
+            — including a token claiming SUPER_ADMIN.
+          * ENCRYPTION_KEY is only ever handed to app.utils.crypto, which
+            deliberately DERIVES a valid Fernet key from any non-Fernet string so
+            an odd prod key can't brick the app. That resilience means a
+            placeholder key encrypts and decrypts perfectly — with a key anyone
+            can reproduce in one line.
+
+        This is precisely the failure mode of handing the system to a client to
+        install on their own VM, so it fails at startup instead of silently.
+        Non-production environments only get a warning, so dev and CI still boot.
+        """
+        problems: list[str] = []
+        for name in ("SECRET_KEY", "ENCRYPTION_KEY"):
+            raw = (getattr(self, name, "") or "").strip()
+            if not raw:
+                problems.append(f"{name} is empty")
+            elif raw.upper() in _PLACEHOLDER_SECRETS:
+                problems.append(f"{name} is still the placeholder value '{raw}'")
+            elif len(raw) < 32:
+                problems.append(
+                    f"{name} is only {len(raw)} characters — use at least 32 "
+                    f"(generate with: python -c \"import secrets; print(secrets.token_urlsafe(48))\")"
+                )
+
+        if not problems:
+            return self
+
+        detail = "; ".join(problems)
+        if self.APP_ENV == "production":
+            raise ValueError(
+                f"Refusing to start in production with insecure secrets: {detail}. "
+                f"Set real values in .env before deploying."
+            )
+
+        import warnings
+        warnings.warn(
+            f"INSECURE SECRETS (tolerated because APP_ENV={self.APP_ENV}): {detail}",
+            stacklevel=2,
+        )
+        return self
 
 
 @lru_cache()

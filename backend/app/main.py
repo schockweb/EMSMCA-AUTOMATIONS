@@ -15,7 +15,7 @@ from sqlalchemy import select, text
 from app.config import get_settings
 from app.database import create_tables, AsyncSessionLocal, get_db
 from app.models.user import User, UserRole
-from app.utils.security import hash_password, get_current_user
+from app.utils.security import hash_password, get_current_user, require_role
 from app.middleware import RateLimitMiddleware, XSSProtectionMiddleware, CrashHandlerMiddleware, setup_logging, get_logger
 from app.core.response_cache import ResponseCacheMiddleware
 
@@ -251,7 +251,17 @@ app.include_router(adjudication_router)
 app.include_router(edi_router)
 app.include_router(analytics_router)
 app.include_router(authorization_router)
-app.include_router(mock_scheme_router)
+
+# The mock scheme server fakes a medical scheme's OAuth + authorisation engine
+# so the pipeline can be exercised without real scheme credentials. It answers
+# unauthenticated and always approves. Mounting it in production put endpoints
+# that mint "tokens" and issue "authorisation numbers" on the public API, next
+# to the real ones — a live claim can be pointed at it and come back approved.
+# Development and test only.
+if settings.APP_ENV != "production":
+    app.include_router(mock_scheme_router)
+    logger.warning("Mock scheme API mounted at /api/mock-scheme (APP_ENV=%s).", settings.APP_ENV)
+
 app.include_router(gateway_router)
 app.include_router(crashes_router)
 app.include_router(member_lookup_router)
@@ -579,6 +589,7 @@ async def submit_invoice(
     invoice_id: str,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_role(UserRole.ADMIN, UserRole.SUPER_ADMIN)),
 ):
     """
     Submit an approved invoice for payer routing.
@@ -586,15 +597,29 @@ async def submit_invoice(
     Determines the payer type (SCHEME or AGGREGATOR) and dispatches
     the invoice to the correct submission strategy as a background task.
     Returns 202 Accepted immediately.
+
+    ADMIN-only. This endpoint carried NO authentication dependency at all while
+    nginx proxied /api/ straight through, so any unauthenticated caller holding
+    (or guessing) a claim UUID could flip that claim to SUBMITTED and overwrite
+    its dispatch reference — unattributably. The distinct 404/422/202 responses
+    also made it an oracle for which claim IDs exist and which scheme a case
+    belongs to.
     """
     import uuid as _uuid
     from app.models.claim import Claim
     from app.models.case import Case
     from app.rules import get_rules_for_scheme
 
+    # A malformed UUID must not surface as an unhandled ValueError (500).
+    try:
+        claim_uuid = _uuid.UUID(invoice_id)
+    except (ValueError, AttributeError, TypeError):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Invoice (claim) not found.")
+
     # 1. Load the claim
     claim_result = await db.execute(
-        select(Claim).where(Claim.id == _uuid.UUID(invoice_id))
+        select(Claim).where(Claim.id == claim_uuid)
     )
     claim = claim_result.scalar_one_or_none()
     if not claim:

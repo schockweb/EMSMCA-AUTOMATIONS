@@ -192,9 +192,17 @@ async def get_current_user(
 # ── Role Guard ─────────────────────────────────────
 
 def require_role(*roles: UserRole):
-    """Dependency factory: require the current user to have one of the specified roles."""
+    """Dependency factory: require the current user to have one of the specified roles.
+
+    SUPER_ADMIN implicitly satisfies every role check. The match used to be
+    exact, so `require_role(UserRole.ADMIN)` returned 403 to a SUPER_ADMIN —
+    locking the highest-privileged account out of user management, claim
+    approval and claim rejection. Call sites worked around it one at a time by
+    passing both roles; several never did. Encoding the hierarchy here means a
+    new `require_role(ADMIN)` cannot reintroduce the trap.
+    """
     async def role_checker(current_user: User = Depends(get_current_user)):
-        if current_user.role not in roles:
+        if current_user.role != UserRole.SUPER_ADMIN and current_user.role not in roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Insufficient permissions. Required: {[r.value for r in roles]}",

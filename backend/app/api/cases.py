@@ -12,9 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.case import Case, PreAuthStatus
 from app.models.digital_prf import DigitalPRF
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.schemas.case import CaseCreate, CaseUpdate, CaseResponse
-from app.utils.security import get_current_user
+from app.utils.security import get_current_user, require_role
 
 router = APIRouter(prefix="/api/cases", tags=["Cases"])
 
@@ -271,9 +271,16 @@ async def update_case(
 async def delete_all_cases(
     queue: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
-    _current: User = Depends(get_current_user),
+    _current: User = Depends(require_role(UserRole.SUPER_ADMIN)),
 ):
-    """Hard-delete all cases, or scope bounds by the queue (e.g. only cases in management queue)."""
+    """Hard-delete all cases, or scope bounds by the queue (e.g. only cases in management queue).
+
+    SUPER_ADMIN only. This is the single most destructive route in the API — it
+    wipes every case, claim, claim line, RFI, scheme auth request and document
+    on the instance, and unlinks the PDFs from disk. It ran on bare
+    get_current_user, so any authenticated account (default role PARAMEDIC)
+    could empty a client's entire claim history in one request.
+    """
     import os
     from sqlalchemy import delete
     from app.models.document import Document
@@ -301,8 +308,13 @@ async def delete_all_cases(
     if not case_ids:
         return
 
-    # Delete physical files (chunked to avoid parameter limit)
+    # Collect the file paths NOW, but do not unlink anything yet. Unlinking ran
+    # before the transaction, so any failure in the DB wipe below rolled the
+    # rows back and left the case pointing at PDFs that no longer exist —
+    # unrecoverable, because a rollback cannot restore a file. Files are removed
+    # only after the commit succeeds.
     chunk_size = 500
+    doomed_paths: list[str] = []
     for i in range(0, len(case_ids), chunk_size):
         chunk = case_ids[i:i + chunk_size]
         docs_result = await db.execute(select(Document).where(Document.case_id.in_(chunk)))
@@ -310,12 +322,7 @@ async def delete_all_cases(
         for doc in docs:
             for uri in [doc.storage_uri, doc.processed_uri]:
                 if uri:
-                    full_path = get_full_path(uri)
-                    if os.path.exists(full_path):
-                        try:
-                            os.remove(full_path)
-                        except OSError:
-                            pass
+                    doomed_paths.append(get_full_path(uri))
 
     # Wipe tables (order matters for FKs) scoped to these case IDs
     # Process in chunks of 500 to avoid PostgreSQL's 32,767 parameter limit (TooManyParametersError)
@@ -339,8 +346,16 @@ async def delete_all_cases(
         await db.execute(delete(SchemeAuthRequest).where(SchemeAuthRequest.case_id.in_(chunk_cases)))
         await db.execute(delete(Document).where(Document.case_id.in_(chunk_cases)))
         await db.execute(delete(Case).where(Case.id.in_(chunk_cases)))
-    
+
     await db.commit()
+
+    # Rows are gone and committed — now the files are safe to unlink.
+    for full_path in doomed_paths:
+        if os.path.exists(full_path):
+            try:
+                os.remove(full_path)
+            except OSError:
+                pass
 
 
 

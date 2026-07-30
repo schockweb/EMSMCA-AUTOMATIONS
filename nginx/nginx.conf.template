@@ -26,7 +26,7 @@ upstream ems_api {
 
 server {
     listen 80;
-    server_name portal.emsmca.co.za 172.209.218.22 _;
+    server_name ${PORTAL_DOMAIN} ${PORTAL_HOST_IP} _;
 
     # ── Certbot ACME challenge (for SSL certificate issuance) ──
     location /.well-known/acme-challenge/ {
@@ -43,13 +43,13 @@ server {
 # Certificate must exist before nginx will start. Issue it first:
 #   docker compose -f docker-compose.prod.yml run --rm ems_certbot \
 #     certonly --webroot -w /var/www/certbot \
-#     -d portal.emsmca.co.za --agree-tos -m admin@emsmca.co.za
+#     -d ${PORTAL_DOMAIN} --agree-tos -m ${PORTAL_ADMIN_EMAIL}
 server {
     listen 443 ssl http2;
-    server_name portal.emsmca.co.za;
+    server_name ${PORTAL_DOMAIN};
 
-    ssl_certificate /etc/letsencrypt/live/portal.emsmca.co.za/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/portal.emsmca.co.za/privkey.pem;
+    ssl_certificate /etc/letsencrypt/live/${PORTAL_DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${PORTAL_DOMAIN}/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_ciphers HIGH:!aNULL:!MD5;
     ssl_prefer_server_ciphers on;

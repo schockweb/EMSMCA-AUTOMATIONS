@@ -1,10 +1,11 @@
 """Add role column to crew_members and seed JEMS."""
 import asyncio
+import os
 from sqlalchemy import text
 from app.database import engine, AsyncSessionLocal, Base
 from app.models.service_provider import ServiceProvider
 from app.models.crew_member import CrewMember
-from app.utils.security import hash_password
+from app.utils.security import hash_password, validate_password_complexity
 from sqlalchemy import select
 
 
@@ -56,10 +57,23 @@ async def migrate_and_seed():
         admin = result.scalar_one_or_none()
 
         if not admin:
+            # The password was hardcoded here as "JEMS.Admin!2026" while this
+            # repository was public (2026-05-27 → 2026-07-27), so that value is
+            # permanently burned — and this is a crew-ADMIN account for a real
+            # provider, which can administer that provider's crew and read its
+            # PRFs. It must be supplied at run time and never committed.
+            seed_password = os.getenv("JEMS_ADMIN_PASSWORD", "")
+            if not seed_password:
+                raise SystemExit(
+                    "JEMS_ADMIN_PASSWORD is not set. Generate one and pass it in:\n"
+                    "  JEMS_ADMIN_PASSWORD='...' python seed_jems.py"
+                )
+            validate_password_complexity(seed_password)
+
             admin = CrewMember(
                 provider_id=provider.id,
                 email="jems.admin@emsclaims.co.za",
-                hashed_password=hash_password("JEMS.Admin!2026"),
+                hashed_password=hash_password(seed_password),
                 full_name="JEMS Administrator",
                 initials="JA",
                 qualification="ECP",   # HPCSA category — see app.utils.hpcsa

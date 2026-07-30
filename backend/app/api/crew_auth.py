@@ -315,6 +315,23 @@ async def require_portal_grant(
     scope = payload.get("token_scope")
     if scope not in (PORTAL_GRANT_SCOPE, "crew"):
         raise HTTPException(status_code=401, detail="Invalid device unlock token")
+
+    # A refresh token must not unlock a device. Both token families are signed
+    # with the same key, so without this an admin's 7-day refresh credential
+    # would satisfy the gate.
+    if payload.get("type") != "access":
+        raise HTTPException(status_code=401, detail="Invalid device unlock token")
+
+    # Revocation must be honoured here too. This gate accepts an existing crew
+    # token as proof of unlock (so a mid-shift crew can add a colleague without
+    # re-entering the company password) but never consulted the blacklist — so a
+    # crew token revoked at End Shift could still be exchanged for a FRESH
+    # 12-hour patient-record token, making logout reversible for the token's
+    # remaining lifetime.
+    jti = payload.get("jti")
+    if jti and await is_token_blacklisted(jti, db):
+        raise HTTPException(status_code=401, detail="This device unlock has been revoked.")
+
     if str(payload.get("provider_id")) != str(provider.id):
         # Never let one company's unlock reach another company's crew.
         raise HTTPException(status_code=403, detail="Token does not belong to this provider")

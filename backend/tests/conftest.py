@@ -83,7 +83,15 @@ def _assert_not_production(url: str) -> None:
 
 _assert_not_production(os.environ["DATABASE_URL"])
 
+# The suite pins its own secrets rather than inheriting whatever backend/.env
+# happens to hold. APP_ENV is pinned too: Settings.APP_ENV defaults to
+# "production", so without this the placeholder-secret validator would treat a
+# test run as a production boot and refuse to start.
+os.environ["APP_ENV"] = "test"
 os.environ["SECRET_KEY"] = "ems-portal-super-secret-key-2024"
+# A real Fernet key (44-char urlsafe base64). Test-only and committed on
+# purpose — it encrypts nothing but fixtures.
+os.environ["ENCRYPTION_KEY"] = "dGVzdC1vbmx5LWZlcm5ldC1rZXktZm9yLXVuaXQtdGU="
 os.environ["LOG_LEVEL"] = "WARNING"
 os.environ["LOG_FORMAT"] = "text"
 
