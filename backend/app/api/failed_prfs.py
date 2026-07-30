@@ -13,11 +13,31 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.digital_prf import DigitalPRF, PRFStatus
-from app.utils.security import get_current_user
+from app.models.user import UserRole
+from app.utils.security import get_current_user, require_role
 
 logger = logging.getLogger("ems.failed_prfs")
 
-router = APIRouter(prefix="/api/failed-prfs", tags=["Failed Forms"])
+# ROUTER-LEVEL role gate, deliberately not per-route.
+#
+# Every route here was authentication-only (`Depends(get_current_user)`), and
+# nothing in this module filters by provider — the queue is instance-wide by
+# design, because back-office staff fix failed PRFs across every company. The
+# combination meant ANY account, including the default PARAMEDIC role, could
+# enumerate and read the complete patient record of every failed or stuck PRF
+# belonging to every provider on the instance — form_data carries patient name,
+# SA ID number, scheme membership and clinical notes — and rewrite any of them
+# via /correct.
+#
+# Cross-provider visibility is correct for this queue and is kept; what was
+# missing is that only back-office ADMINs should have it. The gate lives on the
+# router so a route added later cannot quietly omit it. (require_role already
+# treats SUPER_ADMIN as satisfying any check.)
+router = APIRouter(
+    prefix="/api/failed-prfs",
+    tags=["Failed Forms"],
+    dependencies=[Depends(require_role(UserRole.ADMIN, UserRole.SUPER_ADMIN))],
+)
 
 # A PRF is "stuck" when the crew submitted it but the billing pipeline never
 # produced a Case — the SUBMITTED-black-hole state (lost queue message, worker

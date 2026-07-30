@@ -3,6 +3,7 @@ EMS Medical Claims Ingestion Portal — FastAPI Application Entry Point
 Production-hardened with rate limiting, XSS protection, structured logging.
 """
 from __future__ import annotations
+import asyncio
 import os
 import time
 from contextlib import asynccontextmanager
@@ -326,12 +327,83 @@ async def root():
     }
 
 
+# Deep health results are cached for this many seconds.
+#
+# /health is unauthenticated AND explicitly exempt from the rate limiter
+# (middleware/rate_limit.py skips it so a wedged limiter cannot fail a
+# load-balancer probe). It performed, per request, a blocking kombu
+# ensure_connection (up to 3s), a blocking control.inspect() broadcast (up to
+# 3s) and an httpx call to the RabbitMQ management API (up to 5s). The two
+# blocking calls sit inside `async def` with nothing awaiting them, so they park
+# the uvicorn event loop — for every user, not just the caller. A trivial
+# unauthenticated loop against /health could therefore pin the whole API to zero
+# throughput without tripping any limit.
+#
+# Caching fixes the amplification without weakening the probe: Docker's
+# HEALTHCHECK and the load balancer poll on a 30s cadence, far longer than this
+# window, so they still see fresh results, while a flood collapses onto one
+# underlying check.
+_HEALTH_CACHE_SECONDS = 5.0
+_health_cache: dict = {"at": 0.0, "payload": None, "status": 200}
+_health_lock = asyncio.Lock()
+
+
+def _blocking_broker_checks() -> dict:
+    """RabbitMQ + Celery probes. Synchronous on purpose — the caller runs this
+    in a worker thread so the event loop stays free."""
+    out = {"rabbitmq": "unknown", "celery_workers": "unknown"}
+
+    try:
+        from app.tasks.celery_app import celery_app as _celery
+        conn = _celery.connection()
+        conn.ensure_connection(max_retries=1, timeout=3)
+        conn.close()
+        out["rabbitmq"] = "healthy"
+    except Exception as e:
+        logger.error("RabbitMQ health check failed: %s", str(e))
+        out["rabbitmq"] = "unhealthy"
+
+    try:
+        from app.tasks.celery_app import celery_app as _celery
+        inspector = _celery.control.inspect(timeout=3)
+        active = inspector.active()
+        wc = len(active) if active else 0
+        out["celery_workers"] = (
+            f"healthy ({wc} nodes)" if wc > 0 else "unhealthy: no active workers"
+        )
+    except Exception as e:
+        logger.error("Celery workers health check failed: %s", str(e))
+        out["celery_workers"] = "unhealthy"
+
+    return out
+
+
 @app.get("/health", tags=["Health"])
 async def health_check():
     """
     Deep health check — verifies database, RabbitMQ, Celery, and queue depth.
     Used by Docker HEALTHCHECK and load balancers.
+
+    Results are cached for _HEALTH_CACHE_SECONDS; see the note above.
     """
+    from starlette.responses import JSONResponse
+
+    now = time.time()
+    if _health_cache["payload"] is not None and (now - _health_cache["at"]) < _HEALTH_CACHE_SECONDS:
+        return JSONResponse(content=_health_cache["payload"], status_code=_health_cache["status"])
+
+    # Single-flight: a burst of concurrent probes waits on one real check rather
+    # than each starting its own broker round-trip.
+    async with _health_lock:
+        now = time.time()
+        if _health_cache["payload"] is not None and (now - _health_cache["at"]) < _HEALTH_CACHE_SECONDS:
+            return JSONResponse(content=_health_cache["payload"], status_code=_health_cache["status"])
+        payload, status_code = await _run_health_checks()
+        _health_cache.update({"at": time.time(), "payload": payload, "status": status_code})
+        return JSONResponse(content=payload, status_code=status_code)
+
+
+async def _run_health_checks():
     checks = {
         "api": "healthy",
         "database": "unknown",
@@ -350,26 +422,15 @@ async def health_check():
         logger.error("Database health check failed: %s", str(e))
         checks["database"] = "unhealthy"
 
-    # RabbitMQ
+    # RabbitMQ + Celery workers. Both probes block, so they run in a worker
+    # thread — inside `async def` they used to stall the event loop for every
+    # request in flight, not just this one.
     try:
-        from app.tasks.celery_app import celery_app as _celery
-        conn = _celery.connection()
-        conn.ensure_connection(max_retries=1, timeout=3)
-        conn.close()
-        checks["rabbitmq"] = "healthy"
+        loop = asyncio.get_running_loop()
+        checks.update(await loop.run_in_executor(None, _blocking_broker_checks))
     except Exception as e:
-        logger.error("RabbitMQ health check failed: %s", str(e))
+        logger.error("Broker health checks failed: %s", str(e))
         checks["rabbitmq"] = "unhealthy"
-
-    # Celery workers
-    try:
-        from app.tasks.celery_app import celery_app as _celery
-        inspector = _celery.control.inspect(timeout=3)
-        active = inspector.active()
-        wc = len(active) if active else 0
-        checks["celery_workers"] = f"healthy ({wc} nodes)" if wc > 0 else "unhealthy: no active workers"
-    except Exception as e:
-        logger.error("Celery workers health check failed: %s", str(e))
         checks["celery_workers"] = "unhealthy"
 
     # Queue depth (Item 9) — query RabbitMQ management API
@@ -425,9 +486,7 @@ async def health_check():
     if unhealthy:
         checks["api"] = "degraded"
 
-    status_code = 200 if not unhealthy else 503
-    from starlette.responses import JSONResponse
-    return JSONResponse(content=checks, status_code=status_code)
+    return checks, (200 if not unhealthy else 503)
 
 
 @app.get("/health/ready", tags=["Health"])

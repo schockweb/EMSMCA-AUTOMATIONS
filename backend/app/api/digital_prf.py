@@ -290,11 +290,27 @@ async def create_prf(
     if body.supervising_practitioner_qualification:
         initial_form_data["supervising_practitioner_qualification"] = body.supervising_practitioner_qualification.strip().upper()
 
+    # The partner crew member and the vehicle must belong to the caller's own
+    # provider. PATCH has always enforced this; CREATE wrote both foreign keys
+    # straight from the request body, so it was the one path around the check.
+    # A crew of company A could post company B's crew UUID and then read back
+    # B's employee full name, initials, HPCSA registration number and
+    # qualification from their own PRF — _load_crew_prf's 404 does not help,
+    # because the PRF being read genuinely belongs to A; only the data rendered
+    # into it is B's. It also pinned B's vehicle and staff onto A's billing
+    # record and into A's generated PDF.
+    crew_2_id = uuid.UUID(body.crew_member_2_id) if body.crew_member_2_id else None
+    vehicle_id = uuid.UUID(body.vehicle_id) if body.vehicle_id else None
+    if crew_2_id is not None:
+        await _assert_provider_owns(db, CrewMember, crew_2_id, crew.provider_id, "crew member")
+    if vehicle_id is not None:
+        await _assert_provider_owns(db, Vehicle, vehicle_id, crew.provider_id, "vehicle")
+
     prf = DigitalPRF(
         provider_id=crew.provider_id,
         crew_member_1_id=crew.id,
-        crew_member_2_id=uuid.UUID(body.crew_member_2_id) if body.crew_member_2_id else None,
-        vehicle_id=uuid.UUID(body.vehicle_id) if body.vehicle_id else None,
+        crew_member_2_id=crew_2_id,
+        vehicle_id=vehicle_id,
         prf_number=prf_number,
         case_number=case_number,
         status=PRFStatus.DRAFT,

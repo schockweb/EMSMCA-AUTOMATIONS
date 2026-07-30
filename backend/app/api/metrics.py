@@ -4,6 +4,8 @@ Exposes PRF status counts, failed PRF gauge, and database pool statistics
 in Prometheus exposition format.
 """
 from __future__ import annotations
+import asyncio
+
 from fastapi import APIRouter, Depends
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,9 +16,25 @@ from app.database import get_db, engine
 router = APIRouter(tags=["Monitoring"])
 
 
+def _active_worker_count() -> int:
+    """Blocking Celery inspect. Called via run_in_executor — see the call site."""
+    from app.tasks.celery_app import celery_app as _celery
+    inspector = _celery.control.inspect(timeout=3)
+    active = inspector.active()
+    return len(active) if active else 0
+
+
 @router.get("/api/metrics")
 async def prometheus_metrics(db: AsyncSession = Depends(get_db)):
-    """Prometheus-compatible metrics scrape endpoint (no auth)."""
+    """Prometheus-compatible metrics scrape endpoint.
+
+    Deliberately unauthenticated so a scraper needs no credential — but it
+    reports PRF volumes and failure counts (ems_prf_total, ems_failed_prfs_total)
+    which /api/stats was explicitly closed to anonymous callers. It is therefore
+    DENIED AT THE EDGE in nginx, so it is reachable only from inside the Docker
+    network where Prometheus runs. If you ever need to scrape it from outside,
+    add auth here first — do not simply open the nginx location.
+    """
     lines = []
 
     # ── PRF totals by status ──────────────────────────────
@@ -68,11 +86,13 @@ async def prometheus_metrics(db: AsyncSession = Depends(get_db)):
         pass  # Don't fail the entire metrics endpoint
 
     # ── Active Celery workers ─────────────────────────────
+    # control.inspect().active() is a synchronous kombu broadcast that waits up
+    # to `timeout` seconds. Called directly inside `async def` it parks the
+    # uvicorn event loop for that whole period — stalling every other request in
+    # flight, not just this scrape. Run it in a worker thread instead.
     try:
-        from app.tasks.celery_app import celery_app as _celery
-        inspector = _celery.control.inspect(timeout=3)
-        active = inspector.active()
-        worker_count = len(active) if active else 0
+        loop = asyncio.get_running_loop()
+        worker_count = await loop.run_in_executor(None, _active_worker_count)
         lines.append("# HELP ems_celery_active_workers Number of active Celery worker nodes")
         lines.append("# TYPE ems_celery_active_workers gauge")
         lines.append(f"ems_celery_active_workers {worker_count}")

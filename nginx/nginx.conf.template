@@ -95,6 +95,14 @@ server {
         deny all;
     }
 
+    # Prometheus scrape endpoint. Unauthenticated by design, but it reports PRF
+    # volumes and failure counts — the same shape of data /api/stats was closed
+    # to anonymous callers. Prometheus runs inside the Docker network and
+    # reaches the backend directly, so nothing legitimate needs it from outside.
+    location /api/metrics {
+        deny all;
+    }
+
     location /health {
         proxy_pass http://ems_api;
     }

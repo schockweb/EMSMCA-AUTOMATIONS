@@ -1251,20 +1251,51 @@ async def delete_crew_member(
     if not crew:
         raise HTTPException(404, "Crew member not found")
 
-    from sqlalchemy import delete
+    from sqlalchemy import update
     from app.models.digital_prf import DigitalPRF
-    
-    # ⚠️ TEMPORARY ENABLEMENT: Force-delete dud PRFs associated with this crew member
-    await db.execute(
-        delete(DigitalPRF).where(
-            (DigitalPRF.crew_member_1_id == crew.id) | 
-            (DigitalPRF.crew_member_2_id == crew.id)
-        )
+
+    # This used to force-DELETE every PRF where this person was crew 1 OR crew
+    # 2, with no status filter and no audit entry. Deactivating a paramedic who
+    # had left therefore destroyed every patient report they had ever written or
+    # merely co-signed — including PROCESSED records inside the seven-year
+    # retention window, and reports authored by somebody else where they were
+    # only the second crew member. The Claims survived as billable rows with no
+    # source document, leaving the provider billing schemes for calls whose PRF
+    # no longer existed.
+    #
+    # A PRF is a clinical and legal record. It outlives the employment of the
+    # person who wrote it, so removing a crew member must never remove one.
+    #
+    # Authorship: if this person is crew 1 on any PRF, deleting the row would
+    # leave that record unattributable, so we refuse and point the admin at
+    # deactivation — which already blocks login and hides them from the shift
+    # picker while keeping the record intact.
+    authored = await db.execute(
+        select(func.count(DigitalPRF.id)).where(DigitalPRF.crew_member_1_id == crew.id)
     )
-    
+    authored_count = authored.scalar_one() or 0
+    if authored_count:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"{crew.full_name} is the recorded practitioner on {authored_count} "
+                f"Patient Report Form(s), which must be retained. Deactivate this "
+                f"crew member instead — they will no longer be able to log in or "
+                f"start a shift, and their reports stay intact."
+            ),
+        )
+
+    # Only a partner reference remains. Null it, exactly as delete_vehicle does:
+    # the report keeps its author and its content.
+    await db.execute(
+        update(DigitalPRF)
+        .where(DigitalPRF.crew_member_2_id == crew.id)
+        .values(crew_member_2_id=None)
+    )
+
     await db.delete(crew)
     await db.commit()
-        
+
     logger.info("Deleted crew member: %s from provider %s", crew_id, provider_id)
     return {"message": "Crew member deleted"}
 
