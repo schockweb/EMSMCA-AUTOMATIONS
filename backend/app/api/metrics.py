@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import PlainTextResponse
 
 from app.database import get_db, engine
+from app.models.digital_prf import PRFStatus
 
 router = APIRouter(tags=["Monitoring"])
 
@@ -47,19 +48,39 @@ async def prometheus_metrics(db: AsyncSession = Depends(get_db)):
         lines.append(f'ems_prf_total{{status="{status}"}} {count}')
 
     # ── Failed PRFs gauge ─────────────────────────────────
+    #
+    # The literal must be the enum NAME, not its value. SQLAlchemy's SAEnum
+    # persists Python enum names, so the Postgres type prf_status has labels
+    # DRAFT/SUBMITTED/PROCESSED/FAILED/CORRECTED — while PRFStatus.FAILED.value
+    # is the lowercase "failed". Comparing against 'failed' raised
+    # InvalidTextRepresentationError, so this endpoint returned 500 on every
+    # single scrape and ems_failed_prfs_total was never once recorded. Bound as
+    # a parameter off the enum itself, so renaming a member cannot desync it
+    # again.
     lines.append("# HELP ems_failed_prfs_total Current failed PRFs")
     lines.append("# TYPE ems_failed_prfs_total gauge")
     result = await db.execute(
-        text("SELECT COUNT(*) FROM digital_prfs WHERE status = 'failed'")
+        text("SELECT COUNT(*) FROM digital_prfs WHERE status = :failed"),
+        {"failed": PRFStatus.FAILED.name},
     )
     lines.append(f"ems_failed_prfs_total {result.scalar() or 0}")
 
     # ── Database connection pool ──────────────────────────
-    lines.append("# HELP ems_db_pool_size Database connection pool size")
-    lines.append("# TYPE ems_db_pool_size gauge")
-    pool = engine.pool
-    lines.append(f"ems_db_pool_size {pool.size()}")
-    lines.append(f"ems_db_pool_checkedout {pool.checkedout()}")
+    #
+    # Not every pool implementation exposes these. NullPool — which the test
+    # suite installs, and which any deployment can select — has no .size(), so
+    # this raised AttributeError and took the whole scrape down with it. Every
+    # other block below is already wrapped; this one was not, which is why the
+    # endpoint had no test that could pass. Report the pool metrics when the
+    # pool can supply them and skip them otherwise.
+    try:
+        pool = engine.pool
+        lines.append("# HELP ems_db_pool_size Database connection pool size")
+        lines.append("# TYPE ems_db_pool_size gauge")
+        lines.append(f"ems_db_pool_size {pool.size()}")
+        lines.append(f"ems_db_pool_checkedout {pool.checkedout()}")
+    except (AttributeError, TypeError):
+        pass
 
     # ── Queue depth & consumers (Item 9) ──────────────────
     try:
