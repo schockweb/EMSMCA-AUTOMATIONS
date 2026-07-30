@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.digital_prf import DigitalPRF, PRFStatus
 from app.models.user import UserRole
-from app.utils.security import get_current_user, require_role
+from app.utils.security import get_current_user, require_permission, require_role
 
 logger = logging.getLogger("ems.failed_prfs")
 
@@ -68,7 +68,12 @@ async def _next_correction_case_number(db: AsyncSession, original) -> str | None
 router = APIRouter(
     prefix="/api/failed-prfs",
     tags=["Failed Forms"],
-    dependencies=[Depends(require_role(UserRole.ADMIN, UserRole.SUPER_ADMIN))],
+    dependencies=[
+        Depends(require_role(UserRole.ADMIN, UserRole.SUPER_ADMIN)),
+        # ...and the fine-grained key, so an admin who was deliberately not
+        # given the failed-forms page cannot reach it through the API either.
+        Depends(require_permission("failed_forms")),
+    ],
 )
 
 # A PRF is "stuck" when the crew submitted it but the billing pipeline never

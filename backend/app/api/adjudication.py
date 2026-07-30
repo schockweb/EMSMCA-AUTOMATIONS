@@ -13,7 +13,7 @@ from app.models.case import Case
 from app.models.document import Document
 from app.models.claim import Claim
 from app.models.rfi import RFI, RFIStatus
-from app.utils.security import get_current_user
+from app.utils.security import get_current_user, require_permission
 from app.services.adjudication_engine import adjudicate_claim
 from app.services.bhf_verification import verify_provider_pcns
 from app.services.pmb_routing import detect_pmb_from_icd10, detect_pmb_from_narrative
@@ -27,7 +27,16 @@ from app.services.icd10_cpt_crosswalk import (
 from pydantic import BaseModel
 from typing import Optional
 
-router = APIRouter(prefix="/api/adjudication", tags=["Adjudication"])
+# ROUTER-LEVEL permission gate. Until now `permissions` was presentation
+# only — stored on the user, echoed at login, used by the frontend to hide
+# nav links, and consulted by no endpoint. A user created with
+# permissions=['dashboard'] still had a token that reached this router.
+# SUPER_ADMIN bypasses; a NULL permissions column still means 'all'.
+router = APIRouter(
+    prefix="/api/adjudication",
+    tags=["Adjudication"],
+    dependencies=[Depends(require_permission("adjudication"))],
+)
 
 
 # ── Schemas ────────────────────────────────────────────

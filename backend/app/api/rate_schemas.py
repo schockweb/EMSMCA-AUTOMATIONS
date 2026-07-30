@@ -14,11 +14,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.rate_schema import RateSchema
-from app.utils.security import get_current_user
+from app.utils.security import get_current_user, require_permission
 
 logger = logging.getLogger("ems.rate_schemas")
 
-router = APIRouter(prefix="/api/rate-schemas", tags=["Rate Schemas"])
+# ROUTER-LEVEL permission gate. Until now `permissions` was presentation
+# only — stored on the user, echoed at login, used by the frontend to hide
+# nav links, and consulted by no endpoint. A user created with
+# permissions=['dashboard'] still had a token that reached this router.
+# SUPER_ADMIN bypasses; a NULL permissions column still means 'all'.
+router = APIRouter(
+    prefix="/api/rate-schemas",
+    tags=["Rate Schemas"],
+    dependencies=[Depends(require_permission("rule_builder", "tariff_billing"))],
+)
 
 
 # ── Pydantic Schemas ────────────────────────────────────────

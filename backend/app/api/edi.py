@@ -12,7 +12,7 @@ from typing import Optional
 from app.database import get_db
 from app.models.user import User
 from app.models.edi_submission import EDISubmission, SubmissionStatus
-from app.utils.security import get_current_user
+from app.utils.security import get_current_user, require_permission
 from app.services.edi_generator import (
     generate_healthbridge_xml,
     generate_mediswitch_xml,
@@ -20,7 +20,16 @@ from app.services.edi_generator import (
     poll_submission_status,
 )
 
-router = APIRouter(prefix="/api/edi", tags=["EDI"])
+# ROUTER-LEVEL permission gate. Until now `permissions` was presentation
+# only — stored on the user, echoed at login, used by the frontend to hide
+# nav links, and consulted by no endpoint. A user created with
+# permissions=['dashboard'] still had a token that reached this router.
+# SUPER_ADMIN bypasses; a NULL permissions column still means 'all'.
+router = APIRouter(
+    prefix="/api/edi",
+    tags=["EDI"],
+    dependencies=[Depends(require_permission("edi_submit"))],
+)
 
 
 # ── Schemas ────────────────────────────────────────

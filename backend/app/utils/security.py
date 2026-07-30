@@ -209,3 +209,52 @@ def require_role(*roles: UserRole):
             )
         return current_user
     return role_checker
+
+
+# ── Fine-grained permission guard ──────────────────────────
+
+def has_permission(user: User, *keys: str) -> bool:
+    """True when `user` holds ANY of `keys`.
+
+    Semantics match the /api/auth/me fix: a NULL `permissions` column means
+    "not configured" and grants everything (this is how every existing account
+    was created — the model default is the full list, and users.py stores
+    `body.permissions or ALL_PERMISSIONS`). An EMPTY list means "deliberately
+    stripped to nothing" and grants nothing. Using `or` here would collapse
+    those two cases and hand a stripped user the full set.
+    """
+    if user.role == UserRole.SUPER_ADMIN:
+        return True
+    if user.permissions is None:
+        return True
+    granted = set(user.permissions)
+    return any(k in granted for k in keys)
+
+
+def require_permission(*keys: str):
+    """Dependency factory: require ANY of the given permission keys.
+
+    Until now the permission model was PRESENTATION ONLY. `permissions` was
+    stored on the user, echoed back at login, and used by the frontend to hide
+    nav links — but no endpoint ever consulted it. A user created with
+    permissions=['dashboard'] still had a token that reached every route: the
+    rule builder, the tariff engine, the failed-PRF queue (including the
+    endpoint that rewrites clinical data), EDI generation and submission, ERA
+    reconciliation, provider administration and member lookup. The whole model
+    was a UI convention that looked like access control.
+
+    That is survivable while the only account on the box is a SUPER_ADMIN, which
+    is exactly the current production state. It stops being survivable the
+    moment a client creates limited staff logins on their own VM and reasonably
+    believes the checkboxes mean something.
+
+    SUPER_ADMIN bypasses, consistent with require_role.
+    """
+    async def permission_checker(current_user: User = Depends(get_current_user)):
+        if not has_permission(current_user, *keys):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Insufficient permissions. Required one of: {list(keys)}",
+            )
+        return current_user
+    return permission_checker
