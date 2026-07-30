@@ -134,9 +134,23 @@ async def _next_prf_number(db: AsyncSession, provider: ServiceProvider) -> int:
     serialises concurrent PRF creation for the *same* provider (other providers
     are unaffected), so this max()+1 cannot hand two crews the same number.
     """
+    # Corrections are EXCLUDED from the maximum.
+    #
+    # An admin correction of a failed PRF creates a replacement row numbered
+    # `original.prf_number + 100000` — a deliberately out-of-band value chosen
+    # only to dodge the (provider_id, prf_number) unique constraint. Because
+    # this max() counted it, one correction of PRF #5 pushed the provider's next
+    # real call to #100006, and every later correction added another 100 000.
+    # That permanently destroys the per-provider sequential numbering that
+    # `prf_start_number` exists to carry over from the provider's paper books,
+    # and the bogus number then propagates into the case number.
+    #
+    # A correction is a re-issue of a call that already has a number, not a new
+    # call, so it must not advance the sequence.
     result = await db.execute(
         select(func.max(DigitalPRF.prf_number)).where(
-            DigitalPRF.provider_id == provider.id
+            DigitalPRF.provider_id == provider.id,
+            DigitalPRF.correction_of_id.is_(None),
         )
     )
     provider_max = result.scalar() or 0

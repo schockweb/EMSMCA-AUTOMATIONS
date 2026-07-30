@@ -18,6 +18,38 @@ from app.utils.security import get_current_user, require_role
 
 logger = logging.getLogger("ems.failed_prfs")
 
+# case_number is String(50) and globally unique.
+_CASE_NUMBER_MAX = 50
+
+
+async def _next_correction_case_number(db: AsyncSession, original) -> str | None:
+    """Derive a unique case number for a correction of `original`.
+
+    Returns None only when the original itself never got one — a PRF that failed
+    before a case number was assigned has nothing to derive from, and None is
+    the honest answer rather than an invented identifier.
+    """
+    base = (original.case_number or "").strip()
+    if not base:
+        return None
+
+    for attempt in range(1, 100):
+        suffix = f"-C{attempt}"
+        candidate = base[: _CASE_NUMBER_MAX - len(suffix)] + suffix
+        exists = await db.execute(
+            select(DigitalPRF.id).where(DigitalPRF.case_number == candidate).limit(1)
+        )
+        if exists.scalar_one_or_none() is None:
+            return candidate
+
+    # 99 corrections of one call is not a real scenario; if it happens, leaving
+    # the field NULL is far better than raising a unique-violation at commit and
+    # losing the admin's corrections.
+    logger.warning(
+        "Could not derive a unique correction case number from %r after 99 tries", base
+    )
+    return None
+
 # ROUTER-LEVEL role gate, deliberately not per-route.
 #
 # Every route here was authentication-only (`Depends(get_current_user)`), and
@@ -285,14 +317,33 @@ async def correct_failed_prf(
     corrected_data.update(body.form_data)
 
     # ── Create NEW PRF row with corrected data ──
+    #
+    # NUMBERING. prf_number carries the +100000 offset only because
+    # (provider_id, prf_number) is unique and the original still holds the real
+    # number. `_next_prf_number` now EXCLUDES rows with correction_of_id set, so
+    # this out-of-band value no longer drags the provider's live sequence up by
+    # 100 000 per correction.
+    #
+    # CASE NUMBER. This used to be left NULL with the comment "will be assigned
+    # during processing" — nothing ever assigns it, so the corrected record (the
+    # one that actually gets billed) stayed unfindable in the admin search,
+    # which matches on case_number, and the PDF emailed to the receiving facility
+    # fell back to the bogus 100005 for its title. The correction is the same
+    # incident as the original, so its case number is derived from the
+    # original's with a -C suffix: searching the original number still finds it,
+    # and the lineage is readable without a join. case_number is globally unique
+    # and capped at 50 characters, so the suffix is applied to a truncated base
+    # and the counter climbs until it lands.
+    corrected_case_number = await _next_correction_case_number(db, original)
+
     from app.models.digital_prf import DigitalPRF as PRFModel
     corrected_prf = PRFModel(
         provider_id=original.provider_id,
         vehicle_id=original.vehicle_id,
         crew_member_1_id=original.crew_member_1_id,
         crew_member_2_id=original.crew_member_2_id,
-        prf_number=original.prf_number + 100000,  # Offset to avoid collision; will be unique
-        case_number=None,  # Will be assigned during processing
+        prf_number=original.prf_number + 100000,
+        case_number=corrected_case_number,
         status=PRFStatus.SUBMITTED,
         form_data=corrected_data,
         # Copy real-time timestamps from original
@@ -355,8 +406,35 @@ async def correct_failed_prf(
     await db.refresh(corrected_prf)
 
     # ── Enqueue the corrected PRF for processing ──
+    #
+    # The commit above has already happened, so an unhandled enqueue failure
+    # returned a 500 for work that WAS saved. The admin then reasonably retries,
+    # producing a second correction of the same PRF — another +100000 row and
+    # another -C suffix — for one actual correction. The submit path in
+    # digital_prf.py already handles a broker outage explicitly; this one did
+    # not.
+    #
+    # Reverting is not the right recovery here (unlike submit, there is no
+    # earlier state to fall back to — the correction is a new row that the admin
+    # asked for and that is now committed). Instead say plainly that it was
+    # saved. A correction left in SUBMITTED with no task is precisely the state
+    # the stuck-PRF watchdog on this very queue detects and re-drives.
     from app.tasks.prf_processing import process_prf_submission
-    process_prf_submission.delay(str(corrected_prf.id))
+    try:
+        process_prf_submission.delay(str(corrected_prf.id))
+    except Exception as enqueue_err:
+        logger.error(
+            "PRF %s corrected → new PRF %s SAVED but could not be enqueued: %s",
+            prf_id, str(corrected_prf.id), enqueue_err,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "The correction was saved, but the processing queue is "
+                "unavailable. Do NOT re-submit it — it will be picked up "
+                "automatically once the queue recovers."
+            ),
+        )
 
     logger.info(
         "PRF %s corrected → new PRF %s created and enqueued",
