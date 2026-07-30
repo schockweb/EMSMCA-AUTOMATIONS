@@ -9788,8 +9788,10 @@ export default function DigitalPRFForm() {
           );
         })()}
 
-        {/* ── Floating quick-vitals button (clinical & transport phases) ── */}
-        {(phase === 3 || phase === 4) && !quickVital && (
+        {/* ── Floating quick-vitals button — Clinical phase (3) only.
+             In Transport (4) the top-right Vitals tag is the sole vitals
+             affordance, so this button is hidden there to avoid a duplicate. ── */}
+        {phase === 3 && !quickVital && (
           <button type="button" onClick={() => setQV(true)} style={{ position: 'fixed', bottom: 90, right: 18, zIndex: 100, width: 56, height: 56, borderRadius: 28, background: `linear-gradient(135deg,${G},${GDK})`, border: 'none', color: W, fontSize: '0.65rem', fontWeight: 900, cursor: 'pointer', boxShadow: `0 4px 20px ${G}55`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, lineHeight: 1 }}>
             <span style={{ fontSize: '1.2rem', lineHeight: 1 }}>+</span>
             <span style={{ fontSize: '0.5rem', letterSpacing: '0.04em' }}>VITALS</span>
