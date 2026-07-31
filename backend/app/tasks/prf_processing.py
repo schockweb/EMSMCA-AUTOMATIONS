@@ -504,3 +504,77 @@ def requeue_stuck_prfs():
         return loop.run_until_complete(_sweep())
     finally:
         loop.close()
+
+
+# Clock-skew grace kept beyond a token's own expiry before its revocation row is
+# dropped, so a mismatch between the API container and the database can never
+# delete a row while the token it revokes still looks valid to another machine.
+BLACKLIST_PURGE_GRACE = timedelta(days=1)
+
+
+async def purge_expired_blacklist_rows(db, grace: timedelta = BLACKLIST_PURGE_GRACE) -> int:
+    """Delete blacklist rows whose token expired more than `grace` ago.
+
+    Separated from the Celery task on purpose: the task owns an event loop and a
+    throwaway engine, which makes it awkward to call from a test. The test would
+    otherwise have to re-implement this query, and would then be asserting its
+    own copy of the logic rather than the code that actually runs in production.
+    Both call this.
+    """
+    from sqlalchemy import delete, func, select
+    from app.models.token_blacklist import TokenBlacklist
+
+    cutoff = datetime.now(timezone.utc) - grace
+    before = (await db.execute(select(func.count(TokenBlacklist.id)))).scalar_one()
+
+    result = await db.execute(
+        delete(TokenBlacklist).where(TokenBlacklist.expires_at < cutoff)
+    )
+    await db.commit()
+
+    removed = result.rowcount or 0
+    if removed:
+        logger.info(
+            "Purged %d expired token_blacklist rows (%d -> %d)",
+            removed, before, before - removed,
+        )
+    return removed
+
+
+@shared_task(name="purge_expired_blacklist", acks_late=True)
+def purge_expired_blacklist():
+    """Delete token_blacklist rows whose token has already expired.
+
+    The blacklist exists so a revoked JWT cannot be replayed before its own
+    `exp` passes. Once `expires_at` is in the past the row proves nothing — the
+    token is rejected on its expiry claim alone — so keeping it is pure cost.
+
+    Nothing ever deleted these. The model's own column comment says "entries can
+    be purged after this time", but the job was never written, so the table only
+    grew. is_token_blacklisted() runs on EVERY authenticated request, and while
+    the unique index on jti keeps that lookup logarithmic, the table itself was
+    on track for roughly 1.1M rows a year at the target of ~1500 crew (two
+    sessions a day each, plus admin logins and every refresh-token rotation) —
+    unbounded index bloat, backup weight and vacuum pressure for zero value.
+
+    Deliberately conservative: a grace period is kept beyond expiry so that any
+    clock skew between the API container and the database cannot cause a row to
+    be dropped while the token it revokes is still, from some other machine's
+    point of view, valid.
+    """
+    import asyncio
+
+    async def _purge():
+        engine, Session = _make_celery_session()
+        try:
+            async with Session() as db:
+                return await purge_expired_blacklist_rows(db)
+        finally:
+            await engine.dispose()
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(_purge())
+    finally:
+        loop.close()

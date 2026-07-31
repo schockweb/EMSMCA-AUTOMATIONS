@@ -74,6 +74,19 @@ celery_app.conf.update(
             "schedule": 300.0,  # every 5 minutes
             "options": {"queue": "ems_default"},
         },
+        # token_blacklist had no cleanup at all. Every logout and every
+        # refresh-token rotation adds a row, and a row is worthless the moment
+        # the token it revokes expires on its own `exp` claim — but nothing ever
+        # deleted them. At the target scale (~1500 crew, two sessions a day
+        # each, plus admin logins) that is on the order of 1.1M rows a year of
+        # dead weight, on a table consulted by EVERY authenticated request.
+        # Hourly is ample: the largest token lifetime is the 7-day refresh
+        # token, so nothing accumulates meaningfully between runs.
+        "purge-expired-blacklist": {
+            "task": "purge_expired_blacklist",
+            "schedule": 3600.0,  # hourly
+            "options": {"queue": "ems_default"},
+        },
     },
 )
 
