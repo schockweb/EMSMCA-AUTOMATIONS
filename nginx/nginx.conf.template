@@ -105,6 +105,17 @@ server {
 
     location /health {
         proxy_pass http://ems_api;
+        # REQUIRED. Every other proxied location sets this; /health did not, and
+        # nginx's default for proxy_pass is `Host: $proxy_host` — i.e. the
+        # literal upstream name `ems_api`. Once TrustedHostMiddleware was
+        # enabled on the backend that Host is not in the allow-list, so the
+        # public health endpoint started answering 400 "Invalid host header"
+        # while the container's own healthcheck (which talks to localhost) still
+        # passed — the failure mode most likely to be missed.
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
     }
 
     # ── Uploaded files (provider logos, etc.) ──
