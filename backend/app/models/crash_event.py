@@ -6,7 +6,7 @@ from typing import Union
 import uuid
 from datetime import datetime, timezone, timedelta
 from enum import Enum as PyEnum
-from sqlalchemy import String, Boolean, Text, DateTime, Enum, ForeignKey, text
+from sqlalchemy import String, Boolean, Text, DateTime, Enum, ForeignKey, Integer, text
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
@@ -62,6 +62,18 @@ class CrashEvent(Base):
     metadata_blob: Mapped[Union[dict, None]] = mapped_column(
         JSONB, nullable=True,
         comment="Extra context: request body, task args, browser info"
+    )
+    occurrences: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1",
+        comment=(
+            "How many times this same fault was reported into the current "
+            "aggregation window. One row per distinct fault per hour rather "
+            "than one row per occurrence — see report_frontend_crash."
+        ),
+    )
+    last_seen_at: Mapped[Union[datetime, None]] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+        comment="Most recent occurrence folded into this row",
     )
     resolved: Mapped[bool] = mapped_column(
         Boolean, default=False, nullable=False,

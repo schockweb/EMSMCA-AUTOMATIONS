@@ -84,6 +84,46 @@ async def report_frontend_crash(
         except Exception:
             pass  # Token invalid/expired — that's fine, still record the crash
 
+    # ── Fold repeats into one row per distinct fault per hour ──────────────
+    #
+    # This endpoint is unauthenticated by design (a crash must be reportable
+    # when auth is exactly what is broken) and used to INSERT one row per call
+    # with no aggregation or cap. The client fires it from window.onerror,
+    # onunhandledrejection AND on every 5xx from the shared axios instance — so
+    # the flood peaks precisely when the backend is already unhealthy.
+    #
+    # The development database reached 3.68 MILLION rows in 27 days, 99.2% of
+    # the whole database, of which 3,679,048 were the SAME message, peaking at
+    # 8,166 rows/minute — 27x the configured 300/min limiter, which fails open
+    # when Redis is unavailable. Production has 76 rows only because it has one
+    # user; the mechanism is identical and scales with user count.
+    #
+    # The client now de-duplicates and hard-caps per session, but that is the
+    # client's word for it. This is the server's own guarantee: a repeated
+    # fault increments a counter instead of authoring a new row, so the table
+    # grows with DISTINCT faults, not with occurrences.
+    window_start = datetime.now(timezone.utc) - timedelta(hours=1)
+    existing = (await db.execute(
+        select(CrashEvent)
+        .where(
+            CrashEvent.source == CrashSource.FRONTEND,
+            CrashEvent.error_type == report.error_type,
+            CrashEvent.message == report.message[:2000],
+            CrashEvent.endpoint == report.endpoint,
+            CrashEvent.created_at >= window_start,
+        )
+        .order_by(CrashEvent.created_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+
+    if existing is not None:
+        existing.occurrences = (existing.occurrences or 1) + 1
+        existing.last_seen_at = datetime.now(timezone.utc)
+        # Deliberately NOT unresolving a resolved row: an operator marking a
+        # crash resolved should not have it flap back on the next stray report.
+        await db.commit()
+        return {"crash_id": str(existing.id), "recorded": True, "deduplicated": True}
+
     crash = CrashEvent(
         source=CrashSource.FRONTEND,
         severity=CrashSeverity(report.severity),
@@ -93,12 +133,14 @@ async def report_frontend_crash(
         endpoint=report.endpoint,
         user_id=user_id,
         metadata_blob=report.metadata,
+        occurrences=1,
+        last_seen_at=datetime.now(timezone.utc),
     )
     db.add(crash)
     await db.commit()
     await db.refresh(crash)
     logger.warning("Frontend crash reported: %s — %s", report.error_type, report.message[:200])
-    return {"crash_id": str(crash.id), "recorded": True}
+    return {"crash_id": str(crash.id), "recorded": True, "deduplicated": False}
 
 
 # ── GET /api/crashes — Paginated crash list ──────────────

@@ -17,6 +17,47 @@ interface State {
   errorMessage: string;
 }
 
+/**
+ * De-duplication for the crash reporter.
+ *
+ * WHY THIS EXISTS. `reportCrash` is wired to window.onerror and
+ * onunhandledrejection, and the API client reports every 5xx. All three fire
+ * repeatedly for a single underlying fault — a render loop, a failing poll, a
+ * backend that is already down. The server writes one row per call with no
+ * aggregation, so one stuck client can author unbounded rows.
+ *
+ * This is not hypothetical. The development database reached 3.68 MILLION crash
+ * rows in 27 days — 99.2% of the entire database — of which 3,679,048 were the
+ * SAME message, peaking at 8,166 rows per minute. Production has 76 rows only
+ * because it has one user; the mechanism is identical.
+ *
+ * Two independent limits, because either alone is escapable:
+ *   - a fingerprint set, so a repeating fault reports ONCE per session; and
+ *   - a hard per-session ceiling, so a fault whose message varies (a timestamp
+ *     or a changing id in the text) still cannot report without bound.
+ *
+ * Both reset on reload, which is correct: a genuinely new session should be
+ * able to report what it sees.
+ */
+const REPORTED_FINGERPRINTS = new Set<string>();
+const MAX_REPORTS_PER_SESSION = 20;
+let reportsSent = 0;
+
+/** Exported for tests — resets the per-session dedup state. */
+export function __resetCrashReporterState() {
+  REPORTED_FINGERPRINTS.clear();
+  reportsSent = 0;
+}
+
+/** True when this crash should be sent; records it as seen. */
+export function shouldReportCrash(fingerprint: string): boolean {
+  if (reportsSent >= MAX_REPORTS_PER_SESSION) return false;
+  if (REPORTED_FINGERPRINTS.has(fingerprint)) return false;
+  REPORTED_FINGERPRINTS.add(fingerprint);
+  reportsSent += 1;
+  return true;
+}
+
 /** Fire-and-forget crash reporter — works even without auth */
 function reportCrash(payload: {
   error_type: string;
@@ -27,6 +68,13 @@ function reportCrash(payload: {
   metadata?: Record<string, unknown>;
 }) {
   try {
+    const endpoint = payload.endpoint || window.location.pathname;
+    // Fingerprint on the fault, not the occurrence: no timestamp, no URL query,
+    // no stacktrace (line numbers shift between builds).
+    if (!shouldReportCrash(`${payload.error_type}|${payload.message.slice(0, 200)}|${endpoint}`)) {
+      return;
+    }
+
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     const token = localStorage.getItem('access_token');
     if (token) headers['Authorization'] = `Bearer ${token}`;
