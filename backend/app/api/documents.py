@@ -12,9 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.document import Document, OCRStatus
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.schemas.document import DocumentResponse, DocumentListResponse
-from app.utils.security import get_current_user, require_permission
+from app.utils.security import get_current_user, require_permission, require_role
 from app.utils.storage import save_upload, get_full_path, file_exists
 from app.config import get_settings
 
@@ -289,9 +289,16 @@ async def get_document(
 async def delete_document(
     doc_id: str,
     db: AsyncSession = Depends(get_db),
-    _current: User = Depends(get_current_user),
+    _current: User = Depends(require_role(UserRole.ADMIN, UserRole.SUPER_ADMIN)),
 ):
-    """Permanently delete a document and its files from disk."""
+    """Permanently delete a document and its files from disk.
+
+    ADMIN-only, on top of the router's permission gate. This unlinks the file
+    from disk as well as deleting the row, so it is unrecoverable — a scanned
+    patient PRF inside the seven-year retention window is simply gone. Holding
+    a documents permission is enough to read; destroying retained clinical
+    records should take more than that.
+    """
     import os
 
     result = await db.execute(select(Document).where(Document.id == uuid.UUID(doc_id)))

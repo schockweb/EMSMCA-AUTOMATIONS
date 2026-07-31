@@ -327,16 +327,34 @@ class _HardenedUploads(StaticFiles):
     `<img src="/uploads/...">` embedding from the SPA still renders normally.
     """
 
-    # Worker-spool subdirectories on the shared uploads volume that hold
-    # confidential documents (patient PRF PDFs awaiting the email task).
-    # They are NOT web assets and must never be served — without this guard
-    # anyone holding the PRF UUID could fetch the full patient record
-    # unauthenticated at /uploads/prf_email/<uuid>.pdf.
-    _PRIVATE_PREFIXES = ("prf_email/", "prf_email\\")
+    # ALLOWLIST, not a denylist.
+    #
+    # This mount is UNAUTHENTICATED — StaticFiles does not run route
+    # dependencies, and nginx proxies the whole `^~ /uploads/` prefix. It used
+    # to block exactly one prefix, `prf_email/`, and serve everything else. That
+    # made the guard look complete while leaving every other subdirectory on the
+    # same volume world-readable to anyone with a URL, including `raw/` — the
+    # scanned patient PRFs. A denylist over a directory that other code writes
+    # to is guaranteed to fall behind: the next subdirectory anyone adds is
+    # public by default.
+    #
+    # Only genuine web assets are served. These are the three directories
+    # app/api/providers.py writes for display in the SPA (logos, crew photos,
+    # vehicle photos). Patient documents have an authenticated door already —
+    # GET /api/documents/{id}/download — and must use it.
+    #
+    # NOTE: crew/ and vehicles/ are named by UUID and are still served without
+    # a token; they are staff/vehicle photos rather than patient data, and the
+    # SPA embeds them as plain <img> tags. Tightening those means routing them
+    # through an authenticated endpoint, which is a separate change.
+    _PUBLIC_PREFIXES = ("logos/", "crew/", "vehicles/")
 
     async def get_response(self, path, scope):
-        norm = (path or "").lstrip("/\\")
-        if norm.startswith(self._PRIVATE_PREFIXES):
+        norm = (path or "").lstrip("/\\").replace("\\", "/")
+        # Reject anything that is not explicitly a public asset directory.
+        # `..` never reaches here (StaticFiles resolves and rejects traversal
+        # first), but the prefix test is what keeps new directories private.
+        if not norm.startswith(self._PUBLIC_PREFIXES):
             from starlette.responses import PlainTextResponse
             return PlainTextResponse("Not Found", status_code=404)
         response = await super().get_response(path, scope)

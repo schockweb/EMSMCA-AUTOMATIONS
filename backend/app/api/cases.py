@@ -363,9 +363,17 @@ async def delete_all_cases(
 async def delete_case(
     case_id: str,
     db: AsyncSession = Depends(get_db),
-    _current: User = Depends(get_current_user),
+    _current: User = Depends(require_role(UserRole.ADMIN, UserRole.SUPER_ADMIN)),
 ):
-    """Delete a case and all of its associated documents, claims, lines, and RFIs."""
+    """Delete a case and all of its associated documents, claims, lines, and RFIs.
+
+    ADMIN-only. The BULK route (DELETE /api/cases/all) was gated to SUPER_ADMIN
+    earlier, but this per-case route was missed and kept running on bare
+    get_current_user — so any authenticated account, default role PARAMEDIC,
+    could still destroy a patient's case, its claims, claim lines, RFIs, scheme
+    auth requests and documents one call at a time. A loop over case IDs
+    reproduces the bulk wipe the other guard was added to prevent.
+    """
     from sqlalchemy import delete, update
     from app.models.document import Document
     from app.models.claim import Claim
