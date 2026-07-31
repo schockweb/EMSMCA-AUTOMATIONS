@@ -111,3 +111,7 @@ coverage/
 htmlcov/
 .coverage
 frontend/coverage/
+
+# Ad-hoc benchmark/repro scratch scripts — not part of the app
+backend/bench*.py
+backend/loopcheck.py
