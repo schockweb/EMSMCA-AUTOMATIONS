@@ -4,7 +4,7 @@
  * New PRF is created from the dashboard (not immediately after login).
  */
 import { useState, useEffect } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router';
 // Use the RAW axios here, NOT the admin api/client. The crew/client portal has
 // its own token (crew_token, passed explicitly as a Bearer header on each call)
 // and must never go through the admin interceptor — that interceptor would

@@ -3,7 +3,7 @@
  * Dense tables, modal-driven forms. No gradients, no soft shadows.
  */
 import { useState, useEffect, useCallback } from 'react';
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router';
 // Raw axios — this client-portal dashboard authenticates with crew_token via
 // getApi() and must stay off the admin api/client interceptor.
 import axios from 'axios';

@@ -2,7 +2,7 @@
  * App — Root component with routing and layout.
  */
 import { useState, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate, useParams } from 'react-router';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import api from './api/client';
 import Login from './pages/Login';

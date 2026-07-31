@@ -1,39 +1,61 @@
 # ─── Core Framework ─────────────────────────────
-fastapi==0.115.6
-uvicorn[standard]==0.34.0
-python-multipart==0.0.19
+fastapi==0.141.1
+# Starlette is pinned EXPLICITLY even though FastAPI pulls it in. FastAPI's own
+# constraint is only `starlette>=0.46.0`, so a fresh install could resolve to a
+# version still carrying the Host-header and request.url path-validation
+# advisories (PYSEC-2026-161 / 248 / 249 / 1941 / 1942 / 2280 / 2281). Pinning
+# it here makes the fixed version a requirement rather than a coincidence.
+starlette==1.3.1
+uvicorn[standard]==0.52.0
+# 0.0.19 → 0.0.32: multipart parsing DoS (large preamble/epilogue, header
+# parsing), unvalidated Content-Length, and querystring separator confusion.
+# This parses every file upload the crew makes.
+python-multipart==0.0.32
 
 # ─── Database ───────────────────────────────────
-sqlalchemy[asyncio]==2.0.36
-asyncpg==0.30.0
-alembic==1.14.1
-greenlet==3.1.1
+sqlalchemy[asyncio]==2.0.51
+asyncpg==0.31.0
+alembic==1.18.5
+greenlet==3.5.4
 
 # ─── Auth & Security ───────────────────────────
-python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
-bcrypt==4.0.1
+# 3.3.0 → 3.5.0: algorithm confusion with OpenSSH ECDSA and other key formats
+# (PYSEC-2024-232, the CVE-2022-29217 class) plus two JWE decode DoS issues.
+# We were already mitigated against the algorithm-confusion case because
+# decode_token passes algorithms=[HS256] explicitly — this closes it properly.
+python-jose[cryptography]==3.5.0
+# passlib REMOVED — it was declared but imported nowhere (app/utils/security.py
+# calls bcrypt directly). It is also unmaintained and is the usual source of
+# bcrypt-version incompatibilities, so dropping it is what makes the bcrypt 5.x
+# bump safe. The bcrypt API in use (hashpw/gensalt/checkpw) is unchanged.
+bcrypt==5.0.0
 
 # ─── Config ─────────────────────────────────────
-pydantic==2.10.4
-pydantic-settings==2.7.1
-python-dotenv==1.0.1
+pydantic==2.13.4
+pydantic-settings==2.14.2
+python-dotenv==1.2.2
 
 # ─── Async Tasks ────────────────────────────────
-celery==5.4.0
-kombu==5.4.2
+celery==5.6.3
+kombu==5.6.2
 
 # ─── Cache (Redis) ──────────────────────────────
-redis[asyncio]==5.2.1
+redis[asyncio]==8.1.0
 
 # ─── Image Preprocessing ───────────────────────
-Pillow==11.1.0
+# 11.1.0 → 12.3.0: 24 advisories. Pillow parses attacker-supplied images (crew
+# sticker photos, provider logos, vehicle/crew photos), so decoder bugs here are
+# reachable from an upload.
+Pillow==12.3.0
 httpx==0.28.1
 
 # ─── AI / OCR ──────────────────────────────────
-llama-parse==0.5.19
-mistralai==1.3.1
-
+# llama-parse and mistralai REMOVED — neither SDK was imported anywhere in the
+# codebase. Sticker OCR calls the Mistral REST API directly with httpx
+# (app/api/digital_prf.py), and the LlamaParse path in ocr_extraction.py never
+# imported the SDK either. They only ever contributed their dependency tree,
+# including the CVE-bearing llama-index-core. Re-add if an SDK is adopted.
+#
 # ─── Azure Document Intelligence OCR — OPTIONAL, NOT INSTALLED ─────────────
 # app/services/ocr_extraction.py imports these inside _get_layout_azure(), and
 # extract_document() defaults to engine="azure". They are deliberately absent:
@@ -51,11 +73,15 @@ mistralai==1.3.1
 #   azure-core==1.32.0
 
 # ─── Utilities ──────────────────────────────────
-cryptography==44.0.0
-aiofiles==24.1.0
-python-dateutil==2.9.0
+# 44.0.0 → 49.0.0: the wheels statically link OpenSSL, and 42.0.0–44.0.0 ship a
+# vulnerable copy (PYSEC-2026-1284), plus DNS name-constraint validation and
+# public_key_from_numbers issues. This library backs Fernet, which encrypts the
+# per-provider SMTP credentials.
+cryptography==49.0.0
+aiofiles==25.1.0
+python-dateutil==2.9.0.post0
 
 # ─── Testing ───────────────────────────────────
-pytest==8.3.4
-pytest-asyncio==0.24.0
+pytest==9.1.1
+pytest-asyncio==1.4.0
 httpx==0.28.1

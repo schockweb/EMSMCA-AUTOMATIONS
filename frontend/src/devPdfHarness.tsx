@@ -22,7 +22,7 @@
  */
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { MemoryRouter, Routes, Route } from 'react-router-dom';
+import { MemoryRouter, Routes, Route } from 'react-router';
 import axios from 'axios';
 import {
   DESIGN_W_PX, MAX_FIT_W as SHIPPED_MAX_FIT_W, MIN_LEGIBLE_SCALE,

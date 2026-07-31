@@ -334,10 +334,17 @@ def test_mock_scheme_routes_exist_when_not_production():
 
     Without this, deleting the router entirely would also make the guard test
     pass, and the pipeline would lose its offline scheme simulator.
+
+    Reads the OpenAPI schema rather than walking app.routes. FastAPI 0.141 wraps
+    each include_router() result in a `_IncludedRouter` instead of flattening its
+    routes into app.routes, so the old traversal saw 8 paths where there are 121
+    and this test failed on the dependency upgrade even though nothing was
+    wrong. The schema is the stable public contract; the internal route-tree
+    shape is not.
     """
     from app.main import app as fastapi_app
 
-    paths = {getattr(r, "path", "") for r in fastapi_app.routes}
+    paths = set(fastapi_app.openapi().get("paths", {}))
     assert any(p.startswith("/api/mock-scheme") for p in paths), (
         "mock scheme routes are absent even though APP_ENV is not production"
     )

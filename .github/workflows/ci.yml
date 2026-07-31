@@ -173,6 +173,67 @@ jobs:
         run: cd frontend && npx eslint src/
 
   # ═══════════════════════════════════════════════════════════════════════
+  # Dependency vulnerabilities.
+  #
+  # This had never run. On 2026-07-31 a first manual scan found 53 advisories
+  # across 9 backend packages — including the JWT library (algorithm confusion),
+  # the ASGI layer under FastAPI, the multipart parser handling every upload,
+  # and Pillow, which decodes attacker-supplied images. None of it was visible
+  # because nothing looked. For a platform holding patient data, "nobody ran a
+  # scanner" is not an acceptable answer, so it now runs on every push.
+  #
+  # PRODUCTION dependencies GATE the build. Build-only dependencies (eslint,
+  # the workbox/PWA toolchain) are reported but do not fail CI: they never reach
+  # a running system, and several of their advisories currently have no fixed
+  # release at all — npm's suggested "fix" for vite-plugin-pwa is a DOWNGRADE,
+  # which would put the crew offline service worker at risk to silence a
+  # build-time finding. Report those honestly rather than pretending or forcing.
+  # ═══════════════════════════════════════════════════════════════════════
+  dependency-audit:
+    name: "Dependency Audit"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      # Gating. The one known exception is ecdsa PYSEC-2026-1325, a timing
+      # side-channel in ECDSA signing that upstream has no fix for. We sign with
+      # HS256 (HMAC) and never perform an ECDSA operation, so the vulnerable
+      # code path is unreachable; ecdsa is only present because
+      # python-jose[cryptography] declares it.
+      - name: pip-audit (backend, gating)
+        run: |
+          cd backend
+          pip-audit -r requirements.txt --progress-spinner off \
+            --ignore-vuln PYSEC-2026-1325
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: cd frontend && npm ci --no-audit
+
+      # Gating: anything that actually ships to a browser.
+      - name: npm audit (production deps, gating)
+        run: cd frontend && npm audit --omit=dev --audit-level=high
+
+      - name: npm audit (build-time deps, reported only)
+        continue-on-error: true
+        run: cd frontend && npm audit --audit-level=high
+
+  # ═══════════════════════════════════════════════════════════════════════
   # Images must build — gated on both test suites, not on lint.
   # ═══════════════════════════════════════════════════════════════════════
   build-images:

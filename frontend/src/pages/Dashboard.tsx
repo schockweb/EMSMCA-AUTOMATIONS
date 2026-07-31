@@ -5,7 +5,7 @@
  * orange (no magenta / purple) per the latest brief.
  */
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import api from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
 import { LoadErrorPanel, LoadErrorBar } from '../components/LoadError';

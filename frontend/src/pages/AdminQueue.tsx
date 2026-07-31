@@ -4,7 +4,7 @@
  * drag-and-drop bundling, confidence gauges, smart status badges.
  */
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import api from '../api/client';
 import { LoadErrorPanel, LoadErrorBar } from '../components/LoadError';
 

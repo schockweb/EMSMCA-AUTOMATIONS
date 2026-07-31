@@ -7,7 +7,7 @@ import {
   useNavigate,
   useSearchParams,
   useLocation,
-} from "react-router-dom";
+} from "react-router";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
 import api from "../api/client";
 

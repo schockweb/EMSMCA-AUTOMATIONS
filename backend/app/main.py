@@ -189,6 +189,42 @@ app.add_middleware(
     expose_headers=["X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"],
 )
 
+# 1a. Host header allow-list.
+#
+# TrustedHostMiddleware was IMPORTED at the top of this file and never
+# registered — a dead import for however long it has been there. It is also
+# precisely the mitigation for the Starlette advisories in which the Host header
+# is not validated before `request.url` is reconstructed (PYSEC-2026-161 and
+# relatives). nginx passes Host straight through and its server_name ends in a
+# `_` catch-all, so an attacker-controlled Host reaches the app.
+#
+# Hosts are derived from the origins already configured for CORS, plus the
+# public app URL, so a client VM needs no extra setting. "*" (allow anything) is
+# used only when nothing is configured, which is the development case.
+_allowed_hosts: list[str] = []
+for _origin in cors_origins + ([settings.PUBLIC_APP_URL] if settings.PUBLIC_APP_URL else []):
+    try:
+        from urllib.parse import urlparse as _urlparse
+        _host = (_urlparse(_origin).hostname or "").strip()
+        if _host and _host not in _allowed_hosts:
+            _allowed_hosts.append(_host)
+    except Exception:  # pragma: no cover - malformed origin in config
+        continue
+
+if _allowed_hosts and settings.APP_ENV == "production":
+    # Docker's internal healthcheck and nginx talk to the container by service
+    # name / loopback, so those must stay reachable or the container is marked
+    # unhealthy and taken out of rotation.
+    _allowed_hosts += ["localhost", "127.0.0.1", "ems_backend", "backend", "testserver"]
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=_allowed_hosts)
+    logger.info("TrustedHostMiddleware active for: %s", ", ".join(_allowed_hosts))
+else:
+    logger.warning(
+        "TrustedHostMiddleware NOT active (APP_ENV=%s, %d hosts derived) — "
+        "any Host header is accepted.",
+        settings.APP_ENV, len(_allowed_hosts),
+    )
+
 # 1b. Response compression — critical for mobile networks (60-80% size reduction)
 from fastapi.middleware.gzip import GZipMiddleware
 app.add_middleware(GZipMiddleware, minimum_size=1000)

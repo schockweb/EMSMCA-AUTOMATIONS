@@ -3,7 +3,7 @@
  */
 import { useState } from 'react';
 import type { FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { useAuth } from '../contexts/AuthContext';
 import { useScrollLock } from '../hooks/useScrollLock';
 import Logo from '../components/Logo';

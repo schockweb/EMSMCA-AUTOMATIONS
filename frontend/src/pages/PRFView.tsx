@@ -4,7 +4,7 @@
  * with the provider's branding (logo, PR number, address, phone) prominent.
  */
 import { useEffect, useRef, useState, useCallback, Fragment } from 'react';
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router';
 import axios from '../api/client';
 import { getCrewToken, ensureProviderSession } from '../utils/crewSession';
 import { jsPDF } from 'jspdf';

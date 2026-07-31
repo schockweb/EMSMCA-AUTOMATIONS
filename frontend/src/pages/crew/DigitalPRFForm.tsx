@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, createContext, useContext } from 'react';
 import ReactDOM from 'react-dom';
 import { useScrollLock } from '../../hooks/useScrollLock';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router';
 // Raw axios — the PRF form builds its own crew_token-authenticated instance via
 // api() below; it must not inherit the admin api/client interceptor.
 import axios from 'axios';
