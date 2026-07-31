@@ -31,6 +31,11 @@ GATED_ROUTES = [
     ("/api/tariff-lines/by-schema/1", ("tariff_billing", "rule_builder")),
     ("/api/failed-prfs", ("failed_forms",)),
     ("/api/adjudication/rfis", ("adjudication",)),
+    # The documents router: every route was authentication-only, and
+    # /export-spreadsheet bulk-exports EVERY document's extracted patient data
+    # with no provider filter whatsoever.
+    ("/api/documents/", ("upload", "document_review", "admin_queue")),
+    ("/api/documents/export-spreadsheet", ("upload", "document_review", "admin_queue")),
 ]
 
 

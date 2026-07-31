@@ -14,13 +14,39 @@ from app.database import get_db
 from app.models.document import Document, OCRStatus
 from app.models.user import User
 from app.schemas.document import DocumentResponse, DocumentListResponse
-from app.utils.security import get_current_user
+from app.utils.security import get_current_user, require_permission
 from app.utils.storage import save_upload, get_full_path, file_exists
 from app.config import get_settings
 
 settings = get_settings()
 
-router = APIRouter(prefix="/api/documents", tags=["Documents"])
+# ROUTER-LEVEL permission gate.
+#
+# All 13 routes here were authentication-only — every one bound bare
+# get_current_user with no role or permission check. Documents are scanned PRFs
+# and their OCR-extracted contents: patient names, SA ID numbers, scheme
+# membership, clinical detail. Two routes made that unbounded:
+#
+#   GET /{doc_id}/download   streams any document's file by UUID alone.
+#   GET /export-spreadsheet  selects EVERY Document with no provider filter at
+#                            all and bulk-exports their extracted_data to xlsx.
+#
+# So any authenticated account — and the User model defaults new accounts to
+# PARAMEDIC — could exfiltrate the entire document corpus of every provider on
+# the instance in a single request.
+#
+# Cross-provider access is retained deliberately: back-office staff process
+# paper PRFs across every company, exactly like the failed-PRF queue. What was
+# missing is that only staff granted a documents page should have it. The keys
+# mirror the frontend pages (Upload, Document Review, Admin Queue), so this
+# follows the existing permission model rather than imposing a role hierarchy
+# on top of it. SUPER_ADMIN bypasses and a NULL permissions column still means
+# "all", so no existing account is locked out.
+router = APIRouter(
+    prefix="/api/documents",
+    tags=["Documents"],
+    dependencies=[Depends(require_permission("upload", "document_review", "admin_queue"))],
+)
 
 ALLOWED_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".tiff", ".tif", ".bmp", ".webp"}
 
