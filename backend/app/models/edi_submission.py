@@ -44,7 +44,7 @@ class EDISubmission(Base):
         SAEnum(EDIFormat, name="edi_format"), nullable=False
     )
     submission_status: Mapped[SubmissionStatus] = mapped_column(
-        SAEnum(SubmissionStatus, name="submission_status"),
+        SAEnum(SubmissionStatus, name="submission_status"), index=True,
         nullable=False,
         default=SubmissionStatus.DRAFT,
     )

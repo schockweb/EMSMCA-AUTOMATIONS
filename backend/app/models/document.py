@@ -39,7 +39,7 @@ class Document(Base):
         default="PRF",
     )
     ocr_status: Mapped[OCRStatus] = mapped_column(
-        SAEnum(OCRStatus, name="ocr_status"),
+        SAEnum(OCRStatus, name="ocr_status"), index=True,
         nullable=False,
         default=OCRStatus.PENDING,
     )
@@ -63,7 +63,10 @@ class Document(Base):
         comment="True if this is the primary PRF in a bundle"
     )
     uploaded_by: Mapped[Union[uuid.UUID, None]] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True, index=True
+        # Indexed because User.documents back-populates through it. Even with
+        # that relationship now lazy="raise", an unindexed FK to users is a
+        # sequential scan waiting to happen the first time anything joins it.
     )
     reviewed_at: Mapped[Union[datetime, None]] = mapped_column(
         DateTime(timezone=True), nullable=True,
@@ -74,7 +77,7 @@ class Document(Base):
         comment="User who performed the HITL review"
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), index=True, default=lambda: datetime.now(timezone.utc)
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

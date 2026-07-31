@@ -3,6 +3,7 @@ Failed PRF Management API — Admin tools for reviewing and reprocessing
 PRFs that failed during the automated processing pipeline.
 """
 from __future__ import annotations
+import asyncio
 import logging
 from datetime import datetime, timezone, date, timedelta
 
@@ -426,7 +427,9 @@ async def correct_failed_prf(
     # the stuck-PRF watchdog on this very queue detects and re-drives.
     from app.tasks.prf_processing import process_prf_submission
     try:
-        process_prf_submission.delay(str(corrected_prf.id))
+        # Synchronous kombu publish — offloaded so a hung broker cannot freeze
+        # the event loop for every other request. See api/digital_prf.py submit.
+        await asyncio.to_thread(process_prf_submission.delay, str(corrected_prf.id))
     except Exception as enqueue_err:
         logger.error(
             "PRF %s corrected → new PRF %s SAVED but could not be enqueued: %s",
@@ -507,9 +510,10 @@ async def reprocess_failed_prf(
     await db.commit()
     await db.refresh(prf)
 
-    # Requeue for processing
+    # Requeue for processing. Synchronous kombu publish — offloaded so a hung
+    # broker cannot freeze the event loop. See api/digital_prf.py submit.
     from app.tasks.prf_processing import process_prf_submission
-    process_prf_submission.delay(str(prf.id))
+    await asyncio.to_thread(process_prf_submission.delay, str(prf.id))
 
     logger.info("PRF %s requeued for reprocessing", prf_id)
     return {"message": "PRF requeued for reprocessing", "prf_id": str(prf.id)}

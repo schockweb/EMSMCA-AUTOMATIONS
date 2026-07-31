@@ -18,7 +18,7 @@ class Vehicle(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     provider_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("service_providers.id"), nullable=False
+        UUID(as_uuid=True), ForeignKey("service_providers.id"), nullable=False, index=True
     )
     callsign: Mapped[str] = mapped_column(
         String(50), nullable=False,

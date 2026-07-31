@@ -34,7 +34,7 @@ class Claim(Base):
     )
     target_scheme: Mapped[Union[str, None]] = mapped_column(String(255), nullable=True)
     adjudication_status: Mapped[AdjudicationStatus] = mapped_column(
-        SAEnum(AdjudicationStatus, name="adjudication_status"),
+        SAEnum(AdjudicationStatus, name="adjudication_status"), index=True,
         nullable=False,
         default=AdjudicationStatus.PENDING,
     )
@@ -69,7 +69,7 @@ class Claim(Base):
         DateTime(timezone=True), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), index=True, default=lambda: datetime.now(timezone.utc)
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

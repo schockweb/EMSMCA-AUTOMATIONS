@@ -35,7 +35,7 @@ class RFI(Base):
         UUID(as_uuid=True), ForeignKey("claims.id"), nullable=False, index=True
     )
     rfi_status: Mapped[RFIStatus] = mapped_column(
-        SAEnum(RFIStatus, name="rfi_status"),
+        SAEnum(RFIStatus, name="rfi_status"), index=True,
         nullable=False,
         default=RFIStatus.OPEN,
     )

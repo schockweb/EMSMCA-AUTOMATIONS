@@ -71,7 +71,9 @@ class Case(Base):
                 "When set, takes precedence over the computed PRF display name."
     )
     assigned_provider_id: Mapped[Union[uuid.UUID, None]] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True, index=True
+        # Same reasoning as documents.uploaded_by — User.cases back-populates
+        # through this FK, and it was unindexed.
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc),

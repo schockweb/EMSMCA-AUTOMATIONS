@@ -3,6 +3,7 @@ Digital PRF API — Create, auto-save (5s), and submit digital Patient Report Fo
 Crew members use these endpoints from their mobile phones.
 """
 from __future__ import annotations
+import asyncio
 import re
 import uuid
 import logging
@@ -1319,7 +1320,25 @@ async def submit_prf(
     from app.tasks.prf_processing import process_prf_submission
     target_queue = "ems_critical" if queue_priority == "critical" else "ems_default"
     try:
-        process_prf_submission.apply_async(args=[str(prf.id)], queue=target_queue)
+        # OFFLOADED TO A THREAD. apply_async is kombu's SYNCHRONOUS publisher —
+        # called bare inside `async def` it blocks the uvicorn event loop, which
+        # stalls every other request in flight, not just this one. RabbitMQ's
+        # real failure mode under a memory or disk alarm is to HANG rather than
+        # refuse, and a hung broker was measured at 4.09s of total event-loop
+        # freeze against an 8.4ms baseline. With 4 gunicorn workers, roughly 4
+        # concurrent submits is zero API throughput for everybody — and crews
+        # then retry, which deepens it. This is the crew end-of-call submit, the
+        # single most concurrency-sensitive endpoint in the product (shift
+        # change puts many crews here at once).
+        #
+        # Same pattern already used correctly in api/metrics.py and
+        # api/providers.py. The except below is unchanged: it still reverts
+        # SUBMITTED -> DRAFT so the PRF stays editable and re-submittable.
+        await asyncio.to_thread(
+            process_prf_submission.apply_async,
+            args=[str(prf.id)],
+            queue=target_queue,
+        )
     except Exception as enqueue_err:
         logger.error(
             "PRF #%d: failed to enqueue billing task: %s", prf.prf_number, enqueue_err
@@ -1792,7 +1811,11 @@ async def email_prf_to_facility(
     # the task's already-sent guard (which protects against duplicates from
     # stale background retries) doesn't skip it.
     is_resend = bool(prf.facility_email_sent_at)
-    send_prf_facility_email.delay(str(prf.id), to, pdf_path, is_resend)
+    # Synchronous kombu publish — see the note at the submit endpoint. Offloaded
+    # so a hung broker cannot freeze the event loop for every other request.
+    await asyncio.to_thread(
+        send_prf_facility_email.delay, str(prf.id), to, pdf_path, is_resend
+    )
     return {"status": "queued", "recipient": to}
 
 

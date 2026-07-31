@@ -3,6 +3,7 @@ Documents API — Upload, list, and download PRF documents.
 Triggers async preprocessing and OCR extraction pipelines.
 """
 from __future__ import annotations
+import asyncio
 import uuid
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status, BackgroundTasks
@@ -177,7 +178,11 @@ async def upload_document(
     # Trigger async preprocessing task
     try:
         from app.tasks.preprocessing import preprocess_document
-        preprocess_document.delay(str(doc.id))
+        # Synchronous kombu publish — offloaded so a hung broker cannot freeze
+        # the event loop. Currently unreachable (OCR_INTAKE_ENABLED is False and
+        # the handlers 503 first), fixed anyway so turning intake back on does
+        # not silently reintroduce the stall. See api/digital_prf.py submit.
+        await asyncio.to_thread(preprocess_document.delay, str(doc.id))
     except Exception:
         # If Celery/RabbitMQ isn't running, the upload still succeeds — task can be retried later
         pass
@@ -383,7 +388,8 @@ async def reprocess_document_endpoint(
     await db.commit()
 
     # Trigger with engine preference
-    preprocess_document.delay(str(doc.id), engine=engine)
+    # Synchronous kombu publish — offloaded, see api/digital_prf.py submit.
+    await asyncio.to_thread(preprocess_document.delay, str(doc.id), engine=engine)
 
     return {"message": "Document queued for re-processing", "status": "pending"}
 
@@ -554,7 +560,11 @@ async def reprocess_pending_documents(
 
     triggered = []
     for doc in stuck_docs:
-        preprocess_document.delay(str(doc.id))
+        # Synchronous kombu publish — offloaded so a hung broker cannot freeze
+        # the event loop. Currently unreachable (OCR_INTAKE_ENABLED is False and
+        # the handlers 503 first), fixed anyway so turning intake back on does
+        # not silently reintroduce the stall. See api/digital_prf.py submit.
+        await asyncio.to_thread(preprocess_document.delay, str(doc.id))
         triggered.append(str(doc.id))
 
     return {

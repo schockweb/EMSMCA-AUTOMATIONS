@@ -89,9 +89,28 @@ class User(Base):
     )
 
     # Relationships
-    cases = relationship("Case", back_populates="assigned_provider", lazy="selectin")
-    documents = relationship("Document", foreign_keys="[Document.uploaded_by]", back_populates="uploaded_by_user", lazy="selectin")
-    audit_logs = relationship("AuditLog", back_populates="user", lazy="selectin")
+    #
+    # lazy="raise", NOT "selectin".
+    #
+    # These three were eager-loaded, and `get_current_user` does a bare
+    # `select(User)` — so EVERY authenticated request emitted four statements
+    # (users, then cases, documents and audit_logs) and materialised every row
+    # the account had ever touched, only to discard it. 114 `Depends()` call
+    # sites resolve to that dependency or to get_admin_or_crew_admin, which does
+    # the same. The cost grows with the account's history rather than staying
+    # constant: roughly 625ms per request at 1M rows and 3.1s at 5M.
+    #
+    # Nothing in the application reads user.cases / user.documents /
+    # user.audit_logs — verified by grep across app/ — so eager loading bought
+    # nothing at all.
+    #
+    # "raise" rather than "select" on purpose: if a future code path does touch
+    # one of these, it fails loudly in tests instead of silently reintroducing
+    # an N+1 on the hottest path in the system. Any legitimate future use should
+    # add an explicit selectinload() at that query.
+    cases = relationship("Case", back_populates="assigned_provider", lazy="raise")
+    documents = relationship("Document", foreign_keys="[Document.uploaded_by]", back_populates="uploaded_by_user", lazy="raise")
+    audit_logs = relationship("AuditLog", back_populates="user", lazy="raise")
 
     def __repr__(self):
         return f"<User {self.email} ({self.role.value})>"

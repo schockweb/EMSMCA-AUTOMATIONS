@@ -57,6 +57,20 @@ celery_app.conf.update(
     # Hard kill after 120s — prevents hung workers consuming a slot forever.
     # Soft limit at 60s — raises SoftTimeLimitExceeded so the task can
     # mark the PRF as FAILED gracefully before the hard kill.
+    # ── Bound how long a publish can take when the broker misbehaves ──
+    #
+    # RabbitMQ's real failure mode under a memory or disk alarm is to accept the
+    # TCP connection and then HANG, not to refuse it. With no timeout, a publish
+    # waits indefinitely. The submit path now offloads the publish to a thread so
+    # the event loop stays free either way, but an unbounded wait still parks a
+    # thread-pool slot and leaves the crew's request hanging with no answer.
+    #
+    # 2s to connect, one retry, then fail — the caller already handles a failed
+    # enqueue properly (api/digital_prf.py reverts SUBMITTED -> DRAFT and returns
+    # 503 so the crew can retry, rather than stranding the PRF).
+    broker_connection_timeout=2,
+    broker_connection_retry_on_startup=True,
+    broker_transport_options={"max_retries": 1},
     task_time_limit=120,
     task_soft_time_limit=60,
     worker_send_task_events=True,
