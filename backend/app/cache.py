@@ -133,7 +133,20 @@ async def delete_cache_pattern(pattern: str) -> int:
 
 async def invalidate_prf(prf_id: str) -> None:
     """Invalidate all cache entries for a specific PRF (called on every PATCH)."""
+    # The detail cache is written PER CREW MEMBER — digital_prf.py builds the key
+    # as `prf:detail:{prf_id}:crew:{crew.id}` so that two crew on the same call
+    # get their own entry. This helper deleted the un-suffixed
+    # `prf:detail:{prf_id}`, which is a key nothing ever writes, so the delete
+    # always matched zero entries and the detail cache was NEVER invalidated.
+    #
+    # A submitted PRF is cached for CACHE_TTL_PRF_SUBMITTED_SECONDS (3600), so
+    # an edit could keep serving the pre-edit clinical record for a full hour.
+    # That is a correctness problem with patient data, not a performance one.
+    #
+    # Pattern-delete both shapes: the crew-suffixed keys that are actually
+    # written, and the bare key in case an older entry is still resident.
     await delete_cache(f"prf:detail:{prf_id}")
+    await delete_cache_pattern(f"prf:detail:{prf_id}:*")
     # Also bust any PRF-list caches (they include summary rows for this PRF).
     # Use a broad pattern — list caches are cheap to rebuild.
     await delete_cache_pattern("prf:list:*")
