@@ -5,7 +5,7 @@ Computes DSO, rejection rates, AI confidence, revenue, and pipeline health.
 from __future__ import annotations
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
-from sqlalchemy import select, func, case as sql_case, extract
+from sqlalchemy import Integer, cast, select, func, case as sql_case, extract
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.claim import Claim, AdjudicationStatus
@@ -263,32 +263,52 @@ async def _rfi_metrics(db: AsyncSession) -> dict:
     }
 
 
+_TREND_DAYS = 7
+
+
+async def _daily_counts(db: AsyncSession, model, since: datetime, days: int) -> dict:
+    """Rows per day-window, as {day_index: count}, in ONE query.
+
+    The windows are NOT calendar days. `since` is "now minus seven days", so
+    each bucket runs from that time of day to the same time the next day, and
+    `date_trunc('day', …)` would silently shift every boundary. Bucketing on
+    the elapsed interval instead reproduces exactly the windows the previous
+    per-day loop used.
+    """
+    bucket = cast(
+        func.floor(func.extract("epoch", model.created_at - since) / 86400),
+        Integer,
+    ).label("bucket")
+
+    rows = (await db.execute(
+        select(bucket, func.count(model.id))
+        .where(
+            model.created_at >= since,
+            model.created_at < since + timedelta(days=days),
+        )
+        .group_by(bucket)
+    )).all()
+
+    return {int(b): int(n) for b, n in rows if b is not None}
+
+
 async def _weekly_trends(db: AsyncSession, since: datetime) -> dict:
-    """7-day trend data for charts."""
-    # Documents per day
+    """7-day trend data for charts.
+
+    Two queries, not fourteen. This ran a count for documents and a count for
+    claims inside a `for i in range(7)` loop, each awaited before the next
+    began — so the chart alone cost 14 sequential round-trips against a managed
+    database, holding its connection for the whole sequence.
+    """
+    doc_counts = await _daily_counts(db, Document, since, _TREND_DAYS)
+    claim_counts = await _daily_counts(db, Claim, since, _TREND_DAYS)
+
     doc_trend = []
     claim_trend = []
-
-    for i in range(7):
-        day_start = since + timedelta(days=i)
-        day_end = day_start + timedelta(days=1)
-
-        doc_count = (await db.execute(
-            select(func.count(Document.id)).where(
-                Document.created_at >= day_start,
-                Document.created_at < day_end,
-            )
-        )).scalar() or 0
-
-        claim_count = (await db.execute(
-            select(func.count(Claim.id)).where(
-                Claim.created_at >= day_start,
-                Claim.created_at < day_end,
-            )
-        )).scalar() or 0
-
-        doc_trend.append({"date": day_start.strftime("%Y-%m-%d"), "count": doc_count})
-        claim_trend.append({"date": day_start.strftime("%Y-%m-%d"), "count": claim_count})
+    for i in range(_TREND_DAYS):
+        label = (since + timedelta(days=i)).strftime("%Y-%m-%d")
+        doc_trend.append({"date": label, "count": doc_counts.get(i, 0)})
+        claim_trend.append({"date": label, "count": claim_counts.get(i, 0)})
 
     return {
         "documents_per_day": doc_trend,
