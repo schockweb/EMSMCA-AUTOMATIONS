@@ -94,11 +94,35 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
+      # A REAL broker, not memory://.
+      #
+      # The 2026-08-01 submit outage was a queue declared with the wrong
+      # dead-letter arguments — RabbitMQ answered 406 PRECONDITION_FAILED and
+      # no crew could submit a PRF. An in-memory transport accepts anything, so
+      # CI was structurally incapable of seeing it. See
+      # tests/test_broker_queue_declare.py.
+      rabbitmq:
+        image: rabbitmq:3.13-alpine
+        env:
+          RABBITMQ_DEFAULT_USER: test_rabbit
+          RABBITMQ_DEFAULT_PASS: test_rabbit_pass
+        ports:
+          - 5672:5672
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
     env:
       DATABASE_URL: "postgresql+asyncpg://test_user:test_pass@localhost:5432/test_ems"
       SECRET_KEY: "test-secret"
       ENCRYPTION_KEY: "test-encrypt-key-32chars0000000"
-      CELERY_BROKER_URL: "memory://"
+      CELERY_BROKER_URL: "amqp://test_rabbit:test_rabbit_pass@localhost:5672//"
+      # Under this flag an absent or unreachable broker FAILS the build instead
+      # of skipping. A suite that quietly skips its only real-broker test looks
+      # identical to one that passes it.
+      EMS_TESTS_REQUIRE_BROKER: "1"
       APP_ENV: "development"
       SEED_ADMIN_PASSWORD: "DevSeed!Change#2026"
 
@@ -123,6 +147,17 @@ jobs:
             echo "Waiting for Postgres..."
             sleep 2
           done
+
+      - name: Wait for RabbitMQ
+        run: |
+          for i in $(seq 1 30); do
+            if (echo > /dev/tcp/localhost/5672) 2>/dev/null; then
+              echo "RabbitMQ accepting connections"; exit 0
+            fi
+            echo "Waiting for RabbitMQ... ($i/30)"; sleep 2
+          done
+          echo "::error::RabbitMQ never came up — the broker tests would skip silently"
+          exit 1
 
       # No `-x`: one failure must not hide the state of every other test.
       - name: Run pytest

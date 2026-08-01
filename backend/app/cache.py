@@ -113,16 +113,56 @@ async def delete_cache(key: str) -> None:
         logger.debug("Cache DELETE error for key=%s: %s", key, exc)
 
 
+# How many keys to pull per SCAN round-trip, and how many to delete per call.
+# Big enough that a large keyspace does not cost thousands of round-trips,
+# small enough that one command never occupies Redis for long.
+_SCAN_BATCH = 500
+
+
+async def _unlink_batch(r, keys: list) -> int:
+    """Remove a batch of keys, preferring UNLINK.
+
+    UNLINK detaches the keys immediately and frees the memory on a background
+    thread; DEL frees inline. Old Redis (<4) has no UNLINK, hence the fallback.
+    """
+    try:
+        return await r.unlink(*keys)
+    except Exception:
+        return await r.delete(*keys)
+
+
 async def delete_cache_pattern(pattern: str) -> int:
-    """Delete all keys matching a pattern (e.g. 'prf:*'). Returns count deleted."""
+    """Delete all keys matching a pattern (e.g. 'prf:*'). Returns count deleted.
+
+    SCAN, not KEYS.
+
+    `KEYS` walks the ENTIRE keyspace in a single blocking pass, and Redis is
+    single-threaded — so for its whole duration every other client waits,
+    including the session lookups on the request path. This function is called
+    from `invalidate_prf`, which runs on every PRF PATCH: the crew autosave.
+    That is the hottest write in the product (each crew saves on every phase
+    change, and a shift change puts many crews there at once), so the one place
+    a full-keyspace block is least affordable was doing two of them per save.
+
+    SCAN walks the same keyspace in bounded slices, yielding to other clients
+    between them. It can return duplicates and can miss keys created mid-scan;
+    both are fine here — this is a cache invalidation, and anything created
+    during the scan is by definition newer than the write being invalidated.
+    """
     try:
         r = await _get_redis()
         if r is None:
             return 0
-        keys = await r.keys(pattern)
-        if keys:
-            return await r.delete(*keys)
-        return 0
+        deleted = 0
+        batch: list = []
+        async for key in r.scan_iter(match=pattern, count=_SCAN_BATCH):
+            batch.append(key)
+            if len(batch) >= _SCAN_BATCH:
+                deleted += await _unlink_batch(r, batch)
+                batch = []
+        if batch:
+            deleted += await _unlink_batch(r, batch)
+        return deleted
     except Exception as exc:
         logger.debug("Cache DELETE pattern error for pattern=%s: %s", pattern, exc)
         return 0
@@ -147,15 +187,19 @@ async def invalidate_prf(prf_id: str) -> None:
     # written, and the bare key in case an older entry is still resident.
     await delete_cache(f"prf:detail:{prf_id}")
     await delete_cache_pattern(f"prf:detail:{prf_id}:*")
-    # Also bust any PRF-list caches (they include summary rows for this PRF).
-    # Use a broad pattern — list caches are cheap to rebuild.
-    await delete_cache_pattern("prf:list:*")
+    # NOTE: there is deliberately no `prf:list:*` sweep here.
+    #
+    # There used to be, and nothing in the codebase has ever WRITTEN a
+    # `prf:list:` key — grep it. So the sweep could only ever match zero keys,
+    # while still paying a full pass over the keyspace on every autosave. It
+    # was pure cost, and the broad `*` made it the most expensive call of the
+    # three. If a PRF-list cache is introduced later, invalidate it here and
+    # scope the pattern to the provider — never a bare `*`.
 
 
 async def invalidate_provider(provider_id: str) -> None:
     """Invalidate cached provider config (called on provider settings save)."""
     await delete_cache(f"provider:{provider_id}")
-    await delete_cache_pattern(f"prf:list:{provider_id}:*")
 
 
 async def cache_health() -> dict:

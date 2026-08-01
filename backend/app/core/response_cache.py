@@ -44,6 +44,26 @@ NEVER_CACHE = {"/api/auth", "/api/metrics", "/api/geocode", "/api/member-lookup"
 # 30s-stale null would defeat its purpose.
 NEVER_CACHE_SUFFIXES = ("/case-status",)
 
+# ── Store bounds ────────────────────────────────────────────────────────────
+# The store was an unbounded dict. Entries expire logically, but expiry was
+# only ever ACTED ON in `_get_cached` — i.e. when the very same key is asked
+# for again. A key that is never requested a second time is never freed.
+#
+# The cache key includes a fingerprint of the caller's token, so every session
+# gets its own namespace, and crew tokens rotate every 12 hours. Each shift
+# change therefore mints a fresh set of keys for every cached prefix, and the
+# previous shift's entries — full JSON bodies: PRF lists, case lists, patient
+# names — stay resident in the worker for as long as the process lives. That
+# is both an unbounded memory leak and PHI retained far past its TTL.
+#
+# 2000 entries is generous for the working set (12 cacheable prefixes × active
+# sessions) while capping worst-case residency.
+MAX_ENTRIES = 2000
+
+# Sweep expired entries every N insertions. Amortises the cost instead of
+# walking the store on every request.
+SWEEP_EVERY_N_WRITES = 200
+
 
 class ResponseCacheMiddleware(BaseHTTPMiddleware):
     # Set on construction so logout can purge a session's entries. The cache is
@@ -54,6 +74,7 @@ class ResponseCacheMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         # store: cache_key → {"body", "headers", "expires", "path", "auth_fp"}
         self._store: dict[str, dict] = {}
+        self._writes_since_sweep = 0
         ResponseCacheMiddleware._instance = self
 
     # ── helpers ──────────────────────────────────────────────────────────────
@@ -116,8 +137,40 @@ class ResponseCacheMiddleware(BaseHTTPMiddleware):
             return None
         return entry
 
+    def _sweep_expired(self) -> int:
+        """Drop every entry whose TTL has passed. Returns the count."""
+        now = time.monotonic()
+        before = len(self._store)
+        self._store = {
+            k: v for k, v in self._store.items() if v["expires"] > now
+        }
+        return before - len(self._store)
+
+    def _enforce_bound(self) -> None:
+        """Keep the store under MAX_ENTRIES, evicting nearest-to-expiry first.
+
+        Runs only after a sweep has already removed everything expired, so this
+        evicts entries that are still live — the least valuable ones being those
+        about to expire anyway.
+        """
+        overflow = len(self._store) - MAX_ENTRIES
+        if overflow <= 0:
+            return
+        doomed = sorted(self._store.items(), key=lambda kv: kv[1]["expires"])[:overflow]
+        for k, _ in doomed:
+            self._store.pop(k, None)
+        logger.warning(
+            "Response cache hit its %d-entry bound; evicted %d entries. If this "
+            "recurs the working set has outgrown the cap.", MAX_ENTRIES, len(doomed),
+        )
+
     def _set_cached(self, key: str, body: bytes, headers: list, ttl: int,
                     path: str = "", auth_fp: str = "") -> None:
+        self._writes_since_sweep += 1
+        if self._writes_since_sweep >= SWEEP_EVERY_N_WRITES or len(self._store) >= MAX_ENTRIES:
+            self._writes_since_sweep = 0
+            self._sweep_expired()
+
         self._store[key] = {
             "body": body,
             "headers": headers,
@@ -125,6 +178,7 @@ class ResponseCacheMiddleware(BaseHTTPMiddleware):
             "path": path,       # stored so invalidation can match by prefix
             "auth_fp": auth_fp, # stored so logout can purge one session
         }
+        self._enforce_bound()
 
     # ── request handling ─────────────────────────────────────────────────────
 

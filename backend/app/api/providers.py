@@ -501,33 +501,48 @@ async def list_providers(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """List all service providers with crew and vehicle counts."""
+    """List all service providers with crew and vehicle counts.
+
+    The counts are four GROUPED queries, not four queries PER PROVIDER.
+
+    This loop used to await a crew count, a vehicle count, a PRF count and an
+    admin-email lookup inside the iteration — five round-trips per provider, run
+    strictly one after another because each is awaited before the next begins.
+    At the 105 tenants this platform is sized for that is 421 sequential
+    round-trips for one page load, and the page gets slower in direct
+    proportion to how successful the business is. It is now a fixed five
+    regardless of tenant count.
+    """
     result = await db.execute(select(ServiceProvider).order_by(ServiceProvider.name))
     providers = result.scalars().all()
 
+    def _counts(rows) -> dict:
+        return {pid: n for pid, n in rows}
+
+    crew_counts = _counts((await db.execute(
+        select(CrewMember.provider_id, func.count(CrewMember.id))
+        .group_by(CrewMember.provider_id)
+    )).all())
+    vehicle_counts = _counts((await db.execute(
+        select(Vehicle.provider_id, func.count(Vehicle.id))
+        .group_by(Vehicle.provider_id)
+    )).all())
+    prf_counts = _counts((await db.execute(
+        select(DigitalPRF.provider_id, func.count(DigitalPRF.id))
+        .group_by(DigitalPRF.provider_id)
+    )).all())
+    # min() rather than the old `.limit(1)`: that had no ORDER BY, so which
+    # address you got back was whatever the planner happened to return first
+    # and could change between calls for a provider with several admins.
+    admin_emails = dict((await db.execute(
+        select(CrewMember.provider_id, func.min(CrewMember.email))
+        .where(CrewMember.role == "admin")
+        .group_by(CrewMember.provider_id)
+    )).all())
+
     items = []
     for p in providers:
-        # Count crew
-        crew_count = await db.execute(
-            select(func.count(CrewMember.id)).where(CrewMember.provider_id == p.id)
-        )
-        # Count vehicles
-        vehicle_count = await db.execute(
-            select(func.count(Vehicle.id)).where(Vehicle.provider_id == p.id)
-        )
-        # Count PRFs
-        prf_count = await db.execute(
-            select(func.count(DigitalPRF.id)).where(DigitalPRF.provider_id == p.id)
-        )
-        
-        # Get Admin Email
-        admin_crew = await db.execute(
-            select(CrewMember.email).where(
-                CrewMember.provider_id == p.id,
-                CrewMember.role == "admin"
-            ).limit(1)
-        )
-        admin_email = admin_crew.scalar_one_or_none()
+        admin_email = admin_emails.get(p.id)
 
         items.append({
             "id": str(p.id),
@@ -546,9 +561,9 @@ async def list_providers(
             "smtp_service": p.smtp_service,
             "smtp_email": p.smtp_email,
             "smtp_configured": bool(p.smtp_email and p.smtp_password_encrypted),
-            "crew_count": crew_count.scalar() or 0,
-            "vehicle_count": vehicle_count.scalar() or 0,
-            "prf_count": prf_count.scalar() or 0,
+            "crew_count": crew_counts.get(p.id, 0),
+            "vehicle_count": vehicle_counts.get(p.id, 0),
+            "prf_count": prf_counts.get(p.id, 0),
             "created_at": p.created_at.isoformat() if p.created_at else None,
         })
 

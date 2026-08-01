@@ -25,6 +25,28 @@ os.environ["DATABASE_URL"] = os.getenv(
     os.getenv("DATABASE_URL", "postgresql+asyncpg://ems_admin:ems_secure_2024@localhost:5432/ems_claims"),
 )
 
+# ── 1b. BROKER ──────────────────────────────────────────────────────────────
+# Without this the suite inherits whatever CELERY_BROKER_URL the developer's
+# .env names — in practice `amqp://…@ems_rabbitmq`, a hostname that only
+# resolves inside Docker. The four submit-path tests then died on DNS
+# (getaddrinfo failed) on every local run.
+#
+# That was not cosmetic. Those four tests cover the endpoint that queues the
+# billing pipeline, and their being permanently red is precisely why the
+# 2026-08-01 submit outage reached crews: the publish path had no working
+# coverage anywhere, so nobody noticed it had stopped publishing. A red test
+# nobody can make green is the same as no test.
+#
+# kombu's in-memory transport accepts a publish and drops it, which is all
+# these tests need — they assert the ENDPOINT's contract (202, DRAFT→SUBMITTED,
+# idempotent replay, submitted PRFs are undeletable), not the broker's.
+#
+# It deliberately does NOT prove the queue is declared with the right
+# dead-letter arguments — an in-memory transport cannot, and that mismatch was
+# the actual outage. CI runs a real RabbitMQ and
+# tests/test_broker_queue_declare.py asserts it there.
+os.environ.setdefault("CELERY_BROKER_URL", "memory://")
+
 # ── 1a. PRODUCTION GUARD ────────────────────────────────────────────────────
 # On 2026-07-28 this suite was run inside the production backend container.
 # The fallback above picked up the container's own DATABASE_URL, so the tests
