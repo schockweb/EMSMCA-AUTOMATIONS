@@ -12,6 +12,7 @@ import { useParams, useNavigate } from 'react-router';
 import axios from 'axios';
 import { getCrewToken, getCrewProfile, ensureProviderSession, CREW_SESSION_KEYS } from '../../utils/crewSession';
 import { inferResumePhase } from '../../utils/prfResumePhase';
+import { crewMemberById } from './localCrewRoster';
 import {
   buildSavePayload as buildPrfSavePayload,
   classifySaveError,
@@ -4691,19 +4692,19 @@ export default function DigitalPRFForm() {
     const data = prf.form_data || {};
 
     // ── Auto-prefill assessor / manager from authenticated crew session ──
-    const crew2Profile = (() => {
-      try { return JSON.parse(localStorage.getItem(CREW_SESSION_KEYS.partner) || '{}'); }
-      catch { return {}; }
-    })();
     const crew1FromMeta = prf.crew_member_1 || null;
-    const crew2FromMeta = prf.crew_member_2 || null;
+    // The local fallback resolves the id recorded ON THIS PRF against the shift
+    // roster. It used to read `crew2_profile.full_name` directly — a key the
+    // dashboard never writes (it stores `name`) — so it was undefined every
+    // time and the fallback silently did nothing.
+    const crew2FromMeta = prf.crew_member_2 || crewMemberById(prf.crew_member_2_id);
     const lead = crew1FromMeta?.full_name || profile.name || '';
     // HPCSA category fallback ('AEA' = Ambulance Emergency Assistant) — matches
     // the backend default in `CrewMember.qualification`. Only used when no crew
     // profile is loaded yet, which shouldn't happen for an authenticated session.
     const leadQ = crew1FromMeta?.qualification || profile.qualification || 'AEA';
-    const partner = crew2FromMeta?.full_name || crew2Profile.full_name || '';
-    const partnerQ = crew2FromMeta?.qualification || crew2Profile.qualification || 'AEA';
+    const partner = crew2FromMeta?.full_name || '';
+    const partnerQ = crew2FromMeta?.qualification || 'AEA';
     if (!data.assessed_by && lead) data.assessed_by = lead;
     if (!data.assessor_qualifications && leadQ) data.assessor_qualifications = leadQ;
     if (!data.managed_by && partner) data.managed_by = partner;
@@ -5814,10 +5815,24 @@ export default function DigitalPRFForm() {
     setPhase(target);
   };
 
+  // Crew 2 on this PRF.
+  //
+  // `prfMeta` is the SERVER row, and a PRF started with no signal has no server
+  // row to fetch — so offline this was simply empty. That silently dropped the
+  // second practitioner out of the end-of-call sign-off list AND out of the
+  // treating / IV / medication picker, on a document that names them. Reported
+  // from the field: the second PRF captured offline "doesn't pick up the 2nd
+  // crew member and doesn't ask for the 2nd crew member signature".
+  //
+  // The fallback resolves `crew2Id` — recorded on this PRF when it was created
+  // — against the roster stored at shift start. Matched by id, so a crew swap
+  // mid-shift can never retro-attach the wrong practitioner to an earlier call.
+  const crew2Member = prfMeta?.crew_member_2 || crewMemberById(crew2Id);
+
   // Crew members on this PRF, used for the submit sign-off list. Crew 1 is the
   // logged-in crew; crew 2 + any extra crew come from the PRF record.
   const getCrewSignList = (): Array<{ key: string; name: string; sub: string }> => {
-    const c2 = prfMeta?.crew_member_2 || null;
+    const c2 = crew2Member;
     const sub = (q?: string, h?: string) => [q, h].filter(Boolean).join(' · ');
     const list = [{ key: 'c1', name: profile?.name || 'Crew 1', sub: sub(profile?.qualification, profile?.hpcsa_number) }];
     if (c2) list.push({ key: 'c2', name: c2.full_name || 'Crew 2', sub: sub(c2.qualification, c2.hpcsa_number) });
@@ -8829,7 +8844,9 @@ export default function DigitalPRFForm() {
 
   // ── Phase 6: COMPLETE ─────────────────────────────────────────────────────
   const P6 = () => {
-    const crew2 = prfMeta.crew_member_2 || null;
+    // Same local fallback as the sign-off list — this is the panel the crew
+    // reads to confirm who is on the call, so it must not go blank offline.
+    const crew2 = crew2Member;
     return (
       <>
         <SHdr t="Completion Times" />
@@ -10103,7 +10120,11 @@ export default function DigitalPRFForm() {
             qualification: prfMeta.crew_member_1?.qualification || profile.qualification || '',
             hpcsa: prfMeta.crew_member_1?.hpcsa_number || profile.hpcsa_number || '',
           });
-          const c2 = prfMeta.crew_member_2;
+          // Falls back to the device's own shift roster when there is no server
+          // row yet (PRF captured offline) — otherwise no procedure on an
+          // offline call could be attributed to Crew 2, and HPCSA scope
+          // enforcement keys off exactly that attribution.
+          const c2 = crew2Member;
           if (c2?.full_name) opts.push({
             id: 'crew2', tag: 'Crew 2',
             name: c2.full_name,

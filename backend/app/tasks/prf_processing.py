@@ -240,6 +240,34 @@ def process_prf_submission(self, prf_id: str):
                     dependant_code=_fit("dependent_number", fd.get("dependent_number"), 5),
                     dispatch_type=dispatch_type,
                     referring_doctor_pr=_fit("referring_doctor", fd.get("referring_doctor"), 20),
+                    created_at=prf.created_at or now,
+                    # WHEN THE CALL WAS CAPTURED, not when this task got round to
+                    # inserting the row.
+                    #
+                    # The admin case list is ordered by Case.created_at. Left to
+                    # default to now(), that is the moment the billing worker ran
+                    # — and for a PRF captured offline, that is simply whenever
+                    # its outbox entry happened to drain. Two calls captured back
+                    # to back with no signal, #129 then #130, arrived as:
+                    #
+                    #   prf  prf.created_at  submitted_at  case.created_at
+                    #   129  13:38:53        13:41:54      13:41:54
+                    #   130  13:41:28        13:41:28      13:41:28
+                    #
+                    # #129 was captured FIRST but synced LAST (its submit needed
+                    # a retry while #130's went through first time), so it sorted
+                    # above #130 and the office read the numbering as running
+                    # backwards. Nothing was mis-numbered; the list was ordered
+                    # by network luck.
+                    #
+                    # The PRF's own created_at is the capture order — prf_number
+                    # is assigned from it, a per-provider counter — so copying it
+                    # here puts each provider's numbers in sequence while still
+                    # interleaving providers chronologically. It also keeps the
+                    # sort on an indexed column: ordering by a correlated
+                    # subquery over digital_prfs instead measured 460ms vs
+                    # 0.03ms at 200k cases, and grows linearly.
+
                 )
                 if dropped:
                     logger.warning(

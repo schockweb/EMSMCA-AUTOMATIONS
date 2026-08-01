@@ -612,6 +612,28 @@ export default function CrewDashboard() {
         seededFd.supervising_practitioner_qualification = String(createBody.supervising_practitioner_qualification).trim().toUpperCase();
       }
 
+      // Crew 2 + any third/fourth crew member. Online these are filled in by the
+      // form's server load; offline that load cannot run, so without seeding
+      // them here an offline PRF carried NO record of anyone but Crew 1 —
+      // blank "Managed By", and extra crew missing from the sign-off list.
+      // Mirrors exactly what DigitalPRFForm's fetchPrfOnce writes.
+      const crew2Profile: any = (() => {
+        try { return JSON.parse(localStorage.getItem(CREW_SESSION_KEYS.partner) || 'null'); }
+        catch { return null; }
+      })();
+      const partnerName = crew2Profile?.full_name || crew2Profile?.name || '';
+      if (partnerName && crew2Profile?.id === createBody.crew_member_2_id) {
+        seededFd.managed_by = partnerName;
+        seededFd.manager_qualifications = crew2Profile.qualification || 'AEA';
+      }
+      const extraCrews: any[] = (() => {
+        try {
+          const raw = JSON.parse(localStorage.getItem(CREW_SESSION_KEYS.extraCrew) || 'null');
+          return Array.isArray(raw) ? raw : [];
+        } catch { return []; }
+      })();
+      if (extraCrews.length > 1) seededFd.extra_crew = extraCrews.slice(1);
+
       localStorage.setItem(`prf-draft:${newId}`, JSON.stringify({
         fd: seededFd,
         vitals: [], ivRows: [], medRows: [],
