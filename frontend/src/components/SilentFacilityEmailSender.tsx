@@ -33,11 +33,13 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { MemoryRouter, Routes, Route } from 'react-router';
+import axios from 'axios';
 import PRFView from '../pages/PRFView';
 import {
   getPendingEmails,
   clearPendingEmail,
   recordAttempt,
+  attachCaseId,
   isExhausted,
   type PendingEmail,
 } from '../services/pendingFacilityEmail';
@@ -55,6 +57,38 @@ const POLL_MS = 30_000;
 /** A single attempt may not run forever — html2canvas can stall on a
  *  backgrounded tab, and a wedged attempt would block every later one. */
 const ATTEMPT_TIMEOUT_MS = 120_000;
+
+/**
+ * Attach the Case id to any pending email still missing one.
+ *
+ * The outbox tries once at sync time, but the Case is created by the
+ * asynchronous billing pipeline — so that single look is often simply too
+ * early, and the outbox entry is deleted straight afterwards. Without a second
+ * chance here, a PRF whose Case took more than a moment to appear would sit
+ * pending forever and the hospital would never get the handover document.
+ *
+ * /case-status is the only endpoint carrying case_id, and it is deliberately
+ * exempt from the response cache so it cannot answer with a stale null.
+ */
+async function resolveMissingCaseIds(): Promise<void> {
+  const token = getCrewToken();
+  if (!token) return;
+  const headers = { Authorization: `Bearer ${token}` };
+
+  for (const entry of getPendingEmails()) {
+    if (entry.caseId || isExhausted(entry)) continue;
+    try {
+      const res = await axios.get(
+        `/api/digital-prf/${entry.prfId}/case-status`, { headers, timeout: 8000 },
+      );
+      if (res.data?.case_id) attachCaseId(entry.prfId, res.data.case_id);
+    } catch {
+      // Not billed yet, or no signal. Try again on the next tick — this must
+      // never count as a send attempt, or a slow pipeline would exhaust the
+      // retry budget before a single send was even possible.
+    }
+  }
+}
 
 function nextSendable(): PendingEmail | null {
   const providerNow = (() => {
@@ -95,10 +129,18 @@ export default function SilentFacilityEmailSender() {
   useEffect(() => {
     let cancelled = false;
 
-    const tick = () => {
+    const tick = async () => {
       if (cancelled || busyRef.current) return;
       if (!navigator.onLine || shouldSkipNetwork()) return;
       if (!getCrewToken()) return;          // nobody logged in to send as
+
+      // Anything still waiting on the billing pipeline gets another chance at
+      // its Case id before we decide there is nothing to send.
+      if (getPendingEmails().some((e) => !e.caseId && !isExhausted(e))) {
+        await resolveMissingCaseIds();
+        if (cancelled || busyRef.current) return;
+      }
+
       const next = nextSendable();
       if (!next) return;
 
@@ -107,11 +149,15 @@ export default function SilentFacilityEmailSender() {
       timeoutRef.current = setTimeout(() => finish(next.prfId, 'timeout'), ATTEMPT_TIMEOUT_MS);
     };
 
-    const startTimer = setTimeout(tick, START_DELAY_MS);
-    const poll = setInterval(tick, POLL_MS);
+    // tick is async now (it may resolve Case ids first); nothing awaits it, so
+    // swallow rejections rather than surfacing an unhandled promise.
+    const run = () => { void tick().catch(() => {}); };
+
+    const startTimer = setTimeout(run, START_DELAY_MS);
+    const poll = setInterval(run, POLL_MS);
     // Reconnecting is the whole trigger for this feature; give the outbox its
     // head start, then look.
-    const onOnline = () => setTimeout(tick, START_DELAY_MS);
+    const onOnline = () => setTimeout(run, START_DELAY_MS);
     window.addEventListener('online', onOnline);
 
     return () => {

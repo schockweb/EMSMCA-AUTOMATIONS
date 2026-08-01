@@ -85,10 +85,25 @@ async function noteSubmittedCase(
 
     let caseId = caseIdFromSubmit;
     if (!caseId) {
-      // One cheap look. The pipeline typically takes a second or two; if it is
-      // not ready the next sync pass or the dashboard picks it up.
+      // /case-status, NOT /{prfId}.
+      //
+      // This read used to be `GET /api/digital-prf/{prfId}` and take
+      // `res.data.case_id` — a key that response has never contained (it
+      // returns case_NUMBER). So it resolved undefined every single time,
+      // attachCaseId never fired, and because markSynced then deletes the
+      // outbox entry there was nothing left for a later pass to retry. Every
+      // offline-confirmed facility email silently never sent. The online path
+      // was unaffected — it polls /case-status directly — which is why it went
+      // unnoticed.
+      //
+      // /case-status is the one endpoint that carries case_id, and it is
+      // deliberately exempt from the response cache (NEVER_CACHE_SUFFIXES), so
+      // it cannot serve a stale null. Do NOT "fix" this by adding case_id to
+      // the detail response: that one IS cached for an hour once submitted.
       try {
-        const res = await axios.get(`/api/digital-prf/${prfId}`, { headers, timeout: 8000 });
+        const res = await axios.get(
+          `/api/digital-prf/${prfId}/case-status`, { headers, timeout: 8000 },
+        );
         caseId = res.data?.case_id || null;
       } catch {
         return;

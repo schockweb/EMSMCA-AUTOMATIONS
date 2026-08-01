@@ -595,3 +595,80 @@ describe('syncEngine — ordering', () => {
     expect(await getCount()).toBe(0);
   });
 });
+
+/**
+ * Resolving the Case id for an offline-confirmed facility email.
+ *
+ * The outbox looked this up with `GET /api/digital-prf/{prfId}` and read
+ * `case_id` off it — a key that response has NEVER contained (it returns
+ * case_NUMBER). So it resolved undefined every single time, attachCaseId never
+ * fired, and markSynced then deleted the outbox entry, leaving nothing to
+ * retry. Every facility email confirmed offline silently never sent, and
+ * nothing anywhere recorded that one was owed.
+ *
+ * The online path polls /case-status directly, which is why this went unseen.
+ */
+describe('facility-email Case id after an offline submit', () => {
+  const EMAIL_PRF = '99999999-8888-7777-6666-555555555555';
+
+  beforeEach(async () => {
+    await clearAll();
+    localStorage.clear();
+    setOnline(true);
+    vi.clearAllMocks();
+    mockToken.mockReturnValue('crew-token-abc');
+  });
+
+  it('asks /case-status, the only endpoint that returns case_id', async () => {
+    const { rememberPendingEmail, getPendingEmail, __clearAllPendingEmails } =
+      await import('../services/pendingFacilityEmail');
+    __clearAllPendingEmails();
+    rememberPendingEmail(EMAIL_PRF, 'dr@hospital.co.za', 'provider-a');
+
+    mockAxios.patch.mockResolvedValue({ data: {} });
+    // Submit answers WITHOUT a case_id — the real 202 shape, because the
+    // billing pipeline has not run yet.
+    mockAxios.post.mockResolvedValue({
+      data: { status: 'submitted', prf_number: 42, case_number: 'X-2026-01-000042' },
+    });
+    (axios as any).get = vi.fn(async (url: string) => {
+      if (url.endsWith('/case-status')) return { data: { case_id: 'the-case-id' } };
+      // The detail endpoint: has case_number, never case_id.
+      return { data: { id: EMAIL_PRF, case_number: 'X-2026-01-000042' } };
+    });
+
+    await queueSubmit(EMAIL_PRF, { form_data: {} });
+    await startSync();
+
+    const urls = ((axios as any).get as ReturnType<typeof vi.fn>).mock.calls.map(c => c[0]);
+    expect(
+      urls.some((u: string) => u.includes('/case-status')),
+      `no /case-status lookup was made; it asked: ${JSON.stringify(urls)}`,
+    ).toBe(true);
+
+    expect(
+      getPendingEmail(EMAIL_PRF)?.caseId,
+      'the Case id was never attached, so the hospital never gets the PRF',
+    ).toBe('the-case-id');
+  });
+
+  it('leaves the record pending — not deleted — when the Case is not ready yet', async () => {
+    // The Case is created asynchronously, so one lookup is routinely too early.
+    const { rememberPendingEmail, getPendingEmail, __clearAllPendingEmails } =
+      await import('../services/pendingFacilityEmail');
+    __clearAllPendingEmails();
+    rememberPendingEmail(EMAIL_PRF, 'dr@hospital.co.za', 'provider-a');
+
+    mockAxios.patch.mockResolvedValue({ data: {} });
+    mockAxios.post.mockResolvedValue({ data: { status: 'submitted' } });
+    (axios as any).get = vi.fn(async () => ({ data: { case_id: null } }));
+
+    await queueSubmit(EMAIL_PRF, { form_data: {} });
+    await startSync();
+
+    const pending = getPendingEmail(EMAIL_PRF);
+    expect(pending, 'an owed handover document must never be dropped').toBeDefined();
+    expect(pending?.caseId).toBeFalsy();
+    expect(pending?.attempts ?? 0, 'a slow pipeline must not burn a send attempt').toBe(0);
+  });
+});
