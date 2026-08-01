@@ -62,6 +62,44 @@ async function recreateAndSubmit(
   await axios.post(`/api/digital-prf/${newId}/submit`, null, { headers, timeout: 15000 });
 }
 
+/**
+ * Link a just-synced PRF to its Case, so a facility email confirmed offline can
+ * be completed.
+ *
+ * The email endpoint is keyed by CASE id, but the Case is created by the
+ * asynchronous billing pipeline — so the submit response usually has none yet.
+ * Rather than block the outbox drain polling for it, this records what it can
+ * and returns; the pending-email record is resolved on a later pass or by the
+ * dashboard. A failure here must NEVER fail the sync: the PRF itself is safely
+ * on the server by this point, and the email has a server-side backstop.
+ */
+async function noteSubmittedCase(
+  prfId: string,
+  caseIdFromSubmit: string | null,
+  headers: Record<string, string>,
+): Promise<void> {
+  try {
+    const { getPendingEmail, attachCaseId } = await import('./pendingFacilityEmail');
+    const pending = getPendingEmail(prfId);
+    if (!pending || pending.caseId) return;
+
+    let caseId = caseIdFromSubmit;
+    if (!caseId) {
+      // One cheap look. The pipeline typically takes a second or two; if it is
+      // not ready the next sync pass or the dashboard picks it up.
+      try {
+        const res = await axios.get(`/api/digital-prf/${prfId}`, { headers, timeout: 8000 });
+        caseId = res.data?.case_id || null;
+      } catch {
+        return;
+      }
+    }
+    if (caseId) attachCaseId(prfId, caseId);
+  } catch {
+    /* pending-email bookkeeping must never break the outbox drain */
+  }
+}
+
 export async function startSync() {
   if (syncing || !navigator.onLine) return;
   syncing = true;
@@ -165,7 +203,15 @@ export async function startSync() {
             }
             // Idempotent: returns 200 with status processed/submitted even on
             // replay, so an already-submitted PRF clears cleanly here.
-            await axios.post(`/api/digital-prf/${prfId}/submit`, null, { headers, timeout: 15000 });
+            const subRes = await axios.post(
+              `/api/digital-prf/${prfId}/submit`, null, { headers, timeout: 15000 },
+            );
+            // If the crew confirmed a facility address while offline, the send
+            // needs a Case id — the email endpoint is keyed by case, not PRF.
+            // The billing pipeline creates the Case asynchronously, so it is
+            // often absent on this first response; noteSubmittedCase resolves
+            // it later rather than blocking the drain on a poll.
+            await noteSubmittedCase(prfId, subRes.data?.case_id || null, headers);
           } catch (subErr: any) {
             // "PRF not found": the draft was swept server-side. Re-create it
             // from the queued payload and submit the fresh row rather than
