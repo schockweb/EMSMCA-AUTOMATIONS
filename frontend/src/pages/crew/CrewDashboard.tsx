@@ -13,6 +13,8 @@ import { useNavigate, useParams } from 'react-router';
 import axios from 'axios';
 import { grantHeaders } from '../../utils/portalGrant';
 import { useScrollLock } from '../../hooks/useScrollLock';
+import { shouldSkipNetwork, reportSuccess, reportFailure } from '../../services/serverHealth';
+import { cacheCrewRoster, getCachedCrewRoster, cacheVehicles, getCachedVehicles } from '../../services/offlineShiftCache';
 import {
   getCrewToken,
   getCrewProfile,
@@ -196,14 +198,54 @@ export default function CrewDashboard() {
 
   useEffect(() => {
     setVehiclesError(null);
+
+    // OFFLINE-FIRST. Both rosters are cached on every successful load and
+    // served from cache when the portal cannot be reached, so a crew arriving
+    // at shift change during an outage still gets a usable name and vehicle
+    // picker. Without this the start-shift screen is empty and the crew cannot
+    // begin at all — everything AFTER this point (create, edit, save, submit,
+    // sync) already worked offline; the door was the only broken part.
+    //
+    // `shouldSkipNetwork()` covers the case navigator.onLine misses: full
+    // signal, unreachable server. Going straight to cache there avoids paying
+    // the service worker's 10s NetworkFirst timeout per request.
+    if (shouldSkipNetwork()) {
+      const cachedV = getCachedVehicles(providerSlug);
+      const cachedC = getCachedCrewRoster(providerSlug);
+      if (cachedV) setVehicles(cachedV);
+      if (cachedC) setCrewRoster(cachedC as any);
+      setVehiclesError(
+        cachedV
+          ? null
+          : 'Offline, and no vehicle list has been saved on this device yet.',
+      );
+      setVehiclesLoading(false);
+      return;
+    }
+
     axios.get(`/api/providers/${providerSlug}/public-vehicles`)
-      .then(res => { const d = res.data; setVehicles(Array.isArray(d) ? d : []); })
+      .then(res => {
+        const d = res.data;
+        const list = Array.isArray(d) ? d : [];
+        setVehicles(list);
+        reportSuccess();
+        cacheVehicles(providerSlug, list);
+      })
       .catch(err => {
         // Distinguish "couldn't reach server" from "no vehicles exist".
         // 404 means the provider slug is wrong; anything else (network
         // error, 500, etc.) means the API is down or unreachable.
         if (err?.response?.status === 404) {
           setVehiclesError('Provider not found. Check the URL.');
+          return;
+        }
+        reportFailure(err);
+        // Unreachable — fall back to whatever this device last saw rather than
+        // showing an empty picker.
+        const cached = getCachedVehicles(providerSlug);
+        if (cached && cached.length) {
+          setVehicles(cached);
+          setVehiclesError(null);
         } else {
           setVehiclesError('Could not reach the server. Check your connection and try again.');
         }
@@ -214,8 +256,18 @@ export default function CrewDashboard() {
     // a blocker — the start-shift screen still works if the crew types
     // the HPCSA number directly into the underlying value.
     axios.get(`/api/providers/${providerSlug}/public-crew`, { headers: grantHeaders(providerSlug) })
-      .then(res => { const d = res.data; setCrewRoster(Array.isArray(d) ? d : []); })
-      .catch(() => { /* silent — dropdown just shows empty list */ });
+      .then(res => {
+        const d = res.data;
+        const list = Array.isArray(d) ? d : [];
+        setCrewRoster(list);
+        reportSuccess();
+        cacheCrewRoster(providerSlug, list as any);
+      })
+      .catch((err) => {
+        reportFailure(err);
+        const cached = getCachedCrewRoster(providerSlug);
+        if (cached && cached.length) setCrewRoster(cached as any);
+      });
 
     if (token) loadDrafts(token);
   }, [providerSlug, token]);

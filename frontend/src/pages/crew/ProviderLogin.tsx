@@ -18,6 +18,8 @@ import StartShiftWizard from './StartShiftWizard';
 import type { CrewOption, VehicleOption } from './StartShiftWizard';
 import { saveAdminSession, ensureProviderSession } from '../../utils/crewSession';
 import { getPortalGrant, savePortalGrant, grantHeaders } from '../../utils/portalGrant';
+import { reportSuccess, reportFailure } from '../../services/serverHealth';
+import { cacheCrewRoster, getCachedCrewRoster } from '../../services/offlineShiftCache';
 
 interface ProviderInfo {
   name: string;
@@ -104,11 +106,24 @@ export default function ProviderLogin() {
     axios.get(`/api/providers/${providerSlug}/public-crew`, cfg)
       .then(res => {
         const data = res.data;
-        setCrewList(Array.isArray(data) ? data : []);
+        const list = Array.isArray(data) ? data : [];
+        setCrewList(list);
+        reportSuccess();
+        // Cache so this device can still present the picker during an outage.
+        cacheCrewRoster(providerSlug, list as any);
       })
       .catch(err => {
-        // Grant expired or rejected — fall back to the unlock prompt.
-        if (err?.response?.status === 401 || err?.response?.status === 403) setUnlocked(false);
+        // Grant expired or rejected — fall back to the unlock prompt. This is
+        // an ANSWER from the server, so it is authoritative and must still be
+        // honoured; only a transport failure means "unreachable".
+        if (err?.response?.status === 401 || err?.response?.status === 403) {
+          setUnlocked(false);
+          return;
+        }
+        reportFailure(err);
+        // Unreachable — show what this device last saw rather than an empty list.
+        const cached = getCachedCrewRoster(providerSlug);
+        if (cached && cached.length) setCrewList(cached as any);
       });
     axios.get(`/api/providers/${providerSlug}/public-vehicles`, cfg)
       .then(res => {
