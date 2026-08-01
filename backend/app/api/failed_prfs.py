@@ -16,6 +16,7 @@ from app.database import get_db
 from app.models.digital_prf import DigitalPRF, PRFStatus
 from app.models.user import UserRole
 from app.utils.security import get_current_user, require_permission, require_role
+from app.tasks.publish import publish_task, publish_delay
 
 logger = logging.getLogger("ems.failed_prfs")
 
@@ -429,7 +430,7 @@ async def correct_failed_prf(
     try:
         # Synchronous kombu publish — offloaded so a hung broker cannot freeze
         # the event loop for every other request. See api/digital_prf.py submit.
-        await asyncio.to_thread(process_prf_submission.delay, str(corrected_prf.id))
+        await publish_delay(process_prf_submission, str(corrected_prf.id))
     except Exception as enqueue_err:
         logger.error(
             "PRF %s corrected → new PRF %s SAVED but could not be enqueued: %s",
@@ -513,7 +514,7 @@ async def reprocess_failed_prf(
     # Requeue for processing. Synchronous kombu publish — offloaded so a hung
     # broker cannot freeze the event loop. See api/digital_prf.py submit.
     from app.tasks.prf_processing import process_prf_submission
-    await asyncio.to_thread(process_prf_submission.delay, str(prf.id))
+    await publish_delay(process_prf_submission, str(prf.id))
 
     logger.info("PRF %s requeued for reprocessing", prf_id)
     return {"message": "PRF requeued for reprocessing", "prf_id": str(prf.id)}

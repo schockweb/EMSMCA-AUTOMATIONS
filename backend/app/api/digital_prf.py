@@ -27,6 +27,7 @@ from app.models.user import User
 from app.api.crew_auth import get_current_crew
 from app.utils.security import get_current_user
 from app.utils.hpcsa import to_tier as _qual_to_tier
+from app.tasks.publish import publish_task, publish_delay
 
 logger = logging.getLogger("ems.digital_prf")
 
@@ -1334,10 +1335,8 @@ async def submit_prf(
         # Same pattern already used correctly in api/metrics.py and
         # api/providers.py. The except below is unchanged: it still reverts
         # SUBMITTED -> DRAFT so the PRF stays editable and re-submittable.
-        await asyncio.to_thread(
-            process_prf_submission.apply_async,
-            args=[str(prf.id)],
-            queue=target_queue,
+        await publish_task(
+            process_prf_submission, args=[str(prf.id)], queue=target_queue
         )
     except Exception as enqueue_err:
         logger.error(
@@ -1813,9 +1812,7 @@ async def email_prf_to_facility(
     is_resend = bool(prf.facility_email_sent_at)
     # Synchronous kombu publish — see the note at the submit endpoint. Offloaded
     # so a hung broker cannot freeze the event loop for every other request.
-    await asyncio.to_thread(
-        send_prf_facility_email.delay, str(prf.id), to, pdf_path, is_resend
-    )
+    await publish_delay(send_prf_facility_email, str(prf.id), to, pdf_path, is_resend)
     return {"status": "queued", "recipient": to}
 
 

@@ -18,6 +18,7 @@ from app.schemas.document import DocumentResponse, DocumentListResponse
 from app.utils.security import get_current_user, require_permission, require_role
 from app.utils.storage import save_upload, get_full_path, file_exists
 from app.config import get_settings
+from app.tasks.publish import publish_task, publish_delay
 
 settings = get_settings()
 
@@ -182,7 +183,7 @@ async def upload_document(
         # the event loop. Currently unreachable (OCR_INTAKE_ENABLED is False and
         # the handlers 503 first), fixed anyway so turning intake back on does
         # not silently reintroduce the stall. See api/digital_prf.py submit.
-        await asyncio.to_thread(preprocess_document.delay, str(doc.id))
+        await publish_delay(preprocess_document, str(doc.id))
     except Exception:
         # If Celery/RabbitMQ isn't running, the upload still succeeds — task can be retried later
         pass
@@ -389,7 +390,7 @@ async def reprocess_document_endpoint(
 
     # Trigger with engine preference
     # Synchronous kombu publish — offloaded, see api/digital_prf.py submit.
-    await asyncio.to_thread(preprocess_document.delay, str(doc.id), engine=engine)
+    await publish_task(preprocess_document, args=[str(doc.id)], kwargs={'engine': engine})
 
     return {"message": "Document queued for re-processing", "status": "pending"}
 
@@ -564,7 +565,7 @@ async def reprocess_pending_documents(
         # the event loop. Currently unreachable (OCR_INTAKE_ENABLED is False and
         # the handlers 503 first), fixed anyway so turning intake back on does
         # not silently reintroduce the stall. See api/digital_prf.py submit.
-        await asyncio.to_thread(preprocess_document.delay, str(doc.id))
+        await publish_delay(preprocess_document, str(doc.id))
         triggered.append(str(doc.id))
 
     return {
