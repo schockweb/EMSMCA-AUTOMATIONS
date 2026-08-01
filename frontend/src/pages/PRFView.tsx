@@ -325,7 +325,21 @@ const zoomBtn = (off: boolean): React.CSSProperties => ({
 });
 
 // ── Component ────────────────────────────────────────────────────────
-export default function PRFView() {
+export interface PRFViewProps {
+  /**
+   * Render off-screen purely to send the facility email, with no crew watching.
+   *
+   * Used by SilentFacilityEmailSender after a PRF captured offline has synced.
+   * In this mode the page must not touch anything the crew can perceive — see
+   * the viewport-meta guard, which would otherwise re-enable iOS focus-zoom on
+   * a form they are typing into mid-call.
+   */
+  silentMode?: boolean;
+  /** Called once, with why the silent attempt finished. */
+  onSilentDone?: (outcome: 'sent' | 'error' | 'no-smtp' | 'no-recipient' | 'already-sent') => void;
+}
+
+export default function PRFView({ silentMode = false, onSilentDone }: PRFViewProps = {}) {
   const { providerSlug, caseId } = useParams<{ providerSlug: string; caseId: string }>();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -534,13 +548,50 @@ export default function PRFView() {
   // first thing anyone tries on one. Relax the meta while the viewer is
   // mounted and restore it on the way out, leaving every form page untouched.
   useEffect(() => {
+    // NOT in silent mode. The silent sender mounts this page off-screen while
+    // the crew is on some other page — usually the PRF form, mid-call.
+    // Relaxing the app-wide viewport meta from there would re-enable iOS
+    // focus-zoom on a form the crew is actively typing into, which is exactly
+    // what maximum-scale=1.0 exists to prevent. The hidden copy is never
+    // looked at, so it has no business touching the viewport at all.
+    if (silentMode) return;
     const meta = document.querySelector('meta[name="viewport"]');
     if (!meta) return;
     const original = meta.getAttribute('content') || '';
     meta.setAttribute('content',
       'width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes, viewport-fit=cover');
     return () => { meta.setAttribute('content', original); };
-  }, []);
+  }, [silentMode]);
+
+  // ── Silent auto-send ──────────────────────────────────────────────────────
+  //
+  // Mounted off-screen by SilentFacilityEmailSender after an offline PRF has
+  // synced. `?send=1` alone only GATES the UI (longer delivery poll, no Skip);
+  // it never actually fired the send — the crew still had to tap. Offline there
+  // is no crew watching, so the send has to fire itself.
+  //
+  // Waits for the PRF to load and for a valid recipient, then calls exactly the
+  // same handler the button calls, so there is one send path rather than two.
+  const silentFiredRef = useRef(false);
+  useEffect(() => {
+    if (!silentMode || silentFiredRef.current) return;
+    if (!prf || sendStatus === 'sending') return;
+    if (!prf.smtp_configured) { onSilentDone?.('no-smtp'); return; }
+    if (prf.facility_email_sent_at) { onSilentDone?.('already-sent'); return; }
+    const to = (prf.form_data?.handover_doctor_email || '').trim();
+    if (!SEND_EMAIL_RE.test(to)) { onSilentDone?.('no-recipient'); return; }
+    silentFiredRef.current = true;
+    void handleAutoSend();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [silentMode, prf]);
+
+  // Report the outcome once the shared handler settles.
+  useEffect(() => {
+    if (!silentMode || !silentFiredRef.current) return;
+    if (sendStatus === 'sent') onSilentDone?.('sent');
+    else if (sendStatus === 'error') onSilentDone?.('error');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [silentMode, sendStatus]);
 
   // Build the PDF by snapshotting each .prf-page independently and placing
   // it on its own A4 landscape sheet. This bypasses the browser's CSS print

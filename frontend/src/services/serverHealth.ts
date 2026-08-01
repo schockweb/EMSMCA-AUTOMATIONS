@@ -82,7 +82,13 @@ export function getServerState(): ServerState {
  */
 export function shouldSkipNetwork(): boolean {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return true;
-  return state === 'down';
+  // 'checking' counts as skip. It means the breaker was open and a probe is in
+  // flight — we do not yet know the portal is back. Treating that window as
+  // "up" is exactly the failing-OPEN this module's contract rules out: a caller
+  // would start real work against a server there is no evidence is reachable.
+  // Found by test — the silent email sender mounted its hidden viewer, and
+  // began rendering a PDF, mid-probe.
+  return state === 'down' || state === 'checking';
 }
 
 /**

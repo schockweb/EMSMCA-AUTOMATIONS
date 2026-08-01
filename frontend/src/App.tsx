@@ -31,6 +31,7 @@ import DigitalPRFForm from './pages/crew/DigitalPRFForm';
 import ProviderLogin from './pages/crew/ProviderLogin';
 import ProviderAdminDashboard from './pages/crew/ProviderAdminDashboard';
 import './index.css';
+import SilentFacilityEmailSender from './components/SilentFacilityEmailSender';
 
 // Legacy `/${slug}/crew/login` URL — bounces to the unified provider login
 // at `/${slug}/login`. The old CrewLogin page was removed.
@@ -197,6 +198,10 @@ export default function App() {
   return (
     <ErrorBoundary>
     <PWAUpdatePrompt />
+    {/* Completes the facility email for any PRF captured offline, once there
+        is signal. Renders nothing the crew can see — see the component for why
+        it must stay invisible in the technical sense too. */}
+    <SilentFacilityEmailSender />
     <BrowserRouter>
       <AuthProvider>
         <Routes>
