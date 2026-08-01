@@ -16,7 +16,27 @@ from app.models.user import User, UserRole
 from app.schemas.case import CaseCreate, CaseUpdate, CaseResponse
 from app.utils.security import get_current_user, require_role
 
-router = APIRouter(prefix="/api/cases", tags=["Cases"])
+# ROUTER-LEVEL role gate, deliberately not per-route.
+#
+# Nothing in this module filters by provider — the case queue is instance-wide
+# by design, because back-office staff work across every client company. Every
+# route was authentication-only (`Depends(get_current_user)`), so ANY active
+# account, including the default PARAMEDIC role, could list the case ids of all
+# ~105 providers. That list is the enumeration step of a much worse chain: those
+# ids feed /api/digital-prf/admin/by-case/{case_id}, which returns the full
+# clinical record — patient name, SA ID number, scheme, clinical narrative, all
+# five signatures and both crew members' HPCSA numbers.
+#
+# Cross-provider visibility is correct here and is kept; what was missing is
+# that only back-office ADMINs should have it. The gate lives on the router so a
+# route added later cannot quietly omit it. Same treatment, and for the same
+# reason, as failed_prfs.py. (require_role already treats SUPER_ADMIN as
+# satisfying any check.)
+router = APIRouter(
+    prefix="/api/cases",
+    tags=["Cases"],
+    dependencies=[Depends(require_role(UserRole.ADMIN, UserRole.SUPER_ADMIN))],
+)
 
 
 def _prf_display_name(provider_name, prf_number, form_data) -> Optional[str]:

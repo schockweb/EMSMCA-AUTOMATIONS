@@ -25,7 +25,8 @@ from app.models.claim import Claim, AdjudicationStatus
 from app.models.document import Document, OCRStatus
 from app.models.user import User
 from app.api.crew_auth import get_current_crew
-from app.utils.security import get_current_user
+from app.utils.security import get_current_user, has_permission
+from app.models.user import UserRole
 from app.utils.hpcsa import to_tier as _qual_to_tier
 from app.tasks.publish import publish_task, publish_delay
 
@@ -1521,9 +1522,33 @@ async def _resolve_case_prf_access(
 ) -> tuple[DigitalPRF, CrewMember | None]:
     """Dual-mode auth + load for the /admin/by-case/* family.
 
-    Accepts either an admin User JWT (full access) or a crew JWT (the crew
-    member must own the PRF, or be their provider's admin for a same-provider
-    PRF). Returns (prf, crew_member-or-None-for-admin). Raises 401/403/404.
+    Accepts either a back-office ADMIN/SUPER_ADMIN User JWT (instance-wide) or a
+    crew JWT (the crew member must own the PRF, or be their provider's admin for
+    a same-provider PRF). Returns (prf, crew_member-or-None-for-admin).
+    Raises 400/401/403/404.
+
+    THE ROLE GATE BELOW IS LOAD-BEARING — do not reduce it to is_active.
+
+    This helper is the ONLY authorisation on all three by-case routes; the
+    router is registered bare in main.py. It used to end the admin branch at
+    "User row exists and is_active", with no role or permission check at all.
+    `User.role` defaults to PARAMEDIC and an ADMIN can mint any role, so ANY
+    active back-office account — the lowest-privilege one on the instance —
+    could:
+      • read the complete clinical record of every provider (GET /api/cases/
+        enumerates case ids instance-wide, and this route then returns
+        form_data, the SA ID number, all five signatures, and both crew
+        members' names and HPCSA numbers);
+      • mail a patient's full PRF to any address they chose, sent FROM the
+        owning provider's own mailbox via its decrypted SMTP app password;
+      • stamp facility_email_sent_at through the /manual route, which every
+        downstream guard honours — so the receiving hospital never gets the
+        handover document while the crew UI, the admin surfaces and the
+        database all record it as delivered.
+
+    This was an omission rather than a decision: failed_prfs.py carries a
+    router-level require_role(ADMIN, SUPER_ADMIN) + require_permission for
+    exactly this shape of defect, and that fix never reached this family.
     """
     # Both admin and crew JWTs come through Authorization: Bearer <token>.
     # `decode_token` validates the signature; the scope distinction comes
@@ -1566,6 +1591,18 @@ async def _resolve_case_prf_access(
         user = user_res.scalar_one_or_none()
         if not user or not user.is_active:
             raise HTTPException(status_code=401, detail="User not found or inactive")
+        # Back-office privilege, not merely a valid login. Role first:
+        # has_permission() returns True when `permissions` is NULL (documented
+        # fail-open), so it can only ever narrow an already-privileged account,
+        # never stand in for the role check.
+        if user.role not in (UserRole.ADMIN, UserRole.SUPER_ADMIN):
+            logger.warning(
+                "Refused by-case PRF access for user %s (role %s) on case %s",
+                user.id, user.role, case_id,
+            )
+            raise HTTPException(status_code=403, detail="Admin access required")
+        if not has_permission(user, "cases"):
+            raise HTTPException(status_code=403, detail="Not permitted")
     else:
         if payload.get("token_scope") != "crew":
             raise HTTPException(status_code=401, detail="Invalid token")
@@ -1577,8 +1614,16 @@ async def _resolve_case_prf_access(
         if not crew_member or not crew_member.is_active:
             raise HTTPException(status_code=401, detail="Crew member not found or inactive")
 
+    # Bare uuid.UUID() raised ValueError on a malformed id, which surfaced as a
+    # 500 and a logged stack trace — a 400 is the honest answer and keeps a
+    # trivially-triggered path out of the crash reporter.
+    try:
+        case_uuid = uuid.UUID(case_id)
+    except (ValueError, AttributeError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid case id")
+
     result = await db.execute(
-        select(DigitalPRF).where(DigitalPRF.case_id == uuid.UUID(case_id))
+        select(DigitalPRF).where(DigitalPRF.case_id == case_uuid)
     )
     prf = result.scalar_one_or_none()
     if not prf:
@@ -1835,14 +1880,30 @@ async def mark_prf_facility_email_manual(
     opens, the popup shows 'already sent', and any still-retrying background
     send task aborts instead of delivering a second copy.
     """
-    prf, _crew = await _resolve_case_prf_access(request, db, case_id)
+    prf, crew = await _resolve_case_prf_access(request, db, case_id)
     if prf.status not in (PRFStatus.SUBMITTED, PRFStatus.PROCESSED):
         raise HTTPException(400, "Only submitted PRFs can be marked as sent.")
     to = (body.recipient or "").strip()
+    # Validate the address on the same rule the automatic path uses. This value
+    # is the only record of where a handover document went, and stamping it
+    # suppresses every later send — so free text here produced an unauditable
+    # claim of delivery. Blank stays allowed: "sent from my own mail app" is the
+    # legitimate case this route exists for.
+    if to and not _RECIPIENT_RE.match(to):
+        raise HTTPException(400, "That does not look like a valid email address.")
     prf.facility_email_sent_to = (to or "receiving facility (sent manually)")[:255]
     prf.facility_email_sent_at = datetime.now(timezone.utc)
     prf.facility_email_error = None
     await db.commit()
+    # Who suppressed future sends. There is no column for the actor yet (that
+    # needs a migration), so at minimum it must be reconstructable from logs —
+    # a manual mark stops the hospital ever receiving the document, and until
+    # now nothing recorded who did it.
+    logger.info(
+        "PRF #%s facility email marked sent MANUALLY to %r by %s",
+        prf.prf_number, prf.facility_email_sent_to,
+        f"crew {crew.id}" if crew else "back-office admin",
+    )
     return {"status": "marked_manual", "recipient": prf.facility_email_sent_to}
 
 
