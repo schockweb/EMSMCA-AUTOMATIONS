@@ -2,6 +2,11 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!-- MUST match index.html. Without it the harness renders at the browser's
+         default ~980px layout viewport even when the window is phone-sized, so
+         a mobile-only layout defect is invisible here — which is exactly how
+         one reached production. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover" />
     <title>PRF PDF harness (dev only)</title>
     <style>
       body { margin: 0; font-family: system-ui, sans-serif; }

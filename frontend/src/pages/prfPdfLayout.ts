@@ -115,6 +115,50 @@ export function planPlacement(canvasW: number, canvasH: number, reflowW: number)
   };
 }
 
+// ── On-SCREEN legibility floor ──────────────────────────────────────────────
+
+/**
+ * Never auto-apply a screen zoom below this.
+ *
+ * The same failure as the print floor above, in the other medium. The viewer
+ * shrinks the fixed 1220px sheet with CSS `zoom` so it fits the container,
+ * which is right on a desktop column. On a 375px phone it resolves to ~0.30:
+ * a full A4 landscape PRF rendered about 363x257 CSS px, where a label
+ * authored at 0.62rem (~9.9px) paints at under 3px. Nothing is clipped and
+ * nothing errors — the form is simply unreadable, which is what "squished"
+ * means when a crew reports it.
+ *
+ * Panning already works (.prf-screen-wrap is overflow-x:auto) and this page
+ * already relaxes the app-wide maximum-scale so pinch-zoom works too. Both were
+ * added to let a reader ESCAPE the squished default — but the default itself
+ * was never raised, so every phone still opened on the unreadable view and the
+ * crew had to know to fix it.
+ *
+ * 0.75 keeps the smallest label at ~7.4px, which is legible on a phone, and
+ * costs horizontal panning — exactly what every PDF reader does with a
+ * landscape page on a portrait screen. The true fit-to-width is still kept as
+ * `fitScale` so the zoom-out control can reach the full-page overview
+ * deliberately; it is just no longer where the reader lands.
+ */
+export const MIN_SCREEN_ZOOM = 0.75;
+
+/** Width the on-screen fit is computed against: design width plus margin. */
+export const SCREEN_FIT_BASIS_PX = 1240;
+
+/**
+ * Decide the on-screen zoom for a container `availPx` wide.
+ *
+ * `fit`     — true fit-to-width; the lower bound the zoom-out control may reach.
+ * `applied` — what to actually set by default, never below MIN_SCREEN_ZOOM.
+ *
+ * Pure arithmetic on purpose: jsdom has no layout engine, so this is the part
+ * that can be tested. The measuring stays in PRFView.
+ */
+export function screenZoomFor(availPx: number): { fit: number; applied: number } {
+  const fit = Math.min(1, availPx / SCREEN_FIT_BASIS_PX);
+  return { fit, applied: Math.max(fit, MIN_SCREEN_ZOOM) };
+}
+
 /**
  * The printed size, in points, of a piece of text authored at `remAtDesign`
  * for a sheet placed with the given `textScale`. Used by tests to assert a

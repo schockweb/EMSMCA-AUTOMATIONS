@@ -22,7 +22,7 @@ const GREEN_TINT = '#e7f3f5';    // label cell background (teal tint)
 import { PrintableInjuryDiagram } from '../components/BodyDiagram';
 import {
   INSET_MM, MAX_W_MM, MAX_H_MM, SHEET_RATIO,
-  DESIGN_W_PX, MAX_FIT_W, planPlacement,
+  DESIGN_W_PX, MAX_FIT_W, planPlacement, screenZoomFor,
 } from './prfPdfLayout';
 const INK      = '#0b1020';      // body text
 const MUT      = '#5b6478';      // secondary text
@@ -493,9 +493,13 @@ export default function PRFView() {
     if (!el || !wrap) return;
     el.style.zoom = '';                        // measure at the true 1220px width
     const avail = wrap.clientWidth - 8;        // small breathing room
-    const fit = Math.min(1, avail / 1240);     // 1220 design width + margin
+    // `fit` is the true fit-to-width and stays the zoom-out floor, so the
+    // overview is still reachable on purpose. `applied` is where the reader
+    // LANDS, and is never below MIN_SCREEN_ZOOM — on a phone plain fit-to-width
+    // is ~0.30, which renders the sheet unreadable (see prfPdfLayout).
+    const { fit, applied } = screenZoomFor(avail);
     setFitScale(fit);
-    const z = userZoomRef.current ?? fit;
+    const z = userZoomRef.current ?? applied;
     el.style.zoom = z < 1 ? String(z) : '';
   }, []);
   useEffect(() => {

@@ -23,6 +23,7 @@ import { describe, it, expect } from 'vitest';
 import {
   planPlacement, printedPt,
   MAX_W_MM, MAX_H_MM, DESIGN_W_PX, MAX_FIT_W, MIN_LEGIBLE_SCALE, SHEET_RATIO,
+  screenZoomFor, MIN_SCREEN_ZOOM,
 } from '../pages/prfPdfLayout';
 
 /** html2canvas runs at scale 1.5 in PRFView. */
@@ -135,6 +136,73 @@ describe('placement — the shrink branch may not breach the floor', () => {
     expect(short.textScale).toBeCloseTo(tall.textScale, 5);   // same size text
     if (short.kind === 'slice' && tall.kind === 'slice') {
       expect(tall.sheets).toBeGreaterThan(short.sheets);       // more paper
+    }
+  });
+});
+
+// ── On-screen legibility floor ─────────────────────────────────────────────
+//
+// Reported from the field: "on mobile, when viewing the PDF ... the layout is
+// all squished again". Measured in a real browser at a 375px viewport BEFORE
+// this floor existed: the viewer applied zoom 0.296 to fit the fixed 1220px A4
+// sheet, rendering the page 363x257 CSS px with its smallest label at 2.9px.
+// Nothing clipped, nothing errored — simply unreadable.
+describe('screenZoomFor — on-screen legibility floor', () => {
+  const LABEL_PX = 0.62 * 16;   // smallest label, authored at 0.62rem
+
+  it('never lands the reader below the legibility floor on a phone', () => {
+    const { applied } = screenZoomFor(375 - 8);
+    expect(applied).toBe(MIN_SCREEN_ZOOM);
+    expect(LABEL_PX * applied).toBeGreaterThanOrEqual(7);
+  });
+
+  it('reproduces the reported defect if the floor is removed', () => {
+    // The raw fit is what used to be applied. Pin how bad it is, so nobody
+    // "simplifies" screenZoomFor back to Math.min(1, avail/1240).
+    const { fit } = screenZoomFor(375 - 8);
+    expect(fit).toBeLessThan(0.31);
+    expect(LABEL_PX * fit).toBeLessThan(3.1);
+  });
+
+  it('leaves a desktop column completely unchanged', () => {
+    for (const w of [1240, 1385, 1920]) {
+      const { fit, applied } = screenZoomFor(w);
+      expect(fit).toBe(1);
+      expect(applied).toBe(1);
+    }
+  });
+
+  it('still fits exactly at the design width', () => {
+    expect(screenZoomFor(1240).applied).toBe(1);
+  });
+
+  it('keeps the true fit as the zoom-out bound, so the overview stays reachable', () => {
+    // fit < applied is the whole point: the reader LANDS readable but can
+    // deliberately zoom out to see the whole sheet.
+    const { fit, applied } = screenZoomFor(400);
+    expect(fit).toBeLessThan(applied);
+  });
+
+  it('is monotonic — a wider container never zooms out further', () => {
+    let prev = 0;
+    for (const w of [200, 375, 600, 900, 1100, 1240, 1600]) {
+      const { applied } = screenZoomFor(w);
+      expect(applied).toBeGreaterThanOrEqual(prev);
+      prev = applied;
+    }
+  });
+
+  it('never exceeds 1 — the sheet is never blown up past its design size', () => {
+    for (const w of [1240, 2000, 5000]) {
+      expect(screenZoomFor(w).applied).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('handles a zero/negative container without producing NaN', () => {
+    for (const w of [0, -50]) {
+      const { applied } = screenZoomFor(w);
+      expect(Number.isFinite(applied)).toBe(true);
+      expect(applied).toBe(MIN_SCREEN_ZOOM);
     }
   });
 });
