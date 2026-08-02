@@ -19,6 +19,15 @@ celery_app = Celery(
         "app.tasks.prf_processing",
         "app.tasks.prf_email",
         "app.tasks.dlq_setup",
+        # Without this the worker never REGISTERS report_retention_status, so
+        # beat publishes it on schedule and the worker rejects every delivery as
+        # an unregistered task — a scheduled job that looks configured and has
+        # never once run. Any new task module must be added here.
+        "app.tasks.retention",
+        # Without this the worker never REGISTERS report_retention_status, so
+        # beat publishes it on schedule and the worker rejects every delivery as
+        # an unregistered task — a scheduled job that looks configured and has
+        # never once run. Any new task module must be added here.
     ],
 )
 
