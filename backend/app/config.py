@@ -43,6 +43,18 @@ class Settings(BaseSettings):
     # Leave empty for local dev (plain Docker Postgres needs no SSL).
     DB_SSL_MODE: str = ""
 
+    # ── Record retention (POPIA s14) ──
+    # How long a live clinical record is kept, measured from its capture date.
+    # A setting rather than a constant so a provider whose regulator or insurer
+    # requires longer can raise it without a code change. It must NEVER be
+    # lowered without a documented instruction from the responsible party:
+    # destroying a health record early is as much a breach as over-retention.
+    RETENTION_YEARS: float = 7.0
+    # Destruction is irreversible, so it is OPT-IN. See app/tasks/retention.py
+    # for why a task that silently begins deleting patient records years after
+    # it was written is a worse outcome than tracking the obligation by hand.
+    RETENTION_ENFORCE: bool = False
+
     # ── Database Connection Pool ──
     # Tuned for high concurrency (500+ ambulances, 1500 crew members).
     # pool_size × num_workers = persistent connections per backend replica.

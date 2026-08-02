@@ -35,6 +35,7 @@ from app.api.gateway import router as gateway_router
 from app.api.crashes import router as crashes_router
 from app.api.member_lookup import router as member_lookup_router
 from app.api.geocode import router as geocode_router
+from app.api.data_rights import router as data_rights_router
 from app.api.crew_auth import router as crew_auth_router
 from app.api.providers import router as providers_router
 from app.api.account_security import router as account_security_router
@@ -303,6 +304,7 @@ app.include_router(gateway_router)
 app.include_router(crashes_router)
 app.include_router(member_lookup_router)
 app.include_router(geocode_router, prefix="/api/geocode", tags=["Geocoding"])
+app.include_router(data_rights_router)
 app.include_router(crew_auth_router)
 app.include_router(providers_router)
 app.include_router(account_security_router)

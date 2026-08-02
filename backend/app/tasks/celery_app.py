@@ -113,6 +113,13 @@ celery_app.conf.update(
             "schedule": 3600.0,  # hourly
             "options": {"queue": "ems_default"},
         },
+        # The retention obligation is reported weekly so it lives in operations
+        # rather than only in a policy document. It reports; it does not delete.
+        "report-retention-status": {
+            "task": "report_retention_status",
+            "schedule": 604800.0,  # weekly
+            "options": {"queue": "ems_default"},
+        },
         # The email spool holds rendered patient PDFs — complete clinical
         # records — waiting to be attached. Every code path deletes its own
         # file, but a SIGKILLed worker (OOM) or a container replaced mid-deploy
