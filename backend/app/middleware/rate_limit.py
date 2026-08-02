@@ -63,15 +63,42 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     # ── Helpers ────────────────────────────────────────────────────────────
 
     def _get_identity_key(self, request: Request) -> str:
-        """Per-token identity when authenticated, else per-IP.
+        """Per-token identity when the token is REAL, else per-IP.
 
-        We hash the token so raw credentials never become Redis keys / log lines.
+        THE BUG THIS FIXES
+        ------------------
+        This used to hash whatever sat after "Bearer " with no validation at
+        all. The bucket key is therefore chosen by the caller: send
+        `Authorization: Bearer <fresh random nonce>` on every request and every
+        request lands in a brand-new 600-request bucket, so the application
+        limiter never fires for anyone who does not want it to. An anonymous
+        attacker got unlimited throughput on every route except the three in
+        AUTH_STRICT_PATHS — including the provider portal-password endpoints,
+        the crew shift-start endpoints and the unauthenticated crash ingest.
+
+        Verifying the signature first is what makes the key non-forgeable: a
+        nonce is not a valid JWT, so it falls through to the IP bucket, and an
+        attacker cannot manufacture a valid token without SECRET_KEY. Bucketing
+        by `sub` + `jti` rather than by the raw string also means the limit
+        follows the identity across a token rotation instead of resetting.
+
+        Deliberately no database lookup here — this runs on EVERY request, and a
+        revoked-but-unexpired token is still a token we are happy to rate-limit
+        as its owner. Signature and expiry are the only properties needed.
         """
         auth = request.headers.get("authorization", "")
         if auth.lower().startswith("bearer "):
             token = auth[7:].strip()
             if token:
-                return "tok:" + hashlib.sha256(token.encode()).hexdigest()[:16]
+                try:
+                    from app.utils.security import decode_token
+                    payload = decode_token(token)
+                except Exception:
+                    payload = None      # forged, malformed or expired → IP bucket
+                if payload:
+                    subject = str(payload.get("sub") or payload.get("crew_id") or "")
+                    if subject:
+                        return "tok:" + hashlib.sha256(subject.encode()).hexdigest()[:16]
         return "ip:" + get_trusted_client_ip(request)
 
     async def _check_limit(self, redis_client, key: str, limit: int) -> tuple[bool, int]:

@@ -29,11 +29,37 @@ from __future__ import annotations
 from typing import Any
 
 from sqlalchemy import JSON, Text
+
 from sqlalchemy.types import TypeDecorator
 
 from app.utils.patient_id import decrypt_id, encrypt_id
 
 PATIENT_ID_KEY = "patient_id_number"
+
+# EVERY national identifier in the blob, not just the patient's SA ID.
+#
+# The first version of this encrypted exactly one key, which left three others
+# sitting in plaintext in the SAME JSONB column:
+#
+#   debtor_id_number          — a 13-digit SA ID belonging to the account holder,
+#                               who is frequently the patient's parent or spouse
+#   patient_passport_number   — for a FOREIGN NATIONAL this is the patient's only
+#                               national identifier, so for that entire class of
+#                               patient the field the platform claims to encrypt
+#                               was stored in the clear beside their clinical record
+#   debtor_passport_number    — same, for the account holder
+#
+# "The SA ID field is encrypted" is not the same claim as "the patient's
+# identifier is encrypted", and only the second one is worth making to a scheme.
+#
+# PATIENT_ID_KEY stays separate because it alone drives the lookup hash.
+_EXTRA_ID_KEYS = (
+    "debtor_id_number",
+    "patient_passport_number",
+    "debtor_passport_number",
+)
+
+ENCRYPTED_FORM_KEYS = (PATIENT_ID_KEY,) + _EXTRA_ID_KEYS
 
 
 class EncryptedPatientID(TypeDecorator):
@@ -52,11 +78,11 @@ class EncryptedPatientID(TypeDecorator):
 
 
 class FormDataWithEncryptedPatientID(TypeDecorator):
-    """The PRF form blob, with just the ID number encrypted inside it.
+    """The PRF form blob, with every national identifier inside it encrypted.
 
-    Only that one key is transformed. Encrypting the whole blob would make the
-    record unqueryable and unindexable, and would put the clinical narrative
-    — which staff legitimately search — behind a decrypt on every read.
+    Only the identifier keys are transformed. Encrypting the whole blob would
+    make the record unqueryable and unindexable, and would put the clinical
+    narrative — which staff legitimately search — behind a decrypt on every read.
     """
 
     impl = JSON
@@ -65,20 +91,87 @@ class FormDataWithEncryptedPatientID(TypeDecorator):
     def process_bind_param(self, value: Any, dialect) -> Any:  # noqa: ARG002
         if not isinstance(value, dict):
             return value
-        raw = value.get(PATIENT_ID_KEY)
-        if raw in (None, ""):
-            return value
-        # str(): the ID arrives as an int from some OCR paths, and a numeric SA
-        # ID reaching .encode() would raise and fail the whole save.
-        return {**value, PATIENT_ID_KEY: encrypt_id(str(raw))}
+        out = None
+        for key in ENCRYPTED_FORM_KEYS:
+            raw = value.get(key)
+            if raw in (None, ""):
+                continue
+            if out is None:
+                out = dict(value)
+            # str(): the ID arrives as an int from some OCR paths, and a numeric
+            # SA ID reaching .encode() would raise and fail the whole save.
+            out[key] = encrypt_id(str(raw))
+        return value if out is None else out
 
     def process_result_value(self, value: Any, dialect) -> Any:  # noqa: ARG002
         if not isinstance(value, dict):
             return value
-        raw = value.get(PATIENT_ID_KEY)
-        if raw in (None, ""):
+        out = None
+        for key in ENCRYPTED_FORM_KEYS:
+            raw = value.get(key)
+            if raw in (None, ""):
+                continue
+            if out is None:
+                out = dict(value)
+            out[key] = decrypt_id(str(raw))
+        return value if out is None else out
+
+
+# The OCR intake path, which the PRF work never covered.
+#
+# `documents.extracted_data` is a bare JSONB holding the structured result of
+# reading a SCANNED patient report form, and the extraction schema captures both
+# the patient's SA ID (`patient_id_number`) and the principal member's
+# (`main_member_id`). None of it was encrypted, and encrypt_patient_ids.py never
+# touched this table — so "patient IDs are encrypted at rest" was true of the
+# digital PRF and the case, and false of every scanned form ever uploaded.
+_EXTRACTED_ID_KEYS = (
+    "patient_id_number",
+    "main_member_id",
+    "patient_passport_number",
+    "debtor_id_number",
+)
+
+
+class ExtractedDataWithEncryptedIDs(TypeDecorator):
+    """OCR extraction output, with the identifier fields encrypted at rest.
+
+    impl is JSON, NOT JSONB, and that is not a detail. The model imports
+    `JSON as JSONB` (models/document.py:7) — an alias, so the column reads as
+    JSONB in the source while `information_schema` reports plain `json`. Using a
+    real JSONB impl here would declare a type the column does not have. The same
+    alias trap is why `.astext` had to become `.as_string()` on
+    `digital_prfs.form_data`.
+    """
+
+    impl = JSON
+    cache_ok = True
+
+    def process_bind_param(self, value: Any, dialect) -> Any:  # noqa: ARG002
+        if not isinstance(value, dict):
             return value
-        return {**value, PATIENT_ID_KEY: decrypt_id(str(raw))}
+        out = None
+        for key in _EXTRACTED_ID_KEYS:
+            raw = value.get(key)
+            if raw in (None, ""):
+                continue
+            if out is None:
+                out = dict(value)
+            out[key] = encrypt_id(str(raw))
+        return value if out is None else out
+
+    def process_result_value(self, value: Any, dialect) -> Any:  # noqa: ARG002
+        if not isinstance(value, dict):
+            return value
+        out = None
+        for key in _EXTRACTED_ID_KEYS:
+            raw = value.get(key)
+            if raw in (None, ""):
+                continue
+            if out is None:
+                out = dict(value)
+            out[key] = decrypt_id(str(raw))
+        return value if out is None else out
 
 
 def register_patient_id_hash_sync() -> None:

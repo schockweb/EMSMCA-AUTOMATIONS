@@ -60,8 +60,32 @@ def _hmac_key() -> bytes:
     from app.config import get_settings
     # Domain-separated from the Fernet key derivation so the lookup hash can
     # never be used to attack the ciphertext, or vice versa.
-    raw = (get_settings().ENCRYPTION_KEY or "").encode()
-    return hashlib.sha256(b"patient-id-lookup:" + raw).digest()
+    #
+    # .strip() is REQUIRED, not tidiness. crypto._fernet() strips the same
+    # setting; this did not. The same secret normalised two different ways means
+    # that if the key ever gains or loses surrounding whitespace between
+    # deployments — a re-paste into .env.prod, a Docker secret file with a
+    # trailing newline, a copy through a password manager — every ciphertext
+    # keeps decrypting perfectly while EVERY lookup hash silently changes.
+    #
+    # Nothing errors. The provider PRF search by ID quietly returns nothing,
+    # duplicate detection stops matching and creates a second patient record,
+    # and POPIA subject access reports `found: false` — telling a data subject
+    # the platform holds nothing about them because of a newline character.
+    configured = get_settings().ENCRYPTION_KEY or ""
+    if configured != configured.strip():
+        # Loud, because this is the one case where the change above is not a
+        # no-op: hashes stored under the unstripped key will no longer match,
+        # so every ID lookup silently starts missing. Fix the environment
+        # variable, then re-run `python encrypt_patient_ids.py --verify-hashes`.
+        import logging
+        logging.getLogger("ems.patient_id").critical(
+            "ENCRYPTION_KEY has leading/trailing whitespace. Lookup hashes are "
+            "derived from the STRIPPED key; any hash stored before this build "
+            "used the raw value and will no longer match. Patient ID search and "
+            "subject-access will return nothing until hashes are recomputed."
+        )
+    return hashlib.sha256(b"patient-id-lookup:" + configured.strip().encode()).digest()
 
 
 def id_hash(value: str | None) -> Optional[str]:
@@ -85,12 +109,29 @@ def looks_encrypted(value: str | None) -> bool:
     return bool(value) and value.startswith(_TOKEN_PREFIX)
 
 
+def _is_real_token(value: str) -> bool:
+    """A value is 'already encrypted' only if it actually DECRYPTS.
+
+    `looks_encrypted` is a prefix test on six characters the user controls. That
+    is fine for choosing a read strategy, but it was also gating the WRITE path:
+    anything a crew member typed beginning with 'gAAAAA' was treated as
+    ciphertext and stored verbatim, in the clear, in a column the platform
+    describes as always-encrypted. On the way back out it failed to decrypt and
+    the identifier silently read as blank.
+
+    Deciding by trial decryption instead means the property tested is the
+    property wanted. It costs one Fernet verify on a value that already carries
+    the prefix, which is the rare case.
+    """
+    return looks_encrypted(value) and decrypt_str(value) is not None
+
+
 def encrypt_id(value: str | None) -> Optional[str]:
     """Plaintext ID -> Fernet token. Idempotent: an already-encrypted value is
     returned unchanged, so a backfill can be re-run safely."""
     if not value:
         return None
-    if looks_encrypted(value):
+    if _is_real_token(value):
         return value
     return encrypt_str(value)
 

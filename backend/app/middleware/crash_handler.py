@@ -48,6 +48,67 @@ class CrashHandlerMiddleware(BaseHTTPMiddleware):
             )
 
 
+# Substring match, lowercase, deliberately broad. A crash report is diagnostic
+# data — over-redacting costs an engineer a little context, under-redacting puts
+# a patient's identity in a 90-day table nobody thinks of as clinical.
+_SENSITIVE_SUBSTRINGS = (
+    "id_number", "idnumber", "passport", "password", "secret", "token",
+    "authorization", "api_key", "apikey", "member_number", "membership",
+    "patient_name", "surname", "first_name", "full_name", "dob",
+    "date_of_birth", "signature", "email", "phone", "cell", "address",
+    "account_number", "medical_aid", "scheme_member",
+)
+
+_REDACTED = "<redacted>"
+
+
+def _is_sensitive(key: str) -> bool:
+    k = str(key).lower()
+    return any(s in k for s in _SENSITIVE_SUBSTRINGS)
+
+
+def _redact(obj, depth: int = 0):
+    """Recursively blank the values of sensitive-looking keys.
+
+    Keys are kept and values dropped on purpose: knowing that
+    `patient_id_number` was present and non-empty is the diagnostic signal;
+    the digits themselves never are.
+    """
+    if depth > 6:
+        return "<truncated>"
+    if isinstance(obj, dict):
+        return {
+            k: (_REDACTED if _is_sensitive(k) else _redact(v, depth + 1))
+            for k, v in obj.items()
+        }
+    if isinstance(obj, (list, tuple)):
+        return [_redact(v, depth + 1) for v in obj[:50]]
+    if isinstance(obj, str) and len(obj) > 500:
+        return obj[:500] + "…<truncated>"
+    return obj
+
+
+def _redact_body(body: bytes) -> str:
+    """Redact a JSON body field-wise; refuse to store one we cannot parse.
+
+    A body we cannot parse is a body we cannot redact, and a PRF autosave that
+    fails to decode is exactly the case most likely to contain patient data. So
+    the fallback records the size and content type, not the bytes.
+    """
+    import json
+
+    try:
+        parsed = json.loads(body.decode("utf-8"))
+    except Exception:
+        return f"<unparsed body, {len(body)} bytes — not stored>"
+    if not isinstance(parsed, (dict, list)):
+        return f"<non-object body, {len(body)} bytes — not stored>"
+    try:
+        return json.dumps(_redact(parsed), default=str)[:2000]
+    except Exception:
+        return f"<unserialisable body, {len(body)} bytes — not stored>"
+
+
 async def record_crash_event(request: Request, exc: Exception) -> uuid.UUID:
     """Persist a crash event to the database from either middleware or a FastAPI exception handler."""
     crash_id = uuid.uuid4()
@@ -58,9 +119,22 @@ async def record_crash_event(request: Request, exc: Exception) -> uuid.UUID:
         user_id = request.state.user_id
 
     # Build metadata
+    #
+    # REDACTED, because this table was the largest unmanaged copy of PHI in the
+    # product. The crew app posts the entire PRF form blob every five seconds on
+    # autosave, and POST /api/cases carries patient_id_number — so any unhandled
+    # 500 on those routes wrote a patient's plaintext SA ID and name into
+    # crash_events, a JSONB column with no encryption, readable by any admin via
+    # /api/crashes and retained for 90 days. Query strings were worse:
+    # /api/data-rights/subject-access took the ID number as a URL parameter, so
+    # a 500 there stored the complete identifier verbatim.
+    #
+    # Diagnostic value is preserved — an engineer needs the SHAPE of the failing
+    # request (which fields were present, how big it was), not the patient's
+    # identity.
     meta = {
         "method": request.method,
-        "query_params": dict(request.query_params),
+        "query_params": _redact(dict(request.query_params)),
         "client_host": request.client.host if request.client else None,
         "headers": {
             "user-agent": request.headers.get("user-agent"),
@@ -72,7 +146,7 @@ async def record_crash_event(request: Request, exc: Exception) -> uuid.UUID:
     try:
         body = await request.body()
         if body and len(body) <= 10240:
-            meta["request_body_preview"] = body.decode("utf-8", errors="replace")[:2000]
+            meta["request_body_preview"] = _redact_body(body)
     except Exception:
         pass
 

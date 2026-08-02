@@ -268,3 +268,24 @@ def purge_session_cache(authorization_header: str) -> int:
     before = len(inst._store)
     inst._store = {k: v for k, v in inst._store.items() if v.get("auth_fp") != fp}
     return before - len(inst._store)
+
+
+def purge_all_cached_responses() -> int:
+    """Empty the whole response cache. Returns the count dropped.
+
+    For events where the sessions to invalidate are not in our hand. Bulk
+    revocation is exactly that case: an administrator revokes every session for
+    a lost tablet, and the entries to drop are keyed by a fingerprint of tokens
+    we never see. Purging selectively is impossible; leaving them means the
+    revoked token keeps getting cached 200s until the entry expires.
+
+    Cheap enough to be the right answer: the store is in-process, bounded, and
+    holds at most a few minutes of GETs. The cost is a brief cache-miss burst;
+    the alternative is a revocation that does not take effect for five minutes.
+    """
+    inst = ResponseCacheMiddleware._instance
+    if inst is None:
+        return 0
+    dropped = len(inst._store)
+    inst._store = {}
+    return dropped

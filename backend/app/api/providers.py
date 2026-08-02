@@ -7,13 +7,13 @@ from typing import Optional
 import uuid
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import os
 import io
 import shutil
 from PIL import Image
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, status, UploadFile, File, Response
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import select, func, or_, cast, Text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,16 +21,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.crew_auth import portal_grant_scheme, require_portal_grant
 from app.config import get_settings
 from app.database import get_db
+from app.models.audit_log import AuditLog
 from app.models.service_provider import ServiceProvider
 from app.models.crew_member import CrewMember
 from app.models.vehicle import Vehicle
 from app.models.digital_prf import DigitalPRF, PRFStatus
+from app.utils.client_ip import get_trusted_client_ip
+from app.utils.login_throttle import (
+    clear_source_failures,
+    is_source_blocked,
+    register_source_failure,
+)
 from app.utils.security import (
     get_current_user,
     hash_password,
     require_role,
     verify_password,
     verify_password_async,
+    verify_password_or_dummy,
+    MAX_FAILED_ATTEMPTS,
+    LOCKOUT_DURATION_MINUTES,
 )
 from app.utils.hpcsa import (
     HPCSA_CATEGORIES,
@@ -370,6 +380,34 @@ def _slugify(name: str) -> str:
     return slug[:100]
 
 
+_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,99}$")
+
+
+def _validate_slug(slug: str) -> str:
+    """Accept only a slug shape, because the slug reaches the filesystem.
+
+    `_slugify` was applied ONLY to a slug derived from the provider name — an
+    explicitly supplied `slug` was stored verbatim. The logo upload then builds
+    `f"{provider.slug}_logo{ext}"` and hands it to os.path.join, which does not
+    normalise `..`, so a provider created with slug `../../../../tmp/pwn` wrote
+    attacker-chosen bytes outside the uploads directory. The logo route performs
+    no content validation either, unlike the crew photo route (re-encoded
+    through PIL) and document upload (magic-byte checked).
+
+    Whitelist rather than blacklist: the set of characters legal in a slug is
+    small and known, while the set of characters dangerous in a path depends on
+    the platform and grows.
+    """
+    slug = (slug or "").strip().lower()
+    if not _SLUG_RE.match(slug):
+        raise HTTPException(
+            400,
+            "Slug must be lowercase letters, digits and hyphens only, "
+            "starting with a letter or digit (max 100 characters).",
+        )
+    return slug
+
+
 # ═══════════════════════════════════════════════════════════
 # PUBLIC ENDPOINT (no auth required — for login page dropdown)
 # ═══════════════════════════════════════════════════════════
@@ -393,12 +431,36 @@ class PortalLoginRequest(BaseModel):
     password: str   # portal_login_password
 
 @router.post("/{slug}/portal-login")
-async def portal_login(slug: str, body: PortalLoginRequest, db: AsyncSession = Depends(get_db)):
+async def portal_login(
+    slug: str,
+    body: PortalLoginRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
     """Verify company-wide portal credentials (portal_login_email / portal_login_password).
     These are set in the EMSMCA Client Login section when creating a provider and allow
     ALL staff (admin + crew) of that company to access their login portal.
     Returns provider info on success so the frontend can render the branded portal.
+
+    THE THIRD DOOR TO THE SAME SECRET
+    ---------------------------------
+    Account lockout was added on 2026-07-23 and reached the other two doors —
+    `/api/crew/portal-unlock` and the portal branch of `/api/auth/login` — but
+    never reached this one. It read the same `portal_login_password_hash` and
+    never looked at `locked_until`, never incremented `failed_login_attempts`
+    and wrote no audit row, so the whole lockout control was bypassable by
+    choosing this URL: unlimited guesses at the shared company password, leaving
+    nothing in the audit log.
+
+    That mattered because `GET /api/providers/public` hands out every active
+    slug without authentication, and one correct guess chains through
+    portal-unlock → public-crew → shift-start-by-id to a 12-hour token that can
+    read, edit and delete that company's patient records.
+
+    Now enforced identically to its two siblings, and the failure responses are
+    uniform so this cannot be used to enumerate which companies are configured.
     """
+    client_ip = get_trusted_client_ip(request)
     result = await db.execute(
         select(ServiceProvider).where(
             ServiceProvider.slug == slug.strip().lower(),
@@ -406,17 +468,64 @@ async def portal_login(slug: str, body: PortalLoginRequest, db: AsyncSession = D
         )
     )
     provider = result.scalar_one_or_none()
-    if not provider:
-        raise HTTPException(status_code=404, detail="Provider not found")
-    if not provider.portal_login_password_hash:
-        raise HTTPException(status_code=403, detail="No portal credentials configured for this provider")
-    # Case-insensitive username match
+
+    generic = HTTPException(status_code=401, detail="Invalid username or password")
+
+    # Unknown slug and unconfigured provider both answer the same way, and both
+    # still pay the bcrypt cost, so neither the status code nor the response
+    # time distinguishes them. The previous 404/403 pair confirmed for an
+    # anonymous caller exactly which companies exist and which have credentials.
+    if not provider or not provider.portal_login_password_hash:
+        await verify_password_or_dummy(body.password, None)
+        raise generic
+
+    # Throttled per SOURCE for the same reason as /api/crew/portal-unlock: this
+    # verifies the same shared company password, and a provider-wide lock driven
+    # by an anonymous caller takes an ambulance service off the air. See
+    # app/utils/login_throttle.py.
+    if await is_source_blocked("portal", str(provider.id), client_ip):
+        db.add(AuditLog(
+            user_id=None, action="PORTAL_LOGIN_FAILED_LOCKED", entity_type="auth_portal",
+            entity_id=provider.id, ip_address=client_ip,
+            details={"provider_slug": provider.slug, "route": "portal-login"},
+        ))
+        await db.commit()
+        raise HTTPException(
+            status_code=403,
+            detail="Too many incorrect attempts from this device. Try again later.",
+        )
+
     stored_username = (provider.portal_login_email or "").strip().lower()
     submitted_username = body.username.strip().lower()
-    if stored_username != submitted_username:
-        raise HTTPException(status_code=401, detail="Invalid username or password")
-    if not await verify_password_async(body.password, provider.portal_login_password_hash):
-        raise HTTPException(status_code=401, detail="Invalid username or password")
+    password_ok = await verify_password_or_dummy(
+        body.password, provider.portal_login_password_hash
+    )
+
+    if stored_username != submitted_username or not password_ok:
+        source_failures = await register_source_failure("portal", str(provider.id), client_ip)
+        provider.failed_login_attempts = (provider.failed_login_attempts or 0) + 1
+        db.add(AuditLog(
+            user_id=None, action="PORTAL_LOGIN_FAILED", entity_type="auth_portal",
+            entity_id=provider.id, ip_address=client_ip,
+            details={
+                "provider_slug": provider.slug, "route": "portal-login",
+                "failed_attempts": provider.failed_login_attempts,
+                "source_failures": source_failures,
+            },
+        ))
+        await db.commit()
+        raise generic
+
+    await clear_source_failures("portal", str(provider.id), client_ip)
+    provider.failed_login_attempts = 0
+    provider.locked_until = None
+    db.add(AuditLog(
+        user_id=None, action="PORTAL_LOGIN_SUCCESS", entity_type="auth_portal",
+        entity_id=provider.id, ip_address=client_ip,
+        details={"provider_slug": provider.slug, "route": "portal-login"},
+    ))
+    await db.commit()
+
     return {
         "valid": True,
         "provider_name": provider.name,
@@ -499,9 +608,17 @@ async def list_crew_public_by_slug(
 @router.get("")
 async def list_providers(
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(_provider_admin),
 ):
     """List all service providers with crew and vehicle counts.
+
+    Back-office admin only. This ran on bare `get_current_user`, so any
+    authenticated account — including a crew-created User defaulting to
+    PARAMEDIC, or an admin narrowed to a single page — could enumerate every
+    tenant on the platform together with each one's `portal_login_username`
+    (returned below) and a crew admin's email address. That is the customer
+    list of the business plus the login identity for the shared company
+    password, handed to anyone with any token.
 
     The counts are four GROUPED queries, not four queries PER PROVIDER.
 
@@ -577,7 +694,9 @@ async def create_provider(
     user: User = Depends(_provider_admin),
 ):
     """Create a new service provider."""
-    slug = body.slug or _slugify(body.name)
+    # Validated, not merely defaulted: an explicit slug used to bypass _slugify
+    # entirely and reach os.path.join in the logo upload path.
+    slug = _validate_slug(body.slug or _slugify(body.name))
 
     # Check slug uniqueness
     existing = await db.execute(select(ServiceProvider).where(ServiceProvider.slug == slug))
@@ -656,8 +775,13 @@ async def upload_provider_logo(
     file_ext = (os.path.splitext(file.filename)[1] if file.filename else ".png").lower()
     if file_ext not in ALLOWED_LOGO_EXTENSIONS:
         raise HTTPException(400, f"Unsupported logo format '{file_ext}'. Use PNG, JPG, SVG or WEBP.")
-    safe_filename = f"{provider.slug}_logo{file_ext}"
+    # basename() as well as the create-time slug validation. Providers created
+    # BEFORE that validation existed may already hold a traversing slug, and
+    # this is the line that turns one into a write outside UPLOAD_DIR.
+    safe_filename = os.path.basename(f"{provider.slug}_logo{file_ext}")
     file_path = os.path.join(UPLOAD_DIR, safe_filename)
+    if os.path.dirname(os.path.abspath(file_path)) != os.path.abspath(UPLOAD_DIR):
+        raise HTTPException(400, "Invalid provider slug for a filename")
 
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
@@ -671,9 +795,15 @@ async def upload_provider_logo(
 async def get_provider(
     provider_id: str,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(_provider_admin),
 ):
-    """Get full provider details."""
+    """Get full provider details.
+
+    Every sibling route on this router (settings, crew, vehicles, prfs, logo,
+    patch, delete) is gated by _assert_settings_access or _provider_admin; this
+    one and the list route were left on bare authentication, so any logged-in
+    account could read any tenant's record by UUID.
+    """
     result = await db.execute(
         select(ServiceProvider).where(ServiceProvider.id == uuid.UUID(provider_id))
     )
@@ -1036,8 +1166,13 @@ async def upload_provider_logo_settings(
     if file_ext not in ALLOWED_LOGO_EXTENSIONS:
         raise HTTPException(400, f"Unsupported logo format '{file_ext}'. Use PNG, JPG, SVG or WEBP.")
 
-    safe_filename = f"{provider.slug}_logo{file_ext}"
+    # basename() as well as the create-time slug validation. Providers created
+    # BEFORE that validation existed may already hold a traversing slug, and
+    # this is the line that turns one into a write outside UPLOAD_DIR.
+    safe_filename = os.path.basename(f"{provider.slug}_logo{file_ext}")
     file_path = os.path.join(UPLOAD_DIR, safe_filename)
+    if os.path.dirname(os.path.abspath(file_path)) != os.path.abspath(UPLOAD_DIR):
+        raise HTTPException(400, "Invalid provider slug for a filename")
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 

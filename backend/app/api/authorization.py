@@ -16,6 +16,7 @@ from app.models.user import User, UserRole
 from app.models.auth_request import SchemeAuthRequest, AuthRequestStatus
 from app.models.system_settings import SystemSettings
 from app.schemas.authorization import AuthRequestResponse, AuthHistoryResponse, AuthRequestCreate
+from app.services.gateway import sanitize_payload
 from pydantic import BaseModel
 from app.services.scheme_auth import (
     resolve_scheme_credentials,
@@ -178,7 +179,14 @@ async def request_authorization(
     auth_req.auth_number = result.get("auth_number")
     auth_req.approved_amount = result.get("approved_amount")
     auth_req.decline_reason = result.get("reason")
-    auth_req.request_payload = result.get("request_payload")
+    # SANITISED before persisting. _build_auth_payload writes the patient's SA
+    # ID into request_payload (adapters/base.py:102) — decrypted by the column
+    # type, so plaintext — and SchemeAuthRequest.request_payload is a bare JSONB
+    # with no encryption. That was a third at-rest plaintext copy of the one
+    # field the platform encrypts, and this route returns it to the client.
+    # sanitize_payload already existed and was only ever applied on the
+    # APIAuditLog path; it was never brought to the record that outlives it.
+    auth_req.request_payload = sanitize_payload(result.get("request_payload"))
     auth_req.response_payload = result.get("response_payload")
     auth_req.responded_at = datetime.now(timezone.utc)
 
@@ -456,7 +464,14 @@ async def auto_request_authorization(case_id: uuid.UUID, db: AsyncSession) -> di
     auth_req.auth_number = result.get("auth_number")
     auth_req.approved_amount = result.get("approved_amount")
     auth_req.decline_reason = result.get("reason")
-    auth_req.request_payload = result.get("request_payload")
+    # SANITISED before persisting. _build_auth_payload writes the patient's SA
+    # ID into request_payload (adapters/base.py:102) — decrypted by the column
+    # type, so plaintext — and SchemeAuthRequest.request_payload is a bare JSONB
+    # with no encryption. That was a third at-rest plaintext copy of the one
+    # field the platform encrypts, and this route returns it to the client.
+    # sanitize_payload already existed and was only ever applied on the
+    # APIAuditLog path; it was never brought to the record that outlives it.
+    auth_req.request_payload = sanitize_payload(result.get("request_payload"))
     auth_req.response_payload = result.get("response_payload")
     auth_req.responded_at = datetime.now(timezone.utc)
 

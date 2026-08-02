@@ -60,6 +60,17 @@ class ServiceProvider(Base):
         comment="Portal login locked until this timestamp (NULL = not locked)"
     )
 
+    # ── Bulk revocation of device unlocks ──
+    # One company password is shared across every crew tablet, so when it leaks
+    # it leaks to everyone at once. Rotating the password alone does NOT undo
+    # the damage: the 12-hour portal grants already minted from the old password
+    # stay valid, and each one can still be exchanged for crew tokens. Stamping
+    # this kills every outstanding grant for the company in a single write.
+    tokens_revoked_at: Mapped[Union[datetime, None]] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+        comment="Invalidate all portal grants issued before this time (NULL = none revoked)"
+    )
+
     # Outbound PRF email account — each provider sends "PRF to receiving
     # facility" PDFs from its OWN Gmail / Outlook mailbox. The app password is
     # Fernet-encrypted at rest (app/utils/crypto.py) and never returned by any

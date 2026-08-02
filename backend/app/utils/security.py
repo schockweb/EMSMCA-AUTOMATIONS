@@ -48,6 +48,48 @@ async def verify_password_async(plain_password: str, hashed_password: str) -> bo
     )
 
 
+# A bcrypt digest of a value nobody knows, built once per process. Verifying
+# against it is how an UNKNOWN account is made to cost the same as a real one.
+# Generated rather than hard-coded so the work factor always tracks whatever
+# gensalt() currently defaults to.
+_DUMMY_HASH: Optional[str] = None
+
+
+def _dummy_hash() -> str:
+    global _DUMMY_HASH
+    if _DUMMY_HASH is None:
+        _DUMMY_HASH = hash_password(uuid.uuid4().hex + uuid.uuid4().hex)
+    return _DUMMY_HASH
+
+
+async def verify_password_or_dummy(
+    plain_password: str, hashed_password: Optional[str]
+) -> bool:
+    """Verify a password, spending the SAME bcrypt time when there is no account.
+
+    Every login path short-circuited on an unknown identity — `if not user or not
+    verify(...)` never reaches the hash — so a request for an address that does
+    not exist came back in single-digit milliseconds while a real one spent
+    ~200 ms in bcrypt. That gap is a reliable oracle for "does this account exist
+    here", readable by an anonymous caller with a stopwatch and no valid
+    credential.
+
+    On this platform an account IS a person: the paramedic login set discloses
+    which practitioners work for which ambulance service, and the provider portal
+    set discloses which ambulance services are customers. Neither is ours to
+    leak, and lockout does not help — enumeration needs one attempt per address,
+    never five against the same one.
+
+    Hashing the submitted password against a throwaway digest costs what the real
+    check costs and returns False. The comparison is deliberately performed and
+    discarded; it must not be optimised away.
+    """
+    if not hashed_password:
+        await verify_password_async(plain_password, _dummy_hash())
+        return False
+    return await verify_password_async(plain_password, hashed_password)
+
+
 # ── Password Complexity Validation ────────────────
 
 def validate_password_complexity(password: str) -> None:
@@ -73,20 +115,35 @@ def validate_password_complexity(password: str) -> None:
 # ── JWT Tokens (with JTI for revocation) ──────────
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+    now = datetime.now(timezone.utc)
     to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + (
+    expire = now + (
         expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     )
     jti = str(uuid.uuid4())
-    to_encode.update({"exp": expire, "type": "access", "jti": jti})
+    # Issue time is what makes bulk revocation possible: the blacklist can only
+    # revoke a token whose JTI someone has seen, and a stolen token is by
+    # definition one nobody has seen. `iat_ms` carries the millisecond precision
+    # the standard second-granularity `iat` cannot — see
+    # token_is_revoked_by_family for why one second is too coarse here.
+    to_encode.update({
+        "exp": expire, "iat": int(now.timestamp()),
+        "iat_ms": int(now.timestamp() * 1000),
+        "type": "access", "jti": jti,
+    })
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
 
 def create_refresh_token(data: dict) -> str:
+    now = datetime.now(timezone.utc)
     to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+    expire = now + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
     jti = str(uuid.uuid4())
-    to_encode.update({"exp": expire, "type": "refresh", "jti": jti})
+    to_encode.update({
+        "exp": expire, "iat": int(now.timestamp()),
+        "iat_ms": int(now.timestamp() * 1000),
+        "type": "refresh", "jti": jti,
+    })
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
 
@@ -111,6 +168,65 @@ async def is_token_blacklisted(jti: str, db: AsyncSession) -> bool:
         select(TokenBlacklist).where(TokenBlacklist.jti == jti)
     )
     return result.scalar_one_or_none() is not None
+
+
+def token_is_revoked_by_family(payload: dict, revoked_at: Optional[datetime]) -> bool:
+    """True when this token was issued before its owner's tokens were mass-revoked.
+
+    WHY A SECOND MECHANISM EXISTS ALONGSIDE THE BLACKLIST
+    -----------------------------------------------------
+    The blacklist revokes one token, by JTI, and can only ever revoke a JTI
+    somebody has presented. That is precisely the wrong shape for the case that
+    matters: a token COPIED off a device. Nobody has seen the copy, so there is
+    no JTI to blacklist, and the original stays valid — logging out on the real
+    device blacklists the real device's token and leaves the thief's untouched.
+
+    A per-identity cutoff inverts that. Stamping `tokens_revoked_at = now` kills
+    every credential issued before that instant, seen or unseen, in one write.
+    It is the only thing that answers "a crew tablet was left at the hospital"
+    or "this refresh token was replayed, assume the account is compromised".
+
+    Fails CLOSED on a token with no `iat`. Tokens minted before this field
+    existed cannot prove when they were issued, so once an identity has been
+    revoked they are treated as predating it. That logs out anyone still holding
+    a pre-upgrade token at the moment of a revocation — which is the correct
+    trade when the alternative is a revocation that silently does not revoke.
+    """
+    if revoked_at is None:
+        return False
+    if revoked_at.tzinfo is None:
+        revoked_at = revoked_at.replace(tzinfo=timezone.utc)
+    # `iat_ms` rather than the standard `iat`, and the difference matters.
+    #
+    # A JWT NumericDate is whole seconds, but the cutoff is a database timestamp
+    # carrying microseconds — and the events this defends against happen INSIDE
+    # one second. Refresh-token reuse is the clearest case: the replay that
+    # triggers revocation typically arrives milliseconds after the exchange that
+    # minted the attacker's token, so at second granularity the attacker's token
+    # and the cutoff share a timestamp and the comparison lets it live. That is
+    # the entire attack surviving the countermeasure aimed at it.
+    #
+    # Rounding the other way is no better: it would revoke the token the victim
+    # gets when they immediately sign back in, locking them out for the rest of
+    # the second. Milliseconds remove the ambiguity instead of picking a side.
+    #
+    # `iat` is still emitted for standards compliance and is used as a fallback
+    # for tokens minted before iat_ms existed.
+    issued_ms = payload.get("iat_ms")
+    if issued_ms is None:
+        iat = payload.get("iat")
+        if iat is None:
+            return True
+        try:
+            issued_ms = int(iat) * 1000
+        except (TypeError, ValueError):
+            return True
+    try:
+        issued_ms = int(issued_ms)
+    except (TypeError, ValueError):
+        return True
+
+    return issued_ms < int(revoked_at.timestamp() * 1000)
 
 
 async def blacklist_token(
@@ -185,6 +301,14 @@ async def get_current_user(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found or inactive",
+        )
+
+    # Bulk revocation — set when a refresh token is replayed (treated as theft)
+    # or when an administrator ends every session for this account.
+    if token_is_revoked_by_family(payload, getattr(user, "tokens_revoked_at", None)):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session revoked. Please sign in again.",
         )
     return user
 

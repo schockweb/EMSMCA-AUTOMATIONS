@@ -3,18 +3,40 @@ Claims API — Claim creation, listing, and status management.
 """
 from __future__ import annotations
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.models.audit_log import AuditLog
 from app.models.claim import Claim, AdjudicationStatus
 from app.models.claim_line import ClaimLine
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.schemas.claim import ClaimCreate, ClaimUpdate, ClaimResponse, ClaimLineResponse
-from app.utils.security import get_current_user
+from app.utils.client_ip import get_trusted_client_ip
+from app.utils.security import get_current_user, require_permission, require_role
 
-router = APIRouter(prefix="/api/claims", tags=["Claims"])
+# AUTHENTICATION-ONLY UNTIL NOW.
+#
+# This router declared no dependencies at all, so the only requirement was a
+# valid token — any role, any permission set. `User.role` defaults to PARAMEDIC
+# and an account created with permissions=["dashboard"] still reached every
+# route here. That meant reading every tenant's claims (amounts, target scheme,
+# ICD-10 diagnosis codes and free-text descriptions on the line items) and,
+# through PATCH /{claim_id}/lines, silently rewriting what is billed to a
+# medical scheme — with no provider scoping, no status check and no audit row.
+#
+# Every comparable router was hardened and this one was missed: cases.py gates
+# on role, documents.py and failed_prfs.py on role plus permission. It now
+# matches them.
+router = APIRouter(
+    prefix="/api/claims",
+    tags=["Claims"],
+    dependencies=[
+        Depends(require_role(UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.BILLING_CLERK)),
+        Depends(require_permission("adjudication", "cases", "tariff_billing")),
+    ],
+)
 
 
 @router.post("/", response_model=ClaimResponse, status_code=status.HTTP_201_CREATED)
@@ -170,10 +192,17 @@ from app.schemas.claim import ClaimLinesUpdateBulk
 async def update_claim_lines(
     claim_id: str,
     body: ClaimLinesUpdateBulk,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     _current: User = Depends(get_current_user),
 ):
-    """Bulk update claim lines explicitly setting quantities and total prices."""
+    """Bulk update claim lines explicitly setting quantities and total prices.
+
+    This rewrites what is billed to a medical scheme. The neighbouring void
+    route has always required a reason and written a full before/after audit
+    entry; this one wrote nothing, so a changed amount could not be attributed
+    to anyone. It is now audited on the same terms.
+    """
     # Fetch claim to ensure it exists
     result = await db.execute(select(Claim).where(Claim.id == uuid.UUID(claim_id)))
     claim = result.scalar_one_or_none()
@@ -186,6 +215,13 @@ async def update_claim_lines(
     )
     db_lines = lines_result.scalars().all()
     line_map = {str(l.id): l for l in db_lines}
+
+    before_state = {
+        "total_amount": float(claim.total_amount or 0),
+        "dispatch_reference_number": claim.dispatch_reference_number,
+        "lines": {str(l.id): {"quantity": l.quantity, "total_price": float(l.total_price or 0)}
+                  for l in db_lines},
+    }
 
     total_amount = 0.0
 
@@ -214,6 +250,24 @@ async def update_claim_lines(
     # Persist dispatch reference on the same call (aggregator payer flow)
     if body.dispatch_reference_number is not None:
         claim.dispatch_reference_number = body.dispatch_reference_number.strip() or None
+
+    after_state = {
+        "total_amount": float(claim.total_amount or 0),
+        "dispatch_reference_number": claim.dispatch_reference_number,
+        "lines": {str(l.id): {"quantity": l.quantity, "total_price": float(l.total_price or 0)}
+                  for l in db_lines},
+    }
+    if before_state != after_state:
+        db.add(AuditLog(
+            user_id=_current.id,
+            action="CLAIM_LINES_UPDATED",
+            entity_type="claim",
+            entity_id=claim.id,
+            details={"changed_by": _current.email, "case_id": str(claim.case_id)},
+            before_state=before_state,
+            after_state=after_state,
+            ip_address=get_trusted_client_ip(request),
+        ))
 
     await db.commit()
     

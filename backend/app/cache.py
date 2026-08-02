@@ -85,19 +85,67 @@ async def get_cache(key: str) -> Optional[dict]:
         raw = await r.get(key)
         if raw is None:
             return None
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8", errors="strict")
+        if raw.startswith(_SENSITIVE_PREFIX):
+            from app.utils.crypto import decrypt_str
+            plain = decrypt_str(raw[len(_SENSITIVE_PREFIX):])
+            if plain is None:
+                # Written under a different key — treat as a miss rather than
+                # serving nothing useful or raising into the request.
+                return None
+            return json.loads(plain)
         return json.loads(raw)
     except Exception as exc:
         logger.debug("Cache GET error for key=%s: %s", key, exc)
         return None
 
 
-async def set_cache(key: str, value: dict, ttl: int = 60) -> None:
-    """Store a JSON value in the cache with a TTL (seconds). Fails silently."""
+# Marker on cache values that hold patient data. Kept as a prefix on the stored
+# string so a reader can tell encrypted from plain without a second key lookup,
+# and so existing plaintext entries written before this change still decode.
+_SENSITIVE_PREFIX = "enc:v1:"
+
+
+async def set_cache(key: str, value: dict, ttl: int = 60, sensitive: bool = False) -> None:
+    """Store a JSON value in the cache with a TTL (seconds). Fails silently.
+
+    `sensitive=True` encrypts the payload before it reaches Redis.
+
+    WHY: Redis here runs with `--appendonly yes` on a persistent volume, with no
+    password and no TLS. The crew PRF detail route cached the full clinical
+    record — including the patient's SA ID number already DECRYPTED by the
+    column type — for up to an hour. So the one field the platform encrypts in
+    PostgreSQL had a plaintext copy sitting in an AOF file on the same disk, and
+    anyone with the volume snapshot, or any code execution inside the Docker
+    network, could read it with no credential at all. Encrypting at rest in the
+    database while writing the same value in clear to a cache is not encrypting
+    at rest.
+
+    The alternative — not caching the record — was rejected because the cache is
+    what keeps a crew reopening a PRF off the database on a bad connection.
+    """
     try:
         r = await _get_redis()
         if r is None:
             return
-        await r.set(key, json.dumps(value, default=str), ex=ttl)
+        payload = json.dumps(value, default=str)
+        if sensitive:
+            # encrypt_str RAISES on a bad key rather than returning None, so
+            # this must be caught here. Falling through to the outer handler
+            # would also skip the write, but only by accident — and a later
+            # refactor that made the outer handler re-raise would start writing
+            # PHI in clear. Skipping the cache is the safe failure.
+            from app.utils.crypto import encrypt_str
+            try:
+                payload = _SENSITIVE_PREFIX + encrypt_str(payload)
+            except Exception as exc:
+                logger.warning(
+                    "Cache SET skipped for key=%s — cannot encrypt (%s). "
+                    "Patient data is never cached in clear.", key, exc,
+                )
+                return
+        await r.set(key, payload, ex=ttl)
     except Exception as exc:
         logger.debug("Cache SET error for key=%s: %s", key, exc)
 

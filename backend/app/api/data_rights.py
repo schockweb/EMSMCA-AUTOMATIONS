@@ -36,7 +36,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -49,14 +50,23 @@ from app.models.service_provider import ServiceProvider
 from app.models.user import User, UserRole
 from app.services.phi_audit import record_phi_access, ACTION_TRANSMIT
 from app.utils.patient_id import id_hash, normalise_id
-from app.utils.security import require_role
+from app.utils.security import require_permission, require_role
 
 # Back-office ADMIN only. These routes assemble more patient data into a single
 # response than anything else in the product.
+# Role AND permission. Role alone was not enough: these routes assemble the
+# largest patient payloads in the product — one GET returns an entire tenant's
+# clinical history — and an ADMIN narrowed to ["dashboard"] still reached them,
+# so the permission checkboxes did not constrain the single widest disclosure
+# on the platform. Comparable readers (digital_prf.py's by-case route) already
+# pair the role gate with has_permission.
 router = APIRouter(
     prefix="/api/data-rights",
     tags=["Data Rights"],
-    dependencies=[Depends(require_role(UserRole.ADMIN, UserRole.SUPER_ADMIN))],
+    dependencies=[
+        Depends(require_role(UserRole.ADMIN, UserRole.SUPER_ADMIN)),
+        Depends(require_permission("cases", "settings")),
+    ],
 )
 
 
@@ -96,14 +106,33 @@ def _prf_payload(p: DigitalPRF) -> dict:
     }
 
 
-@router.get("/subject-access")
+class SubjectAccessRequest(BaseModel):
+    id_number: str
+
+
+@router.post("/subject-access")
 async def subject_access_request(
+    body: SubjectAccessRequest,
     request: Request,
-    id_number: str = Query(..., description="The data subject's SA ID number"),
     db: AsyncSession = Depends(get_db),
     _current: User = Depends(require_role(UserRole.ADMIN, UserRole.SUPER_ADMIN)),
 ):
     """Everything held about one person — POPIA s23.
+
+    POST WITH A BODY, NOT GET WITH A QUERY PARAMETER.
+    -------------------------------------------------
+    This took the ID as `?id_number=`, which put the single field the platform
+    goes to the trouble of encrypting in the database into the URL — and the URL
+    is logged verbatim in two places: nginx's combined access log (access_log is
+    disabled only for health checks and static assets) and uvicorn's, which runs
+    without --no-access-log. There is no log rotation on the VM. So a POPIA
+    subject-access request — the mechanism that exists to PROTECT a data
+    subject — wrote that person's full SA ID in cleartext to disk twice, in
+    files not covered by any encryption story and routinely shipped to ops.
+
+    A request body is not logged. This is a breaking change to the endpoint
+    shape, taken deliberately: there is no way to keep an identifier out of the
+    logs while it is in the URL.
 
     Located by the KEYED HASH of the identifier, never by scanning: the ID is
     encrypted at rest, so an equality search on the hash is both the only way
@@ -111,7 +140,7 @@ async def subject_access_request(
     "900101 5800 083" and "9001015800083" are the same person and a lookup that
     missed on a space would tell a member we hold nothing about them.
     """
-    digits = normalise_id(id_number)
+    digits = normalise_id(body.id_number)
     if len(digits) < 6:
         raise HTTPException(400, "Provide the full ID number.")
 

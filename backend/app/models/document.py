@@ -8,6 +8,7 @@ from sqlalchemy import String, Boolean, Float, Text, ForeignKey, DateTime, Enum 
 # from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
+from app.utils.encrypted_types import ExtractedDataWithEncryptedIDs
 import enum
 
 
@@ -47,8 +48,12 @@ class Document(Base):
     ocr_field_scores: Mapped[Union[dict, None]] = mapped_column(
         JSONB, nullable=True, comment="Per-field confidence map"
     )
+    # Encrypted at rest: this blob carries the patient's SA ID and the principal
+    # member's, read off a scanned PRF. It was a bare JSONB while the digital
+    # PRF and the case were both encrypted, so the scanned-form pipeline was the
+    # one remaining plaintext copy of the identifier.
     extracted_data: Mapped[Union[dict, None]] = mapped_column(
-        JSONB, nullable=True, comment="Structured extraction result"
+        ExtractedDataWithEncryptedIDs, nullable=True, comment="Structured extraction result"
     )
     needs_hitl_review: Mapped[bool] = mapped_column(
         Boolean, default=False,

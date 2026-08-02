@@ -79,6 +79,15 @@ class User(Base):
         comment="Last password change timestamp"
     )
 
+    # ── Bulk session revocation ──
+    # Every token issued to this account BEFORE this instant is invalid. The
+    # JTI blacklist can only revoke a token someone has presented, which is
+    # useless against a token that was copied — see token_is_revoked_by_family.
+    tokens_revoked_at: Mapped[Union[datetime, None]] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+        comment="Invalidate all tokens issued before this time (NULL = none revoked)"
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

@@ -80,8 +80,8 @@ async def subject_records():
 async def test_subject_access_returns_that_person_and_only_that_person(
     client, auth_headers, subject_records
 ):
-    res = await client.get(
-        "/api/data-rights/subject-access", params={"id_number": _ID}, headers=auth_headers,
+    res = await client.post(
+        "/api/data-rights/subject-access", json={"id_number": _ID}, headers=auth_headers,
     )
     assert res.status_code == 200, res.text[:200]
     body = res.json()
@@ -102,9 +102,9 @@ async def test_formatting_does_not_change_who_is_found(client, auth_headers, sub
     this stays green if the route's own (redundant) normalise call is removed,
     and goes red the moment the real one is. Verified by mutating both.
     """
-    res = await client.get(
+    res = await client.post(
         "/api/data-rights/subject-access",
-        params={"id_number": "900101 5800 083"}, headers=auth_headers,
+        json={"id_number": "900101 5800 083"}, headers=auth_headers,
     )
     assert res.status_code == 200
     assert res.json()["found"] is True
@@ -117,8 +117,8 @@ async def test_a_subject_access_request_is_logged_as_a_transmit(
     anything in the system is audited, it is this."""
     from tests.conftest import _TestSession
 
-    await client.get(
-        "/api/data-rights/subject-access", params={"id_number": _ID}, headers=auth_headers,
+    await client.post(
+        "/api/data-rights/subject-access", json={"id_number": _ID}, headers=auth_headers,
     )
     async with _TestSession() as db:
         rows = (await db.execute(
@@ -154,11 +154,24 @@ async def test_the_retention_policy_is_reported_not_just_documented(client, auth
     )
 
 
-@pytest.mark.parametrize("route", [
-    "/api/data-rights/subject-access?id_number=9001015800083",
-    "/api/data-rights/retention",
+@pytest.mark.parametrize("method,route,body", [
+    ("POST", "/api/data-rights/subject-access", {"id_number": "9001015800083"}),
+    ("GET", "/api/data-rights/retention", None),
 ])
-async def test_data_rights_routes_require_admin(client, route):
+async def test_data_rights_routes_require_admin(client, method, route, body):
     """These assemble more patient data into one response than anything else."""
-    res = await client.get(route)
+    res = (await client.post(route, json=body)) if method == "POST"         else (await client.get(route))
     assert res.status_code in (401, 403), f"{route} was reachable unauthenticated"
+
+
+async def test_subject_access_is_not_reachable_by_GET(client, auth_headers):
+    """The identifier must never travel in a URL — nginx and uvicorn both log
+    the query string verbatim, to files with no rotation and no encryption.
+
+    Guards the GET->POST change: if someone reinstates a GET for convenience,
+    every subject-access request starts writing an SA ID to disk in cleartext.
+    """
+    res = await client.get(
+        "/api/data-rights/subject-access?id_number=9001015800083", headers=auth_headers,
+    )
+    assert res.status_code == 405, "subject-access accepted the ID in the URL again"

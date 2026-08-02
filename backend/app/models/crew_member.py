@@ -64,6 +64,17 @@ class CrewMember(Base):
         comment="Account locked until this timestamp (NULL = not locked)"
     )
 
+    # ── Bulk session revocation (mirrors User) ──
+    # This matters more for crew than for back-office staff. A crew token lives
+    # 12 hours, is minted onto a SHARED tablet that rides in an ambulance, and
+    # opens patient records. When a device is lost, left at a hospital or handed
+    # to the wrong person, End Shift on the real device cannot help — it revokes
+    # only the JTI it can see. This kills every session for the practitioner.
+    tokens_revoked_at: Mapped[Union[datetime, None]] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+        comment="Invalidate all crew tokens issued before this time (NULL = none revoked)"
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

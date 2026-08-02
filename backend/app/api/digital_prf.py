@@ -1535,7 +1535,12 @@ async def get_prf(
     ttl = settings.CACHE_TTL_PRF_DRAFT_SECONDS
     if prf.status.value in ("submitted", "processed"):
         ttl = settings.CACHE_TTL_PRF_SUBMITTED_SECONDS
-    await set_cache(cache_key, result, ttl=ttl)
+    # sensitive=True: `result` carries form_data with the patient's SA ID
+    # already decrypted by the column type, plus the full clinical record and
+    # the signature images. Redis persists to an AOF file with no password, so
+    # without this there is a plaintext on-disk copy of the field the database
+    # encrypts.
+    await set_cache(cache_key, result, ttl=ttl, sensitive=True)
 
     return result
 

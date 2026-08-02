@@ -3,12 +3,13 @@ Crashes API — CRUD and analytics for the CrashEvent monitoring system.
 Admin-only access (except POST /api/crashes for frontend error reporting).
 """
 from __future__ import annotations
+import json
 import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select, func, delete, case, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,10 +30,47 @@ class FrontendCrashReport(BaseModel):
     """Schema for crashes reported by the React frontend."""
     error_type: str = Field(..., max_length=255)
     message: str = Field(..., max_length=2000)
-    stacktrace: Optional[str] = None
+    stacktrace: Optional[str] = Field(None, max_length=20000)
     endpoint: Optional[str] = Field(None, max_length=500, description="Current page URL")
     severity: str = Field("error", pattern="^(critical|error|warning)$")
     metadata: Optional[dict] = None
+
+    @field_validator("metadata")
+    @classmethod
+    def _bound_and_redact_metadata(cls, v):
+        """This endpoint is UNAUTHENTICATED, and `metadata` had no bound at all.
+
+        Every other field is capped; this one accepted an arbitrary object of
+        any size, depth or key count and stored it whole. An anonymous caller
+        could push ~1MB per request into the same PostgreSQL instance that holds
+        the patient records — and the codebase already carries the scar: the
+        development database once reached 3.68 million crash rows, 99.2% of the
+        entire database.
+
+        It is also a browser-supplied blob from the crew PWA, so it can carry
+        whatever happened to be in scope when the component threw — including
+        patient fields. Redacted with the same rules as the server-side crash
+        handler, because an unauthenticated ingest is the last place patient
+        identifiers should be able to land.
+        """
+        if v is None:
+            return None
+        if not isinstance(v, dict):
+            raise ValueError("metadata must be an object")
+
+        from app.middleware.crash_handler import _redact
+
+        cleaned = _redact(v)
+        try:
+            encoded = json.dumps(cleaned, default=str)
+        except Exception:
+            raise ValueError("metadata is not serialisable")
+        if len(encoded) > 8192:
+            # Truncate rather than reject: a crash report is best-effort
+            # telemetry and losing it entirely to a size cap hides real faults.
+            return {"_truncated": True, "_original_bytes": len(encoded),
+                    "preview": encoded[:2000]}
+        return cleaned
 
 
 class CrashEventOut(BaseModel):
@@ -78,7 +116,11 @@ async def report_frontend_crash(
                 _settings.SECRET_KEY,
                 algorithms=[_settings.ALGORITHM],
             )
-            uid = payload.get("sub")
+            # A refresh token must not stand in as identity here either. It is
+            # only attribution on a crash row, but get_current_user and
+            # _resolve_case_prf_access both enforce this and a lone exception is
+            # how the next person concludes the check is optional.
+            uid = payload.get("sub") if payload.get("type") == "access" else None
             if uid:
                 user_id = uuid.UUID(uid)
         except Exception:

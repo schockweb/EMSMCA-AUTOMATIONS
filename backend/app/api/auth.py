@@ -19,6 +19,8 @@ from app.schemas.auth import TokenResponse, RefreshRequest, UserProfile
 from app.utils.security import (
     verify_password,
     verify_password_async,
+    verify_password_or_dummy,
+    token_is_revoked_by_family,
     create_access_token,
     create_refresh_token,
     decode_token,
@@ -137,7 +139,17 @@ async def login(
         )
 
     # ── Validate credentials ──
-    if not user or not await verify_password_async(form_data.password, user.hashed_password):
+    #
+    # Evaluated BEFORE the `not user` test rather than after it. Written as
+    # `not user or not await verify(...)` the bcrypt call is short-circuited
+    # away for an address that does not exist, so an unknown email answered in
+    # milliseconds and a real one took ~200 ms — an existence oracle for anyone
+    # with a stopwatch and no credential. verify_password_or_dummy spends the
+    # same time either way.
+    password_ok = await verify_password_or_dummy(
+        form_data.password, user.hashed_password if user else None
+    )
+    if not user or not password_ok:
         # Record failed attempt
         if user:
             user.failed_login_attempts = (user.failed_login_attempts or 0) + 1
@@ -185,6 +197,7 @@ async def login(
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_token(
     body: RefreshRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     """Rotate refresh token — blacklists the old one and issues new tokens."""
@@ -195,15 +208,43 @@ async def refresh_token(
             detail="Invalid refresh token",
         )
 
-    # Check if old refresh token has been revoked
+    user_id = payload.get("sub")
+
+    # ── Refresh-token REUSE means the token was stolen ──
+    #
+    # Rotation blacklists a refresh token the instant it is spent, so a valid
+    # holder never presents the same one twice. A second presentation therefore
+    # means two parties hold it — and the platform cannot tell which of them is
+    # the legitimate user. Simply 401ing the replay (the previous behaviour)
+    # rejects one request and leaves the attacker's freshly-rotated token, which
+    # they obtained on the FIRST use, valid for its full seven days.
+    #
+    # The standard response is to assume compromise and revoke the whole family:
+    # every token issued to this account before now dies, both parties are
+    # logged out, and whoever knows the password gets back in. Logging out a
+    # legitimate user on a rare race is a far better outcome than leaving a
+    # thief with a week of authenticated access to patient records.
     old_jti = payload.get("jti")
     if old_jti and await is_token_blacklisted(old_jti, db):
+        if user_id:
+            replayed_user = await db.scalar(select(User).where(User.id == user_id))
+            if replayed_user is not None:
+                replayed_user.tokens_revoked_at = datetime.now(timezone.utc)
+                await _record_login_audit(
+                    db, replayed_user.id, "REFRESH_TOKEN_REUSE_REVOKED",
+                    get_trusted_client_ip(request),
+                    {"jti": old_jti,
+                     "note": "Blacklisted refresh token replayed — all sessions revoked"},
+                )
+                await db.commit()
+                logger.warning(
+                    "Refresh token REUSE for user=%s (jti=%s) — revoked all sessions",
+                    user_id, old_jti,
+                )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Refresh token has been revoked",
         )
-
-    user_id = payload.get("sub")
 
     # Ensure user still exists in the database (prevents infinite loop after a DB wipe)
     user = await db.scalar(select(User).where(User.id == user_id))
@@ -221,6 +262,15 @@ async def refresh_token(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Account is deactivated",
+        )
+
+    # A refresh token from before a mass revocation must not mint anything.
+    # Without this the family revocation above stops access tokens but leaves
+    # the refresh credential able to issue fresh ones — revoking nothing.
+    if token_is_revoked_by_family(payload, user.tokens_revoked_at):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session revoked. Please sign in again.",
         )
 
     # Blacklist the old refresh token so it can't be reused

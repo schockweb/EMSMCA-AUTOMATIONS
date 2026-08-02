@@ -17,9 +17,16 @@ from app.models.audit_log import AuditLog
 from app.models.crew_member import CrewMember
 from app.models.service_provider import ServiceProvider
 from app.utils.client_ip import get_trusted_client_ip
+from app.utils.login_throttle import (
+    clear_source_failures,
+    is_source_blocked,
+    register_source_failure,
+)
 from app.utils.security import (
     verify_password,
     verify_password_async,
+    verify_password_or_dummy,
+    token_is_revoked_by_family,
     hash_password,
     create_access_token,
     decode_token,
@@ -97,6 +104,12 @@ async def get_current_crew(
     crew = result.scalar_one_or_none()
     if not crew or not crew.is_active:
         raise HTTPException(status_code=401, detail="Crew member not found or inactive")
+
+    # Bulk revocation — the lost-tablet case. Blacklisting by JTI can only kill
+    # a token someone presents; this kills every session minted for this
+    # practitioner before the cutoff, including copies nobody has seen.
+    if token_is_revoked_by_family(payload, getattr(crew, "tokens_revoked_at", None)):
+        raise HTTPException(status_code=401, detail="Session revoked. Sign in again.")
     return crew
 
 
@@ -134,7 +147,15 @@ async def crew_login(body: CrewLoginRequest, request: Request, db: AsyncSession 
 
     # Run bcrypt in a thread executor so the event loop (and DB pool) isn't
     # blocked by the ~200 ms CPU-bound hash check.
-    if not crew or not await verify_password_async(body.password, crew.hashed_password):
+    #
+    # Computed before the `not crew` test so an unknown address costs the same
+    # as a real one. Short-circuiting made this endpoint an oracle for "does
+    # this paramedic have a login here" — which discloses who works for which
+    # ambulance service to an anonymous caller. See verify_password_or_dummy.
+    password_ok = await verify_password_or_dummy(
+        body.password, crew.hashed_password if crew else None
+    )
+    if not crew or not password_ok:
         if crew:
             crew.failed_login_attempts = (crew.failed_login_attempts or 0) + 1
             if crew.failed_login_attempts >= MAX_FAILED_ATTEMPTS:
@@ -336,6 +357,26 @@ async def require_portal_grant(
         # Never let one company's unlock reach another company's crew.
         raise HTTPException(status_code=403, detail="Token does not belong to this provider")
 
+    # Bulk revocation, checked on BOTH shapes this gate accepts.
+    #
+    # Rotating a leaked company password does not by itself invalidate the
+    # 12-hour grants already minted from the old one, and each surviving grant
+    # still mints fresh crew tokens — so without this the rotation buys nothing
+    # until the last grant expires.
+    if token_is_revoked_by_family(payload, getattr(provider, "tokens_revoked_at", None)):
+        raise HTTPException(
+            status_code=401,
+            detail="This device unlock has been revoked. Enter the company password again.",
+        )
+    if scope == "crew":
+        holder = await db.scalar(
+            select(CrewMember).where(CrewMember.id == payload.get("crew_id"))
+        )
+        if holder is not None and token_is_revoked_by_family(
+            payload, getattr(holder, "tokens_revoked_at", None)
+        ):
+            raise HTTPException(status_code=401, detail="Session revoked. Sign in again.")
+
     return provider
 
 
@@ -359,27 +400,48 @@ async def portal_unlock(body: PortalUnlockRequest, request: Request, db: AsyncSe
     # this cannot be used to enumerate which companies exist or are configured.
     generic = HTTPException(status_code=401, detail="Incorrect company password")
 
+    # The uniform 401 below only hides the DIFFERENCE if it also costs the same.
+    # Returning immediately for an unknown or unconfigured slug skipped bcrypt
+    # entirely, so the response time distinguished exactly what the shared error
+    # message was written to conceal: which companies exist on this platform.
     if not provider or not provider.portal_login_password_hash:
+        await verify_password_or_dummy(body.password, None)
         raise generic
 
-    if provider.locked_until and provider.locked_until > datetime.now(timezone.utc):
+    # Blocked per SOURCE, not per provider.
+    #
+    # A provider-wide lock here was a clinical-availability weapon: the slug list
+    # is public and unauthenticated, so five wrong guesses shut an entire
+    # ambulance service out of starting shifts for 45 minutes, and a loop kept
+    # every company out indefinitely. Throttling the address that is guessing
+    # keeps the brute-force protection and removes the denial of service — a
+    # crew on another connection is never affected by an attacker's failures.
+    # See app/utils/login_throttle.py.
+    if await is_source_blocked("portal", str(provider.id), client_ip):
         raise HTTPException(
             status_code=403,
-            detail="Too many incorrect attempts. Try again later.",
+            detail="Too many incorrect attempts from this device. Try again later.",
         )
 
     if not await verify_password_async(body.password, provider.portal_login_password_hash):
+        source_failures = await register_source_failure("portal", str(provider.id), client_ip)
+        # The provider-wide counter is still maintained, but only as a RECORD —
+        # it drives the admin Locked-Accounts view and alerting. It no longer
+        # decides whether a request is refused.
         provider.failed_login_attempts = (provider.failed_login_attempts or 0) + 1
-        if provider.failed_login_attempts >= MAX_FAILED_ATTEMPTS:
-            provider.locked_until = datetime.now(timezone.utc) + timedelta(minutes=LOCKOUT_DURATION_MINUTES)
         db.add(AuditLog(
             user_id=None, action="PORTAL_UNLOCK_FAILED", entity_type="auth_portal",
             entity_id=provider.id, ip_address=client_ip,
-            details={"provider_slug": provider.slug, "failed_attempts": provider.failed_login_attempts},
+            details={
+                "provider_slug": provider.slug,
+                "failed_attempts": provider.failed_login_attempts,
+                "source_failures": source_failures,
+            },
         ))
         await db.commit()
         raise generic
 
+    await clear_source_failures("portal", str(provider.id), client_ip)
     provider.failed_login_attempts = 0
     provider.locked_until = None
     db.add(AuditLog(
@@ -605,4 +667,22 @@ async def crew_logout(
         exp = datetime.fromtimestamp(payload.get("exp", 0), tz=timezone.utc)
         await blacklist_token(jti, payload.get("crew_id"), "access", exp, db)
         await db.commit()
+
+    # Purge this session's cached responses.
+    #
+    # ResponseCacheMiddleware is the OUTERMOST middleware, so a cache HIT
+    # returns the stored body without running the route — which means
+    # get_current_crew and the blacklist check above never execute. Blacklisting
+    # alone therefore left a just-ended session still receiving 200s with real
+    # data for up to the cache TTL. The admin logout has purged since the same
+    # bug was found there; the crew one never did, and crew is the side with the
+    # lost-tablet problem.
+    try:
+        from app.core.response_cache import purge_session_cache
+        dropped = purge_session_cache(f"Bearer {token}")
+        if dropped:
+            logger.info("Crew logout purged %d cached responses", dropped)
+    except Exception:  # cache housekeeping must never break logout
+        pass
+
     return {"message": "Session ended"}
