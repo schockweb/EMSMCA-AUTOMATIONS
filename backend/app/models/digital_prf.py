@@ -13,6 +13,7 @@ from sqlalchemy import String, Text, ForeignKey, DateTime, JSON, Enum as SAEnum,
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
+from app.utils.encrypted_types import FormDataWithEncryptedPatientID
 
 
 class PRFStatus(str, enum.Enum):
@@ -81,8 +82,12 @@ class DigitalPRF(Base):
 
     # ── Form Data (all ~120 fields as structured JSON) ────
     form_data: Mapped[Union[dict, None]] = mapped_column(
-        JSON, nullable=True, default=dict,
-        comment="Full PRF content — patient, clinical, vitals, etc."
+        # The SA ID number inside this blob is encrypted at rest; every other
+        # key is stored as-is. See app/utils/encrypted_types.py for why only
+        # that one field, and what it costs (raw-SQL scans of the ID stop
+        # matching, which is the point).
+        FormDataWithEncryptedPatientID, nullable=True, default=dict,
+        comment="Full PRF content — patient, clinical, vitals. patient_id_number encrypted."
     )
 
     # ── Real-time Timestamps ──────────────────────────────

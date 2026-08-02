@@ -8,6 +8,7 @@ from sqlalchemy import String, Date, Text, ForeignKey, DateTime, Boolean, Enum a
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
+from app.utils.encrypted_types import EncryptedPatientID
 import enum
 
 
@@ -25,12 +26,20 @@ class Case(Base):
     )
     patient_name: Mapped[str] = mapped_column(String(255), nullable=False)
     patient_id_number: Mapped[Union[str, None]] = mapped_column(
-        # NOTE: stored as PLAINTEXT today (a Fernet token cannot fit in 13 chars).
-        # Protected by TLS in transit + Azure storage encryption + access controls.
-        # Field-level encryption is a tracked post-pilot task: widen to Text,
-        # encrypt via app/utils/crypto.py, add a hash column for lookups, and
-        # backfill existing rows. Do NOT claim field encryption until then.
-        String(13), nullable=True, comment="SA ID number (plaintext — see model note)"
+        # ENCRYPTED AT REST. Fernet token on disk, plain string in Python — the
+        # transform lives in the column type, so no call site needs to know.
+        # The column was String(13), exactly an SA ID and far too small to hold
+        # a token, which is why this could not be done before.
+        EncryptedPatientID, nullable=True,
+        comment="SA ID number — Fernet-encrypted at rest; see app/utils/patient_id.py"
+    )
+    patient_id_hash: Mapped[Union[str, None]] = mapped_column(
+        # Keyed HMAC-SHA256 of the digits, so equality lookups and duplicate
+        # detection still work without decrypting. HMAC and not a bare digest:
+        # an SA ID is 13 digits with a checksum, so a plain SHA-256 of every
+        # possible value is computable on a laptop.
+        String(64), nullable=True, index=True,
+        comment="HMAC-SHA256 lookup hash of patient_id_number"
     )
     patient_dob: Mapped[Union[date, None]] = mapped_column(Date, nullable=True)
     medical_scheme_name: Mapped[Union[str, None]] = mapped_column(String(255), nullable=True)
@@ -93,3 +102,12 @@ class Case(Base):
 
     def __repr__(self):
         return f"<Case {self.id} — {self.patient_name}>"
+
+
+# Wire the lookup-hash listener at import time. Registering it here rather than
+# in application startup means anything that imports the model — the API, the
+# Celery workers, the backfill script, the tests — gets consistent behaviour.
+# A Case written by a worker with no hash would be a Case the office cannot find.
+from app.utils.encrypted_types import register_patient_id_hash_sync  # noqa: E402
+
+register_patient_id_hash_sync()
