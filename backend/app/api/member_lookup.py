@@ -15,14 +15,26 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app.models.user import User
-from app.utils.security import get_current_user
+from app.models.user import User, UserRole
+from app.utils.security import get_current_user, require_role
 from app.config import get_settings
 
 logger = logging.getLogger("ems.member_lookup")
 settings = get_settings()
 
-router = APIRouter(prefix="/api/member-lookup", tags=["Member Lookup"])
+# Back-office ADMIN only.
+#
+# This is an identity oracle: give it a scheme and a membership number and it
+# returns the member's name, SA ID number and contact details from the scheme's
+# own API. Authentication-only meant any active account — including the default
+# PARAMEDIC role — could enumerate membership numbers and harvest identities for
+# people who are not even patients of this platform.
+router = APIRouter(
+    prefix="/api/member-lookup",
+    dependencies=[Depends(require_role(UserRole.ADMIN, UserRole.SUPER_ADMIN))],
+    tags=["Member Lookup"],
+
+)
 
 
 # ── Response Schema ────────────────────────────────────────────────────────────

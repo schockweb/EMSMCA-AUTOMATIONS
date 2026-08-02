@@ -211,6 +211,53 @@ class Settings(BaseSettings):
         )
         return self
 
+    @model_validator(mode="after")
+    def _require_database_tls_in_production(self) -> "Settings":
+        """Refuse to boot a production instance that talks to the database in
+        the clear.
+
+        Every patient name, SA ID number and clinical note in this system
+        crosses this connection. DB_SSL_MODE defaults to "" so local Docker
+        Postgres (which serves no certificate) works out of the box — and that
+        default is silent, so a client installing on their own VM gets an
+        instance that looks completely normal while shipping PHI unencrypted
+        across their network.
+
+        This is the same failure mode as the placeholder secrets above, and gets
+        the same treatment: fatal in production, a warning everywhere else.
+
+        Either mechanism satisfies it — DB_SSL_MODE=require, or an ssl/sslmode
+        parameter already in DATABASE_URL, which is how this deployment does it.
+        """
+        url = (self.DATABASE_URL or "").lower()
+        tls = (
+            self.DB_SSL_MODE.strip().lower() in {"require", "verify-ca", "verify-full"}
+            or "ssl=require" in url or "sslmode=require" in url
+            or "ssl=true" in url or "sslmode=verify" in url
+        )
+        if tls:
+            return self
+
+        # A loopback database cannot be intercepted on the wire; demanding TLS
+        # there would only push people to disable the check entirely.
+        local = any(h in url for h in ("@localhost", "@127.0.0.1", "@postgres", "@db:", "@ems_postgres"))
+
+        if self.APP_ENV == "production" and not local:
+            raise ValueError(
+                "Refusing to start in production without TLS to the database. "
+                "Patient identifiers and clinical notes would cross the network "
+                "in plaintext. Set DB_SSL_MODE=require, or add ssl=require to "
+                "DATABASE_URL."
+            )
+
+        import warnings
+        warnings.warn(
+            f"Database connection is NOT encrypted (APP_ENV={self.APP_ENV}). "
+            f"Acceptable for local development only.",
+            stacklevel=2,
+        )
+        return self
+
 
 @lru_cache()
 def get_settings() -> Settings:

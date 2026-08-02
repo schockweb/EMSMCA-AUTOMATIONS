@@ -4,7 +4,7 @@ Cases API — CRUD operations for EMS cases / pre-authorizations.
 from __future__ import annotations
 import uuid
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select, func, or_
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +15,7 @@ from app.models.digital_prf import DigitalPRF
 from app.models.user import User, UserRole
 from app.schemas.case import CaseCreate, CaseUpdate, CaseResponse
 from app.utils.security import get_current_user, require_role
+from app.services.phi_audit import record_phi_access, ACTION_READ
 
 # ROUTER-LEVEL role gate, deliberately not per-route.
 #
@@ -259,6 +260,7 @@ async def count_cases(
 @router.get("/{case_id}", response_model=CaseResponse)
 async def get_case(
     case_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     _current: User = Depends(get_current_user),
 ):
@@ -271,6 +273,14 @@ async def get_case(
     case = result.scalar_one_or_none()
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
+
+    # A case carries patient name, SA ID number, scheme membership and the
+    # extracted clinical data — opening one is a PHI read and must be on record.
+    await record_phi_access(
+        db, action=ACTION_READ, entity_type="case", entity_id=case.id,
+        user=_current, request=request,
+    )
+
     names = await _display_names_for(db, [case.id])
     return _case_to_response(case, (case.custom_display_name or names.get(case.id)))
 

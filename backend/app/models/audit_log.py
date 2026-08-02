@@ -19,6 +19,13 @@ class AuditLog(Base):
     user_id: Mapped[Union[uuid.UUID, None]] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=True, index=True
     )
+    # Crew members are NOT users — they live in their own table with their own
+    # token type. Almost every read of a patient record is by a crew member, so
+    # without this column the audit trail could not name the actor for the
+    # majority of accesses, which is exactly what POPIA s22 scoping needs.
+    crew_member_id: Mapped[Union[uuid.UUID, None]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("crew_members.id"), nullable=True, index=True
+    )
     action: Mapped[str] = mapped_column(
         String(50), nullable=False,
         comment="CREATE, READ, UPDATE, DELETE, TRANSMIT"

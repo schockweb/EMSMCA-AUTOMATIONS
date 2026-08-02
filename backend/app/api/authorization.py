@@ -12,7 +12,7 @@ from app.database import get_db
 from app.models.case import Case, PreAuthStatus
 from app.models.claim import Claim
 from app.models.claim_line import ClaimLine
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.models.auth_request import SchemeAuthRequest, AuthRequestStatus
 from app.models.system_settings import SystemSettings
 from app.schemas.authorization import AuthRequestResponse, AuthHistoryResponse, AuthRequestCreate
@@ -21,9 +21,19 @@ from app.services.scheme_auth import (
     resolve_scheme_credentials,
     get_adapter_for_scheme,
 )
-from app.utils.security import get_current_user
+from app.utils.security import get_current_user, require_role
 
-router = APIRouter(prefix="/api/authorization", tags=["Authorization"])
+# Back-office ADMIN only. Every route here reads or acts on a case's scheme
+# authorisation — patient identity, membership number and clinical
+# justification — across ALL providers, and /email-draft composes a message
+# containing them. It was authentication-only, so the default PARAMEDIC role
+# could read the whole instance's authorisation queue.
+router = APIRouter(
+    prefix="/api/authorization",
+    dependencies=[Depends(require_role(UserRole.ADMIN, UserRole.SUPER_ADMIN))],
+    tags=["Authorization"],
+
+)
 
 
 def _auth_to_response(a: SchemeAuthRequest) -> AuthRequestResponse:

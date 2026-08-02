@@ -10,14 +10,23 @@ from pydantic import BaseModel
 from typing import Optional
 
 from app.database import get_db
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.models.era import ERA
-from app.utils.security import get_current_user
+from app.utils.security import get_current_user, require_role
 from app.services.analytics import get_dashboard_analytics
 from app.services.era_reconciliation import parse_era_response, auto_reconcile
 from app.services.notifications import send_notification
 
-router = APIRouter(prefix="/api", tags=["Analytics & Payout"])
+# Back-office ADMIN only. Instance-wide financial and operational figures
+# across every provider, plus ERA ingestion and an outbound notification
+# sender. Authentication-only meant any account could read the whole book of
+# business and trigger notifications.
+router = APIRouter(
+    prefix="/api",
+    dependencies=[Depends(require_role(UserRole.ADMIN, UserRole.SUPER_ADMIN))],
+    tags=["Analytics & Payout"],
+
+)
 
 
 # ── Schemas ────────────────────────────────────────

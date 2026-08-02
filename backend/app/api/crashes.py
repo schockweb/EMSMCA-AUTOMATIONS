@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.crash_event import CrashEvent, CrashSource, CrashSeverity
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.api.auth import get_current_user
 from app.middleware.logging_config import get_logger
 
@@ -158,7 +158,7 @@ async def list_crashes(
     current_user: User = Depends(get_current_user),
 ):
     """List crash events with filters, pagination, and search. Admin only."""
-    if current_user.role.value != "admin":
+    if current_user.role not in (UserRole.ADMIN, UserRole.SUPER_ADMIN):
         raise HTTPException(403, "Admin access required")
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
@@ -203,7 +203,7 @@ async def crash_stats(
     current_user: User = Depends(get_current_user),
 ):
     """Aggregated crash statistics for the System Health dashboard. Admin only."""
-    if current_user.role.value != "admin":
+    if current_user.role not in (UserRole.ADMIN, UserRole.SUPER_ADMIN):
         raise HTTPException(403, "Admin access required")
 
     now = datetime.now(timezone.utc)
@@ -302,7 +302,7 @@ async def resolve_crash(
     current_user: User = Depends(get_current_user),
 ):
     """Mark a crash as resolved. Admin only."""
-    if current_user.role.value != "admin":
+    if current_user.role not in (UserRole.ADMIN, UserRole.SUPER_ADMIN):
         raise HTTPException(403, "Admin access required")
 
     result = await db.execute(select(CrashEvent).where(CrashEvent.id == crash_id))
@@ -326,7 +326,7 @@ async def delete_crash(
     current_user: User = Depends(get_current_user),
 ):
     """Delete a crash record. Admin only."""
-    if current_user.role.value != "admin":
+    if current_user.role not in (UserRole.ADMIN, UserRole.SUPER_ADMIN):
         raise HTTPException(403, "Admin access required")
 
     result = await db.execute(select(CrashEvent).where(CrashEvent.id == crash_id))
@@ -347,7 +347,7 @@ async def purge_old_crashes(
     current_user: User = Depends(get_current_user),
 ):
     """Delete crash records older than 90 days. Admin only."""
-    if current_user.role.value != "admin":
+    if current_user.role not in (UserRole.ADMIN, UserRole.SUPER_ADMIN):
         raise HTTPException(403, "Admin access required")
 
     cutoff = CrashEvent.purge_cutoff()

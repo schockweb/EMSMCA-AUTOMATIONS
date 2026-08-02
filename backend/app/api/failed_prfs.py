@@ -7,12 +7,13 @@ import asyncio
 import logging
 from datetime import datetime, timezone, date, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import select, func, text, or_, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.services.phi_audit import record_phi_access, ACTION_READ
 from app.models.digital_prf import DigitalPRF, PRFStatus
 from app.models.user import UserRole
 from app.utils.security import get_current_user, require_permission, require_role
@@ -293,6 +294,7 @@ async def count_failed_prfs(
 @router.get("/{prf_id}")
 async def get_failed_prf(
     prf_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     _user=Depends(get_current_user),
 ):
@@ -310,6 +312,15 @@ async def get_failed_prf(
     prf = result.scalar_one_or_none()
     if not prf:
         raise HTTPException(404, f"PRF {prf_id} not found")
+
+    # This queue is instance-wide by design — back-office staff work across
+    # every provider — so a read here can be of ANY tenant's patient. That makes
+    # it one of the most important accesses to have on record.
+    await record_phi_access(
+        db, action=ACTION_READ, entity_type="digital_prf", entity_id=prf.id,
+        user=_user, request=request,
+        details={"prf_number": prf.prf_number, "queue": "failed_prfs"},
+    )
 
     return {
         "id": str(prf.id),

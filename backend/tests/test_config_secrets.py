@@ -127,3 +127,49 @@ def test_development_only_warns():
 def test_test_env_only_warns():
     with pytest.warns(UserWarning, match="INSECURE SECRETS"):
         Settings(APP_ENV="test", SECRET_KEY="CHANGE_ME", ENCRYPTION_KEY="CHANGE_ME", _env_file=None)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TLS to the database.
+# ─────────────────────────────────────────────────────────────────────────────
+# DB_SSL_MODE defaults to "" so local Docker Postgres works out of the box, and
+# that default is SILENT — a client installing on their own VM got an instance
+# that looked completely normal while shipping every patient name, SA ID number
+# and clinical note across their network in plaintext.
+
+_REMOTE = "postgresql+asyncpg://u:p@ems.postgres.database.azure.com:5432/d"
+_GOOD = {"SECRET_KEY": "s" * 40, "ENCRYPTION_KEY": "e" * 40}
+
+
+def _settings(**kw):
+    from app.config import Settings
+    return Settings(**_GOOD, **kw)
+
+
+def test_production_refuses_a_plaintext_remote_database():
+    import pytest as _pytest
+    with _pytest.raises(Exception) as exc:
+        _settings(APP_ENV="production", DATABASE_URL=_REMOTE)
+    assert "TLS" in str(exc.value) or "plaintext" in str(exc.value)
+
+
+def test_ssl_in_the_url_satisfies_it():
+    """How this deployment actually does it — prod carries ssl=require in
+    DATABASE_URL rather than setting DB_SSL_MODE."""
+    _settings(APP_ENV="production", DATABASE_URL=_REMOTE + "?ssl=require")
+
+
+def test_db_ssl_mode_satisfies_it():
+    _settings(APP_ENV="production", DB_SSL_MODE="require", DATABASE_URL=_REMOTE)
+
+
+def test_a_loopback_database_is_allowed():
+    """Demanding TLS to a database that cannot be intercepted would only push
+    people to disable the check altogether."""
+    _settings(APP_ENV="production",
+              DATABASE_URL="postgresql+asyncpg://u:p@postgres:5432/d")
+
+
+def test_development_still_boots_without_tls():
+    """Dev and CI must not be blocked by this."""
+    _settings(APP_ENV="development", DATABASE_URL=_REMOTE)

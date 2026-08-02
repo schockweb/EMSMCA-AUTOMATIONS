@@ -26,6 +26,7 @@ from app.models.document import Document, OCRStatus
 from app.models.user import User
 from app.api.crew_auth import get_current_crew
 from app.utils.security import get_current_user, has_permission
+from app.services.phi_audit import record_phi_access, ACTION_READ, ACTION_TRANSMIT
 from app.models.user import UserRole
 from app.utils.hpcsa import to_tier as _qual_to_tier
 from app.tasks.publish import publish_task, publish_delay
@@ -1435,6 +1436,7 @@ async def list_prfs(
 @router.get("/{prf_id}")
 async def get_prf(
     prf_id: str,
+    request: Request,
     crew: CrewMember = Depends(get_current_crew),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1451,6 +1453,15 @@ async def get_prf(
         return cached
 
     prf = await _load_crew_prf(db, prf_id, crew, allow_crew2=True)
+
+    # A crew member opening a patient's record. Logged after the cache check
+    # above, so a re-read inside the 30s TTL produces no row — see the
+    # limitation documented in app/services/phi_audit.py.
+    await record_phi_access(
+        db, action=ACTION_READ, entity_type="digital_prf", entity_id=prf.id,
+        crew=crew, request=request,
+        details={"prf_number": prf.prf_number, "status": prf.status.value},
+    )
 
     async def _crew(crew_id):
         if not crew_id:
@@ -1528,7 +1539,7 @@ async def get_prf(
 # ── Admin: fetch full PRF + branding for scheme-facing rendering ─────────────
 
 async def _resolve_case_prf_access(
-    request: Request, db: AsyncSession, case_id: str
+    request: Request, db: AsyncSession, case_id: str, *, audit_action: str = "READ"
 ) -> tuple[DigitalPRF, CrewMember | None]:
     """Dual-mode auth + load for the /admin/by-case/* family.
 
@@ -1591,6 +1602,7 @@ async def _resolve_case_prf_access(
 
     is_admin = bool(payload.get("sub")) and payload.get("token_scope") != "crew"
 
+    user = None
     crew_member: CrewMember | None = None
     if is_admin:
         # A refresh token also carries `sub`, so without this check it
@@ -1652,6 +1664,25 @@ async def _resolve_case_prf_access(
         )
         if not is_provider_admin and prf.crew_member_1_id != crew_member.id:
             raise HTTPException(403, "This PRF was not created by you")
+
+    # AUDIT — logged HERE, after every access check has passed, so it records
+    # exactly the accesses that actually happened and nothing that was refused.
+    #
+    # It lives in the shared resolver rather than in each of the three routes
+    # deliberately: a route added to this family later inherits the logging
+    # automatically. Missing-guard-on-a-new-sibling is the precise defect that
+    # produced the authorisation hole this helper now closes.
+    await record_phi_access(
+        db,
+        action=audit_action,
+        entity_type="digital_prf",
+        entity_id=prf.id,
+        user=user if is_admin else None,
+        crew=crew_member,
+        request=request,
+        details={"case_id": str(prf.case_id) if prf.case_id else None,
+                 "prf_number": prf.prf_number},
+    )
 
     return prf, crew_member
 
@@ -1807,7 +1838,12 @@ async def email_prf_to_facility(
     email account configured, PDF magic-byte + size checks, and a
     duplicate-send guard (same recipient re-queues only with force=true).
     """
-    prf, _crew = await _resolve_case_prf_access(request, db, case_id)
+    # TRANSMIT, not READ: this is PHI leaving the platform for a third party.
+    # It is the single most consequential access in the product and is queried
+    # separately during an incident.
+    prf, _crew = await _resolve_case_prf_access(
+        request, db, case_id, audit_action=ACTION_TRANSMIT,
+    )
 
     if prf.status not in (PRFStatus.SUBMITTED, PRFStatus.PROCESSED):
         raise HTTPException(400, "Only submitted PRFs can be emailed to the facility.")
@@ -1912,7 +1948,9 @@ async def mark_prf_facility_email_manual(
     opens, the popup shows 'already sent', and any still-retrying background
     send task aborts instead of delivering a second copy.
     """
-    prf, crew = await _resolve_case_prf_access(request, db, case_id)
+    prf, crew = await _resolve_case_prf_access(
+        request, db, case_id, audit_action=ACTION_TRANSMIT,
+    )
     if prf.status not in (PRFStatus.SUBMITTED, PRFStatus.PROCESSED):
         raise HTTPException(400, "Only submitted PRFs can be marked as sent.")
     to = (body.recipient or "").strip()

@@ -157,3 +157,61 @@ async def test_null_permissions_admin_reaches_everything(client):
         assert resp.status_code != 403, (
             f"an existing NULL-permissions admin was refused {route}"
         )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Routers that were authentication-only until 2026-08-02.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_NEWLY_GATED = [
+    # Instance-wide scheme authorisation queue: patient identity, membership
+    # number and clinical justification for every provider.
+    ("/api/authorization/queue", "authorization"),
+    # Instance-wide financial and operational figures across every provider.
+    ("/api/analytics/dashboard", "analytics"),
+    # An identity oracle — scheme + membership number in, name, SA ID number
+    # and contact details out, for people who need not be patients here.
+    ("/api/member-lookup/gems/1234567", "member lookup"),
+]
+
+
+@pytest.mark.parametrize("route,label", _NEWLY_GATED, ids=[r[1] for r in _NEWLY_GATED])
+@pytest.mark.asyncio
+async def test_a_low_privilege_account_is_refused(client, route, label):
+    """The default role for a carelessly-created user is PARAMEDIC."""
+    email = await _user_with(
+        "newgate_paramedic@emsclaims.test", None, role=UserRole.PARAMEDIC
+    )
+    headers = await _login(client, email)
+    res = await client.get(route, headers=headers)
+    assert res.status_code == 403, (
+        f"a PARAMEDIC account reached {label} ({route}): {res.status_code}"
+    )
+
+
+@pytest.mark.parametrize("route,label", _NEWLY_GATED, ids=[r[1] for r in _NEWLY_GATED])
+@pytest.mark.asyncio
+async def test_an_admin_is_not_locked_out(client, route, label):
+    """Refusing everybody would pass the test above. It must not."""
+    email = await _user_with("newgate_admin@emsclaims.test", None, role=UserRole.ADMIN)
+    headers = await _login(client, email)
+    res = await client.get(route, headers=headers)
+    assert res.status_code != 403, f"an ADMIN was locked out of {label} ({route})"
+
+
+@pytest.mark.asyncio
+async def test_super_admin_reaches_the_crash_dashboard(client):
+    """These routes tested `role.value != "admin"`, an EXACT match that refuses
+    SUPER_ADMIN. Production has exactly one back-office account and it is a
+    SUPER_ADMIN, so the crash dashboard was refusing the only person who could
+    use it. Same trap as the one already documented on require_role."""
+    email = await _user_with(
+        "newgate_superadmin@emsclaims.test", None, role=UserRole.SUPER_ADMIN
+    )
+    headers = await _login(client, email)
+    for route in ("/api/crashes", "/api/crashes/stats"):
+        res = await client.get(route, headers=headers)
+        assert res.status_code != 403, (
+            f"SUPER_ADMIN was refused {route} — the highest privilege in the "
+            f"system cannot read the crash log"
+        )
