@@ -172,9 +172,40 @@ both systems.
       loopback-peer-only (72./192.168. prefix checks removed); RateLimitMiddleware
       RE-ENABLED in main.py (auth 15/min per client IP, api 300/min); `redis` service added
       to docker-compose.prod.yml (limiter previously failed open on prod — no Redis there).
-- [ ] 3 — `/me` permission fallback only on `None`
-- [ ] 4 — Refresh-token reuse → revoke family
-- [ ] 5 — `/refresh` checks `is_active`
-- [ ] 6 — Constant-time unknown-account path
-- [ ] 7 — Crew change-password moved to request body
-- [ ] 8 — CSP header shipped (cookie migration tracked separately)
+- [x] 3 — `/me` permission fallback only on `None` — DONE. Also fixed in
+      `has_permission` and, on 2026-08-02, in `users._user_response`, where the
+      admin UI was still showing a stripped account as holding every permission.
+- [x] 4 — Refresh-token reuse → revoke family — DONE 2026-08-02:
+      `tokens_revoked_at` on `users`, `crew_members` and `service_providers`
+      (migration `e5a8c2d47f19`), checked in `get_current_user`,
+      `get_current_crew`, `require_portal_grant` and `/api/auth/refresh`.
+      Replaying a spent refresh token is treated as theft and kills the family.
+      Tokens carry `iat_ms`, not just `iat`: reuse fires milliseconds after the
+      exchange that minted the attacker's token, so whole-second resolution let
+      it survive the revocation aimed at it.
+- [x] 5 — `/refresh` checks `is_active` — DONE.
+- [x] 6 — Constant-time unknown-account path — DONE 2026-08-02:
+      `verify_password_or_dummy` on all THREE password doors (admin login, crew
+      login, provider portal-login/portal-unlock). An unknown identity now costs
+      the same bcrypt as a real one, so response time no longer discloses which
+      paramedics and which ambulance companies exist.
+- [x] 7 — Crew change-password moved to request body — DONE.
+- [x] 8 — CSP header shipped — DONE in `nginx/security-headers.conf` (CSP +
+      HSTS), which is what `ems_nginx` serves in production. The cookie
+      migration off `localStorage` is still open and tracked separately.
+
+---
+
+## Added 2026-08-02 — still open
+
+- [ ] Redis `--requirepass` in production. Needs `REDIS_PASSWORD` **and** the
+      matching `REDIS_URL` set in `.env.prod` in the same change, or the backend
+      cannot authenticate. See the comment in `docker-compose.prod.yml`.
+      Mitigated meanwhile: no published port, no on-disk persistence, and
+      cached patient records are encrypted before they reach Redis.
+- [ ] JWTs in `localStorage` (was item 8's second half) — httpOnly cookie
+      migration, with the CSRF work it implies, across both auth systems.
+- [ ] The emailed PRF PDF is client-supplied and never compared to the stored
+      record, so the audit trail proves a transmission happened and to whom, but
+      not what it contained. Fixing it properly means rendering the PDF
+      server-side.

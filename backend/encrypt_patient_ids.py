@@ -159,6 +159,66 @@ async def run(apply: bool, verify_only: bool) -> int:
             )
             stats["prfs_done"] += 1
 
+    # ── The identifiers the first conversion missed ────────────────────────
+    #
+    # The 2026-08-02 run encrypted exactly one key in one blob and one column.
+    # A hostile review found three more identifiers sitting in plaintext beside
+    # them, and an entire table nobody had considered:
+    #
+    #   digital_prfs.form_data  debtor_id_number, patient_passport_number,
+    #                           debtor_passport_number — the passport is the ONLY
+    #                           national identifier a foreign national has, so
+    #                           for that whole class of patient the field we say
+    #                           we encrypt was stored in the clear
+    #   documents.extracted_data  the scanned-PRF pipeline — patient_id_number
+    #                           and main_member_id, read off the paper form. The
+    #                           column type now encrypts on write, but every row
+    #                           captured before today is still plaintext.
+    #
+    # Same discipline as above: never store a token that does not decrypt back.
+    for table, column, keys in (
+        ("digital_prfs", "form_data",
+         ("debtor_id_number", "patient_passport_number", "debtor_passport_number")),
+        ("documents", "extracted_data",
+         ("patient_id_number", "main_member_id",
+          "patient_passport_number", "debtor_id_number")),
+    ):
+        for key in keys:
+            stat_key = f"{table}.{key}"
+            stats.setdefault(stat_key, 0)
+            async with engine.begin() as conn:
+                rows = (await conn.execute(text(
+                    f"SELECT id, {column}->>'{key}' FROM {table} "
+                    f"WHERE {column}->>'{key}' IS NOT NULL "
+                    f"AND {column}->>'{key}' <> ''"
+                ))).all()
+
+                for rid, raw in rows:
+                    if looks_encrypted(raw):
+                        if (verify_only or apply) and decrypt_id(raw) is None:
+                            stats["MISMATCH"] += 1
+                            print(f"  !! {table} {rid}.{key}: token does not decrypt")
+                        continue
+                    if not apply:
+                        stats[stat_key] += 1
+                        continue
+
+                    token = encrypt_id(raw)
+                    if decrypt_id(token) != raw:
+                        stats["MISMATCH"] += 1
+                        print(f"  !! {table} {rid}.{key}: refusing to store an "
+                              f"unreversible token ({_mask(raw)})")
+                        continue
+                    # cast(:t AS text), never :t::text — SQLAlchemy reads `::`
+                    # as the start of another bind name.
+                    await conn.execute(
+                        text(f"UPDATE {table} SET {column} = jsonb_set("
+                             f"{column}::jsonb, '{{{key}}}', "
+                             f"to_jsonb(cast(:t AS text))) WHERE id = :i"),
+                        {"t": token, "i": rid},
+                    )
+                    stats[stat_key] += 1
+
     await engine.dispose()
 
     mode = "APPLY" if apply else ("VERIFY" if verify_only else "DRY RUN")
@@ -168,6 +228,14 @@ async def run(apply: bool, verify_only: bool) -> int:
     print(f"  PRFs:   {stats['prfs_total']} with an ID, "
           f"{stats['prfs_plain']} still plaintext, {stats['prfs_done']} converted")
     print(f"  already encrypted and verified reversible: {stats['verified']}")
+    secondary = {k: v for k, v in stats.items() if "." in k and v}
+    if secondary:
+        label = "converted" if apply else "still plaintext"
+        print(f"  secondary identifiers ({label}):")
+        for k, v in sorted(secondary.items()):
+            print(f"      {k}: {v}")
+    elif apply or verify_only:
+        print("  secondary identifiers: none outstanding")
     if stats["MISMATCH"]:
         print(f"  MISMATCHES: {stats['MISMATCH']}  <-- investigate before trusting this run")
         return 1

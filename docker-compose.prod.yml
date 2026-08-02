@@ -36,6 +36,22 @@ services:
       --maxmemory 128mb
       --maxmemory-policy allkeys-lru
       --save ""
+      # NO --requirepass yet, deliberately, and this is a TODO not an omission.
+      #
+      # Turning it on requires REDIS_URL in .env.prod to carry the same password
+      # in the same change, or the backend cannot authenticate and every request
+      # loses its cache and its rate limiter. That file is not in the repository,
+      # so this cannot be done atomically from here.
+      #
+      # Lower urgency than it looks: this Redis publishes no port (reachable only
+      # inside ems_app_net) and runs with `--save ""`, so unlike the development
+      # instance there is no append-only file on disk. Cached patient records are
+      # also encrypted before they are written now (app/cache.py), so a memory
+      # dump of this container no longer yields plaintext identifiers.
+      #
+      # To enable: set REDIS_PASSWORD in .env.prod, change REDIS_URL to
+      # redis://:<password>@redis:6379/0, add --requirepass ${REDIS_PASSWORD}
+      # here, then recreate both the redis and backend containers together.
     deploy:
       resources:
         limits:

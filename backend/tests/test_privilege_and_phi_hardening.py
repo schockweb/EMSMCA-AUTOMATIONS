@@ -363,6 +363,50 @@ def test_crash_reports_do_not_capture_patient_identifiers():
     assert "not stored" in _redact_body(b"\x80\x81 raw bytes")
 
 
+async def test_the_crash_recorder_actually_calls_the_redactor():
+    """The test above proves the redactor works. This proves it is WIRED.
+
+    Mutation testing caught the gap: replacing the call site with the original
+    `body.decode(...)[:2000]` left every redaction test green while real crash
+    rows went back to storing plaintext SA IDs. A guard that exists but is not
+    called is the single most repeated defect in this codebase, and testing the
+    helper in isolation is exactly how it stays invisible.
+    """
+    import json
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from app.middleware import crash_handler
+
+    body = json.dumps({"patient_id_number": "9001015800083",
+                       "patient_name": "Jane Doe", "pulse": 88}).encode()
+
+    request = MagicMock()
+    request.method = "POST"
+    request.url.path = "/api/cases"
+    request.query_params = {"id_number": "9001015800083"}
+    request.client.host = "203.0.113.4"
+    request.headers = {"user-agent": "pytest", "content-type": "application/json"}
+    request.state = MagicMock(spec=[])          # no user_id attribute
+    request.body = AsyncMock(return_value=body)
+
+    captured = {}
+
+    class _Session:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        def add(self, row): captured["row"] = row
+        async def commit(self): pass
+
+    with patch.object(crash_handler, "AsyncSessionLocal", lambda: _Session()):
+        await crash_handler.record_crash_event(request, ValueError("boom"))
+
+    blob = json.dumps(captured["row"].metadata_blob, default=str)
+    assert "9001015800083" not in blob, \
+        "the crash recorder stored a plaintext SA ID — redaction is not wired in"
+    assert "Jane Doe" not in blob
+    assert "pulse" in blob, "diagnostic context was lost"
+
+
 # ════════════════════════════════════════════════════════════════════
 # Availability: lockout must throttle the attacker, not the ambulance service
 # ════════════════════════════════════════════════════════════════════
