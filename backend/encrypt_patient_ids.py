@@ -115,11 +115,22 @@ async def run(apply: bool, verify_only: bool) -> int:
         for pid, raw in rows:
             if looks_encrypted(raw):
                 if verify_only or apply:
-                    if decrypt_id(raw) is None:
+                    plain = decrypt_id(raw)
+                    if plain is None:
                         stats["MISMATCH"] += 1
                         print(f"  !! prf {pid}: stored token does not decrypt")
                     else:
                         stats["verified"] += 1
+                        # Backfill a hash that a previous run could not write
+                        # because the column did not exist yet. Encryption and
+                        # the lookup hash shipped separately, so rows converted
+                        # by the first run have no hash and are unfindable.
+                        if apply:
+                            await conn.execute(
+                                text("UPDATE digital_prfs SET patient_id_hash = :h "
+                                     "WHERE id = :i AND patient_id_hash IS NULL"),
+                                {"h": id_hash(plain), "i": pid},
+                            )
                 continue
 
             stats["prfs_plain"] += 1
@@ -141,9 +152,10 @@ async def run(apply: bool, verify_only: bool) -> int:
             await conn.execute(
                 text("UPDATE digital_prfs "
                      "SET form_data = jsonb_set(form_data::jsonb, "
-                     "'{patient_id_number}', to_jsonb(cast(:t AS text))) "
+                     "'{patient_id_number}', to_jsonb(cast(:t AS text))), "
+                     "    patient_id_hash = :h "
                      "WHERE id = :i"),
-                {"t": token, "i": pid},
+                {"t": token, "h": id_hash(raw), "i": pid},
             )
             stats["prfs_done"] += 1
 

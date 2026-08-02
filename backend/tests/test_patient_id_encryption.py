@@ -226,3 +226,93 @@ def test_nothing_logs_a_whole_id_number():
     assert _ID not in masked
     assert masked.startswith("90") and masked.endswith("83")
     assert normalise_id(masked) != normalise_id(_ID)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Searching by ID number must survive encryption.
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_a_prf_is_still_findable_by_patient_id(client, auth_headers, crypto_cleanup):
+    """The regression encryption introduced.
+
+    The provider PRF search runs `cast(form_data AS text) ILIKE`, which after
+    encryption matches ciphertext and returns nothing — SILENTLY. An operator
+    typing an ID number would conclude the patient is not in the system.
+    """
+    from tests.conftest import _TestSession
+
+    async with _TestSession() as db:
+        provider = (await db.execute(
+            select(ServiceProvider).where(ServiceProvider.slug == "pytest-prf-provider")
+        )).scalar_one()
+        crew = (await db.execute(
+            select(CrewMember).where(CrewMember.email == "crew_a_pytest@emsclaims.test")
+        )).scalar_one()
+        top = (await db.execute(
+            select(DigitalPRF.prf_number).where(DigitalPRF.provider_id == provider.id)
+            .order_by(DigitalPRF.prf_number.desc()).limit(1)
+        )).scalar() or 0
+        db.add(DigitalPRF(
+            provider_id=provider.id, crew_member_1_id=crew.id,
+            prf_number=top + 13000,
+            case_number=f"{_MARKER}-{uuid.uuid4().hex[:8]}",
+            status=PRFStatus.SUBMITTED,
+            form_data={"patient_id_number": _ID, "patient_name": "Findable"},
+        ))
+        await db.commit()
+        provider_id = str(provider.id)
+
+    res = await client.get(
+        f"/api/providers/{provider_id}/prfs", params={"search": _ID}, headers=auth_headers,
+    )
+    assert res.status_code == 200, res.text[:200]
+    numbers = [r["prf_number"] for r in res.json()]
+    assert numbers, "searching by SA ID number found nothing — the operator would conclude the patient is not in the system"
+
+
+async def test_the_hash_column_is_maintained_on_the_prf(crypto_cleanup):
+    """form_data is plain JSON, so an in-place mutation leaves no history for
+    SQLAlchemy to report. The hash must be recomputed unconditionally or it
+    quietly points at the previous patient."""
+    from tests.conftest import _TestSession
+    from app.utils.patient_id import id_hash as _h
+    other = "8202025800086"
+
+    async with _TestSession() as db:
+        provider = (await db.execute(
+            select(ServiceProvider).where(ServiceProvider.slug == "pytest-prf-provider")
+        )).scalar_one()
+        crew = (await db.execute(
+            select(CrewMember).where(CrewMember.email == "crew_a_pytest@emsclaims.test")
+        )).scalar_one()
+        top = (await db.execute(
+            select(DigitalPRF.prf_number).where(DigitalPRF.provider_id == provider.id)
+            .order_by(DigitalPRF.prf_number.desc()).limit(1)
+        )).scalar() or 0
+        prf = DigitalPRF(
+            provider_id=provider.id, crew_member_1_id=crew.id,
+            prf_number=top + 14000,
+            case_number=f"{_MARKER}-{uuid.uuid4().hex[:8]}",
+            status=PRFStatus.DRAFT,
+            form_data={"patient_id_number": _ID},
+        )
+        db.add(prf)
+        await db.commit()
+        pid = prf.id
+
+    async with _TestSession() as db:
+        stored = (await db.execute(
+            text("select patient_id_hash from digital_prfs where id = :i"), {"i": pid},
+        )).scalar_one()
+        assert stored == _h(_ID), "the hash was not written on insert"
+
+    async with _TestSession() as db:
+        prf = (await db.execute(select(DigitalPRF).where(DigitalPRF.id == pid))).scalar_one()
+        prf.form_data = {**prf.form_data, "patient_id_number": other}
+        await db.commit()
+
+    async with _TestSession() as db:
+        stored = (await db.execute(
+            text("select patient_id_hash from digital_prfs where id = :i"), {"i": pid},
+        )).scalar_one()
+        assert stored == _h(other), "the hash still points at the previous patient"

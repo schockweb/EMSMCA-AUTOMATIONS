@@ -89,6 +89,17 @@ class DigitalPRF(Base):
         FormDataWithEncryptedPatientID, nullable=True, default=dict,
         comment="Full PRF content — patient, clinical, vitals. patient_id_number encrypted."
     )
+    patient_id_hash: Mapped[Union[str, None]] = mapped_column(
+        # Derived from form_data['patient_id_number'] on every write.
+        #
+        # Encrypting the ID broke searching for a patient by it: the provider
+        # PRF search runs `cast(form_data AS text) ILIKE`, which now sees
+        # ciphertext and silently matches nothing. This restores the capability
+        # AND makes it fast — an indexed equality lookup instead of detoasting
+        # and scanning every 58KB clinical blob.
+        String(64), nullable=True, index=True,
+        comment="HMAC-SHA256 lookup hash of form_data['patient_id_number']"
+    )
 
     # ── Real-time Timestamps ──────────────────────────────
     # Captured when crew taps "Mark" buttons — not manually typed
@@ -210,3 +221,27 @@ class DigitalPRF(Base):
 
     def __repr__(self):
         return f"<DigitalPRF #{self.prf_number} ({self.status.value})>"
+
+
+# Keep patient_id_hash in step with the encrypted ID inside form_data.
+#
+# Registered at import so the API, the Celery workers, the backfill and the
+# tests all behave identically — a PRF written by a worker without a hash is a
+# PRF the office cannot find.
+from sqlalchemy import event as _event  # noqa: E402
+
+from app.utils.patient_id import id_hash as _id_hash  # noqa: E402
+
+
+def _sync_prf_patient_id_hash(mapper, connection, target):  # noqa: ARG001
+    fd = target.form_data if isinstance(target.form_data, dict) else {}
+    raw = fd.get("patient_id_number")
+    # Always recomputed rather than gated on change detection: form_data is
+    # plain JSON, so an in-place mutation leaves no history for SQLAlchemy to
+    # report, and a stale hash points at the wrong patient. An HMAC is cheap.
+    target.patient_id_hash = _id_hash(str(raw)) if raw not in (None, "") else None
+
+
+_event.listen(DigitalPRF, "before_insert", _sync_prf_patient_id_hash)
+_event.listen(DigitalPRF, "before_update", _sync_prf_patient_id_hash)
+

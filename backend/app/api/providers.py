@@ -1535,11 +1535,29 @@ async def list_provider_prfs(
     ]
     if search and search.strip():
         term = f"%{search.strip()}%"
-        conditions.append(or_(
+        id_clauses = [
             cast(DigitalPRF.prf_number, Text).ilike(term),
             DigitalPRF.case_number.ilike(term),
             cast(DigitalPRF.form_data, Text).ilike(term),
-        ))
+        ]
+        # Searching by SA ID number.
+        #
+        # The blob scan above cannot find one any more: the ID inside form_data
+        # is encrypted, so an ILIKE matches ciphertext and returns nothing —
+        # silently, which is the dangerous part. An operator typing an ID would
+        # conclude the patient is not in the system.
+        #
+        # The keyed hash restores it, and is strictly faster than what it
+        # replaces: an indexed equality check rather than detoasting and
+        # scanning every clinical blob. Only attempted when the term actually
+        # looks like an identifier, so ordinary text searches skip it.
+        from app.utils.patient_id import id_hash, normalise_id
+        digits = normalise_id(search)
+        if len(digits) >= 6:
+            hashed = id_hash(digits)
+            if hashed:
+                id_clauses.append(DigitalPRF.patient_id_hash == hashed)
+        conditions.append(or_(*id_clauses))
 
     total = (await db.execute(
         select(func.count()).select_from(DigitalPRF).where(*conditions)
