@@ -1028,11 +1028,21 @@ async def mark_timestamp(
         f" @ {body.latitude:.5f},{body.longitude:.5f}" if geo_entry else "",
     )
 
+    # mark-time writes to the PRF, so the cached detail response is now stale —
+    # up to 60 seconds of a crew reading back times that do not include the one
+    # they just tapped. It also bumps `updated_at`, which is the client's
+    # optimistic-concurrency token: without returning the new value the next
+    # save posts a token the server has already moved past and takes a 409,
+    # which is the recovery path the pre-submit save was losing signatures in.
+    from app.cache import invalidate_prf as _invalidate_prf
+    await _invalidate_prf(prf_id)
+
     return {
         "field": body.field,
         "timestamp": now.isoformat(),
         "km": body.km,
         "geo": geo_entry,
+        "updated_at": prf.updated_at.isoformat() if prf.updated_at else None,
     }
 
 
@@ -1840,10 +1850,18 @@ async def email_prf_to_facility(
     import os
     from app.config import get_settings as _gs
     out_dir = os.path.join(_gs().UPLOAD_DIR, "prf_email")
-    os.makedirs(out_dir, exist_ok=True)
     pdf_path = os.path.join(out_dir, f"{prf.id}_{uuid.uuid4().hex}.pdf")
-    with open(pdf_path, "wb") as fh:
-        fh.write(pdf_bytes)
+
+    def _write_spool() -> None:
+        os.makedirs(out_dir, exist_ok=True)
+        with open(pdf_path, "wb") as fh:
+            fh.write(pdf_bytes)
+
+    # OFF THE EVENT LOOP. makedirs + open + write of up to 15 MB is blocking
+    # filesystem IO, and this is an async handler — on a busy instance that
+    # stalls every other in-flight request for the duration of the write. Same
+    # class of defect as the bare kombu publish that caused the submit outage.
+    await asyncio.to_thread(_write_spool)
 
     # Fresh attempt — clear any previous terminal failure stamp so the
     # admin surfaces reflect the current attempt, not a stale one.
@@ -1857,7 +1875,21 @@ async def email_prf_to_facility(
     is_resend = bool(prf.facility_email_sent_at)
     # Synchronous kombu publish — see the note at the submit endpoint. Offloaded
     # so a hung broker cannot freeze the event loop for every other request.
-    await publish_delay(send_prf_facility_email, str(prf.id), to, pdf_path, is_resend)
+    try:
+        await publish_delay(send_prf_facility_email, str(prf.id), to, pdf_path, is_resend)
+    except Exception as enqueue_err:
+        # The spool file is written and committed BEFORE this point, so an
+        # unguarded failure here left a file of patient PHI on disk that no
+        # task would ever collect or delete, and returned a 500 the crew's
+        # popup could not interpret. Remove the orphan and answer with the
+        # string PRFView keys on, so the crew is steered to the manual share
+        # flow instead of being told nothing useful.
+        logger.error("PRF #%s: could not queue facility email: %s", prf.prf_number, enqueue_err)
+        try:
+            os.remove(pdf_path)
+        except OSError:
+            pass
+        raise HTTPException(503, "queue_unavailable")
     return {"status": "queued", "recipient": to}
 
 

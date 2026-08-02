@@ -1,4 +1,4 @@
-import { getPending, markSyncing, markSynced, markFailed, markDead } from './offlineDb';
+import { getPending, markSyncing, markSynced, markFailed, markDead, setReplacementId } from './offlineDb';
 import axios from 'axios';
 import { getCrewToken } from '../utils/crewSession';
 
@@ -22,10 +22,12 @@ function currentProviderId(): string | undefined {
 // duplicate a live PRF. The vehicle/crew2 travel in the payload; the shift
 // supervisor is read from local storage (same source the New-PRF button uses).
 async function recreateAndSubmit(
+  entryKey: string,
   prfId: string,
   payload: any,
   headers: Record<string, string>,
   entryProviderId: string | undefined,
+  existingReplacementId: string | undefined,
 ) {
   // This is the ONE operation that mints a brand-new server row under whoever
   // is logged in now, so it is the only path that can launder a queued record
@@ -47,7 +49,33 @@ async function recreateAndSubmit(
     try { return JSON.parse(localStorage.getItem('active_vehicle') || 'null'); }
     catch { return null; }
   })();
+  // IDEMPOTENT RE-CREATE.
+  //
+  // This create sent no client_id, so it was NOT idempotent: every retry of a
+  // failed heal minted a brand-new server row and submitted it. Each of those
+  // rows runs the billing pipeline and produces its own Case and Claim, so one
+  // ambulance call was billed once per retry — and the entry is retried up to
+  // five times before it is marked dead. A network wobble between the create
+  // and the submit was enough to trigger it.
+  //
+  // The replacement id is generated ONCE and persisted on the outbox entry
+  // BEFORE the create is attempted, so a crash at any point after this line
+  // resumes against the same id. Repeats then hit create_prf's replay branch,
+  // which returns the existing row untouched.
+  const replacementId =
+    existingReplacementId ||
+
+    (globalThis.crypto?.randomUUID?.() as string | undefined) ||
+    `xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx`.replace(/[xy]/g, (c) => {
+      const r = (Math.random() * 16) | 0;
+      return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+    });
+  if (!existingReplacementId) {
+    await setReplacementId(entryKey, replacementId);
+  }
+
   const createRes = await axios.post('/api/digital-prf', {
+    client_id: replacementId,
     vehicle_id: payload?.vehicle_id || storedVehicle?.id || null,
     crew_member_2_id: payload?.crew_member_2_id || null,
     supervising_practitioner_pr: supervisor?.hpcsa_number || null,
@@ -232,7 +260,9 @@ export async function startSync() {
             // from the queued payload and submit the fresh row rather than
             // stranding the crew's work as "pending upload" forever.
             if (subErr?.response?.status === 404) {
-              await recreateAndSubmit(prfId, entry.payload, headers, entry.providerId);
+              await recreateAndSubmit(
+                entry.id, prfId, entry.payload, headers, entry.providerId, entry.replacementId,
+              );
             } else {
               throw subErr;
             }

@@ -90,7 +90,8 @@ export function buildSavePayload(s: SaveState): Record<string, any> {
  * created offline whose creation has not drained yet, so it must queue rather
  * than surface an error.
  */
-export type SaveErrorAction = 'session-expired' | 'locked' | 'conflict' | 'queue';
+export type SaveErrorAction =
+  | 'session-expired' | 'locked' | 'conflict' | 'queue' | 'too-large';
 
 export function classifySaveError(
   err: any,
@@ -100,10 +101,34 @@ export function classifySaveError(
   if (status === 401) return 'session-expired';
   if (status === 423) return 'locked';
   if (status === 409) return 'conflict';
+  // 413 IS NOT RETRYABLE.
+  //
+  // Everything unrecognised falls through to 'queue', which is right for a
+  // network blip and wrong for this: the request is too big and will be exactly
+  // as big next time. The entry retried five times, was marked dead, and the
+  // crew's PRF sat permanently unsent in the outbox with no explanation — the
+  // one failure mode where retrying cannot possibly help. A captured document
+  // photo is usually what pushes a record over the limit.
+  //
+  // Terminal and LOUD: the crew has to remove an attachment, and only they can.
+
+  if (status === 413) return 'too-large';
   return 'queue';
 }
 
 /** True when the failure means the work must be preserved rather than dropped. */
 export function preservesWork(action: SaveErrorAction): boolean {
   return action !== 'locked';
+}
+
+/** Crew-facing message for a terminal save failure, or null when the save will
+ *  be retried automatically and the crew needs no interruption mid-call. */
+export function saveErrorMessage(action: SaveErrorAction): string | null {
+  if (action === 'too-large') {
+    return (
+      'This PRF is too large to send — an attached photo or document is the ' +
+      'usual cause. Remove or retake the largest attachment, then save again.'
+    );
+  }
+  return null;
 }

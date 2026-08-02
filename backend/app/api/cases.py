@@ -4,7 +4,7 @@ Cases API — CRUD operations for EMS cases / pre-authorizations.
 from __future__ import annotations
 import uuid
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select, func, or_
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -207,8 +207,12 @@ def _build_case_filter(queue: Optional[str], search: Optional[str]) -> list:
 async def list_cases(
     queue: Optional[str] = None,
     search: Optional[str] = None,
-    skip: int = 0,
-    limit: int = 50,
+    # Bounded. `limit` was an unbounded int, so ?limit=1000000 asked Postgres
+    # for every retained case and serialised each one's extracted_data — enough
+    # to exhaust a worker from a single request. A negative skip is a SQL error
+    # rather than a page.
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
     _current: User = Depends(get_current_user),
 ):

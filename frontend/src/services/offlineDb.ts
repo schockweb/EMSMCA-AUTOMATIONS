@@ -26,6 +26,14 @@ export interface OfflineEntry {
   // entry is a patient record).
   providerId?: string;
   crewId?: string;
+  // ── Self-heal replacement id ───────────────────────────────────────────
+  // When a queued PRF's server row has been swept (404), syncEngine re-creates
+  // it. That create used to send NO client_id, so every retry minted a BRAND
+  // NEW server row and submitted it — one ambulance call billed as many times
+  // as the entry was retried. Recording the replacement id here means a retry
+  // reuses it as client_id and hits the server's idempotent-replay branch,
+  // which returns the existing row instead of creating another.
+  replacementId?: string;
 }
 
 /**
@@ -134,6 +142,20 @@ export async function markSyncing(key: string) {
   const entry = await db.get(STORE, key);
   if (entry) {
     entry.status = 'syncing';
+    await db.put(STORE, entry);
+  }
+}
+
+/**
+ * Record the server row a swept PRF was re-created as, BEFORE the PATCH and
+ * submit that follow. Persisting it first is the point: if the app dies
+ * mid-heal, the next pass reuses this id rather than minting another row.
+ */
+export async function setReplacementId(key: string, replacementId: string) {
+  const db = await initDb();
+  const entry = await db.get(STORE, key);
+  if (entry) {
+    entry.replacementId = replacementId;
     await db.put(STORE, entry);
   }
 }

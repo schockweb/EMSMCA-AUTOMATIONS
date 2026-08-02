@@ -672,3 +672,81 @@ describe('facility-email Case id after an offline submit', () => {
     expect(pending?.attempts ?? 0, 'a slow pipeline must not burn a send attempt').toBe(0);
   });
 });
+
+/**
+ * The 404 self-heal must be idempotent.
+ *
+ * When a queued PRF's server row has been swept, the outbox re-creates it. That
+ * create sent NO client_id, so it was not idempotent: every retry minted a
+ * brand-new server row and submitted it, and each of those rows runs the
+ * billing pipeline and produces its own Case and Claim. One ambulance call
+ * billed once per retry, up to five times before the entry is marked dead — and
+ * a network wobble between the create and the submit was enough to trigger it.
+ */
+describe('outbox 404 self-heal', () => {
+  const DEAD = '44444444-3333-2222-1111-000000000000';
+
+  beforeEach(async () => {
+    await clearAll();
+    localStorage.clear();
+    localStorage.setItem('crew_profile', JSON.stringify({ provider_id: 'prov-1', id: 'crew-1' }));
+    localStorage.setItem('active_vehicle', JSON.stringify({ id: 'veh-1' }));
+    setOnline(true);
+    vi.clearAllMocks();
+    mockToken.mockReturnValue('crew-token-abc');
+  });
+
+  /** submit 404s (row swept); the re-create + patch + submit then succeed. */
+  function wireSweptPrf(createdId = 'server-side-new-id') {
+    mockAxios.patch.mockResolvedValue({ data: {} });
+    mockAxios.post.mockImplementation(async (url: string) => {
+      if (url.endsWith(`/api/digital-prf/${DEAD}/submit`)) throw httpError(404, 'PRF not found');
+      if (url === '/api/digital-prf') return { data: { id: createdId } };
+      return { data: { status: 'submitted' } };
+    });
+    (axios as any).get = vi.fn(async () => ({ data: { case_id: null } }));
+  }
+
+  it('sends a client_id on the re-create so a retry cannot bill twice', async () => {
+    wireSweptPrf();
+    await queueSubmit(DEAD, { form_data: { patient_name: 'Swept' } });
+    await startSync();
+
+    const creates = mockAxios.post.mock.calls.filter((c: any[]) => c[0] === '/api/digital-prf');
+    expect(creates.length, 'expected exactly one re-create').toBe(1);
+    expect(
+      creates[0][1]?.client_id,
+      'the re-create carried no client_id, so every retry mints another billable PRF',
+    ).toBeTruthy();
+  });
+
+  it('reuses the SAME id when the heal is retried', async () => {
+    // First pass: the re-create lands but the follow-up submit dies.
+    mockAxios.patch.mockResolvedValue({ data: {} });
+    mockAxios.post.mockImplementation(async (url: string) => {
+      if (url.endsWith(`/api/digital-prf/${DEAD}/submit`)) throw httpError(404, 'PRF not found');
+      if (url === '/api/digital-prf') return { data: { id: 'server-side-new-id' } };
+      throw Object.assign(new Error('Network Error'), { code: 'ERR_NETWORK' });
+    });
+    (axios as any).get = vi.fn(async () => ({ data: { case_id: null } }));
+
+    await queueSubmit(DEAD, { form_data: { patient_name: 'Swept' } });
+    await startSync();
+
+    const firstId = mockAxios.post.mock.calls
+      .filter((c: any[]) => c[0] === '/api/digital-prf')[0][1].client_id;
+
+    // Second pass — the entry is still queued and retries.
+    vi.clearAllMocks();
+    wireSweptPrf();
+    await startSync();
+
+    const secondCreate = mockAxios.post.mock.calls.filter((c: any[]) => c[0] === '/api/digital-prf');
+    expect(secondCreate.length).toBe(1);
+    expect(
+      secondCreate[0][1].client_id,
+      'the retry chose a NEW id — the server has no way to recognise the replay, ' +
+      'so it creates a second billable PRF for the same call',
+    ).toBe(firstId);
+  });
+});

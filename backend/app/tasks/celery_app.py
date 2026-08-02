@@ -70,6 +70,18 @@ celery_app.conf.update(
     # 503 so the crew can retry, rather than stranding the PRF).
     broker_connection_timeout=2,
     broker_connection_retry_on_startup=True,
+    # DELIBERATELY no read_timeout / write_timeout here.
+    #
+    # They were added to stop a hung broker parking a publishing thread, and
+    # they broke the connection outright: `read_timeout` applies to reads on the
+    # persistent AMQP connection, so a normal declare-ok wait raised
+    # `TimeoutError: timed out` and every publish failed. Caught by
+    # tests/test_broker_queue_declare.py against a real RabbitMQ.
+    #
+    # The concern was genuine — a parked thread from the SHARED default executor
+    # could starve bcrypt on the login path. That is now solved where it belongs,
+    # in app/tasks/publish.py: publishes run on their own small executor, so a
+    # blocked broker can exhaust only the publish pool and never logins.
     broker_transport_options={"max_retries": 1},
     task_time_limit=120,
     task_soft_time_limit=60,
@@ -98,6 +110,16 @@ celery_app.conf.update(
         # token, so nothing accumulates meaningfully between runs.
         "purge-expired-blacklist": {
             "task": "purge_expired_blacklist",
+            "schedule": 3600.0,  # hourly
+            "options": {"queue": "ems_default"},
+        },
+        # The email spool holds rendered patient PDFs — complete clinical
+        # records — waiting to be attached. Every code path deletes its own
+        # file, but a SIGKILLed worker (OOM) or a container replaced mid-deploy
+        # abandons one, and nothing else has ever swept that directory. Left
+        # alone it grows without bound and retains PHI indefinitely.
+        "purge-prf-email-spool": {
+            "task": "purge_prf_email_spool",
             "schedule": 3600.0,  # hourly
             "options": {"queue": "ems_default"},
         },

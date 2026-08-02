@@ -179,6 +179,8 @@ async def get_failed_stats(
 @router.get("")
 async def list_failed_prfs(
     search: str | None = Query(None, description="Search by PRF number"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
     _user=Depends(get_current_user),
 ):
@@ -186,9 +188,40 @@ async def list_failed_prfs(
 
     Stuck rows carry status="submitted" and no processing_error; the UI labels
     them distinctly. They sort first (NULL last_processing_at, NULLS FIRST) —
-    exactly the rows needing the most attention."""
+    exactly the rows needing the most attention.
+
+    PAGED, and it selects columns rather than whole rows. Neither was true
+    before: this loaded every matching DigitalPRF entity, and `form_data` is a
+    JSONB blob carrying the entire clinical record including base64 signatures
+    and captured document images — tens of kilobytes each, all of it detoasted
+    and shipped out of Postgres so the handler could read two name fields from
+    it. One broker outage escalates a whole shift into this queue, and the page
+    that exists to fix an incident becomes the thing that falls over.
+    """
+    # `.astext` is JSONB-only; this column is generic JSON (see the model), so
+    # the key is extracted as a string via as_string() instead. Doing it in SQL
+    # is the whole point — it keeps the rest of the blob in Postgres.
+    name_fields = func.trim(
+        func.concat_ws(
+            " ",
+            DigitalPRF.form_data["patient_name"].as_string(),
+            DigitalPRF.form_data["patient_surname"].as_string(),
+        )
+    )
     query = (
-        select(DigitalPRF)
+        select(
+            DigitalPRF.id,
+            DigitalPRF.prf_number,
+            DigitalPRF.case_number,
+            DigitalPRF.status,
+            DigitalPRF.processing_error,
+            DigitalPRF.processing_attempts,
+            DigitalPRF.last_processing_at,
+            DigitalPRF.submitted_at,
+            DigitalPRF.created_at,
+            DigitalPRF.case_id,
+            name_fields.label("patient_name"),
+        )
         .where(
             or_(
                 DigitalPRF.status == PRFStatus.FAILED,
@@ -205,8 +238,8 @@ async def list_failed_prfs(
             else DigitalPRF.case_number.ilike(f"%{search}%")
         )
 
-    result = await db.execute(query)
-    prfs = result.scalars().all()
+    result = await db.execute(query.offset(skip).limit(limit))
+    prfs = result.all()
 
     return [
         {
@@ -214,11 +247,7 @@ async def list_failed_prfs(
             "prf_number": prf.prf_number,
             "case_number": prf.case_number,
             "status": prf.status.value,
-            "patient_name": (
-                (prf.form_data or {}).get("patient_name", "")
-                + " "
-                + (prf.form_data or {}).get("patient_surname", "")
-            ).strip(),
+            "patient_name": (prf.patient_name or "").strip(),
             "processing_error": (
                 (prf.processing_error or "")[:200]
             ),
@@ -237,6 +266,28 @@ async def list_failed_prfs(
         }
         for prf in prfs
     ]
+
+
+@router.get("/count")
+async def count_failed_prfs(
+    search: str | None = Query(None, description="Search by PRF number"),
+    db: AsyncSession = Depends(get_db),
+    _user=Depends(get_current_user),
+):
+    """Total rows matching the same filter as the list endpoint, so the page can
+    show an honest "showing N of M" now that the list is capped. Declared before
+    /{prf_id} so this literal path wins over the UUID route."""
+    conditions = [or_(DigitalPRF.status == PRFStatus.FAILED, _stuck_condition())]
+    if search:
+        conditions.append(
+            DigitalPRF.prf_number == int(search)
+            if search.isdigit()
+            else DigitalPRF.case_number.ilike(f"%{search}%")
+        )
+    total = (await db.execute(
+        select(func.count()).select_from(DigitalPRF).where(*conditions)
+    )).scalar() or 0
+    return {"total": total}
 
 
 @router.get("/{prf_id}")
@@ -305,8 +356,11 @@ async def correct_failed_prf(
     except ValueError:
         raise HTTPException(400, "Invalid PRF ID format")
 
+    # FOR UPDATE: a correction and a late/redelivered billing task for the same
+    # PRF must not interleave. Without the lock both can observe a billable
+    # original and each produce a Case + Claim for one ambulance call.
     result = await db.execute(
-        select(DigitalPRF).where(DigitalPRF.id == prf_uuid)
+        select(DigitalPRF).where(DigitalPRF.id == prf_uuid).with_for_update()
     )
     original = result.scalar_one_or_none()
     if not original:
@@ -316,6 +370,26 @@ async def correct_failed_prf(
         raise HTTPException(
             400,
             f"Only FAILED PRFs can be corrected. This PRF is '{original.status.value}'.",
+        )
+
+    # ALREADY BILLED — refuse.
+    #
+    # The status check alone is not enough. A PRF can be FAILED *and* already
+    # hold a case_id: the billing task creates the Case, then something later in
+    # the same run raises, and _mark_failed stamps FAILED over a row that was
+    # billed. It then still appears in the failed queue (which filters on status
+    # only), Retry is refused because it is already processed, so Correct is the
+    # only action the UI offers — and correcting it mints a SECOND Case, Document
+    # and Claim for the same ambulance call. Duplicate billing to the scheme.
+    #
+    # The sibling reprocess_failed_prf has always made this check; this route
+    # never did.
+    if original.case_id is not None:
+        raise HTTPException(
+            409,
+            f"This PRF has already been billed (case {original.case_id}). "
+            f"Correcting it would raise a second claim for the same incident. "
+            f"Amend the existing case instead.",
         )
 
     # ── Build corrected form_data (merge original + corrections) ──
@@ -344,38 +418,47 @@ async def correct_failed_prf(
     corrected_case_number = await _next_correction_case_number(db, original)
 
     from app.models.digital_prf import DigitalPRF as PRFModel
+
+    # CARRY EVERYTHING EXCEPT THE EXPLICIT EXCLUSIONS — do not hand-list what to
+    # copy.
+    #
+    # This was a hand-written list of columns, and it has now been wrong twice.
+    # The timestamps and odometer readings were forgotten first and added later;
+    # then all FIVE signature columns were still missing, so a correction
+    # produced a record with no handover signature — the receiving facility's
+    # proof of delivery — on the row that actually gets billed and rendered into
+    # the PDF. The form mirrors some signatures into form_data and the viewer
+    # falls back to those, which is why only handover_signature and
+    # valuables_signature were visibly lost, and why nobody noticed.
+    #
+    # A copy-list fails silently every time a clinical column is added. An
+    # exclusion list fails loudly instead: forget to exclude something and you
+    # get an obvious duplicate-identity bug, not a quietly missing signature.
+    _NOT_INHERITED = {
+        # Identity / numbering — the correction gets its own.
+        "id", "prf_number", "case_number",
+        # Lifecycle — set explicitly below.
+        "status", "form_data", "correction_of_id", "review_flags", "submitted_at",
+        "created_at", "updated_at",
+        # Billing artefacts of the ORIGINAL run. Inheriting case_id would make
+        # the correction look already-billed and skip the pipeline entirely.
+        "case_id", "document_id",
+        "processing_error", "processing_attempts", "last_processing_at",
+        # Delivery stamps belong to the original send, not the re-issue.
+        "facility_email_sent_to", "facility_email_sent_at", "facility_email_error",
+    }
+    inherited = {
+        c.key: getattr(original, c.key)
+        for c in PRFModel.__table__.columns
+        if c.key not in _NOT_INHERITED
+    }
+
     corrected_prf = PRFModel(
-        provider_id=original.provider_id,
-        vehicle_id=original.vehicle_id,
-        crew_member_1_id=original.crew_member_1_id,
-        crew_member_2_id=original.crew_member_2_id,
+        **inherited,
         prf_number=original.prf_number + 100000,
         case_number=corrected_case_number,
         status=PRFStatus.SUBMITTED,
         form_data=corrected_data,
-        # Copy real-time timestamps from original
-        time_call_received=original.time_call_received,
-        time_dispatched=original.time_dispatched,
-        time_mobile=original.time_mobile,
-        time_on_scene=original.time_on_scene,
-        time_depart_scene=original.time_depart_scene,
-        time_at_destination=original.time_at_destination,
-        time_handover=original.time_handover,
-        time_available=original.time_available,
-        time_back_to_base=original.time_back_to_base,
-        # Copy odometer readings
-        km_call_received=original.km_call_received,
-        km_dispatched=original.km_dispatched,
-        km_mobile=original.km_mobile,
-        km_on_scene=original.km_on_scene,
-        km_depart_scene=original.km_depart_scene,
-        km_at_destination=original.km_at_destination,
-        km_handover=original.km_handover,
-        km_available=original.km_available,
-        km_back_to_base=original.km_back_to_base,
-        # Copy geo and billing
-        geo_locations=original.geo_locations,
-        billing_schema_code=original.billing_schema_code,
         # Link to original
         correction_of_id=original.id,
         review_flags=[{

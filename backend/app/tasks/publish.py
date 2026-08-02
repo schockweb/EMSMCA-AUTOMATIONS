@@ -33,6 +33,8 @@ rather than merely non-blocking.
 from __future__ import annotations
 
 import asyncio
+import functools
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from app.tasks.celery_app import celery_app
@@ -49,8 +51,47 @@ def _publish_sync(task: Any, *args: Any, **kwargs: Any) -> Any:
     return task.apply_async(*args, **kwargs)
 
 
+# Hard ceiling on a single publish.
+#
+# Offloading to a thread stops a hung broker freezing the event loop, but the
+# THREAD still blocks — indefinitely, because kombu's socket has no read timeout
+# of its own. RabbitMQ's real failure mode under a memory or disk alarm is to
+# accept the connection and then never answer.
+#
+# 10s is well beyond a healthy publish (single-digit milliseconds) and well
+# inside the crew's patience. On timeout the caller sees an ordinary exception,
+# which every call site already handles: the submit path reverts
+# SUBMITTED -> DRAFT and returns an actionable 503 rather than stranding the PRF.
+PUBLISH_TIMEOUT_SECONDS = 10
+
+# A DEDICATED pool, not asyncio.to_thread's.
+#
+# `asyncio.to_thread` uses the interpreter's DEFAULT executor, shared by every
+# other to_thread caller in the process — including bcrypt password hashing on
+# the login path. asyncio.wait_for below unblocks the CALLER on timeout, but it
+# cannot cancel a thread that is blocked in a socket read: that thread stays
+# parked until the OS gives up. So a broker alarm would slowly consume the
+# shared executor and logins would stop working across the instance, for a fault
+# that has nothing to do with logging in.
+#
+# Giving publishes their own small pool contains the damage: a wedged broker can
+# exhaust only this pool, and every other offloaded operation is unaffected.
+# Bounding the broker's own socket instead was tried and reverted — read_timeout
+# applies to the persistent AMQP connection and broke normal publishing (see the
+# note in celery_app.py).
+_PUBLISH_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="celery-publish")
+
+
+async def _offload(fn, *args, **kwargs):
+    loop = asyncio.get_running_loop()
+    return await asyncio.wait_for(
+        loop.run_in_executor(_PUBLISH_POOL, functools.partial(fn, *args, **kwargs)),
+        timeout=PUBLISH_TIMEOUT_SECONDS,
+    )
+
+
 async def publish_task(task: Any, *args: Any, **kwargs: Any) -> Any:
-    """Publish a Celery task without blocking the event loop.
+    """Publish a Celery task without blocking the event loop, with a deadline.
 
     Mirrors `task.apply_async(...)`: pass `args=[...]` and `queue="..."` exactly
     as you would to apply_async.
@@ -58,10 +99,12 @@ async def publish_task(task: Any, *args: Any, **kwargs: Any) -> Any:
     Exceptions propagate unchanged, because every caller already handles a
     failed enqueue deliberately — the PRF submit path reverts SUBMITTED -> DRAFT
     and returns 503 so the crew can retry, rather than stranding the record.
+    `asyncio.TimeoutError` is an ordinary Exception, so those handlers cover a
+    timeout too without needing to know about it.
     """
-    return await asyncio.to_thread(_publish_sync, task, *args, **kwargs)
+    return await _offload(_publish_sync, task, *args, **kwargs)
 
 
 async def publish_delay(task: Any, *args: Any) -> Any:
     """Equivalent of `task.delay(*args)`, off the event loop and app-bound."""
-    return await asyncio.to_thread(_publish_sync, task, args=list(args))
+    return await _offload(_publish_sync, task, args=list(args))

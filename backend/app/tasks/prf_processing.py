@@ -78,24 +78,54 @@ async def _mark_attempt(prf_id: str, error_msg: str, attempt: int):
 
 
 async def _mark_failed(prf_id: str, error_msg: str):
-    """Mark a PRF as FAILED after all Celery retries are exhausted."""
+    """Mark a PRF as FAILED after all Celery retries are exhausted.
+
+    NEVER stamps FAILED over a PRF that has actually been billed.
+
+    This runs in its own session, outside the task's transaction, so by the time
+    it fires the row may already carry a case_id — the pipeline created the Case
+    and Claim and then something later in the run raised. Stamping FAILED there
+    put a billed PRF into the failed queue (which filters on status alone),
+    where Retry is refused as already-processed and Correct was therefore the
+    only action offered — and correcting a billed PRF raised a SECOND claim for
+    the same ambulance call.
+
+    The re-read is FOR UPDATE and applies the same condition the task itself
+    uses, so the check cannot race the commit it is checking against.
+    """
     from sqlalchemy import select
     from app.models.digital_prf import DigitalPRF, PRFStatus
 
     engine, Session = _make_celery_session()
     try:
         async with Session() as db:
-            result = await db.execute(select(DigitalPRF).where(DigitalPRF.id == uuid.UUID(prf_id)))
+            result = await db.execute(
+                select(DigitalPRF)
+                .where(DigitalPRF.id == uuid.UUID(prf_id))
+                .with_for_update()
+            )
             prf = result.scalar_one_or_none()
-            if prf:
-                prf.status = PRFStatus.FAILED
+            if not prf:
+                return
+            if prf.case_id is not None or prf.status == PRFStatus.PROCESSED:
+                logger.warning(
+                    "PRF %s raised '%s' but is already billed (case_id=%s, status=%s) "
+                    "— recording the error WITHOUT marking it FAILED",
+                    prf_id, error_msg[:120], prf.case_id, prf.status.value,
+                )
                 prf.processing_error = error_msg[:2000]
                 prf.last_processing_at = datetime.now(timezone.utc)
                 await db.commit()
-                logger.error(
-                    "PRF %s marked as FAILED after %d attempts: %s",
-                    prf_id, prf.processing_attempts, error_msg[:200],
-                )
+                return
+
+            prf.status = PRFStatus.FAILED
+            prf.processing_error = error_msg[:2000]
+            prf.last_processing_at = datetime.now(timezone.utc)
+            await db.commit()
+            logger.error(
+                "PRF %s marked as FAILED after %d attempts: %s",
+                prf_id, prf.processing_attempts, error_msg[:200],
+            )
     finally:
         await engine.dispose()
 
@@ -149,12 +179,38 @@ def process_prf_submission(self, prf_id: str):
                 # so a racing task sees the finished state, not a stale DRAFT read.
                 # case_id is the definitive marker — it's set only when a Case has
                 # actually been created and committed for this PRF.
-                if prf.status == PRFStatus.PROCESSED or prf.case_id is not None:
+                # POSITIVE ALLOW-LIST, not a deny-list.
+                #
+                # This was `status == PROCESSED or case_id is not None` — two
+                # conditions, so every other non-billable state fell through and
+                # was billed:
+                #
+                #  • CORRECTED. An admin correction creates a REPLACEMENT row
+                #    that owns the incident and leaves the original's case_id
+                #    NULL. A redelivered message for the original (acks_late is
+                #    on, so an OOM-killed worker's message is requeued) then ran
+                #    the whole pipeline again — a second Case, Document and
+                #    Claim for one ambulance call, i.e. the scheme billed twice —
+                #    and overwrote the CORRECTED marker with PROCESSED,
+                #    destroying the lineage record the correction flow exists to
+                #    keep.
+                #
+                #  • DRAFT. The submit endpoint reverts SUBMITTED -> DRAFT when
+                #    the enqueue fails. If that enqueue actually landed, the task
+                #    would bill a PRF no crew ever successfully submitted.
+                #
+                # The sibling reprocess_failed_prf in failed_prfs.py has always
+                # used an allow-list; the task side never did.
+                if prf.status not in (PRFStatus.SUBMITTED, PRFStatus.FAILED) or prf.case_id is not None:
                     logger.info(
-                        "PRF #%d already processed (case_id=%s), skipping duplicate task",
-                        prf.prf_number, prf.case_id,
+                        "PRF #%d not billable (status=%s, case_id=%s) — skipping",
+                        prf.prf_number, prf.status.value, prf.case_id,
                     )
-                    return {"status": "already_processed", "prf_number": prf.prf_number}
+                    return {
+                        "status": "skipped",
+                        "reason": prf.status.value,
+                        "prf_number": prf.prf_number,
+                    }
 
                 fd: dict = prf.form_data or {}
                 now = datetime.now(timezone.utc)
@@ -274,6 +330,19 @@ def process_prf_submission(self, prf_id: str):
                         "PRF #%d: dropped invalid-length field(s) from Case: %s",
                         prf.prf_number, "; ".join(dropped),
                     )
+                    # SURFACE IT WHERE STAFF ACTUALLY LOOK.
+                    #
+                    # review_flags below is a JSONB column no interface renders —
+                    # it is write-only. So a case could reach the scheme missing
+                    # its member number or patient ID and nothing anywhere said
+                    # so. auth_flag is the existing "needs a human" marker: it
+                    # pins the case to the top of the queue and shows its reason
+                    # on the screens the billing staff work from every day.
+                    case.auth_flag = True
+                    case.auth_flag_reason = (
+                        "Field(s) too long for the case record and left off — "
+                        "verify against the PRF: " + "; ".join(dropped)
+                    )[:2000]
                     prf.review_flags = (prf.review_flags or []) + [{
                         "type": "invalid_field_length",
                         "timestamp": now.isoformat(),
@@ -482,6 +551,23 @@ def requeue_stuck_prfs():
                 to_requeue: list[tuple[str, int]] = []
                 escalated: list[int] = []
                 for prf in stuck:
+                    # RE-READ under a row lock before writing.
+                    #
+                    # `stuck` is a snapshot. The sweep selects, then iterates,
+                    # and in between a worker can finish the very PRF being
+                    # examined. Escalating on the stale snapshot stamps FAILED
+                    # over a row that now has a case_id — which parks a BILLED
+                    # PRF in the failed queue, where Retry is refused and
+                    # Correct raises a second claim for the same call.
+                    await db.refresh(prf, with_for_update=True)
+                    if prf.case_id is not None or prf.status != PRFStatus.SUBMITTED:
+                        logger.info(
+                            "Watchdog: PRF #%d completed while the sweep was running "
+                            "(status=%s, case_id=%s) — leaving it alone",
+                            prf.prf_number, prf.status.value, prf.case_id,
+                        )
+                        continue
+
                     anchor = prf.submitted_at or prf.updated_at or prf.created_at
                     age_min = (now - anchor).total_seconds() / 60.0
                     if age_min >= ESCALATE_AFTER_MINUTES:

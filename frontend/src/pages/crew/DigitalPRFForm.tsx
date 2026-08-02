@@ -16,6 +16,7 @@ import { crewMemberById } from './localCrewRoster';
 import {
   buildSavePayload as buildPrfSavePayload,
   classifySaveError,
+  saveErrorMessage,
 } from './prfSaveContract';
 import { writeDraft } from './prfDraftStore';
 import { CALL_TYPE_OPTS, billingOptsFor } from './prfCallTypeModel';
@@ -5191,6 +5192,19 @@ export default function DigitalPRFForm() {
         navigate(`/${providerSlug}/crew/dashboard`, { replace: true });
         return;
       }
+      if (action === 'too-large') {
+        // Terminal: the request exceeds the server's body limit and will be
+        // exactly as large on every retry. Queueing it (the old behaviour)
+        // burned five attempts and then parked the crew's PRF in the outbox as
+        // dead, unsent and unexplained. Only the crew can fix this, by removing
+        // an attachment, so this is one of the very few cases that justifies
+        // interrupting them — the alternative is a patient record that never
+        // reaches the server at all.
+        savePendingRef.current = false;
+        setSaveState('error');
+        alert(saveErrorMessage(action));
+        return;
+      }
       if (action === 'conflict') {
         // Another writer touched this PRF. Refresh the version token and force a
         // retry on the next pass so this device's data still persists — but
@@ -5933,6 +5947,7 @@ export default function DigitalPRFForm() {
     // payload directly and await it, retrying once on a 409 version conflict.
     {
       let saved = false;
+      let lastCode: number | undefined;
       for (let attempt = 0; attempt < 2 && !saved; attempt++) {
         const finalPayload = buildSavePayload();
         if (baseUpdatedAtRef.current) finalPayload.client_base_updated_at = baseUpdatedAtRef.current;
@@ -5943,6 +5958,7 @@ export default function DigitalPRFForm() {
           saved = true;
         } catch (err: any) {
           const code = err?.response?.status;
+          lastCode = code;
           if (code === 409) {
             // Another writer bumped the version — refresh the token and retry.
             try {
@@ -5962,6 +5978,48 @@ export default function DigitalPRFForm() {
           // offline outbox (buildSavePayload carries the signatures) so nothing
           // is lost.
           break;
+        }
+      }
+
+      // BOTH ATTEMPTS LOST THE VERSION RACE — do not submit anyway.
+      //
+      // The loop ran twice and, if both collided, fell straight through to
+      // POST /submit. The server then locked and billed whatever IT held,
+      // which by definition is not what this payload carries: the crew and
+      // patient signatures captured seconds earlier in the pre-submit modals
+      // were silently discarded from a legal clinical record. Two 409s is not
+      // exotic — mark-time bumps the version, and so does the autosave this
+      // submit races.
+      //
+      // This payload is authoritative by design (it is the complete record at
+      // the moment of submission, assembled by buildSavePayload), so the
+      // resolution is an unconditional overwrite: send it with NO
+      // client_base_updated_at and let it win.
+      if (!saved && lastCode === 409) {
+        const finalPayload = buildSavePayload();
+        try {
+          const resp = await api().patch(`/api/digital-prf/${prfId}`, finalPayload);
+          if (resp?.data?.updated_at) baseUpdatedAtRef.current = resp.data.updated_at;
+          lastSavedPayloadRef.current = JSON.stringify(finalPayload);
+          saved = true;
+        } catch (err: any) {
+          const code = err?.response?.status;
+          if (code === 423) {
+            saved = true;                     // already submitted — nothing to save
+          } else if (code) {
+            // The server answered and still refused. Submitting now would bill
+            // a record missing the signatures. Keep the work and stop.
+            await queueToOutbox(finalPayload);
+            setSubmit(false);
+            submitInFlightRef.current = false;
+            alert(
+              'Could not save the final signatures to the server. Your PRF has been ' +
+              'kept on this device and will send automatically. Please do not close the app.',
+            );
+            return;
+          }
+          // No response at all — offline. The submit below routes through the
+          // outbox, which carries this same payload including the signatures.
         }
       }
     }

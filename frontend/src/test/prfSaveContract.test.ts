@@ -12,7 +12,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
-  buildSavePayload, classifySaveError, preservesWork,
+  buildSavePayload, classifySaveError, preservesWork, saveErrorMessage,
   type SaveState, type SaveErrorAction,
 } from '../pages/crew/prfSaveContract';
 
@@ -161,5 +161,33 @@ describe('classifySaveError — what happens when the save fails', () => {
     for (const s of [400, 401, 403, 404, 409, 418, 422, 423, 429, 500, 502, 503, 504]) {
       expect(known).toContain(classifySaveError(httpError(s)));
     }
+  });
+});
+
+describe('a payload that is too large is terminal, not retryable', () => {
+  it('classifies 413 as too-large rather than queue', () => {
+    // Everything unrecognised falls through to 'queue', which is right for a
+    // network blip and wrong here: the request is too big and will be exactly
+    // as big next time. It retried five times, was marked dead, and the crew's
+    // PRF sat permanently unsent with no explanation.
+    const err = { response: { status: 413 } };
+    expect(classifySaveError(err, { online: true })).toBe('too-large');
+  });
+
+  it('still preserves the work', () => {
+    expect(preservesWork('too-large' as any)).toBe(true);
+  });
+
+  it('gives the crew something they can act on', () => {
+    const msg = saveErrorMessage('too-large' as any);
+    expect(msg).toBeTruthy();
+    expect(msg!.toLowerCase()).toMatch(/photo|attachment|document/);
+  });
+
+  it('says nothing for failures that retry on their own', () => {
+    // Interrupting a crew mid-call for something the app will fix itself is the
+    // behaviour this codebase deliberately avoids.
+    expect(saveErrorMessage('queue' as any)).toBeNull();
+    expect(saveErrorMessage('conflict' as any)).toBeNull();
   });
 });

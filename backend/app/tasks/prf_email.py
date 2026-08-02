@@ -177,7 +177,26 @@ def send_prf_facility_email(self, prf_id: str, recipient: str, pdf_path: str, fo
         except OSError:
             pass
 
-    sent, reason = _run_async(_run())
+    # NOTHING may escape _run() unhandled.
+    #
+    # This call was bare. Any exception the body did not anticipate — a DB blip
+    # while stamping, a decrypt error, an smtplib edge case, an OOM in the PDF
+    # read — propagated straight out of the task. Celery then had no
+    # `self.retry()` to act on, so: no retry, no `facility_email_error` stamp,
+    # and no `_cleanup_pdf()`. The receiving hospital never got the handover
+    # document, nothing on any admin screen said so, and a file of patient PHI
+    # was left in the spool directory indefinitely.
+    #
+    # Converting to a normal failure lets the existing logic do its job: it is
+    # treated as transient and retried, and once retries are exhausted it
+    # becomes terminal, which stamps the error and removes the spool file.
+    try:
+        sent, reason = _run_async(_run())
+    except Exception:
+        logger.exception(
+            "PRF %s: unexpected error while sending the facility email", prf_id
+        )
+        sent, reason = False, "internal_error"
 
     if sent:
         _cleanup_pdf()
@@ -212,3 +231,55 @@ def send_prf_facility_email(self, prf_id: str, recipient: str, pdf_path: str, fo
         prf_id, reason, self.request.retries + 1, countdown,
     )
     raise self.retry(countdown=countdown)
+
+
+# ── Spool reaper ────────────────────────────────────────────────────────────
+# The spool holds rendered patient PDFs — full clinical records — waiting for
+# the worker to attach them. Every normal path deletes its file: success,
+# terminal failure, and now an unexpected exception too. None of that helps when
+# the worker is SIGKILLed mid-task (OOM) or the container is replaced during a
+# deploy: the message is redelivered, but if that delivery also dies the file is
+# simply abandoned. Nothing else has ever swept this directory, so on a busy
+# instance it grows without bound and retains PHI indefinitely.
+#
+# The cutoff is comfortably past the full retry ladder (2+4+8+16 minutes ≈ 30
+# min), so a file still in play is never removed out from under a pending retry.
+SPOOL_MAX_AGE_SECONDS = 2 * 60 * 60
+
+
+@shared_task(name="purge_prf_email_spool", acks_late=True)
+def purge_prf_email_spool():
+    """Delete abandoned PRF PDFs from the email spool. Runs hourly via beat."""
+    import time
+    from app.config import get_settings
+
+    spool = os.path.join(get_settings().UPLOAD_DIR, "prf_email")
+    if not os.path.isdir(spool):
+        return {"removed": 0, "kept": 0}
+
+    now = time.time()
+    removed = kept = 0
+    for name in os.listdir(spool):
+        path = os.path.join(spool, name)
+        try:
+            if not os.path.isfile(path):
+                continue
+            if now - os.path.getmtime(path) > SPOOL_MAX_AGE_SECONDS:
+                os.remove(path)
+                removed += 1
+            else:
+                kept += 1
+        except OSError as exc:
+            # A file the worker is reading right now, or a permissions problem.
+            # Never let one bad entry abort the sweep.
+            logger.warning("Spool purge: could not handle %s: %s", name, exc)
+
+    if removed:
+        # WARNING, not INFO: every file here should have been removed by the
+        # task that created it. Reaching the reaper means a send died without
+        # cleaning up, and that is worth noticing.
+        logger.warning(
+            "Spool purge: removed %d abandoned PRF PDF(s) older than %dh (%d still in play)",
+            removed, SPOOL_MAX_AGE_SECONDS // 3600, kept,
+        )
+    return {"removed": removed, "kept": kept}
