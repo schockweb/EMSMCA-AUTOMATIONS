@@ -48,6 +48,8 @@ TRANSMIT only. Do not describe it as "a full audit trail".
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
 import uuid
 from typing import Any, Optional
@@ -56,6 +58,7 @@ from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit_log import AuditLog
+from app.utils.patient_id import _hmac_key
 
 logger = logging.getLogger("ems.phi_audit")
 
@@ -157,4 +160,135 @@ async def record_phi_access(
             "PHI access log FAILED for %s %s/%s — the read proceeded but is "
             "unrecorded, so a breach involving it cannot be scoped",
             action, entity_type, entity_id,
+        )
+
+
+# Fields worth snapshotting on a change. Deliberately NOT the whole row: a
+# before/after of the full record would copy the clinical narrative and the
+# patient's identifiers into the audit table, which is the exact thing
+# record_phi_access refuses to do. These are the fields whose alteration
+# changes what the record MEANS or who it is about.
+_CASE_TRACKED = (
+    "patient_name", "patient_id_number", "patient_dob", "medical_scheme_name",
+    "scheme_member_number", "incident_date", "incident_location",
+    "preauth_number", "preauth_status", "dependant_code", "dispatch_type",
+    "referring_doctor_pr", "custom_display_name",
+)
+
+
+# Identifiers are recorded as a keyed FINGERPRINT, never verbatim.
+_FINGERPRINTED = ("patient_id_number", "scheme_member_number")
+
+
+def _fingerprint(value) -> Optional[str]:
+    """A short keyed digest — enough to tell two values apart, not enough to
+    recover either.
+
+    A presence flag was tried first and was wrong: redacting to "<set>" makes
+    the before and after IDENTICAL whenever an identifier is edited, so
+    `record_phi_change` saw no difference and wrote no row at all. Changing the
+    patient's ID number — the single most consequential edit possible on this
+    record — produced silence. Caught by a test that changed the identifier
+    itself; the first version of that test only changed the name, so it passed
+    against the broken behaviour.
+
+    Keyed, so the tiny SA-ID search space cannot be walked to reverse it.
+    """
+    if value in (None, ""):
+        return None
+    return f"<id:{hmac.new(_hmac_key(), str(value).encode(), hashlib.sha256).hexdigest()[:12]}>"
+
+
+def _snapshot(obj, fields=_CASE_TRACKED) -> dict:
+    """Field values as strings, with identifiers reduced to a keyed fingerprint.
+
+    An investigator needs to know THAT the ID number changed, not what it
+    changed from — the old value is still in the record's own history, and
+    copying it here would put an identifier in a second store with its own
+    retention rule and its own breach analysis. Same reasoning as the read log.
+    """
+    out: dict = {}
+    for f in fields:
+        try:
+            v = getattr(obj, f, None)
+        except Exception:
+            continue
+        if f in _FINGERPRINTED:
+            out[f] = _fingerprint(v)
+        else:
+            out[f] = None if v is None else str(v)[:200]
+    return out
+
+
+async def record_phi_change(
+    *,
+    action: str,
+    entity_type: str,
+    entity_id: Optional[uuid.UUID | str],
+    before: Optional[dict] = None,
+    after: Optional[dict] = None,
+    user: Any = None,
+    crew: Any = None,
+    request: Optional[Request] = None,
+    details: Optional[dict] = None,
+) -> None:
+    """Record an EDIT or a DELETION of a patient record.
+
+    The read log answers "who looked at this". This answers "who changed it,
+    and what did it say before" — which is the half an adversarial review
+    correctly identified as the one an investigator actually needs, and the half
+    that decides whether a printout of the record can be relied on at a Council
+    inquiry or in court.
+
+    Only fields that actually differ are stored, so an unrelated edit does not
+    bury the one that matters.
+    """
+    diff_before, diff_after = None, None
+    if before is not None and after is not None:
+        changed = [k for k in after if before.get(k) != after.get(k)]
+        if not changed:
+            return                      # nothing altered — no event to record
+        diff_before = {k: before.get(k) for k in changed}
+        diff_after = {k: after.get(k) for k in changed}
+    else:
+        diff_before, diff_after = before, after
+
+    try:
+        if isinstance(entity_id, str):
+            try:
+                entity_id = uuid.UUID(entity_id)
+            except (ValueError, TypeError):
+                entity_id = None
+
+        meta: dict = dict(details or {})
+        if crew is not None:
+            meta.setdefault("actor_type", "crew")
+            meta.setdefault("actor_name", getattr(crew, "full_name", None))
+        elif user is not None:
+            meta.setdefault("actor_type", "back_office")
+            meta.setdefault("actor_name", getattr(user, "full_name", None))
+            meta.setdefault("actor_role", getattr(getattr(user, "role", None), "value", None))
+        if request is not None:
+            meta.setdefault("route", request.url.path)
+
+        row = AuditLog(
+            user_id=getattr(user, "id", None),
+            crew_member_id=getattr(crew, "id", None),
+            action=action,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            details=meta,
+            before_state=diff_before,
+            after_state=diff_after,
+            ip_address=_client_ip(request),
+        )
+
+        from app.database import AsyncSessionLocal
+        async with AsyncSessionLocal() as audit_db:
+            audit_db.add(row)
+            await audit_db.commit()
+    except Exception:
+        logger.exception(
+            "PHI change log FAILED for %s %s/%s — the change was made but is "
+            "unrecorded", action, entity_type, entity_id,
         )

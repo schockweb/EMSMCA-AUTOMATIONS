@@ -262,3 +262,81 @@ async def _entries_by_type(entity_type: str):
             select(AuditLog).where(AuditLog.entity_type == entity_type)
             .order_by(AuditLog.created_at.asc())
         )).scalars().all()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Edits and deletions — the half an investigator actually needs.
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_editing_a_case_records_before_and_after(client, auth_headers, audited_prf):
+    """This route silently rewrote the derived clinical record — patient name,
+    ID number, scheme, incident date — with nothing recorded anywhere. Without a
+    before/after, "it has not been altered" is an assertion, not evidence."""
+    _prf_id, case_id, _crew = audited_prf
+
+    res = await client.patch(
+        f"/api/cases/{case_id}", headers=auth_headers,
+        json={"patient_name": "Renamed By Admin"},
+    )
+    assert res.status_code == 200, res.text[:200]
+
+    rows = await _entries(case_id, "UPDATE")
+    assert len(rows) == 1, f"a case was edited with no audit row: {rows}"
+    row = rows[0]
+    assert row.before_state and row.after_state, "no before/after captured"
+    assert "patient_name" in row.before_state
+    assert row.after_state["patient_name"] == "Renamed By Admin"
+    assert row.user_id is not None, "the editing account was not identified"
+
+
+async def test_an_unchanged_edit_writes_no_row(client, auth_headers, audited_prf):
+    """Only fields that actually differ are stored, so a routine no-op save does
+    not bury the edit that matters."""
+    _prf_id, case_id, _crew = audited_prf
+
+    current = (await client.get(f"/api/cases/{case_id}", headers=auth_headers)).json()
+    await client.patch(
+        f"/api/cases/{case_id}", headers=auth_headers,
+        json={"patient_name": current["patient_name"]},
+    )
+    assert await _entries(case_id, "UPDATE") == [], "a no-op edit was logged as a change"
+
+
+async def test_the_audit_snapshot_does_not_copy_the_id_number(
+    client, auth_headers, audited_prf
+):
+    """A deletion snapshot must not become a second, longer-lived copy of the
+    identifier we just went to the trouble of encrypting."""
+    from tests.conftest import _TestSession
+    _prf_id, case_id, _crew = audited_prf
+
+    async with _TestSession() as db:
+        case = (await db.execute(
+            select(Case).where(Case.id == uuid.UUID(case_id))
+        )).scalar_one()
+        case.patient_id_number = "9001015800083"
+        await db.commit()
+
+    # Change the ID ITSELF, so it is genuinely in the diff. A first version of
+    # this test only changed patient_name — the ID never entered before/after
+    # either way, so it passed with the redaction removed. That is the fifth
+    # vacuous negative assertion caught in this codebase; the shape is always
+    # the same, an assertion about data the code path never produced.
+    res = await client.patch(
+        f"/api/cases/{case_id}", headers=auth_headers,
+        json={"patient_id_number": "8202025800086"},
+    )
+    assert res.status_code == 200, res.text[:200]
+
+    rows = await _entries(case_id, "UPDATE")
+    assert rows, "changing the ID number produced no audit row at all"
+    captured = " ".join(f"{r.before_state} {r.after_state}" for r in rows)
+    assert "patient_id_number" in captured, (
+        "the change to the identifier was not recorded as having happened"
+    )
+    for raw in ("9001015800083", "8202025800086"):
+        assert raw not in captured, (
+            f"an SA ID number was copied verbatim into the audit log — that is "
+            f"a second, longer-lived store of the identifier we just encrypted: "
+            f"{captured[:200]}"
+        )

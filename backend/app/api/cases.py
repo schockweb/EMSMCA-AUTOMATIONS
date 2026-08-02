@@ -15,7 +15,9 @@ from app.models.digital_prf import DigitalPRF
 from app.models.user import User, UserRole
 from app.schemas.case import CaseCreate, CaseUpdate, CaseResponse
 from app.utils.security import get_current_user, require_role
-from app.services.phi_audit import record_phi_access, ACTION_READ
+from app.services.phi_audit import (
+    record_phi_access, record_phi_change, _snapshot, ACTION_READ,
+)
 
 # ROUTER-LEVEL role gate, deliberately not per-route.
 #
@@ -309,6 +311,7 @@ async def get_case(
 async def update_case(
     case_id: str,
     body: CaseUpdate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     _current: User = Depends(get_current_user),
 ):
@@ -322,6 +325,13 @@ async def update_case(
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
 
+    # Snapshot BEFORE the mutation below. This route silently rewrote the
+    # derived clinical record — patient name, ID number, scheme, incident date —
+    # with nothing recorded anywhere. That is the gap that decides whether a
+    # printout of this record can be relied on at a Council inquiry: without a
+    # before/after, "it has not been altered" is an assertion, not evidence.
+    _before = _snapshot(case)
+
     for field, value in body.model_dump(exclude_unset=True).items():
         if field == "preauth_status" and value is not None:
             setattr(case, field, PreAuthStatus(value))
@@ -334,6 +344,15 @@ async def update_case(
 
     await db.commit()
     await db.refresh(case)
+
+    # Only the fields that actually differ are stored, so a routine status
+    # change does not bury an edit to the patient's identity.
+    await record_phi_change(
+        action="UPDATE", entity_type="case", entity_id=case.id,
+        before=_before, after=_snapshot(case),
+        user=_current, request=request,
+    )
+
     names = await _display_names_for(db, [case.id])
     return _case_to_response(case, (case.custom_display_name or names.get(case.id)))
 
@@ -433,6 +452,7 @@ async def delete_all_cases(
 @router.delete("/{case_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_case(
     case_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     _current: User = Depends(require_role(UserRole.ADMIN, UserRole.SUPER_ADMIN)),
 ):
@@ -458,6 +478,13 @@ async def delete_case(
     case = result.scalar_one_or_none()
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
+
+    # Snapshot BEFORE anything is removed. A deletion is the one change that
+    # cannot be reconstructed from the record afterwards, because the record is
+    # gone — so if it is not captured here it is not captured anywhere. POPIA
+    # s14(4) destruction has to be demonstrable, and "the row is absent" is not
+    # a demonstration of who removed it or when.
+    _before = _snapshot(case)
 
     claim_ids = [c.id for c in case.claims]
 
@@ -492,4 +519,13 @@ async def delete_case(
     await db.execute(delete(Case).where(Case.id == case.id))
 
     await db.commit()
+
+    # Recorded AFTER the commit: a deletion that rolled back must not appear in
+    # the ledger as one that happened.
+    await record_phi_change(
+        action="DELETE", entity_type="case", entity_id=uuid.UUID(case_id),
+        before=_before, after=None,
+        user=_current, request=request,
+        details={"claims_removed": len(claim_ids)},
+    )
 
