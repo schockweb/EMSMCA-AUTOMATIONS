@@ -134,10 +134,14 @@ async def run(apply: bool, verify_only: bool) -> int:
                 continue
             # jsonb_set on the single key: the rest of the clinical record is
             # never rewritten, so a bug here cannot corrupt anything else.
+            # cast(:t AS text), NOT :t::text — SQLAlchemy's parameter parser
+            # reads the `::` as the start of another bind name and the statement
+            # reaches Postgres malformed ("syntax error at or near :"). Caught
+            # by the rehearsal against a restored copy, which is what it is for.
             await conn.execute(
                 text("UPDATE digital_prfs "
                      "SET form_data = jsonb_set(form_data::jsonb, "
-                     "'{patient_id_number}', to_jsonb(:t::text)) "
+                     "'{patient_id_number}', to_jsonb(cast(:t AS text))) "
                      "WHERE id = :i"),
                 {"t": token, "i": pid},
             )
