@@ -28,12 +28,23 @@ An audit log that leaks is worse than none.
 WHAT IT CANNOT SEE
 ------------------
 `ResponseCacheMiddleware` answers a repeated GET from memory WITHOUT running the
-route, so a re-read of the same record by the SAME session inside the cache TTL
-(30s for these paths) produces no second row. Cache keys include a fingerprint
-of the caller's token, so a different person reading the same record always
-misses the cache and is always logged. For breach scoping — "did this account
-ever access this patient?" — that is sufficient; for "how many times", it is not.
-Stated here rather than discovered later.
+route, so a re-read of the same record by the SAME session inside that TTL (30s
+for these paths) produces no second row. Cache keys include a fingerprint of the
+caller's token, so a different person reading the same record always misses the
+cache and is always logged. For breach scoping — "did this account ever access
+this patient?" — that is sufficient; for "how many times", it is not.
+
+An earlier version of this note claimed the only blind spot was 30 seconds. It
+was wrong twice over, and both were found by an adversarial review rather than
+by us: the crew PRF detail route ALSO has a Redis cache whose TTL for a
+submitted PRF is CACHE_TTL_PRF_SUBMITTED_SECONDS — one HOUR — and the audit
+call sat below its early return, so an hour of re-reads recorded a single
+access. That call now runs before the cache check. And the case LIST route,
+which discloses up to 200 patients' names and decrypted ID numbers in one
+response, was not logged at all; it now records one row per request.
+
+WHAT IS STILL NOT LOGGED: edits and deletions. This module records READ and
+TRANSMIT only. Do not describe it as "a full audit trail".
 """
 from __future__ import annotations
 

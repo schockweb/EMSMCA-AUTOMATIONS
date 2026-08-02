@@ -199,3 +199,66 @@ async def test_a_logging_failure_never_denies_a_clinical_read(
         f"a failing audit log blocked a clinical read: {res.status_code} {res.text[:200]}"
     )
     assert await _entries(prf_id, "READ") == [], "sanity: the write really did fail"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Holes an adversarial review found in the first version of this logging.
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_listing_cases_is_logged_as_an_access(client, auth_headers, audited_prf):
+    """The bigger disclosure was the one NOT logged.
+
+    Only the case DETAIL route was recorded. The LIST response carries up to 200
+    patients' names AND their decrypted SA ID numbers, so paging it harvests far
+    more than opening records one at a time — and left no trace at all.
+    """
+    from tests.conftest import _TestSession
+
+    before = await _entries_by_type("case_list")
+    res = await client.get("/api/cases/", params={"limit": 5}, headers=auth_headers)
+    assert res.status_code == 200, res.text[:200]
+    after = await _entries_by_type("case_list")
+
+    assert len(after) == len(before) + 1, (
+        "listing patient records wrote no audit row — the largest single "
+        "disclosure in the product would be invisible"
+    )
+    assert after[-1].details.get("returned") is not None, (
+        "the row does not record how many patients were disclosed, which is "
+        "what bounds the exposure"
+    )
+
+
+async def test_a_cached_prf_read_is_still_logged(client, audited_prf):
+    """Submitted PRFs are Redis-cached for CACHE_TTL_PRF_SUBMITTED_SECONDS —
+    one HOUR. The audit call sat below the cache's early return, so an hour of
+    re-reads recorded a single access."""
+    from tests.conftest import _TestSession
+    from app.utils.security import create_access_token
+
+    prf_id, _case_id, crew = audited_prf
+    token = create_access_token({
+        "sub": str(crew.id), "crew_id": str(crew.id),
+        "provider_id": str(crew.provider_id), "role": crew.role,
+        "token_scope": "crew",
+    })
+    headers = {"Authorization": f"Bearer {token}"}
+
+    for _ in range(3):
+        r = await client.get(f"/api/digital-prf/{prf_id}", headers=headers)
+        assert r.status_code == 200, r.text[:200]
+
+    rows = await _entries(prf_id, "READ")
+    assert len(rows) >= 3, (
+        f"three reads produced {len(rows)} audit row(s) — a cache hit is still "
+        f"a person looking at a patient's record"
+    )
+
+
+async def _entries_by_type(entity_type: str):
+    from tests.conftest import _TestSession
+    async with _TestSession() as db:
+        return (await db.execute(
+            select(AuditLog).where(AuditLog.entity_type == entity_type)
+            .order_by(AuditLog.created_at.asc())
+        )).scalars().all()

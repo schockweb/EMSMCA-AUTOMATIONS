@@ -1447,21 +1447,25 @@ async def get_prf(
     settings = get_settings()
     cache_key = f"prf:detail:{prf_id}:crew:{crew.id}"
 
+    # AUDIT BEFORE THE CACHE, not after.
+    #
+    # This was logged after the load, below the early return — so a cache HIT
+    # produced no row at all. Submitted PRFs are cached for
+    # CACHE_TTL_PRF_SUBMITTED_SECONDS, which is ONE HOUR, so a crew member could
+    # re-open a patient's record repeatedly for an hour and the audit trail
+    # would show a single access. An access log with an hour-wide blind spot is
+    # not one you can scope a breach with.
+    await record_phi_access(
+        db, action=ACTION_READ, entity_type="digital_prf", entity_id=prf_id,
+        crew=crew, request=request, details={"served_from": "cache_or_db"},
+    )
+
     # Check cache first — fast path (no DB round-trip on cache hit)
     cached = await get_cache(cache_key)
     if cached is not None:
         return cached
 
     prf = await _load_crew_prf(db, prf_id, crew, allow_crew2=True)
-
-    # A crew member opening a patient's record. Logged after the cache check
-    # above, so a re-read inside the 30s TTL produces no row — see the
-    # limitation documented in app/services/phi_audit.py.
-    await record_phi_access(
-        db, action=ACTION_READ, entity_type="digital_prf", entity_id=prf.id,
-        crew=crew, request=request,
-        details={"prf_number": prf.prf_number, "status": prf.status.value},
-    )
 
     async def _crew(crew_id):
         if not crew_id:

@@ -206,6 +206,7 @@ def _build_case_filter(queue: Optional[str], search: Optional[str]) -> list:
 
 @router.get("/", response_model=list[CaseResponse])
 async def list_cases(
+    request: Request,
     queue: Optional[str] = None,
     search: Optional[str] = None,
     # Bounded. `limit` was an unbounded int, so ?limit=1000000 asked Postgres
@@ -234,6 +235,25 @@ async def list_cases(
     )
     result = await db.execute(query)
     cases = result.scalars().all()
+
+    # THE LIST IS A PHI DISCLOSURE TOO.
+    #
+    # Only the case DETAIL route was logged, which missed the bigger event: this
+    # response carries up to 200 patients' names AND their decrypted SA ID
+    # numbers (CaseResponse includes patient_id_number, and the column type
+    # decrypts on read). Someone paging this endpoint harvests far more than
+    # they would by opening records one at a time — and left no trace at all.
+    #
+    # One row per request, not per case: 200 rows per page load would bury the
+    # individual accesses that matter. The count and filter are what an
+    # investigator needs to bound what was exposed.
+    await record_phi_access(
+        db, action=ACTION_READ, entity_type="case_list", entity_id=None,
+        user=_current, request=request,
+        details={"returned": len(cases), "queue": queue, "searched": bool(search),
+                 "skip": skip, "limit": limit},
+    )
+
     names = await _display_names_for(db, [c.id for c in cases])
     # Manual rename override (custom_display_name) wins over the computed name.
     return [_case_to_response(c, (c.custom_display_name or names.get(c.id))) for c in cases]

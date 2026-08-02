@@ -20,9 +20,21 @@ from starlette.types import ASGIApp
 logger = logging.getLogger(__name__)
 
 # ── Cache TTL rules (path prefix → seconds) ─────────────────────────────────
+# NOTE ON THE TWO ABSENTEES — /api/cases and /api/digital-prf.
+#
+# Both used to be cached here for 30s. They are the routes that disclose
+# patient records, and this middleware answers a repeated GET from memory
+# WITHOUT running the route — so the PHI access log those routes now write was
+# simply skipped on every cache hit. An access log with holes in it cannot
+# scope a breach under POPIA s22, which is the entire reason it exists.
+#
+# Caching a PHI read and auditing it are mutually exclusive at this layer, and
+# the audit wins. The cost is bounded: the PRF detail route still has its own
+# Redis cache (and now logs BEFORE consulting it), and the case list is a
+# 50-row admin page on an indexed sort.
+#
+# Do not add them back without moving the audit into the middleware itself.
 CACHE_RULES: dict[str, int] = {
-    "/api/cases":           30,
-    "/api/digital-prf":     30,
     "/api/claims":          30,
     "/api/providers":       60,
     "/api/rate-schemas":   300,
