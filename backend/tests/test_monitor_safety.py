@@ -360,3 +360,84 @@ async def test_no_probe_offers_an_unattended_fix_that_touches_patient_data():
         if static_auto_eligibility(p)[0] and p.remedy and p.remedy.touches_patient_data
     ]
     assert not offenders, f"these would act on patient data unattended: {offenders}"
+
+
+async def test_a_probe_error_clears_once_the_probe_runs_again():
+    """Stale probe-error rows must not accumulate.
+
+    A failing probe raises a fault keyed "probe_error::<key>". That is not a
+    registered probe key, so nothing in the normal clear path ever matched it —
+    the row survived the fix forever. A queue that fills with stale CRITICALs
+    teaches the operator to ignore the queue, which costs more than the missing
+    check did.
+    """
+    from app.models.system_fault import FaultStatus
+    from app.services.monitor import engine
+
+    cleared = {}
+
+    class _Fault:
+        def __init__(self, key):
+            self.fault_key = key
+            self.status = FaultStatus.AWAITING_APPROVAL
+            self.resolved_at = None
+            self.outcome = None
+            self.occurrences = 1
+            self.last_seen_at = None
+
+    stale = _Fault("probe_error::p")
+
+    async def fake_open_fault(_db, key):
+        return stale if key == "probe_error::p" else None
+
+    async def healthy():
+        return ProbeResult.healthy()
+
+    probe = _probe(check=healthy)
+
+    class _DB:
+        async def commit(self): pass
+
+    monkey_probe = [probe]
+    orig_all, orig_open = engine.all_probes, engine._open_fault
+    engine.all_probes = lambda: monkey_probe
+    engine._open_fault = fake_open_fault
+    try:
+        await engine.run_sweep(_DB())
+    finally:
+        engine.all_probes, engine._open_fault = orig_all, orig_open
+
+    assert stale.status == FaultStatus.CLEARED, \
+        "the probe recovered but its probe_error fault stayed open forever"
+    assert stale.resolved_at is not None
+
+
+async def test_an_asynchronous_remedy_is_not_reported_as_failed():
+    """Found by running the thing rather than reading it.
+
+    `rerun_blacklist_purge` ENQUEUES a task. Re-probing in the same breath sees
+    the unchanged condition every time, so a fix that was working perfectly was
+    stamped REMEDY_FAILED — which also stops it being retried. "The queued job
+    has not finished yet" and "the fix did not work" are different claims.
+    """
+    from app.models.system_fault import FaultStatus
+    from app.services.monitor import engine
+
+    async def still_failing():
+        return ProbeResult.faulty(reason="task has not run yet")
+
+    probe = _probe(check=still_failing, remedy=_remedy(
+        settle_seconds=0, verification_is_deferred=True,
+    ))
+    fault = _fault()
+    await engine._run_remedy(_FakeDB(), probe, fault)
+
+    assert fault.status == FaultStatus.DETECTED, (
+        "an asynchronous fix was recorded as failed before it could take effect"
+    )
+    assert "asynchronously" in (fault.outcome or "")
+
+    # ...and a SYNCHRONOUS remedy must still be judged immediately.
+    sync_fault = _fault()
+    await engine._run_remedy(_FakeDB(), _probe(check=still_failing), sync_fault)
+    assert sync_fault.status == FaultStatus.REMEDY_FAILED

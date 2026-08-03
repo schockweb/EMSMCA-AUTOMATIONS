@@ -190,6 +190,11 @@ register(Probe(
             "Deletes only token-blacklist rows whose own expiry has already "
             "passed — they are dead weight by definition."
         ),
+        # Asynchronous: this enqueues a task rather than doing the work inline,
+        # so the condition cannot possibly have cleared by the time the engine
+        # re-probes. Wait, then defer the verdict to the next sweep if needed.
+        settle_seconds=10,
+        verification_is_deferred=True,
         cooldown_minutes=30,
         max_attempts=2,
     ),

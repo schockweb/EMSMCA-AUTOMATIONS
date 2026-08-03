@@ -96,6 +96,19 @@ class Remedy:
     destructive: bool                   # discards state that cannot be rebuilt
     blast_radius: str                   # plain words: what is affected if wrong
 
+    # ── Timing ──
+    # Seconds to wait before re-checking the condition. Non-zero for a remedy
+    # whose effect is ASYNCHRONOUS — enqueueing a task, signalling another
+    # process — where an immediate re-probe is guaranteed to still see the
+    # fault and would report a working fix as failed. Found by running one.
+    settle_seconds: int = 0
+    # True when the effect may take longer than `settle_seconds` and the honest
+    # thing is to let the NEXT sweep decide. The fault returns to DETECTED with
+    # an explanation rather than being stamped REMEDY_FAILED, because "the
+    # queued job has not finished yet" and "the fix did not work" are different
+    # claims and only the second should stop further attempts.
+    verification_is_deferred: bool = False
+
     # Loop protection.
     cooldown_minutes: int = 15
     max_attempts: int = 3

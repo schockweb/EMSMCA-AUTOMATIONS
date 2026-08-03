@@ -130,6 +130,13 @@ async def _run_remedy(db, probe: Probe, fault: SystemFault) -> None:
         fault.outcome = f"The fix ran but did not succeed: {result.detail}"[:2000]
         return
 
+    # Let an asynchronous remedy actually take effect before judging it.
+    # Enqueueing a task returns immediately; re-probing in the same breath sees
+    # the unchanged condition and reports a working fix as a failure.
+    if r.settle_seconds:
+        import asyncio
+        await asyncio.sleep(r.settle_seconds)
+
     # Re-probe. "The remedy returned success" and "the fault is gone" are
     # different claims, and only the second one is worth recording as healed —
     # this is the same discipline as verifying a deploy instead of trusting it.
@@ -148,6 +155,17 @@ async def _run_remedy(db, probe: Probe, fault: SystemFault) -> None:
         fault.resolved_at = datetime.now(timezone.utc)
         fault.outcome = f"Fixed automatically. {result.detail}"[:2000]
         logger.warning("SELF-HEALED %s — %s", probe.key, result.detail)
+    elif r.verification_is_deferred:
+        # Applied, but the effect is not instantaneous. Saying "the fix failed"
+        # here would be false, and stamping REMEDY_FAILED would stop the next
+        # sweep from noticing that it worked a minute later.
+        fault.status = FaultStatus.DETECTED
+        fault.outcome = (
+            f"The fix was applied ({result.detail}) and the condition had not "
+            f"cleared {r.settle_seconds}s later. This fix takes effect "
+            f"asynchronously, so the next check will confirm whether it worked."
+        )[:2000]
+        logger.info("Remedy %s applied; verification deferred to the next sweep", r.key)
     else:
         fault.status = FaultStatus.REMEDY_FAILED
         fault.outcome = (
@@ -241,6 +259,16 @@ async def run_sweep(db) -> dict:
                     "before anyone acted."
                 )
                 logger.info("Fault %s cleared on its own", probe.key)
+            # A probe that ran is a probe that is no longer broken. Without
+            # this the probe_error row raised below outlives the fix forever:
+            # it is keyed "probe_error::<key>", which is not a registered probe
+            # key, so no sweep ever clears it and the queue accumulates stale
+            # CRITICALs that train the operator to ignore the queue.
+            stale_error = await _open_fault(db, f"probe_error::{probe.key}")
+            if stale_error is not None:
+                stale_error.status = FaultStatus.CLEARED
+                stale_error.resolved_at = datetime.now(timezone.utc)
+                stale_error.outcome = "The check is running again."
             continue
 
         summary["faults"] += 1
