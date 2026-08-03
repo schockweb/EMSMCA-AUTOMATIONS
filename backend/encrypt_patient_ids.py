@@ -40,6 +40,9 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from app.utils.encrypted_types import (  # noqa: E402
+    _EXTRA_ID_KEYS, _EXTRACTED_ID_KEYS,
+)
 from app.utils.patient_id import (  # noqa: E402
     decrypt_id, encrypt_id, id_hash, looks_encrypted, normalise_id,
 )
@@ -177,11 +180,11 @@ async def run(apply: bool, verify_only: bool) -> int:
     #
     # Same discipline as above: never store a token that does not decrypt back.
     for table, column, keys in (
-        ("digital_prfs", "form_data",
-         ("debtor_id_number", "patient_passport_number", "debtor_passport_number")),
-        ("documents", "extracted_data",
-         ("patient_id_number", "main_member_id",
-          "patient_passport_number", "debtor_id_number")),
+        # Imported rather than restated: a second copy of this list is a second
+        # thing to forget, and forgetting one means an identifier stays in clear
+        # while the report says the table is done.
+        ("digital_prfs", "form_data", _EXTRA_ID_KEYS),
+        ("documents", "extracted_data", _EXTRACTED_ID_KEYS),
     ):
         for key in keys:
             stat_key = f"{table}.{key}"

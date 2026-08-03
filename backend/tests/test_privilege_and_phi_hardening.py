@@ -273,6 +273,79 @@ def test_every_identifier_in_the_prf_blob_is_encrypted():
     assert t.process_result_value(stored, None) == blob, "round-trip lost data"
 
 
+def test_no_identifier_field_in_the_crew_form_is_left_unencrypted():
+    """The omission a rehearsal against real data caught, pinned as a test.
+
+    The first version of ENCRYPTED_FORM_KEYS was written from memory and named
+    four of ten. The five it missed included the principal medical-aid member's
+    SA ID (on 56 production records) and a DECEASED patient's ID number. Nothing
+    failed; the backfill simply reported the table done while the identifiers
+    sat in clear beside the clinical record.
+
+    This reads the actual crew form source and fails when a field whose NAME
+    says it holds a national identifier is not in the encrypted set — so the
+    next person to add one to the form finds out here rather than in an audit.
+    """
+    import re
+    from pathlib import Path
+
+    from app.utils.encrypted_types import ENCRYPTED_FORM_KEYS
+
+    form = Path(__file__).resolve().parents[2] / "frontend" / "src" / "pages" / \
+        "crew" / "DigitalPRFForm.tsx"
+    if not form.exists():
+        pytest.skip("crew form not present in this checkout")
+
+    text = form.read_text(encoding="utf-8", errors="ignore")
+    # Field keys as they appear in the form's state object / Inp name= props.
+    candidates = set(re.findall(r"['\"]([a-z0-9_]*(?:id_number|_id|passport)[a-z0-9_]*)['\"]", text))
+
+    # Structural non-identifiers: business registrations and internal row IDs.
+    # Practice, facility and vehicle numbers are semi-public registrations, not
+    # personal information, and are needed as plain values for billing lookups.
+    not_personal = re.compile(
+        r"(practice|provider|facility|hospital|vehicle|crew|scheme_id|"
+        r"plan_id|tariff|invoice|case_id|prf_id|user_id|valid|_ids$|"
+        r"^id$|^_id$|grid|covid|rapid|paediatric|avpu)", re.I)
+
+    # Individually reviewed and deliberately NOT encrypted. Listed by name with
+    # a reason rather than swept up by a pattern, so each is a decision on the
+    # record instead of an accident of regex.
+    reviewed_and_excluded = {
+        # A person's NAME, not a number — "Identifier's full name and surname".
+        # Matched only because "identified" contains "_id".
+        "med_aid_dec_death_identified_by",
+        # An EMPLOYER-assigned staff number on a Workmen's Compensation claim,
+        # and its PDF display variant. Not a national identifier.
+        "wca_employee_id_pdf",
+        # Medical-aid MEMBERSHIP numbers. These ARE personal information and
+        # POPIA treats them as such — gateway.sanitize_payload already redacts
+        # `medical_aid_number` from stored payloads. They are NOT encrypted here
+        # because doing so is a distinct piece of work, not because they are
+        # harmless: the membership number is the billing key used by EDI
+        # generation, adjudication and scheme member lookup, and the sibling
+        # column `cases.scheme_member_number` is plaintext too, so encrypting
+        # only the form copy would be inconsistent as well as risky.
+        # Tracked in "Security Fixes.md" under the 2026-08-03 open items.
+        "med_aid_number",
+        "medical_aid_number",
+    }
+
+    missing = sorted(
+        k for k in candidates
+        if not not_personal.search(k)
+        and k not in ENCRYPTED_FORM_KEYS
+        and k not in reviewed_and_excluded
+    )
+    assert not missing, (
+        "these crew-form fields look like national identifiers but are NOT "
+        f"encrypted at rest: {missing}. Either add them to _EXTRA_ID_KEYS in "
+        "app/utils/encrypted_types.py and run encrypt_patient_ids.py --apply so "
+        "existing rows are converted, or add them to reviewed_and_excluded here "
+        "WITH A REASON. Do not widen the regex to make this pass."
+    )
+
+
 def test_scanned_prf_extraction_is_encrypted():
     """documents.extracted_data was a bare JSON column holding the SA ID read
     off a scanned form. The conversion script never touched this table."""

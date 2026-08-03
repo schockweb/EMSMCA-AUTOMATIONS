@@ -209,3 +209,11 @@ both systems.
       record, so the audit trail proves a transmission happened and to whom, but
       not what it contained. Fixing it properly means rendering the PDF
       server-side.
+- [ ] Medical-aid MEMBERSHIP numbers (`med_aid_number`, `medical_aid_number` in
+      the PRF blob, `cases.scheme_member_number` as a column) are personal
+      information under POPIA and are **not** encrypted at rest. Deliberately
+      out of scope on 2026-08-03 rather than overlooked: the membership number
+      is the billing key used by EDI generation, adjudication and scheme member
+      lookup, so encrypting it needs those three paths assessed together, and
+      the form copy and the column must move in the same change.
+      `gateway.sanitize_payload` already redacts it from stored scheme payloads.

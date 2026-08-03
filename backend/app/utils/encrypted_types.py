@@ -53,10 +53,32 @@ PATIENT_ID_KEY = "patient_id_number"
 # identifier is encrypted", and only the second one is worth making to a scheme.
 #
 # PATIENT_ID_KEY stays separate because it alone drives the lookup hash.
+#
+# THIS LIST WAS BUILT FROM THE DATA, NOT FROM MEMORY — and the first attempt,
+# written from memory, named four of ten. A rehearsal of the backfill against a
+# restored production backup is what found the rest: after converting everything
+# the list named, 25 rows still held a bare 13-digit string. Among the missing
+# were the principal medical-aid member's SA ID, present on 56 production
+# records, and a DECEASED patient's ID number. Nothing failed — the backfill
+# simply reported the table done.
+#
+# When adding a form field that holds a national identifier, add it here in the
+# SAME change. tests/test_privilege_and_phi_hardening.py reads the crew form and
+# fails if an identifier-shaped field is missing from this set. The query that
+# finds an omission in live data is:
+#
+#   select key, count(*) from digital_prfs, lateral jsonb_each_text(form_data::jsonb)
+#   where value ~ '^[0-9]{13}$' group by key;
 _EXTRA_ID_KEYS = (
-    "debtor_id_number",
-    "patient_passport_number",
+    "debtor_id_number",                     # account holder — often a parent or spouse
+    "patient_passport_number",              # a foreign national's ONLY identifier
     "debtor_passport_number",
+    "main_member_id",                       # principal medical-aid member
+    "med_aid_dec_death_deceased_id",        # declaration of death — the deceased
+    "med_aid_dec_death_deceased_passport",
+    "med_aid_dec_death_hcp_id",             # the certifying practitioner
+    "pvt_account_holder_id",                # private (non-scheme) account holder
+    "id_document_image",                    # a captured ID document, ~874 chars
 )
 
 ENCRYPTED_FORM_KEYS = (PATIENT_ID_KEY,) + _EXTRA_ID_KEYS
