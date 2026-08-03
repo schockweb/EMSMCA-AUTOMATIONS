@@ -95,6 +95,29 @@ images_present_for() {
   echo "$missing"
 }
 
+# Which release is ACTUALLY SERVING, determined from the image the backend
+# container is running — not from git HEAD.
+#
+# The two diverge, and the first rehearsal proved it: after a rollback the
+# checkout was detached at the old commit, `git checkout main` moved HEAD back
+# to the new one, and the script then refused with "already on 4de5683" while
+# production was still serving the OLD images. Git HEAD says what the disk
+# holds. It says nothing about what is running.
+#
+# If two releases share an image ID — a build where nothing changed and Docker
+# reused every layer — the newest manifest wins. They are the same bits, so it
+# makes no practical difference.
+running_release() {
+  local img s rid
+  img=$(docker inspect ems_backend --format '{{.Image}}' 2>/dev/null) || return 0
+  [ -n "$img" ] || return 0
+  for m in $(ls -1t "$RELEASE_DIR"/*.json 2>/dev/null); do
+    s=$(grep -oP '"sha":\s*"\K[^"]+' "$m")
+    rid=$(docker image inspect "ems-ems_backend:release-$s" --format '{{.Id}}' 2>/dev/null)
+    if [ -n "$rid" ] && [ "$rid" = "$img" ]; then echo "$s"; return 0; fi
+  done
+}
+
 list_releases() {
   local found=0
   printf '%-14s  %-9s  %-14s  %-8s  %s\n' "TAGGED (UTC)" "COMMIT" "ALEMBIC" "IMAGES" "SUBJECT"
@@ -111,6 +134,7 @@ list_releases() {
   [ "$found" -gt 0 ] || echo "  (no releases tagged yet)"
   echo
   echo "Current checkout: $(git -C "$EMS_DIR" rev-parse --short HEAD 2>/dev/null) on $(git -C "$EMS_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null)"
+  echo "ACTUALLY RUNNING: $(running_release || echo 'unrecognised image — not a tagged release')"
   echo "Database is at:   $(docker exec ems_backend python -m alembic current 2>/dev/null | grep -oE '^[0-9a-f]{12}' | head -1)"
 }
 
@@ -140,7 +164,13 @@ TARGET_REV=$(grep -oP '"alembic_revision":\s*"\K[^"]+' "$MANIFEST")
 TARGET_SUB=$(grep -oP '"subject":\s*"\K[^"]+' "$MANIFEST")
 
 # ── Preconditions ───────────────────────────────────────────────────────────
-[ "$TARGET" = "$CURRENT_SHA" ] && fail "already on $TARGET"
+RUNNING_SHA=$(running_release)
+if [ "$TARGET" = "$CURRENT_SHA" ] && [ "$TARGET" = "${RUNNING_SHA:-}" ]; then
+  fail "already on $TARGET — checkout and running images both"
+fi
+if [ "$TARGET" = "$CURRENT_SHA" ] && [ "$TARGET" != "${RUNNING_SHA:-}" ]; then
+  log "checkout is already $TARGET but the RUNNING images are ${RUNNING_SHA:-unrecognised} — repointing them"
+fi
 
 missing=$(images_present_for "$TARGET")
 if [ "$missing" -gt 0 ]; then
@@ -174,7 +204,8 @@ fi
 echo
 echo "  ────────────────────────────────────────────────────────────────"
 echo "   ROLLING BACK"
-echo "     from   $CURRENT_SHA   (running now)"
+echo "     checkout at    $CURRENT_SHA"
+echo "     images serving ${RUNNING_SHA:-unrecognised}"
 echo "     to     $TARGET   $TARGET_SUB"
 echo "     images already built — no rebuild, no network"
 echo
@@ -226,11 +257,25 @@ done
 log "image tags repointed to release-$TARGET"
 
 cd "$EMS_DIR" || fail "cannot cd $EMS_DIR"
+
+# docker-compose.worker.yml interpolates ${RABBITMQ_USER} and ${RABBITMQ_PASS}
+# from the SHELL, not from env_file. Without them compose substitutes empty
+# strings — and if rabbitmq is ever recreated in that state it comes up with
+# blank credentials and every worker silently loses its broker. Compose only
+# warns. Load .env.prod into the environment for the compose calls, in a
+# subshell so the secrets do not outlive them.
+#
 # --no-build is the whole point: use the images we just pointed at, do not
 # rebuild from the checked-out source (which would take minutes and could
 # produce something subtly different from what was tested).
-docker compose -f docker-compose.prod.yml   up -d --no-build || fail "app stack did not come up"
-docker compose -f docker-compose.worker.yml up -d --no-build || fail "worker stack did not come up"
+(
+  set -a
+  # shellcheck disable=SC1091
+  [ -f "$EMS_DIR/.env.prod" ] && . "$EMS_DIR/.env.prod"
+  set +a
+  docker compose -f docker-compose.prod.yml   up -d --no-build &&
+  docker compose -f docker-compose.worker.yml up -d --no-build
+) || fail "the stack did not come up"
 
 # nginx caches its upstream's IP from startup; recreating backend containers can
 # move it, and every request then 502s while `docker ps` shows all healthy.
@@ -256,7 +301,12 @@ fi
 
 echo
 log "OK: production is running $TARGET"
-log "the checkout is DETACHED. To return to the newest release:"
+log ""
+log "The checkout is DETACHED at $TARGET. To go forward again, IN THIS ORDER:"
 log "  sudo git -C $EMS_DIR checkout main && sudo git -C $EMS_DIR pull"
-log "  sudo bash $EMS_DIR/deploy/ops/rollback.sh $CURRENT_SHA    (fast, images are still tagged)"
+log "  sudo bash $EMS_DIR/deploy/ops/rollback.sh $CURRENT_SHA --yes"
+log ""
+log "The checkout must come first: this script may not exist at $TARGET, and"
+log "restoring the branch alone changes only the disk — the OLD images keep"
+log "serving until the second command repoints them."
 exit 0
