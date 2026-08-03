@@ -77,6 +77,11 @@ jobs:
 
             cd ${{ env.DEPLOY_DIR }}
 
+            # Name the release currently serving traffic BEFORE overwriting it.
+            # `up -d --build` replaces :latest in place, so after this point the
+            # previous version has no tag and going back means a full rebuild.
+            bash deploy/ops/tag-release.sh || echo "WARN: could not tag the outgoing release"
+
             # Pull latest code
             git fetch origin main
             git reset --hard origin/main
@@ -114,8 +119,12 @@ jobs:
             # Reloading nginx last re-resolves the upstream. (Cost: one reload.)
             docker restart ems_nginx
 
-            # Prune dangling images to save disk
+            # Prune dangling images to save disk. NOT -a: the release-* tags are
+            # the rollback path, and `prune -a` would delete every one of them.
             docker image prune -f
+
+            # Tag what we just deployed, so the NEXT deploy has a way back.
+            bash deploy/ops/tag-release.sh || echo "WARN: could not tag the new release"
 
             echo "✅ Deploy complete"
 

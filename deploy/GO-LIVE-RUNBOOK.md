@@ -129,6 +129,12 @@ Back to working HTTP while you diagnose. Send Claude the nginx logs.
 After pushing from the laptop, on the VM:
 ```bash
 cd /opt/ems
+
+# FIRST: name the release that is currently serving traffic, so there is
+# something to go back to. `up -d --build` overwrites :latest in place — once it
+# has run, the version you were on has no name and rolling back means a rebuild.
+sudo bash deploy/ops/tag-release.sh
+
 sudo git fetch origin main && sudo git reset --hard origin/main
 # NOTE: a line here used to copy nginx.conf.bak-2026-07-12 over the live config.
 # That backup is HTTP-ONLY (it predates HTTPS going live on 2026-07-13), so
@@ -138,11 +144,52 @@ sudo git fetch origin main && sudo git reset --hard origin/main
 sudo VITE_GOOGLE_MAPS_KEY="$(sudo grep -oP '(?<=VITE_GOOGLE_MAPS_KEY=).*' /opt/ems/.env.prod)" docker compose -f docker-compose.prod.yml up -d --build --force-recreate
 sudo docker compose -f docker-compose.prod.yml exec -T ems_backend python -m alembic upgrade head   # ⚠️ MANDATORY — code + database must update together
 sudo docker compose -f docker-compose.worker.yml up -d --build
+sudo docker restart ems_nginx     # re-resolve the backend IP, or every request 502s
 curl -s http://localhost/health   # uptime_seconds must be small
+
+# LAST: tag the release you just deployed, so the NEXT deploy has a way back.
+sudo bash deploy/ops/tag-release.sh
 ```
 - ⚠️ NEVER pass `--remove-orphans` to the **worker** compose command — it deletes the app containers (shared project name).
 - Docker network `ems_db_net` must exist (`sudo docker network create ems_db_net` — already created 2026-07-12).
 - Browser check needs Ctrl+F5, possibly Service-Worker unregister (PWA caching).
+
+---
+
+## Rolling back a bad deploy
+
+```bash
+sudo bash /opt/ems/deploy/ops/rollback.sh --list       # what is available
+sudo bash /opt/ems/deploy/ops/rollback.sh --previous   # the one before this
+sudo bash /opt/ems/deploy/ops/rollback.sh 83bea1f      # a specific release
+```
+
+About twenty seconds, no rebuild, no network. It checks out the target commit
+(so the bind-mounted nginx config matches the images), repoints the `:latest`
+tags at the pre-built release images, recreates the containers with
+`--no-build`, restarts nginx and waits for health.
+
+**Rehearsed end to end on 2026-08-03**: 83bea1f → 24s to healthy → forward again.
+Not a theory.
+
+Three things it will refuse to do, each for a reason:
+
+| It stops when | Because |
+|---|---|
+| the images for that release are gone | the weekly prune reclaims unused images after 30 days. Better to say so than to half-roll-back. |
+| the checkout has uncommitted edits | someone has been editing production by hand and `git checkout` is about to destroy that work. |
+| the database is ahead of the target | see below. |
+
+**The database does not roll back.** If migrations ran after the release you are
+returning to, the old code meets a schema it has never seen. The script prints
+exactly which migrations those are and requires `--accept-schema-drift`. Adding
+a column, table or index is safe — SQLAlchemy ignores what its models do not
+declare. Dropping, renaming, retyping, or making a column NOT NULL is **not**
+safe. `alembic downgrade` is deliberately not automated: an unattended downgrade
+of a database holding patient records is worse than the outage it would fix.
+
+If a rollback is blocked by drift and you cannot accept it, roll forward with a
+fix instead. That is usually the correct answer anyway.
 
 ---
 

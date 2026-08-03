@@ -123,31 +123,92 @@ done
 # Counts cannot detect a column restored as NULLs, so fingerprint the payloads.
 # Restricted to PRFs that were already finalised at dump time (status <> DRAFT):
 # the backend rejects edits to those with 423, so their content must be
-# byte-identical in the backup and in live forever. Draft PRFs are excluded
-# precisely because they are expected to change. This gives a strong integrity
-# check with no day-to-day noise.
+# identical in the backup and in live forever. Draft PRFs are excluded precisely
+# because they are expected to change.
+#
+# WITH ONE EXCEPTION, learned on 2026-08-03. Encrypting patient identifiers at
+# rest rewrites finalised records — legitimately, deliberately, by direct UPDATE
+# and without touching updated_at. The first version of this check fingerprinted
+# the whole of form_data and failed 70 of 81 records on the day the second
+# encryption pass ran. Every record was fine: decrypting BOTH sides showed 81 of
+# 81 identical. But the check said "finalised patient records were altered in
+# production", which is the worst kind of alarm — narrowly true, badly wrong in
+# its conclusion, and fired by a planned migration. An alarm that cries wolf on
+# planned work trains its reader to dismiss it, and dismissing this one is
+# exactly how the 2026-07-18 backup failure went unnoticed for eight days.
+#
+# So the fingerprint now covers everything EXCEPT the identifier fields, and the
+# identifiers are checked separately for PRESENCE. Ciphertext that changes is
+# expected; an identifier that vanishes is not, and re-encryption must not be
+# able to hide a deletion.
+#
+# Note both sides are cast to jsonb, which canonicalises key order and
+# whitespace — so this is also immune to a dump/restore reformatting the JSON,
+# which the raw ::text comparison was not.
+
+# Read the identifier list from the application rather than restating it. A
+# second copy is a second thing to forget, and forgetting one here means a
+# deleted identifier stops being detectable.
+ID_KEYS=$(docker exec ems_backend python -c \
+  "from app.utils.encrypted_types import ENCRYPTED_FORM_KEYS; print(','.join(ENCRYPTED_FORM_KEYS))" \
+  2>/dev/null | tr -d '\r' | tr -d ' ')
+if ! echo "$ID_KEYS" | grep -q "patient_id_number"; then
+  ID_KEYS="patient_id_number,debtor_id_number,patient_passport_number,debtor_passport_number,main_member_id,med_aid_dec_death_deceased_id,med_aid_dec_death_deceased_passport,med_aid_dec_death_hcp_id,pvt_account_holder_id,id_document_image"
+  log "WARN could not read ENCRYPTED_FORM_KEYS from the backend — using the built-in list, which may be stale"
+fi
+ID_ARR="ARRAY[$(echo "$ID_KEYS" | awk -F, '{for(i=1;i<=NF;i++) printf "%s'\''%s'\''", (i>1?",":""), $i}')]"
+
+# Everything except the identifiers: clinical content, times, vitals, narrative.
 FP="select coalesce(md5(string_agg(
-      prf_number||coalesce(form_data::text,'')||status::text||
+      prf_number||coalesce((form_data::jsonb - $ID_ARR)::text,'')||status::text||
       coalesce(patient_signature,'')||coalesce(crew_signature,''), '|' order by id::text)),'none')
     from digital_prfs where status::text <> 'DRAFT'"
-fp_r=$(q_scratch "$FP")
+
+# Which identifier fields are populated, per record. Blind to the ciphertext,
+# sensitive to a field being emptied or dropped.
+IDFP="select coalesce(md5(string_agg(sig,'|' order by sig)),'none') from (
+        select id::text||':'||coalesce((select string_agg(k,',' order by k)
+                 from jsonb_object_keys(form_data::jsonb) k
+                 where k = any($ID_ARR) and coalesce(form_data::jsonb->>k,'') <> ''),'') as sig
+        from digital_prfs where status::text <> 'DRAFT') t"
+
 n_immutable=$(q_scratch "select count(*) from digital_prfs where status::text <> 'DRAFT'")
 
 if [ "${n_immutable:-0}" -eq 0 ]; then
   log "no finalised PRFs in this dump — skipping content fingerprint"
 else
+  fp_r=$(q_scratch "$FP")
+  idfp_r=$(q_scratch "$IDFP")
+
   # Compare against exactly the same id set on the live side.
   ids=$(q_scratch "select string_agg(quote_literal(id::text),',') from digital_prfs where status::text <> 'DRAFT'")
   fp_l=$(q_live "select coalesce(md5(string_agg(
-          prf_number||coalesce(form_data::text,'')||status::text||
+          prf_number||coalesce((form_data::jsonb - $ID_ARR)::text,'')||status::text||
           coalesce(patient_signature,'')||coalesce(crew_signature,''), '|' order by id::text)),'none')
          from digital_prfs where id::text in ($ids)")
+  idfp_l=$(q_live "select coalesce(md5(string_agg(sig,'|' order by sig)),'none') from (
+          select id::text||':'||coalesce((select string_agg(k,',' order by k)
+                   from jsonb_object_keys(form_data::jsonb) k
+                   where k = any($ID_ARR) and coalesce(form_data::jsonb->>k,'') <> ''),'') as sig
+          from digital_prfs where id::text in ($ids)) t")
+
   if [ "$fp_r" = "$fp_l" ]; then
-    log "content fingerprint MATCHES live across $n_immutable finalised PRFs (${fp_r:0:16}...)"
+    log "clinical content MATCHES live across $n_immutable finalised PRFs (${fp_r:0:16}...)"
   else
-    log "content fingerprint MISMATCH on finalised PRFs: backup=${fp_r:0:16}... live=${fp_l:0:16}..."
-    log "  These records are immutable, so they must never differ. Either the dump is"
+    log "clinical content MISMATCH on finalised PRFs: backup=${fp_r:0:16}... live=${fp_l:0:16}..."
+    log "  These records are immutable and identifier encryption is excluded from"
+    log "  this fingerprint, so nothing legitimate changes them. Either the dump is"
     log "  corrupt or finalised patient records were altered in production."
+    problems=$((problems+1))
+  fi
+
+  if [ "$idfp_r" = "$idfp_l" ]; then
+    log "identifier fields present in the same records on both sides (${idfp_r:0:16}...)"
+  else
+    log "identifier PRESENCE differs: backup=${idfp_r:0:16}... live=${idfp_l:0:16}..."
+    log "  An identifier was added to, or removed from, a finalised record. Note"
+    log "  this compares which fields are populated, NOT their values — so it is"
+    log "  unaffected by re-encryption and means a real change."
     problems=$((problems+1))
   fi
 fi
