@@ -100,6 +100,29 @@ class DigitalPRF(Base):
         String(64), nullable=True, index=True,
         comment="HMAC-SHA256 lookup hash of form_data['patient_id_number']"
     )
+    search_text: Mapped[Union[str, None]] = mapped_column(
+        # The searchable text of this PRF, kept in step by a DATABASE TRIGGER
+        # (migration d5b7e91a3c62) rather than by application code.
+        #
+        # WHY THIS COLUMN EXISTS. Provider PRF search ran
+        # `cast(form_data AS text) ILIKE '%term%'`, which detoasts and scans the
+        # entire clinical blob of every one of that provider's PRFs. Production
+        # rows average 150 KB and are mostly base64 — signatures, ID captures,
+        # scene photos — none of which anyone searches. Measured 2026-08-03 on a
+        # provider with 559 records: **146 ms against the blob versus 2.5 ms
+        # without it, a 59x difference**, entirely warm, no disk reads. The UI
+        # fires it on a 400 ms debounce with no minimum term length, so a
+        # six-letter surname was up to four full scans.
+        #
+        # WHY A TRIGGER, NOT APPLICATION CODE. There are several write paths into
+        # form_data (create, autosave PATCH, correction, the encryption backfill,
+        # ad-hoc repair scripts). The recurring defect in this project is a rule
+        # implemented correctly on one path and never carried to the others, and
+        # a stale search index fails SILENTLY — the record simply stops being
+        # findable. The database is the one place every writer must pass through.
+        Text, nullable=True,
+        comment="Searchable text derived from form_data by trigger; see migration d5b7e91a3c62"
+    )
 
     # ── Real-time Timestamps ──────────────────────────────
     # Captured when crew taps "Mark" buttons — not manually typed
@@ -245,3 +268,67 @@ def _sync_prf_patient_id_hash(mapper, connection, target):  # noqa: ARG001
 _event.listen(DigitalPRF, "before_insert", _sync_prf_patient_id_hash)
 _event.listen(DigitalPRF, "before_update", _sync_prf_patient_id_hash)
 
+
+
+# ── search_text: same DDL on the create_all path as in the migration ────────
+#
+# WHY THIS IS HERE AS WELL AS IN MIGRATION d5b7e91a3c62.
+#
+# `search_text` is a plain column, so `Base.metadata.create_all` creates it —
+# and creates it EMPTY, because the thing that fills it is a trigger, and
+# create_all knows nothing about triggers. Every environment built that way (the
+# test database, the development database, and every FRESH CLIENT INSTALL, since
+# bootstrap_schema.py builds from the models and then stamps Alembic at head)
+# would have the column, no trigger, a permanently NULL value — and a provider
+# PRF search that silently returns nothing at all. Not an error. Nothing.
+#
+# The migration covers databases that already exist; this covers databases being
+# created. Same pattern as the scale indexes, which are declared in both places
+# for exactly this reason. `ems_prf_search_text` is CREATE OR REPLACE, so
+# whichever path runs second is harmless.
+#
+# test_prf_search_text.py asserts this definition and the migration's have not
+# drifted apart.
+from sqlalchemy import DDL as _DDL  # noqa: E402
+
+SEARCH_TEXT_BUILD_FN = r"""
+CREATE OR REPLACE FUNCTION ems_prf_search_text(fd jsonb)
+RETURNS text AS $$
+    SELECT left(string_agg(DISTINCT v, ' '), 20000)
+    FROM (
+        SELECT j #>> '{}' AS v
+        FROM jsonb_path_query(fd, '$.**') AS j
+        WHERE jsonb_typeof(j) IN ('string', 'number')
+    ) s
+    WHERE v IS NOT NULL
+      AND v <> ''
+      AND v NOT LIKE 'gAAAAA%'
+      AND NOT (length(v) > 300 AND v !~ '\s');
+$$ LANGUAGE sql IMMUTABLE;
+"""
+
+SEARCH_TEXT_TRIGGER_FN = """
+CREATE OR REPLACE FUNCTION ems_digital_prfs_search_text()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.form_data IS NULL THEN
+        NEW.search_text := NULL;
+    ELSE
+        NEW.search_text := ems_prf_search_text(NEW.form_data::jsonb);
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+"""
+
+SEARCH_TEXT_TRIGGER = """
+CREATE TRIGGER trg_digital_prfs_search_text
+BEFORE INSERT OR UPDATE OF form_data ON digital_prfs
+FOR EACH ROW EXECUTE FUNCTION ems_digital_prfs_search_text();
+"""
+
+for _ddl in (SEARCH_TEXT_BUILD_FN, SEARCH_TEXT_TRIGGER_FN,
+             "DROP TRIGGER IF EXISTS trg_digital_prfs_search_text ON digital_prfs",
+             SEARCH_TEXT_TRIGGER):
+    _event.listen(DigitalPRF.__table__, "after_create",
+                  _DDL(_ddl).execute_if(dialect="postgresql"))

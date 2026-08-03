@@ -258,7 +258,10 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 #    our proxy. Auth paths: 15/min per client IP. Fails open without Redis.
 app.add_middleware(
     RateLimitMiddleware,
-    auth_limit=15,
+    auth_limit=100,           # FAILED sign-ins per minute per IP — flood guard only
+    auth_burst_limit=300,     # ALL sign-ins per minute per IP — lets a whole base start a shift
+    # The credential control is the per-account lockout (5 failures, 45 min),
+    # not either number above. See the class docstring in rate_limit.py.
     api_limit=300,
     window=60,
 )

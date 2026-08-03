@@ -88,13 +88,58 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     def __init__(
         self,
         app,
-        auth_limit: int = 15,         # login/refresh attempts per window, per real client IP
+        auth_limit: int = 100,        # FAILED auth attempts per window, per real client IP
+        auth_burst_limit: int = 300,  # ALL auth attempts per window, per real client IP
         api_limit: int = 600,
         window: int = 60,             # sliding window in seconds
         max_body_bytes: int = 15 * 1024 * 1024,  # 15 MB
     ):
         super().__init__(app)
+        # WHY THERE ARE TWO AUTH LIMITS
+        # -----------------------------
+        # A single per-IP counter over ALL auth attempts cannot tell a shift
+        # change from a password-spraying attack, so it has to be tuned for the
+        # attacker and then the crews pay for it. Measured 2026-08-03: 200 crew
+        # authenticating from one IP, **75% rejected with 429**.
+        #
+        # That is not a hypothetical. Crews at one base share the station WiFi,
+        # and South African mobile carriers put large numbers of subscribers
+        # behind the same CGNAT address, so a whole region can present as a
+        # handful of IPs. The limiter was locking out the people it exists to
+        # protect, one minute at a time, at the exact moment a shift starts.
+        #
+        # The first cut of this counted only FAILURES per IP, at 15/minute, on
+        # the theory that crews succeed and attackers fail. The test suite
+        # rejected it immediately, and it was right to: after fifteen mistyped
+        # passwords from one address, a crew member with the CORRECT password is
+        # refused. At a base of a hundred people on tablets at 06:00, fifteen
+        # typos is an ordinary morning — so the fix reproduced the exact failure
+        # it was meant to remove, with "one clumsy colleague" in place of "a
+        # busy shift change".
+        #
+        # WHERE THE CREDENTIAL CONTROL ACTUALLY LIVES. Not here. It is the
+        # per-account lockout — 5 failures locks THAT account for 45 minutes,
+        # independent of source IP (crew_auth.py, users.py). That is the control
+        # that bounds guessing, it is unaffected by NAT, and nothing in this
+        # class weakens it.
+        #
+        # So both numbers here are FLOOD guards, not credential guards, and are
+        # sized so that no amount of ordinary human error from one address can
+        # stop other people signing on:
+        #
+        #   auth_limit       failed sign-ins per IP per window
+        #   auth_burst_limit all sign-ins per IP per window
+        #
+        # Being honest about what this does not do: against credential stuffing
+        # — one attempt each against many accounts, from rotating addresses —
+        # a per-IP cap of any size is a speed bump, and the per-account lockout
+        # never fires because no account is tried twice. The control that
+        # actually answers stuffing is MFA, which is deferred by the owner's
+        # decision and recorded as such in ROADMAP-TO-PRODUCTION.md. Choosing 15
+        # over 100 here would not change that, and would break every shift
+        # change to pretend otherwise.
         self.auth_limit = auth_limit
+        self.auth_burst_limit = auth_burst_limit
         self.api_limit = api_limit
         self.window = window
         self.max_body_bytes = max_body_bytes
@@ -202,9 +247,15 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 pass
 
         # ── Redis-backed rate limiting ───────────────────────────────────
+        fail_key = None
         if is_auth:
-            bucket_key = f"rl:auth:{get_trusted_client_ip(request)}"
-            limit = self.auth_limit
+            client_ip = get_trusted_client_ip(request)
+            # Counts every auth request, successes included. Resource guard.
+            bucket_key = f"rl:auth:{client_ip}"
+            limit = self.auth_burst_limit
+            # Counts only 401/403. Incremented AFTER the response is known —
+            # see below. This is the brute-force control.
+            fail_key = f"rl:authfail:{client_ip}"
         else:
             bucket_key = f"rl:api:{self._get_identity_key(request)}"
             limit = self.api_limit
@@ -212,6 +263,34 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # Lazily obtain Redis — if unavailable, pass through (fail-open)
         from app.cache import _get_redis
         redis_client = await _get_redis()
+
+        # Already over the FAILURE budget? Reject before touching the handler,
+        # so a spraying attacker never reaches bcrypt or the database. Read-only
+        # (no INCR) — this bucket is only advanced by an actual failed attempt,
+        # otherwise being blocked would extend the block.
+        if fail_key is not None and redis_client is not None:
+            try:
+                failures = int(await redis_client.get(fail_key) or 0)
+            except Exception:
+                failures = 0
+            if failures >= self.auth_limit:
+                retry_after = self.window
+                try:
+                    retry_after = max(int(await redis_client.ttl(fail_key)), 1)
+                except Exception:
+                    pass
+                logger.warning(
+                    "Auth blocked: %d failed attempts from %s in the last %ds",
+                    failures, get_trusted_client_ip(request), self.window,
+                )
+                return JSONResponse(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    content={
+                        "detail": f"Too many failed sign-in attempts. Try again in {retry_after}s.",
+                        "retry_after": retry_after,
+                    },
+                    headers={"Retry-After": str(retry_after)},
+                )
 
         if redis_client is not None:
             rate_limited, count = await self._check_limit(redis_client, bucket_key, limit)
@@ -232,6 +311,22 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 )
 
         response = await call_next(request)
+
+        # Only a REJECTED credential counts against the brute-force budget.
+        #
+        # 401/403 only: a 422 is a malformed body, not a password guess, and a
+        # 429 is this limiter's own answer — counting either would let a client
+        # lock itself out with requests that never tested a credential.
+        if fail_key is not None and redis_client is not None and response.status_code in (401, 403):
+            try:
+                pipe = redis_client.pipeline()
+                pipe.incr(fail_key)
+                pipe.ttl(fail_key)
+                _count, ttl = await pipe.execute()
+                if ttl == -1:
+                    await redis_client.expire(fail_key, self.window)
+            except Exception as exc:
+                logger.warning("Could not record failed auth attempt: %s", exc)
 
         # Add informational rate-limit headers
         try:

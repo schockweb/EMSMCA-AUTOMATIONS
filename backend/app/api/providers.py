@@ -1689,7 +1689,16 @@ async def list_provider_prfs(
         id_clauses = [
             cast(DigitalPRF.prf_number, Text).ilike(term),
             DigitalPRF.case_number.ilike(term),
-            cast(DigitalPRF.form_data, Text).ilike(term),
+            # search_text, NOT cast(form_data AS text).
+            #
+            # The blob scan detoasted and read the whole clinical payload of
+            # every one of this provider's PRFs — production rows average 150 KB
+            # and are mostly base64 signatures and photos that nobody searches.
+            # Measured on a provider with 559 records: 146 ms against the blob,
+            # 2.5 ms without it. This column holds the same text minus the
+            # images, the nested clinical arrays and the ciphertext, and carries
+            # a trigram index. See migration d5b7e91a3c62.
+            DigitalPRF.search_text.ilike(term),
         ]
         # Searching by SA ID number.
         #

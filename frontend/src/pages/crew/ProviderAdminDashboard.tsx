@@ -13,6 +13,10 @@ import { getCrewToken, getCrewProfile, ensureProviderSession, CREW_SESSION_KEYS 
 import { LoadErrorBar } from '../../components/LoadError';
 
 // ── Tokens ───────────────────────────────────────────────────────
+// Shortest term that triggers a server-side PRF search. Not exported: a
+// non-component export in these page modules breaks Fast Refresh.
+const MIN_SEARCH_CHARS = 3;
+
 const INK = '#0a0a0a';
 const MUT = '#6b7280';
 const LN  = '#e5e7eb';
@@ -371,8 +375,19 @@ export default function ProviderAdminDashboard() {
   // Debounced server-side PRF search. Only refetches while the PRFs tab is
   // open; the employees/vehicles tabs stay client-filtered (their lists are
   // small). This is what makes older PRFs reachable across 7 years.
+  //
+  // MIN_SEARCH_CHARS exists because every keystroke past the debounce is a
+  // server-side scan of this provider's PRFs. One and two-character terms match
+  // most of the table, so they cost the most and tell the user the least — the
+  // result is an unusable wall of rows either way. Waiting for the third
+  // character removes the two most expensive queries of every search outright.
+  //
+  // An empty box is NOT a search: it must still refetch, because clearing the
+  // field is how the user returns to the unfiltered list.
   useEffect(() => {
     if (activeTab !== 'prfs') return;
+    const term = search.trim();
+    if (term.length > 0 && term.length < MIN_SEARCH_CHARS) return;
     const t = setTimeout(() => { fetchPrfs(); }, 300);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -820,6 +835,14 @@ export default function ProviderAdminDashboard() {
           )}
 
           {loadError && <LoadErrorBar what="PRFs" onRetry={fetchPrfs} />}
+          {/* Typing one or two characters does not search (see MIN_SEARCH_CHARS).
+              Say so, or the box looks broken: the user types, the list does not
+              move, and there is nothing to explain why. */}
+          {search.trim().length > 0 && search.trim().length < MIN_SEARCH_CHARS && (
+            <div style={{ padding: '8px 12px', marginBottom: 8, color: MUT, fontSize: '0.78rem', background: '#fff', border: `1px solid ${LN}`, borderRadius: 6 }}>
+              Keep typing — searching starts at {MIN_SEARCH_CHARS} characters.
+            </div>
+          )}
           {loading ? (
             <div style={{ padding: 40, textAlign: 'center', color: MUT, fontSize: '0.84rem', background: '#fff', border: `1px solid ${LN}`, borderRadius: 6 }}>Loading…</div>
           ) : loadError && prfs.length === 0 ? (

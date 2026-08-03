@@ -210,3 +210,57 @@ async def test_there_is_no_way_to_mutate_the_trail_through_the_api():
 
     verbs = {m for r in router.routes for m in getattr(r, "methods", set())}
     assert verbs <= {"GET", "HEAD", "OPTIONS"}, f"the audit router exposes {verbs}"
+
+
+# ════════════════════════════════════════════════════════════════════
+# The guard must exist on a FRESH install, not only after a migration
+# ════════════════════════════════════════════════════════════════════
+
+async def test_a_freshly_created_database_gets_the_trigger_too():
+    """Found 2026-08-03. The trigger lived ONLY in migration c2f9a48d61be, and a
+    migration only ever runs against a database that already exists.
+
+    A fresh client install does not use it: bootstrap_schema.py builds the schema
+    from the models with create_all and stamps Alembic at head afterwards. Every
+    new instance therefore had `audit_logs` with no trigger — its record of who
+    opened which patient's file freely deletable by anyone holding the
+    application's own database credentials, which sit on the same VM as nginx.
+
+    The tests above all passed while that was true, because they run against a
+    database somebody had already migrated.
+    """
+    from tests.conftest import _TestSession
+
+    async with _TestSession() as db:
+        n = (await db.execute(text(
+            "SELECT count(*) FROM pg_trigger WHERE tgname = 'trg_audit_logs_append_only'"
+        ))).scalar()
+    assert n == 1, (
+        "the append-only trigger is missing — on a create_all-built database the "
+        "POPIA ledger is mutable"
+    )
+
+
+def test_the_model_and_the_migration_define_the_same_guard():
+    """Declared in two places so both install paths are covered; asserted equal
+    so they cannot drift into two different guarantees."""
+    import importlib.util
+    import re
+    from pathlib import Path
+
+    from app.models.audit_log import AUDIT_APPEND_ONLY_FN
+
+    mig_path = (Path(__file__).resolve().parents[1]
+                / "alembic" / "versions" / "c2f9a48d61be_audit_log_append_only.py")
+    src = mig_path.read_text(encoding="utf-8")
+
+    def norm(s: str) -> str:
+        return re.sub(r"\s+", " ", s).strip().lower()
+
+    body = norm(AUDIT_APPEND_ONLY_FN)
+    # The migration embeds the same function inside an op.execute("""...""").
+    assert norm("CREATE OR REPLACE FUNCTION ems_audit_logs_append_only()") in norm(src)
+    for fragment in ("ems.audit_maintenance", "insufficient_privilege",
+                     "audit_logs is append-only"):
+        assert fragment.lower() in body, f"the model's guard lost {fragment!r}"
+        assert fragment.lower() in norm(src), f"the migration's guard lost {fragment!r}"
