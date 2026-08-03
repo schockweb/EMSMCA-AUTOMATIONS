@@ -67,6 +67,19 @@ services:
   # - prefork pool for CPU-bound OCR work
   # - 12 concurrent workers (CX42 has 8 vCPU, allow oversubscription
   #   since many tasks are I/O-bound API calls)
+  # NOTE on two settings below that were changed on 2026-08-03:
+  #
+  # --without-heartbeat was REMOVED. With AMQP heartbeats off, a half-open TCP
+  # connection — an Azure idle timeout, a broker restart — is never detected by
+  # the worker. The container stays up, /health stays green (it reads the
+  # consumer count but derives its verdict from queue DEPTH alone), and the
+  # queue quietly drains to zero consumers while patient report forms stop being
+  # processed. Heartbeats are what turn that silent failure into a reconnect.
+  #
+  # ems_batch was ADDED to -Q. celery_app.py declares the queue and production
+  # consumed ems_default and ems_critical only, so anything routed to ems_batch
+  # would have gone to a queue nothing reads — a black hole with no error
+  # anywhere. Nothing routes there today; this closes it before something does.
   ems_celery_worker:
     logging: *default-logging
     build:
@@ -93,8 +106,7 @@ services:
       --pool=prefork
       --concurrency=12
       --max-tasks-per-child=1000
-      --without-heartbeat
-      -Q ems_default,ems_critical,default,ocr,adjudication,notifications
+      -Q ems_default,ems_critical,ems_batch,default,ocr,adjudication,notifications
     networks:
       - ems_worker_net
       - ems_shared_net

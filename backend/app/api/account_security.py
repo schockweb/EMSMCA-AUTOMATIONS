@@ -220,8 +220,11 @@ async def revoke_sessions(
     # see, so they cannot be purged selectively — and a revocation that takes
     # five minutes to bite is not a revocation.
     try:
-        from app.core.response_cache import purge_all_cached_responses
-        purge_all_cached_responses()
+        from app.core.response_cache import (
+            bump_revocation_epoch, purge_all_cached_responses,
+        )
+        purge_all_cached_responses()      # this worker, immediately
+        bump_revocation_epoch()           # every other worker, within a second
     except Exception:
         pass
 

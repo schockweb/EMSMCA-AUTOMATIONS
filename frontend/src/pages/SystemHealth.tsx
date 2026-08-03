@@ -4,6 +4,7 @@
  */
 import { useState, useEffect, useCallback } from 'react';
 import api from '../api/client';
+import FaultQueue from '../components/FaultQueue';
 
 interface CrashEvent {
   id: string;
@@ -158,6 +159,11 @@ export default function SystemHealth() {
 
   return (
     <div className="page-content" style={{ padding: '32px 40px', maxWidth: 1400, margin: '0 auto' }}>
+
+      {/* Faults first, crashes second. A crash says something THREW; a fault
+          says a condition the platform depends on is currently false — which is
+          what most of this system's real outages have actually looked like. */}
+      <FaultQueue />
 
       {/* ── Health Status Banner ── */}
       <div style={{

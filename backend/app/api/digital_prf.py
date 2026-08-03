@@ -1584,7 +1584,9 @@ async def _resolve_case_prf_access(
     # `decode_token` validates the signature; the scope distinction comes
     # from claim shape: admin tokens carry `sub` (user UUID), crew tokens
     # carry `token_scope: "crew"` and `crew_id`.
-    from app.utils.security import decode_token, is_token_blacklisted
+    from app.utils.security import (
+        decode_token, is_token_blacklisted, token_is_revoked_by_family,
+    )
     auth_header = request.headers.get("Authorization") or ""
     token = auth_header.removeprefix("Bearer ").strip()
     if not token:
@@ -1605,6 +1607,18 @@ async def _resolve_case_prf_access(
     #   • and a REFRESH token worked as an API key — a 7-day credential granting
     #     read access to patient names, ID numbers and clinical notes.
     # Everything below mirrors what the shared dependencies already enforce.
+    #
+    # 2026-08-03: and then it happened AGAIN. `tokens_revoked_at` (bulk session
+    # revocation, for the lost-tablet case) shipped into get_current_user and
+    # get_current_crew and did not reach here either — so the single route that
+    # returns a full clinical record was the one route where "revoke that
+    # tablet's sessions" did nothing. The JTI blacklist cannot cover it: a
+    # COPIED token is never presented to logout, which is the entire reason the
+    # cutoff mechanism exists.
+    #
+    # The durable fix is for this function to stop hand-rolling and depend on
+    # the shared dependencies; until that refactor, the family check is applied
+    # below for both principals.
     jti = payload.get("jti")
     if jti and await is_token_blacklisted(jti, db):
         raise HTTPException(status_code=401, detail="Session ended")
@@ -1622,6 +1636,8 @@ async def _resolve_case_prf_access(
         user = user_res.scalar_one_or_none()
         if not user or not user.is_active:
             raise HTTPException(status_code=401, detail="User not found or inactive")
+        if token_is_revoked_by_family(payload, user.tokens_revoked_at):
+            raise HTTPException(status_code=401, detail="Session revoked. Please sign in again.")
         # Back-office privilege, not merely a valid login. Role first:
         # has_permission() returns True when `permissions` is NULL (documented
         # fail-open), so it can only ever narrow an already-privileged account,
@@ -1644,6 +1660,8 @@ async def _resolve_case_prf_access(
         crew_member = crew_res.scalar_one_or_none()
         if not crew_member or not crew_member.is_active:
             raise HTTPException(status_code=401, detail="Crew member not found or inactive")
+        if token_is_revoked_by_family(payload, crew_member.tokens_revoked_at):
+            raise HTTPException(status_code=401, detail="Session revoked. Sign in again.")
 
     # Bare uuid.UUID() raised ValueError on a malformed id, which surfaced as a
     # 500 and a logged stack trace — a 400 is the honest answer and keeps a

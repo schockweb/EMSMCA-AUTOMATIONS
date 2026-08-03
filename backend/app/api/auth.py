@@ -329,8 +329,11 @@ async def logout(
     # dependency never executes. Without this purge a just-logged-out token
     # keeps reading cached data until the entry expires (up to 5 minutes).
     try:
-        from app.core.response_cache import purge_session_cache
+        from app.core.response_cache import bump_revocation_epoch, purge_session_cache
         dropped = purge_session_cache(request.headers.get("Authorization", ""))
+        # This worker's store is now clean; the other three gunicorn workers
+        # still hold this session's entries and cannot be reached directly.
+        bump_revocation_epoch()
         if dropped:
             logger.info("Logout purged %d cached responses", dropped)
     except Exception:  # never let cache housekeeping break logout

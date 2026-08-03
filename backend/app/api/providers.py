@@ -121,8 +121,24 @@ async def get_admin_or_crew_admin(
     never looked at is_active, so on the ~32 endpoints guarded by this dependency
     logging out did nothing and a deactivated admin kept full access until their
     token expired.
+
+    2026-08-03: the same gap opened a second time. `tokens_revoked_at` — bulk
+    session revocation, built for the lost-tablet case — shipped into the shared
+    dependencies and did not reach this hand-rolled copy, so on these ~32
+    endpoints (the provider portal password, SMTP credentials, crew CRUD,
+    reset-password, the provider PRF list) "revoke that device's sessions" did
+    nothing. That is the recurring shape in this codebase: a control written
+    correctly in one place and not carried to the second door.
+
+    Anything added to get_current_user or get_current_crew MUST be added here in
+    the same change, until this is refactored to depend on them rather than
+    re-implement them.
     """
-    from app.utils.security import decode_token as _decode, is_token_blacklisted as _blacklisted
+    from app.utils.security import (
+        decode_token as _decode,
+        is_token_blacklisted as _blacklisted,
+        token_is_revoked_by_family as _revoked,
+    )
     # Try admin token first
     if admin_token:
         try:
@@ -134,7 +150,7 @@ async def get_admin_or_crew_admin(
                     from app.models.user import User as _U
                     result = await db.execute(select(_U).where(_U.id == payload.get("sub")))
                     user = result.scalar_one_or_none()
-                    if user and user.is_active:
+                    if user and user.is_active and not _revoked(payload, user.tokens_revoked_at):
                         return user
         except Exception:
             pass
@@ -148,7 +164,7 @@ async def get_admin_or_crew_admin(
                     crew_id = payload.get("crew_id")
                     result = await db.execute(select(CrewMember).where(CrewMember.id == crew_id))
                     crew = result.scalar_one_or_none()
-                    if crew and crew.is_active:
+                    if crew and crew.is_active and not _revoked(payload, crew.tokens_revoked_at):
                         return crew
         except Exception:
             pass

@@ -77,6 +77,85 @@ MAX_ENTRIES = 2000
 SWEEP_EVERY_N_WRITES = 200
 
 
+# ── Cross-worker revocation epoch ───────────────────────────────────────────
+#
+# THE PROBLEM. This cache is a plain dict inside one process, and production
+# runs gunicorn with FOUR workers (backend/Dockerfile). `purge_session_cache`
+# and `purge_all_cached_responses` therefore clear the store of whichever worker
+# happened to handle the logout — the other three keep serving that session's
+# cached responses until each entry's TTL runs out. So "the session was revoked"
+# and "the session stops getting data" were different statements, on a 30-second
+# to 5-minute lag, on endpoints that include the failed-PRF queue and analytics.
+#
+# THE FIX. A single timestamp in Redis, shared by every worker. Any revocation
+# stamps it; every worker refuses cache entries stored before it. Entries are
+# not enumerated or deleted across workers — they are simply no longer valid,
+# which needs no coordination and cannot half-apply.
+#
+# The epoch is re-read at most once a second per worker, so this costs about one
+# Redis GET per second per worker rather than one per request. Worst case a
+# revoked session sees up to one extra second of cached data instead of up to
+# five minutes.
+#
+# Redis unavailable → the epoch reads as 0 and the cache behaves exactly as it
+# did before. That is deliberate: the fallback is the old behaviour, not an
+# outage. It is also why this is a mitigation and not a guarantee, and why the
+# short TTLs on PHI-bearing paths still matter.
+_EPOCH_KEY = "response_cache:revocation_epoch"
+_epoch_cache = {"value": 0.0, "read_at": 0.0}
+_EPOCH_REFRESH_SECONDS = 1.0
+
+
+def _revocation_epoch() -> float:
+    now = time.time()
+    if now - _epoch_cache["read_at"] < _EPOCH_REFRESH_SECONDS:
+        return _epoch_cache["value"]
+    _epoch_cache["read_at"] = now
+    try:
+        import redis
+        from app.config import get_settings
+
+        url = get_settings().REDIS_URL
+        if not url:
+            return _epoch_cache["value"]
+        # A short-lived synchronous client: this runs inside BaseHTTPMiddleware,
+        # which is not a place to hold an async connection pool, and the call is
+        # at most once per second per worker.
+        client = redis.from_url(url, socket_connect_timeout=0.25, socket_timeout=0.25)
+        raw = client.get(_EPOCH_KEY)
+        _epoch_cache["value"] = float(raw) if raw else 0.0
+    except Exception:
+        pass  # no Redis, no cross-worker invalidation — see the note above
+    return _epoch_cache["value"]
+
+
+def bump_revocation_epoch() -> bool:
+    """Invalidate every cached response in every worker, now.
+
+    Called on logout and on bulk session revocation. Returns whether the epoch
+    was actually published — a False means only the local worker was cleared and
+    the caller should not claim otherwise.
+    """
+    try:
+        import redis
+        from app.config import get_settings
+
+        url = get_settings().REDIS_URL
+        if not url:
+            return False
+        client = redis.from_url(url, socket_connect_timeout=0.5, socket_timeout=0.5)
+        stamp = time.time()
+        client.set(_EPOCH_KEY, stamp)
+        _epoch_cache.update({"value": stamp, "read_at": 0.0})
+        return True
+    except Exception:
+        logger.warning(
+            "Could not publish the cache revocation epoch — other gunicorn "
+            "workers may serve this session from cache until their entries expire"
+        )
+        return False
+
+
 class ResponseCacheMiddleware(BaseHTTPMiddleware):
     # Set on construction so logout can purge a session's entries. The cache is
     # per-worker and in-memory, so this reference is per-worker too.
@@ -84,7 +163,7 @@ class ResponseCacheMiddleware(BaseHTTPMiddleware):
 
     def __init__(self, app: ASGIApp):
         super().__init__(app)
-        # store: cache_key → {"body", "headers", "expires", "path", "auth_fp"}
+        # store: cache_key → {"body", "headers", "expires", "stored_at", "path", "auth_fp"}
         self._store: dict[str, dict] = {}
         self._writes_since_sweep = 0
         ResponseCacheMiddleware._instance = self
@@ -147,6 +226,13 @@ class ResponseCacheMiddleware(BaseHTTPMiddleware):
         if time.monotonic() > entry["expires"]:
             del self._store[key]
             return None
+        # Cross-worker revocation. See _revocation_epoch: gunicorn runs FOUR
+        # workers and this store is per-process, so a logout or a session
+        # revocation handled by one worker leaves the other three serving the
+        # revoked session from memory until the TTL expires.
+        if entry.get("stored_at", 0.0) < _revocation_epoch():
+            del self._store[key]
+            return None
         return entry
 
     def _sweep_expired(self) -> int:
@@ -187,6 +273,10 @@ class ResponseCacheMiddleware(BaseHTTPMiddleware):
             "body": body,
             "headers": headers,
             "expires": time.monotonic() + ttl,
+            # WALL clock, unlike `expires`, and deliberately: this is compared
+            # against a timestamp published by a DIFFERENT process, and
+            # monotonic clocks are not comparable across processes.
+            "stored_at": time.time(),
             "path": path,       # stored so invalidation can match by prefix
             "auth_fp": auth_fp, # stored so logout can purge one session
         }

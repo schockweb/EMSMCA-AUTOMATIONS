@@ -24,6 +24,7 @@ celery_app = Celery(
         # an unregistered task — a scheduled job that looks configured and has
         # never once run. Any new task module must be added here.
         "app.tasks.retention",
+        "app.tasks.monitoring",
     ],
 )
 
@@ -133,6 +134,14 @@ celery_app.conf.update(
         "purge-prf-email-spool": {
             "task": "purge_prf_email_spool",
             "schedule": 3600.0,  # hourly
+            "options": {"queue": "ems_default"},
+        },
+        # The fault sweep. Detection always runs; whether a fix is APPLIED
+        # without a human is governed by MONITOR_AUTO_HEAL_ENABLED and the
+        # safety gates in app/services/monitor/registry.py.
+        "run-monitor-sweep": {
+            "task": "run_monitor_sweep",
+            "schedule": float(settings.MONITOR_SWEEP_SECONDS),
             "options": {"queue": "ems_default"},
         },
     },

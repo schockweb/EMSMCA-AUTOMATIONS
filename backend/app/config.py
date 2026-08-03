@@ -55,6 +55,24 @@ class Settings(BaseSettings):
     # it was written is a worse outcome than tracking the obligation by hand.
     RETENTION_ENFORCE: bool = False
 
+    # ── Self-healing (app/services/monitor/) ──
+    # OFF by default, and deliberately so. Detection is always on; ACTING on a
+    # detection without a human is opt-in, because a monitoring system that
+    # starts changing production the moment it is deployed — before anyone has
+    # watched a week of what it WOULD have done — is not something to point at a
+    # platform holding patient records.
+    #
+    # While this is False every fault still appears in the operator queue with
+    # its proposed fix and a one-click approval. Turning it on only removes the
+    # click for the subset that passes every safety gate in
+    # app/services/monitor/registry.py — never anything touching clinical data.
+    MONITOR_AUTO_HEAL_ENABLED: bool = False
+    # How often the probe sweep runs. Five minutes matches the existing PRF
+    # watchdog: long enough that a transient blip self-resolves before it is
+    # reported, short enough that a real outage is caught within one shift
+    # handover rather than at the end of a twelve-hour shift.
+    MONITOR_SWEEP_SECONDS: int = 300
+
     # ── Database Connection Pool ──
     # Tuned for high concurrency (500+ ambulances, 1500 crew members).
     # pool_size × num_workers = persistent connections per backend replica.

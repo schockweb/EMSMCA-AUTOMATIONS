@@ -678,8 +678,9 @@ async def crew_logout(
     # bug was found there; the crew one never did, and crew is the side with the
     # lost-tablet problem.
     try:
-        from app.core.response_cache import purge_session_cache
+        from app.core.response_cache import bump_revocation_epoch, purge_session_cache
         dropped = purge_session_cache(f"Bearer {token}")
+        bump_revocation_epoch()   # the other gunicorn workers
         if dropped:
             logger.info("Crew logout purged %d cached responses", dropped)
     except Exception:  # cache housekeeping must never break logout
