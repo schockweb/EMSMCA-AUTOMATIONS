@@ -169,8 +169,18 @@ About twenty seconds, no rebuild, no network. It checks out the target commit
 tags at the pre-built release images, recreates the containers with
 `--no-build`, restarts nginx and waits for health.
 
-**Rehearsed end to end on 2026-08-03**: 83bea1f → 24s to healthy → forward again.
+**Rehearsed end to end on 2026-08-03**, on production, with health checked at
+every step: back to the previous release in **36s** (healthy 6s after the
+containers were recreated), forward again in **29s**. Health was 200 throughout.
 Not a theory.
+
+The rehearsal found four bugs that reading the code had not: a health probe that
+could never pass (nginx 301s plain HTTP, so the check watched for a 200 that
+never comes), a script that deleted itself mid-run (it lives in the tree it
+checks out, and bash reads scripts incrementally from a file offset), a
+comparison against git HEAD rather than the running images (which refused the
+roll-forward while the old code was still serving), and `. .env.prod` truncating
+a password at a `$`. Rehearse ops tooling or it is decoration.
 
 Three things it will refuse to do, each for a reason:
 

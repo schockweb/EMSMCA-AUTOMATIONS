@@ -139,9 +139,14 @@ jobs:
             set -euo pipefail
             echo "⏳ Waiting for services to become healthy..."
 
-            # Retry health check up to 30 times (60 seconds)
+            # Retry health check up to 30 times (60 seconds).
+            # https + -k: nginx 301s every plain-HTTP request to the domain, so
+            # a probe of http://localhost/health returns 301 forever and this
+            # loop could never have passed. -k because the certificate is for
+            # portal.emsmca.co.za, not localhost — this is a liveness probe on
+            # loopback, not an identity check.
             for i in $(seq 1 30); do
-              HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/health || true)
+              HTTP_CODE=$(curl -sk -o /dev/null -w "%{http_code}" https://localhost/health || true)
               if [ "$HTTP_CODE" = "200" ]; then
                 echo "✅ API healthy (attempt $i)"
                 break
