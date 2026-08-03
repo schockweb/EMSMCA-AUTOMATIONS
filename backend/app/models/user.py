@@ -58,9 +58,20 @@ class User(Base):
     )
     bhf_practice_number: Mapped[Union[str, None]] = mapped_column(String(20), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    permissions: Mapped[Union[list, None]] = mapped_column(
-        JSON, nullable=True, default=lambda: list(ALL_PERMISSIONS),
-        comment="List of page-keys the user can access"
+    # NOT NULL, and defaulting to NOTHING rather than everything.
+    #
+    # A nullable column gave permission checks a third state to interpret, and
+    # `has_permission` interpreted it as "grant everything" — so any row created
+    # by a script or a fixture held every permission regardless of role. There
+    # is no "not configured" any more; see migration a4d81c6b2f75.
+    #
+    # The Python-side default is an empty list for the same reason as the server
+    # default: app/api/users.py always sets permissions explicitly, so this only
+    # fires for something that bypassed it, and no-access is the safe answer for
+    # an account nobody configured.
+    permissions: Mapped[list] = mapped_column(
+        JSON, nullable=False, default=list, server_default="[]",
+        comment="List of page-keys the user can access. Empty = no access."
     )
 
     # ── Account Lockout ──

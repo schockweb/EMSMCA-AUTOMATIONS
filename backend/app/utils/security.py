@@ -340,18 +340,29 @@ def require_role(*roles: UserRole):
 def has_permission(user: User, *keys: str) -> bool:
     """True when `user` holds ANY of `keys`.
 
-    Semantics match the /api/auth/me fix: a NULL `permissions` column means
-    "not configured" and grants everything (this is how every existing account
-    was created — the model default is the full list, and users.py stores
-    `body.permissions or ALL_PERMISSIONS`). An EMPTY list means "deliberately
-    stripped to nothing" and grants nothing. Using `or` here would collapse
-    those two cases and hand a stripped user the full set.
+    NO LONGER FAILS OPEN ON NULL.
+    -----------------------------
+    This used to return True when `permissions` was NULL, on the reasoning that
+    NULL meant "not configured" while an empty list meant "deliberately
+    stripped". That distinction was defensible while the permission model was
+    presentation-only. It stopped being defensible once `require_permission`
+    became the ONLY guard on several routers (adjudication, documents, EDI, rate
+    schemas, tariff lines) and the narrowing half of the claims gate: any row
+    with a NULL column — anything inserted by a script, a migration or a fixture
+    — silently held every permission regardless of role.
+
+    `_resolve_case_prf_access` already had to document working around it
+    ("has_permission() returns True when permissions is NULL … it can only ever
+    narrow an already-privileged account, never stand in for the role check"),
+    which is the signature of a guard that cannot safely be relied on.
+
+    The column is now NOT NULL with a server default (migration a4d81c6b2f75),
+    so "not configured" is no longer representable. An account with no
+    permissions has none — which is the answer a permission check should give.
     """
     if user.role == UserRole.SUPER_ADMIN:
         return True
-    if user.permissions is None:
-        return True
-    granted = set(user.permissions)
+    granted = set(user.permissions or [])
     return any(k in granted for k in keys)
 
 

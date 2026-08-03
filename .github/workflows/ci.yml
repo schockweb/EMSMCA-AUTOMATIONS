@@ -312,3 +312,28 @@ jobs:
             VITE_GOOGLE_MAPS_KEY=ci-placeholder
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # ── Secret scanning ────────────────────────────────────────────────────────
+  #
+  # This repository was PUBLIC from 2026-05-27 to 2026-07-27 with database dumps
+  # and a plaintext SUPER_ADMIN password committed to it. The history was purged
+  # and the credential permanently retired, but nothing prevents a repeat — the
+  # existing gates (pip-audit, npm audit) look at dependencies, not at what we
+  # commit ourselves.
+  #
+  # Full history is scanned, not just the diff: a secret introduced and later
+  # "removed" in a follow-up commit is still in the history and still burned.
+  # fetch-depth: 0 is what makes that possible.
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml

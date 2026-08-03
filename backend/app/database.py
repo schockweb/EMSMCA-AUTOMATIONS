@@ -8,6 +8,8 @@ from __future__ import annotations
 import logging
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
+import re as _re
+
 from app.config import get_settings
 
 logger = logging.getLogger("ems.database")
@@ -31,17 +33,45 @@ else:
             "statement_cache_size": 0,
         }
 
-    # Azure PostgreSQL enforces SSL — pass ssl=True when DB_SSL_MODE='require'.
-    # asyncpg accepts a raw ssl.SSLContext or the string 'require'; we keep it
-    # simple and pass the Python ssl module's default context (which verifies
-    # the server certificate against the system trust store).
-    if settings.DB_SSL_MODE == "require":
+    # ── Database TLS: encrypt AND verify ───────────────────────────────────
+    #
+    # `ssl.create_default_context()` verifies the certificate chain against the
+    # system trust store AND checks the hostname (check_hostname=True,
+    # verify_mode=CERT_REQUIRED). That is the verify-full behaviour we want.
+    #
+    # THE GAP THIS CLOSES. The context above was only ever built when the
+    # DB_SSL_MODE setting was "require". Production does not set that variable —
+    # it puts `?ssl=require` in DATABASE_URL instead, which SQLAlchemy forwards
+    # to asyncpg as the STRING "require", and asyncpg's string form encrypts
+    # WITHOUT validating the certificate or the hostname. The boot guard in
+    # config.py accepts either mechanism, so production passed the check while
+    # getting no verification at all: an attacker positioned between the app and
+    # the database could present any certificate.
+    #
+    # Now either spelling produces the verifying context, and the URL parameter
+    # is stripped so asyncpg cannot override it with its weaker string form.
+    #
+    # Verified against the live Azure server on 2026-08-03 before shipping: the
+    # certificate chains to a trusted root already present in the image and the
+    # hostname matches, so no CA bundle file is needed. A negative control with
+    # an untrusted CA store was correctly refused — proof the check is real
+    # rather than merely configured.
+    _url_wants_tls = bool(_re.search(r"[?&]ssl(mode)?=(require|verify-ca|verify-full)",
+                                     settings.DATABASE_URL, _re.I))
+    if settings.DB_SSL_MODE in ("require", "verify-ca", "verify-full") or _url_wants_tls:
         import ssl as _ssl
         _connect_args["ssl"] = _ssl.create_default_context()
-        logger.info("Database SSL: verify-full (Azure PostgreSQL)")
+        logger.info("Database TLS: encrypted and certificate-verified (verify-full)")
+
+    # The ssl/sslmode query parameter is removed from the URL once a verifying
+    # context is in connect_args. Leaving it would hand asyncpg the string form
+    # as well, and the string form is the one that skips verification.
+    _engine_url = settings.DATABASE_URL
+    if "ssl" in _connect_args:
+        _engine_url = _re.sub(r"[?&]ssl(mode)?=[^&]*", "", _engine_url)
 
     engine = create_async_engine(
-        settings.DATABASE_URL,
+        _engine_url,
         echo=False,
         # ── Connection Pool ────────────────────────────────────────────
         pool_size=settings.DB_POOL_SIZE,

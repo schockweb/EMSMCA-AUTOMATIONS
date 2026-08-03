@@ -1734,7 +1734,12 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
               if (ct === 'RESUS') display = 'Resus';
               else if (ct === 'DOD') display = 'DOD';
               else if (ct === 'WCA_IOD') display = 'WCA / IOD';
-              else if (['IHT', 'IFT', 'RHT', 'COURTESY'].includes(ct)) display = `Transfer — ${ct}`;
+              // RHT is NOT a transfer — it is the opposite of one. Grouping it
+              // with the transfer types printed "Transfer — RHT" on a call
+              // where nobody was moved, which is what a scheme assessor, the
+              // Council or a court reads off the face of the document.
+              else if (ct === 'RHT') display = 'Refused Hospital Transport';
+              else if (['IHT', 'IFT', 'COURTESY'].includes(ct)) display = `Transfer — ${ct}`;
               else if (ct && ct !== 'PRIMARY') display = ct;
               return <FieldRow label="Call Type" value={display} flex={1} />;
             })()}
@@ -2269,6 +2274,90 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
               </>
             )}
 
+            {/* ── Refusal of Transport ─────────────────────────────────────
+                THE GAP THIS CLOSES. The crew captures a refusal declaration,
+                a capacity checklist, the patient's stated reason, printed
+                names, a date and two signatures. NONE of it reached the PDF.
+                The two signature images did render — but under "Terms and
+                Conditions", above the billing and indemnity clauses.
+
+                So the permanent record — the document that goes to a scheme,
+                that is produced at an HPCSA inquiry, that a court reads —
+                showed a patient assenting to PAYMENT TERMS, with nothing on it
+                saying they had refused transport, who witnessed it, or when.
+
+                A signature is only evidence of what sits above it. On the
+                tablet those marks sit above a refusal; on the printed form they
+                sat above different words entirely. That gap is the whole case.
+                */}
+            {fd.call_type === 'RHT' && (
+              <>
+                <SectionHead label="Refusal of Treatment / Transport" />
+                {(() => {
+                  const company = prov?.name || 'the Service Provider';
+                  const checks: Array<[string, string]> = [
+                    ['rht_cap_alert', 'Alert and fully oriented'],
+                    ['rht_cap_no_impairment', 'No apparent impairment (alcohol, drugs, hypoxia, hypoglycaemia)'],
+                    ['rht_cap_risks_explained', 'Risks of refusal explained in a language understood'],
+                    ['rht_cap_questions', 'Questions invited and answered'],
+                    ['rht_cap_advised_recall', 'Advised to call again if the condition changes'],
+                    ['rht_cap_alternative_care', 'Alternative care advised'],
+                  ];
+                  return (
+                    <div style={{ padding: '5px 7px', borderTop: `1px solid ${LN}`, fontSize: '0.62rem', lineHeight: 1.35 }}>
+                      <div style={{ marginBottom: 4 }}>
+                        The patient, or the person lawfully responsible for the patient, declared
+                        that the practitioners of {company} examined and/or offered to examine,
+                        treat and transport the patient; that the nature of the condition, the
+                        recommended treatment and transport, and the risks of declining it —
+                        including deterioration, permanent injury or death — were explained in a
+                        language understood; that questions were invited and answered; that the
+                        refusal is made of their own free will and against the advice given; and
+                        that they may call {company} or another emergency service again at any
+                        time. Responsibility for the decision was accepted and {company}, its
+                        directors, employees and agents released from liability for consequences
+                        arising from the refusal, save for any liability that cannot lawfully be
+                        excluded.
+                      </div>
+                      <div style={{ fontWeight: 800, color: GREEN_DK, marginTop: 5, marginBottom: 2 }}>
+                        Practitioner's confirmation before accepting the refusal
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 8 }}>
+                        {checks.map(([k, label]) => (
+                          <div key={k}>
+                            <span style={{ fontWeight: 900 }}>{fd[k] ? '☑' : '☐'}</span> {label}
+                          </div>
+                        ))}
+                      </div>
+                      {!isBlank(fd.rht_refusal_reason) && (
+                        <div style={{ marginTop: 5 }}>
+                          <span style={{ fontWeight: 800, color: GREEN_DK }}>Reason given: </span>
+                          {fd.rht_refusal_reason}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', borderTop: `1px solid ${LN}` }}>
+                  <div style={{ padding: '5px 7px', borderRight: `1px solid ${LN}` }}>
+                    <div style={{ fontSize: '0.6rem', fontWeight: 900, color: MUT, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>
+                      Patient / Responsible Person
+                    </div>
+                    <div style={{ fontSize: '0.66rem', marginBottom: 2 }}>{fd.rht_waiver_signatory_name || '—'}</div>
+                    <SignatureBox src={prf.signatures?.patient_signature} minHeight={64} />
+                  </div>
+                  <div style={{ padding: '5px 7px' }}>
+                    <div style={{ fontSize: '0.6rem', fontWeight: 900, color: MUT, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>
+                      Witness
+                    </div>
+                    <div style={{ fontSize: '0.66rem', marginBottom: 2 }}>{fd.rht_waiver_witness_name || '—'}</div>
+                    <SignatureBox src={prf.signatures?.witness_signature} minHeight={64} />
+                  </div>
+                </div>
+                <FieldRow label="Date of Refusal" value={fd.rht_waiver_date} />
+              </>
+            )}
+
             {/* Terms & Conditions (page-1 right column, like the paper form) */}
             {fd.call_type !== 'DOD' && (
               <>
@@ -2304,15 +2393,22 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
                   // Patient / Rep always shows (it's a mandatory signature). Witness
                   // and Next of Kin only render when actually captured, so empty
                   // "Not captured" boxes don't clutter the form.
+                  // On an RHT the patient and witness marks are the REFUSAL
+                  // signatures and are printed in the Refusal block above.
+                  // Repeating them here would put the same mark under two
+                  // different headings — refusal and billing terms — which
+                  // muddies precisely what was assented to. A signature is
+                  // evidence of what sits above it, so it appears once.
+                  const refusalOwnsSignatures = fd.call_type === 'RHT';
                   return (
                     <div style={{ display: 'flex', flexDirection: 'column', borderTop: `1px solid ${LN}` }}>
-                      {fd.call_type !== 'DOD' && (
+                      {fd.call_type !== 'DOD' && !refusalOwnsSignatures && (
                         <div style={{ padding: '5px 7px', borderBottom: (witnessSig || nokSig || fd.call_type === 'DOD') ? `1px solid ${LN}` : 'none' }}>
                           <div style={sigLabel}>Patient / Rep.</div>
                           <SignatureBox src={fd.tc_patient_signature || prf.signatures?.patient_signature} minHeight={80} />
                         </div>
                       )}
-                      {(witnessSig || fd.call_type === 'DOD') && (
+                      {(witnessSig || fd.call_type === 'DOD') && !refusalOwnsSignatures && (
                         <div style={{ padding: '5px 7px', borderBottom: (nokSig || fd.call_type === 'DOD') ? `1px solid ${LN}` : 'none' }}>
                           <div style={sigLabel}>Witness</div>
                           <SignatureBox src={witnessSig} minHeight={80} />

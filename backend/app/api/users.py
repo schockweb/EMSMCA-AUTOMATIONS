@@ -27,12 +27,13 @@ def _user_response(u: User) -> UserResponse:
         role=u.role.value,
         bhf_practice_number=u.bhf_practice_number,
         is_active=u.is_active,
-        # NULL means "not configured" and grants everything; an EMPTY list means
-        # "deliberately stripped" and grants nothing. `or` collapses the two and
-        # would show an administrator that a locked-down account holds every
-        # permission — the same bug that was fixed on /api/auth/me and in
-        # has_permission, still live here on the screen where access is managed.
-        permissions=(list(ALL_PERMISSIONS) if u.permissions is None else u.permissions),
+        # Reported verbatim. The column is NOT NULL (migration a4d81c6b2f75),
+        # so there is no "not configured" state left to interpret — an empty
+        # list means no access and the screen where access is managed must show
+        # exactly that. Substituting ALL_PERMISSIONS for a falsy value is how
+        # this screen used to tell an administrator that a locked-down account
+        # held everything.
+        permissions=list(u.permissions or []),
         created_at=u.created_at,
     )
 
@@ -89,7 +90,12 @@ async def create_user(
         full_name=body.full_name,
         role=UserRole(body.role),
         bhf_practice_number=body.bhf_practice_number,
-        permissions=body.permissions or list(ALL_PERMISSIONS),
+        # `or` would treat an explicitly EMPTY list as "not supplied" and hand
+        # the new account every permission — the same falsy-empty-list bug that
+        # was fixed in has_permission and on /api/auth/me. Creating a
+        # deliberately restricted user must not silently create a superuser.
+        permissions=(list(ALL_PERMISSIONS) if body.permissions is None
+                     else body.permissions),
     )
     db.add(user)
     await db.commit()

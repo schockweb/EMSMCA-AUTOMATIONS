@@ -1,0 +1,44 @@
+# gitleaks configuration
+#
+# Extends the default rule set rather than replacing it — the defaults cover AWS
+# keys, private keys, JWTs, Slack tokens and dozens more, and a hand-written
+# rule set would be a smaller net that looks like a bigger one.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Test fixtures and documented-dead credentials"
+
+paths = [
+  # The test suite pins its own secrets on purpose (backend/tests/conftest.py)
+  # so a run never inherits a developer's real .env. They protect nothing.
+  '''backend/tests/conftest\.py''',
+  # Lockfiles carry integrity hashes that look like high-entropy secrets.
+  '''(^|/)(package-lock\.json|poetry\.lock|yarn\.lock)$''',
+  # Vendored dependencies in the load-test virtualenv.
+  '''^\.loadtest-venv/''',
+  # HPCSA scope-of-practice matrix. Every `key: '...'` here is a clinical
+  # taxonomy identifier for a scope category or procedure — not a credential.
+  # Verified 2026-08-03: 6 findings, all of this shape.
+  '''frontend/src/data/hpcsaScope\.ts''',
+  # Production env TEMPLATE. Every secret-shaped value is a placeholder —
+  # verified 2026-08-03 by inspecting value SHAPES rather than values:
+  # POSTGRES_PASSWORD, SECRET_KEY and ENCRYPTION_KEY all carry change-me text,
+  # and the three AI keys share one identical placeholder pattern.
+  #
+  # NOTE: this allowlists the TEMPLATE, never `.env.prod` itself — that file is
+  # gitignored and must never be committed. If it ever is, it is not allowlisted
+  # here and the scan will fail, which is the intended behaviour.
+  '''^\.env\.prod\.template$''',
+]
+
+regexes = [
+  # The committed test-only Fernet key. Encrypts nothing but fixtures, and is
+  # deliberately in the repo so CI can run without a secret store.
+  '''dGVzdC1vbmx5LWZlcm5ldC1rZXktZm9yLXVuaXQtdGU=''',
+  # The test-only JWT signing key, same reasoning.
+  '''ems-portal-super-secret-key-2024''',
+  # The DEVELOPMENT seed password placeholder. Seeding is disabled outside
+  # development (see the APP_ENV guard in app/main.py lifespan).
+  '''DevSeed!Change#2026''',
+]

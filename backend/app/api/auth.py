@@ -358,6 +358,7 @@ async def get_me(current_user: User = Depends(get_current_user)):
         # `or` would treat an EMPTY list as "unset" and grant EVERY permission —
         # so deliberately stripping a user to no permissions used to hand them
         # the full set. Only a genuine NULL means "not configured".
-        permissions=(list(ALL_PERMISSIONS) if current_user.permissions is None
-                     else current_user.permissions),
+        # Verbatim — the column is NOT NULL now, so an empty list is a real
+        # answer (no access) rather than a missing one.
+        permissions=list(current_user.permissions or []),
     )

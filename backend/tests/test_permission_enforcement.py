@@ -67,12 +67,24 @@ async def _login(client, email):
 
 # ── The helper's semantics ─────────────────────────────────────────────────
 
-def test_none_permissions_means_all():
-    """Every existing account was created this way — the column being NULL must
-    keep meaning 'not configured', i.e. everything."""
+def test_unset_permissions_grant_nothing():
+    """REVERSED on 2026-08-03, deliberately.
+
+    This used to assert that a NULL column meant "not configured" and therefore
+    granted EVERYTHING. That was defensible while permissions were
+    presentation-only. It stopped being defensible once `require_permission`
+    became the only guard on several routers — at which point any row inserted
+    by a script, a fixture or a migration silently held every permission
+    regardless of role.
+
+    The column is NOT NULL now (migration a4d81c6b2f75), so this state should
+    not be reachable at all; the assertion is kept, inverted, because an ORM
+    object constructed in memory can still carry None and a permission check
+    must never answer "yes" to a question it has no data for.
+    """
     user = User(email="x@y.z", hashed_password="x", full_name="x",
                 role=UserRole.ADMIN, permissions=None)
-    assert has_permission(user, "rule_builder") is True
+    assert has_permission(user, "rule_builder") is False
 
 
 def test_empty_permissions_means_none():
@@ -146,16 +158,25 @@ async def test_super_admin_reaches_everything(client):
 
 
 @pytest.mark.asyncio
-async def test_null_permissions_admin_reaches_everything(client):
-    """Existing accounts have permissions=NULL. Rolling this out must not lock
-    any of them out."""
+async def test_unset_permissions_reach_nothing(client):
+    """REVERSED on 2026-08-03 — see test_unset_permissions_grant_nothing.
+
+    The original rationale was that existing accounts had permissions=NULL and
+    the rollout must not lock them out. That was checked before inverting the
+    behaviour: ZERO rows in production and zero in the test database had a NULL
+    column, so nobody is locked out by this — and migration a4d81c6b2f75
+    populates any that appear rather than stripping them.
+
+    What this now guards is the direction that matters: an account the
+    permission model has no data for must be refused, not waved through.
+    """
     email = await _user_with("perm_null@emsclaims.test", None)
     headers = await _login(client, email)
 
     for route, _keys in GATED_ROUTES:
         resp = await client.get(route, headers=headers)
-        assert resp.status_code != 403, (
-            f"an existing NULL-permissions admin was refused {route}"
+        assert resp.status_code == 403, (
+            f"an account with no permissions reached {route} ({resp.status_code})"
         )
 
 

@@ -4,12 +4,17 @@ import App from './App'
 import './index.css'
 import { initSyncListeners } from './services/syncEngine'
 import { startServerHealthMonitor } from './services/serverHealth'
+import { loadGoogleMaps } from './services/googleMapsLoader'
 
 // Register the offline outbox auto-sync: drains queued PRF saves/submits as soon
 // as connectivity returns, on app startup, when the tab becomes visible, and on
 // a periodic timer — so a crew's queued work is never stranded waiting for a
 // manual "Sync now" tap.
 initSyncListeners()
+
+// Google Maps Places, loaded from the bundle rather than an inline <script>
+// so the Content-Security-Policy no longer needs 'unsafe-inline'.
+loadGoogleMaps()
 
 // Track whether the PORTAL is reachable, which is a different question from
 // whether the device has a radio. `navigator.onLine` is true with four bars of

@@ -25,6 +25,7 @@ failure is safer than locking out the whole fleet.
 """
 from __future__ import annotations
 import hashlib
+import re
 import logging
 from fastapi import Request, status
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
@@ -33,6 +34,44 @@ from starlette.responses import Response, JSONResponse
 from app.utils.client_ip import get_trusted_client_ip, is_loopback_peer
 
 logger = logging.getLogger("ems.rate_limit")
+
+
+# ── Which paths get the strict, per-IP brute-force budget ───────────────────
+#
+# This used to be a set of exact strings:
+#
+#     {"/api/auth/login", "/api/auth/refresh", "/api/crew/login"}
+#
+# which structurally CANNOT express a parameterised path — and that is exactly
+# how the two most valuable doors were missed. `/api/crew/portal-unlock` and
+# `/api/providers/{slug}/portal-login` both bcrypt-verify the SHARED COMPANY
+# PASSWORD that unlocks every tablet at an ambulance service, and both were
+# sitting in the ordinary 600-per-minute API bucket.
+#
+# The crew shift-start pair is here too: neither verifies a password, but both
+# MINT a 12-hour token that reads, edits and deletes patient report forms, so
+# they are credential-issuing endpoints in every sense that matters.
+#
+# Prefixes are exact or single-segment-wildcard, never substring: a substring
+# match on "portal-login" would also catch a future
+# "/api/admin/portal-login-report" and quietly throttle a reporting page.
+_AUTH_EXACT = frozenset({
+    "/api/auth/login",
+    "/api/auth/refresh",
+    "/api/crew/login",
+    "/api/crew/portal-unlock",
+    "/api/crew/lookup-hpcsa",
+    "/api/crew/shift-start-by-id",
+})
+
+# /api/providers/{slug}/portal-login — one path segment for the slug.
+_AUTH_PATTERN = re.compile(r"^/api/providers/[^/]+/portal-login/?$")
+
+
+def _is_auth_path(path: str) -> bool:
+    """True for endpoints that verify a password or mint a session token."""
+    p = path.rstrip("/") or "/"
+    return p in _AUTH_EXACT or bool(_AUTH_PATTERN.match(path))
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
@@ -134,8 +173,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         # Password-login paths are brute-force targets and must NEVER be exempted
         # by the loopback shortcut below. Decide auth-strict first, then bypass.
-        AUTH_STRICT_PATHS = {"/api/auth/login", "/api/auth/refresh", "/api/crew/login"}
-        is_auth = path in AUTH_STRICT_PATHS
+        is_auth = _is_auth_path(path)
 
         # Skip rate limiting for in-container callers only — docker health
         # checks, CI, `docker exec` test harnesses. This checks the raw TCP

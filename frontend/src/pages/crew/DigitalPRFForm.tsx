@@ -5890,7 +5890,14 @@ export default function DigitalPRFForm() {
     // stuck true, gating the popup behind that ref made every later tap return
     // silently and the motivation block could never be reopened. We also clear
     // the ref here defensively so the subsequent real submit isn't blocked.
-    if (vitals.length < MIN_VITALS && !fd.med_aid_dec_death && fd.call_type !== 'RHT' && !fd.patient_refused_treatment) {
+    // RHT is deliberately NOT exempt any more. A refusal is the call type where
+    // vitals matter MOST, not least: they are the evidence that the patient was
+    // not hypoxic, hypoglycaemic or head-injured — which is the clinical basis
+    // for accepting that they had capacity to refuse. Exempting refusals meant
+    // the one record that most needs observations was the one never asked for
+    // them. This only asks for a MOTIVATION when there are fewer than the norm;
+    // it never blocks the crew (see validatePhase — no mid-call gating).
+    if (vitals.length < MIN_VITALS && !fd.med_aid_dec_death && !fd.patient_refused_treatment) {
       if (!(fd.vitals_shortfall_motivation ?? '').trim()) {
         submitInFlightRef.current = false;
         setVitalsMotivationOpen(true);
@@ -6732,7 +6739,11 @@ export default function DigitalPRFForm() {
       base.preauth_number = 'PRE-TEST-001';
     }
     if (callType === 'RHT') {
-      base.rht_call_out_fee = '750';
+      // No hard-coded default. R750 was baked in here, which is a PRICING
+      // decision living in the crew UI of a platform serving ~105 ambulance
+      // services that each charge differently — and a figure the crew would
+      // accept without reading because it was pre-filled. The crew picks it.
+      // (Provider-configurable defaults belong in Client Settings, not here.)
       base.return_despatch_time = '11:00';
       base.return_on_scene_time = '11:10';
       base.return_depart_scene_time = '11:20';
@@ -7682,18 +7693,104 @@ export default function DigitalPRFForm() {
         // timestamp, and Submit all live on this screen — Handover is
         // hidden because there's no receiving facility to hand over to.
         <>
-          <SHdr t="Refusal of Treatment / Transportation Waiver" />
+          <SHdr t="Refusal of Treatment / Transportation" />
           <Card>
-            <div style={{
-              padding: '14px 16px',
-              background: 'rgba(245,158,11,0.08)',
-              border: `1.5px solid rgba(245,158,11,0.3)`,
-              borderRadius: 10,
-              marginBottom: 16,
-            }}>
-              <div style={{ fontSize: '0.82rem', color: '#78350f', lineHeight: 1.55, fontWeight: 500 }}>
-                I, the patient or the responsible person, hereby waive any treatment offered to me by JEMS Medical Services and understand that by signing this waiver, I indemnify JEMS Medical Services from all further responsibility for my well-being hereonforth.
-              </div>
+            {/* ── The refusal declaration ──────────────────────────────────
+                Rewritten 2026-08-03. What was here before:
+
+                  (a) named "JEMS Medical Services" as a hard-coded literal, on
+                      a platform serving ~105 ambulance services — so every
+                      other provider's patients signed a waiver indemnifying a
+                      company that was not there;
+                  (b) said "hereonforth", which is not a word; and
+                  (c) recorded a blanket indemnity ("waive any treatment",
+                      "all further responsibility") rather than INFORMED
+                      REFUSAL.
+
+                (c) was the substantive problem. A blanket indemnity signed at
+                a roadside is weak protection — what actually defends the crew,
+                and what an HPCSA inquiry or a court looks for, is evidence that
+                the risks were explained, that the patient had the capacity to
+                refuse, and that they were told they could call again. So the
+                declaration below records those facts, and the tick-list under
+                it captures the clinical basis for the capacity judgement.
+
+                Company name comes from the signed-in provider profile, exactly
+                as the Terms & Conditions block already does. */}
+            {(() => {
+              const company = profile?.provider_name || 'the Service Provider';
+              return (
+                <div style={{
+                  padding: '14px 16px',
+                  background: 'rgba(245,158,11,0.08)',
+                  border: `1.5px solid rgba(245,158,11,0.3)`,
+                  borderRadius: 10,
+                  marginBottom: 16,
+                }}>
+                  <div style={{ fontSize: '0.82rem', color: '#78350f', lineHeight: 1.55, fontWeight: 500 }}>
+                    I am the patient, or the person lawfully responsible for the patient.
+                    The practitioners of {company} have examined and/or offered to examine,
+                    treat and transport the patient. They have explained to me, in a language
+                    I understand, the nature of the condition, the treatment and transport
+                    they recommend, and the risks of declining it — which may include
+                    deterioration, permanent injury or death, and which cannot be fully
+                    predicted outside a hospital.
+                  </div>
+                  <div style={{ fontSize: '0.82rem', color: '#78350f', lineHeight: 1.55, fontWeight: 500, marginTop: 8 }}>
+                    I have had the opportunity to ask questions and they have been answered.
+                    I am refusing the recommended treatment and/or transport of my own free
+                    will and against the advice given to me. I understand that I may change
+                    my mind at any time and call {company} or another emergency service
+                    again, and that doing so will not be held against me.
+                  </div>
+                  <div style={{ fontSize: '0.82rem', color: '#78350f', lineHeight: 1.55, fontWeight: 500, marginTop: 8 }}>
+                    I accept responsibility for this decision and release {company}, its
+                    directors, employees and agents from liability for any consequences
+                    arising from my refusal — save for any liability that cannot lawfully
+                    be excluded.
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* ── Capacity and information record ──────────────────────────
+                The declaration above is the patient's statement. This is the
+                CREW's — the clinical basis on which the refusal was accepted.
+                It is what turns a signature into a defensible record, and it is
+                deliberately the crew's own observations rather than anything
+                the patient asserts about themselves. */}
+            <Lbl t="Before accepting the refusal, the practitioner confirms" />
+            <div style={{ marginBottom: 14 }}>
+              {([
+                ['rht_cap_alert', 'Patient is alert and fully oriented'],
+                ['rht_cap_no_impairment', 'No apparent impairment by alcohol, drugs, hypoxia or hypoglycaemia'],
+                ['rht_cap_risks_explained', 'Risks of refusal explained in a language the patient understands'],
+                ['rht_cap_questions', 'Questions invited and answered'],
+                ['rht_cap_advised_recall', 'Advised to call again or seek care if the condition changes'],
+                ['rht_cap_alternative_care', 'Alternative care advised (own doctor / clinic / private transport)'],
+              ] as Array<[string, string]>).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => sf(key, !fd[key])}
+                  aria-pressed={!!fd[key]}
+                  style={{
+                    width: '100%', textAlign: 'left', padding: '10px 12px',
+                    marginBottom: 6, borderRadius: 9, cursor: 'pointer',
+                    border: `1.5px solid ${fd[key] ? '#16a34a' : S200}`,
+                    background: fd[key] ? '#f0fdf4' : W,
+                    color: fd[key] ? '#166534' : S700,
+                    fontSize: '0.8rem', fontWeight: 600, lineHeight: 1.35,
+                  }}
+                >
+                  {fd[key] ? '✓  ' : '○  '}{label}
+                </button>
+              ))}
+            </div>
+
+            <Lbl t="Reason the patient gave for refusing (in their words)" />
+            <div style={{ marginBottom: 14 }}>
+              <Inp fk="rht_refusal_reason" ph="e.g. “I feel fine, I’ll see my own doctor tomorrow”" />
             </div>
 
             <Lbl t="Patient / Responsible Person" />

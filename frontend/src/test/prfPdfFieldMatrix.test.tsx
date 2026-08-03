@@ -271,7 +271,10 @@ function callGroup(callType: string, tag: string): { fd: Record<string, any>; vi
           `CallOutFee-${tag}`, `RetDisp-${tag}`, `RetScene-${tag}`, `RetDepart-${tag}`,
           `RetDest-${tag}`, `RetHandover-${tag}`, `RetAvail-${tag}`,
         ],
-        chips: ['Transfer', 'RHT'],
+        // NOT 'Transfer'. RHT is Refused Hospital Transport — the opposite
+        // of a transfer — and the PDF printed "Transfer — RHT" on a call where
+        // nobody was moved. This expectation encoded that bug as correct.
+        chips: ['Refused Hospital Transport'],
       };
     case 'COURTESY':
       return { fd: { call_type: 'COURTESY' }, visible: [], chips: ['Transfer', 'COURTESY'] };
@@ -607,7 +610,7 @@ describe('PRF PDF field coverage — every call-type × billing-type', () => {
           }
 
           // Call type renders as one labelled row: "Primary", "Resus", "DOD",
-          // or "Transfer — <subtype>" for IHT/IFT/RHT/COURTESY.
+          // "Refused Hospital Transport", or "Transfer — <subtype>" for IHT/IFT/COURTESY.
           built.chips.forEach(chip => expectFieldRow('Call Type', chip));
         });
 
@@ -763,5 +766,99 @@ describe('PRF PDF — attachments and extra sheets', () => {
       raf_oar_report_pdf: { name: 'oar.pdf', size: 0 },   // no data_url
     });
     expect(sheets - base).toBe(0);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// Refusal of transport must PRINT as a refusal
+// ════════════════════════════════════════════════════════════════════════════
+//
+// The crew captured a refusal declaration, a capacity checklist, the patient's
+// stated reason, two printed names, a date and two signatures. NONE of it
+// reached the PDF. The signature images did render — under "Terms and
+// Conditions", above the billing clauses — so the permanent record showed a
+// patient assenting to PAYMENT TERMS with nothing on it saying they had
+// refused transport, who witnessed it, or when.
+//
+// A signature is only evidence of what sits above it.
+describe('RHT — the refusal reaches the printed record', () => {
+  const REFUSAL = {
+    rht_waiver_signatory_name: 'Thandi Mokoena',
+    rht_waiver_witness_name: 'Sipho Dlamini',
+    rht_waiver_date: '2026-08-03',
+    rht_refusal_reason: 'I feel fine, I will see my own doctor tomorrow',
+    rht_cap_alert: true,
+    rht_cap_no_impairment: true,
+    rht_cap_risks_explained: true,
+    rht_cap_questions: true,
+    rht_cap_advised_recall: true,
+    rht_cap_alternative_care: false,   // one unticked, so ☐ must render too
+  };
+
+  async function renderRefusal() {
+    const built = buildPrf('RHT', 'PVT');
+    Object.assign(built.prf.form_data, REFUSAL);
+    currentPrf = built.prf;
+    renderPrfView();
+    await screen.findByText((c) => c.includes(built.anchor), { exact: false });
+    return built;
+  }
+
+  it('names it a refusal, not a transfer', async () => {
+    await renderRefusal();
+    expectVisible('Refused Hospital Transport');
+    const rows = screen.queryAllByText((c) => c.includes('Transfer'), { exact: false });
+    expect(rows.length, 'the PDF still calls a refusal a transfer').toBe(0);
+  });
+
+  it('prints the declaration, both signatories, the date and the reason', async () => {
+    await renderRefusal();
+    expectVisible('Refusal of Treatment / Transport');
+    expectVisible('Thandi Mokoena');
+    expectVisible('Sipho Dlamini');
+    expectVisible('2026-08-03');
+    expectVisible('I feel fine, I will see my own doctor tomorrow');
+    // The substance of informed refusal — not a blanket indemnity.
+    expectVisible('against the advice given');
+    expectVisible('call again');
+  });
+
+  it('prints the capacity checklist, ticked and unticked', async () => {
+    await renderRefusal();
+    expectVisible('Alert and fully oriented');
+    expectVisible('No apparent impairment');
+    // A checklist that only ever renders ticks proves nothing; the unticked
+    // item must be visibly unticked.
+    const ticked = screen.queryAllByText((c) => c.includes('☑'), { exact: false });
+    const unticked = screen.queryAllByText((c) => c.includes('☐'), { exact: false });
+    expect(ticked.length, 'no ticked capacity checks rendered').toBeGreaterThan(0);
+    expect(unticked.length, 'an unticked capacity check rendered as ticked').toBeGreaterThan(0);
+  });
+
+  it('names the signed-in provider, never a hard-coded one', async () => {
+    await renderRefusal();
+    const body = document.body.textContent || '';
+    expect(body, 'the refusal names a hard-coded company').not.toContain('JEMS');
+  });
+
+  it('shows the patient signature exactly once, under the refusal', async () => {
+    // It used to appear under Terms & Conditions only. Adding a refusal block
+    // without suppressing that one put the same mark under two different
+    // headings — refusal AND billing terms — which muddies what was assented to.
+    //
+    // A UNIQUE data URI is used for the patient mark. The shared fixture gives
+    // every signature the same PNG, so counting by src matched all six and the
+    // first version of this test failed against correct code.
+    const UNIQUE = 'data:image/png;base64,UkVGVVNBTFNJRw==';
+    const built = buildPrf('RHT', 'PVT');
+    Object.assign(built.prf.form_data, REFUSAL);
+    built.prf.signatures.patient_signature = UNIQUE;
+    currentPrf = built.prf;
+    renderPrfView();
+    await screen.findByText((c) => c.includes(built.anchor), { exact: false });
+
+    const occurrences = Array.from(document.querySelectorAll('img'))
+      .filter((i) => i.getAttribute('src') === UNIQUE).length;
+    expect(occurrences, 'the patient signature is printed more than once').toBe(1);
   });
 });
