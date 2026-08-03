@@ -220,7 +220,7 @@ bash "$EMS_DIR/deploy/ops/install-ops-crons.sh" >/dev/null 2>&1 \
 # ═══════════════════════════════════════════════════════════════════════════
 step "9. Verification"
 for i in $(seq 1 60); do
-  code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost/health 2>/dev/null || true)
+  code=$(curl -sk -o /dev/null -w "%{http_code}" https://localhost/health 2>/dev/null || true)
   [ "$code" = "200" ] && { ok "health 200 after ${i}s"; break; }
   [ "$i" -eq 60 ] && bad "health check never passed"
   sleep 1

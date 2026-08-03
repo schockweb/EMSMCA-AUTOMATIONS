@@ -34,10 +34,34 @@ set -uo pipefail
 RELEASE_DIR="${RELEASE_DIR:-/opt/ems-releases}"
 EMS_DIR="${EMS_DIR:-/opt/ems}"
 SERVICES="ems_backend ems_nginx ems_celery_worker ems_celery_beat"
-HEALTH_URL="${HEALTH_URL:-http://localhost/health}"
+# https, and -k. nginx 301s every plain-HTTP request to the domain, so a probe
+# of http://localhost/health returns 301 forever and a health check written
+# against it can never pass — it would report a good rollback as a failed one.
+# -k because the certificate is issued for portal.emsmca.co.za, not localhost;
+# this is a liveness probe on the loopback interface, not an identity check.
+HEALTH_URL="${HEALTH_URL:-https://localhost/health}"
+CURL_OPTS="${CURL_OPTS:--sk}"
 
 log()  { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) rollback: $*"; }
 fail() { log "FAIL: $*"; exit 1; }
+
+# This script lives inside the tree it is about to `git checkout`. Bash reads a
+# script incrementally, from a file offset — so checking out a commit that
+# predates this file (or merely changes its length) rewrites the bytes bash is
+# still reading and execution continues at the wrong offset, in the middle of a
+# different line. The failure is arbitrary, silent, and happens halfway through
+# swapping production. Re-exec from a copy outside the tree first.
+if [ -z "${EMS_ROLLBACK_DETACHED:-}" ]; then
+  _self=$(readlink -f "$0" 2>/dev/null || echo "$0")
+  case "$_self" in
+    "$EMS_DIR"/*)
+      _tmp=$(mktemp /tmp/ems-rollback.XXXXXX)
+      cp "$_self" "$_tmp" && chmod +x "$_tmp" || fail "could not copy self to /tmp"
+      EMS_ROLLBACK_DETACHED=1 exec bash "$_tmp" "$@"
+      ;;
+  esac
+fi
+[ -n "${EMS_ROLLBACK_DETACHED:-}" ] && trap 'rm -f "$0"' EXIT
 
 ASSUME_YES=0
 ACCEPT_DRIFT=0
@@ -216,7 +240,7 @@ docker restart ems_nginx >/dev/null 2>&1 || log "WARN could not restart ems_ngin
 log "waiting for health..."
 ok=0
 for i in $(seq 1 45); do
-  code=$(curl -s -o /dev/null -w '%{http_code}' "$HEALTH_URL" 2>/dev/null || true)
+  code=$(curl $CURL_OPTS -o /dev/null -w '%{http_code}' "$HEALTH_URL" 2>/dev/null || true)
   if [ "$code" = "200" ]; then ok=1; log "healthy after ${i}s"; break; fi
   sleep 1
 done
