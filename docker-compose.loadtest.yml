@@ -1,0 +1,144 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# Load-test stack — ISOLATED, and shaped like production.
+#
+#   docker compose -f docker-compose.loadtest.yml up -d --build
+#
+# WHY A SEPARATE STACK
+# --------------------
+# Two reasons, and both were learned the hard way.
+#
+# 1. NEVER against production. Running a suite against a prod container wrote 19
+#    fake rows into the live patient database on 2026-07-28. This stack has its
+#    own PostgreSQL on its own port with its own volume, and nothing in it can
+#    reach the production database.
+#
+# 2. The DEV backend is not shaped like production and would give numbers that
+#    mean nothing. Dev runs a single uvicorn worker with --reload on an
+#    unconstrained 16-core host. Production runs gunicorn with FOUR
+#    UvicornWorkers on a FOUR-vCPU VM. A benchmark against dev would measure a
+#    machine the client does not own.
+#
+# So: the prod image (backend/Dockerfile.prod, gunicorn --workers 4), pinned to
+# 4.0 CPUs and 2G — the same limits docker-compose.prod.yml sets on the VM.
+#
+# Deliberately NOT included: a Celery worker. Submit publishes to the broker on
+# the request path, which is the part that costs the API latency; what a worker
+# then does with the message is asynchronous and does not belong in an API
+# latency measurement. RabbitMQ IS here so publishing is real.
+# ═══════════════════════════════════════════════════════════════════════════
+
+name: emsloadtest
+
+x-logging: &lt-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "2"
+
+services:
+  lt_postgres:
+    image: postgres:18-alpine
+    container_name: lt_postgres
+    logging: *lt-logging
+    environment:
+      POSTGRES_USER: loadtest
+      POSTGRES_PASSWORD: loadtest_only_throwaway
+      POSTGRES_DB: ems_loadtest
+    ports:
+      - "5436:5432"          # 5432 dev-host, 5433 native, 5434 dev-container — 5436 is free
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 4G
+    # The database is not the subject of this test and must not become the
+    # bottleneck by accident. These are the settings a managed instance would
+    # already have; the defaults in the image are tuned for a laptop.
+    command: >
+      postgres
+      -c max_connections=400
+      -c shared_buffers=1GB
+      -c effective_cache_size=3GB
+      -c work_mem=16MB
+      -c synchronous_commit=off
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "loadtest", "-d", "ems_loadtest"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      # postgres:18 wants the mount at /var/lib/postgresql, NOT .../data — it
+      # puts the cluster in a subdirectory so pg_upgrade --link can work without
+      # crossing a mount boundary. Mounting .../data makes 18 refuse to start.
+      - lt_pgdata:/var/lib/postgresql
+    networks: [lt_net]
+
+  lt_redis:
+    image: redis:7.2-alpine
+    container_name: lt_redis
+    logging: *lt-logging
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru --save ""
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 192M
+    networks: [lt_net]
+
+  lt_rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: lt_rabbitmq
+    logging: *lt-logging
+    environment:
+      RABBITMQ_DEFAULT_USER: loadtest
+      RABBITMQ_DEFAULT_PASS: loadtest_only_throwaway
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [lt_net]
+
+  lt_backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    container_name: lt_backend
+    logging: *lt-logging
+    # THE POINT OF THIS FILE: same worker model and same CPU budget as the VM.
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 2G
+    environment:
+      APP_ENV: development          # production would demand DB TLS, which this throwaway has not got
+      DATABASE_URL: postgresql+asyncpg://loadtest:loadtest_only_throwaway@lt_postgres:5432/ems_loadtest
+      CELERY_BROKER_URL: amqp://loadtest:loadtest_only_throwaway@lt_rabbitmq:5672//
+      REDIS_URL: redis://lt_redis:6379/0
+      SECRET_KEY: loadtest_only_not_a_real_signing_key_0123456789
+      ENCRYPTION_KEY: ${LOADTEST_ENCRYPTION_KEY}
+      FRONTEND_URL: http://localhost:5173
+      UPLOAD_DIR: /app/uploads
+      SEED_ADMIN_PASSWORD: ${LOADTEST_ADMIN_PASSWORD}
+      DB_SSL_MODE: disable
+    ports:
+      - "8100:8000"
+    depends_on:
+      lt_postgres:
+        condition: service_healthy
+      lt_rabbitmq:
+        condition: service_healthy
+    networks: [lt_net]
+
+volumes:
+  lt_pgdata:
+
+networks:
+  lt_net:
+    driver: bridge

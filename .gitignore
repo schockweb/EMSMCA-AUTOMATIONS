@@ -115,3 +115,4 @@ frontend/coverage/
 # Ad-hoc benchmark/repro scratch scripts — not part of the app
 backend/bench*.py
 backend/loopcheck.py
+.env.loadtest.local
