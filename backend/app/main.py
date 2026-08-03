@@ -40,6 +40,7 @@ from app.api.crew_auth import router as crew_auth_router
 from app.api.providers import router as providers_router
 from app.api.account_security import router as account_security_router
 from app.api.system_faults import router as system_faults_router
+from app.api.audit_logs import router as audit_logs_router
 from app.api.digital_prf import router as digital_prf_router
 from app.api.rate_schemas import router as rate_schemas_router
 from app.api.failed_prfs import router as failed_prfs_router
@@ -326,6 +327,7 @@ app.include_router(crew_auth_router)
 app.include_router(providers_router)
 app.include_router(account_security_router)
 app.include_router(system_faults_router)
+app.include_router(audit_logs_router)
 app.include_router(digital_prf_router)
 app.include_router(rate_schemas_router)
 app.include_router(failed_prfs_router)

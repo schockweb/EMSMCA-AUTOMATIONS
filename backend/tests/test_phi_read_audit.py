@@ -62,6 +62,11 @@ async def audited_prf():
 
     # Clear any audit rows for this PRF so counts start from zero.
     async with _TestSession() as db:
+        # audit_logs is append-only at the database level (trigger
+        # trg_audit_logs_append_only). Cleaning up test rows is legitimate
+        # maintenance and must say so explicitly — that visibility is the
+        # whole point of the escape hatch.
+        await db.execute(text("SET LOCAL ems.audit_maintenance = \'on\'"))
         await db.execute(text("delete from audit_logs where entity_id = :e"),
                          {"e": ids[0]})
         await db.commit()
@@ -69,6 +74,11 @@ async def audited_prf():
     yield ids
 
     async with _TestSession() as db:
+        # audit_logs is append-only at the database level (trigger
+        # trg_audit_logs_append_only). Cleaning up test rows is legitimate
+        # maintenance and must say so explicitly — that visibility is the
+        # whole point of the escape hatch.
+        await db.execute(text("SET LOCAL ems.audit_maintenance = \'on\'"))
         await db.execute(text("delete from audit_logs where entity_id in (:p, :c)"),
                          {"p": ids[0], "c": ids[1]})
         await db.execute(text("update digital_prfs set case_id=null where case_number like :m"),

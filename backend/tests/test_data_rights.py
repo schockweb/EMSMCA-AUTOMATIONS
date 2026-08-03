@@ -71,6 +71,11 @@ async def subject_records():
                          {"m": f"{_MARKER}%"})
         await db.execute(text("delete from cases where patient_name like :m"),
                          {"m": f"%{_MARKER}%"})
+        # audit_logs is append-only at the database level (trigger
+        # trg_audit_logs_append_only). Cleaning up test rows is legitimate
+        # maintenance and must say so explicitly — that visibility is the
+        # whole point of the escape hatch.
+        await db.execute(text("SET LOCAL ems.audit_maintenance = \'on\'"))
         await db.execute(text(
             "delete from audit_logs where entity_type in "
             "('subject_access','provider_export')"))
