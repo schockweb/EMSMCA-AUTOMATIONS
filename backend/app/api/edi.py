@@ -119,7 +119,7 @@ async def submit_edi(
             )
         return result
 
-    return await process_idempotent_request(request, db, _execute)
+    return await process_idempotent_request(request, db, _execute, actor=_current)
 
 
 @router.get("/submissions")

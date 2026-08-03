@@ -126,6 +126,14 @@ celery_app.conf.update(
             "schedule": 604800.0,  # weekly
             "options": {"queue": "ems_default"},
         },
+        # Nothing ever deleted from idempotency_keys: `expires_at` stopped a
+        # row being SERVED, never being STORED, so every proxied medical-scheme
+        # response body accumulated forever in a table containing patient data.
+        "purge-idempotency-keys": {
+            "task": "purge_expired_idempotency_keys",
+            "schedule": 3600.0,  # hourly
+            "options": {"queue": "ems_default"},
+        },
         # The email spool holds rendered patient PDFs — complete clinical
         # records — waiting to be attached. Every code path deletes its own
         # file, but a SIGKILLed worker (OOM) or a container replaced mid-deploy

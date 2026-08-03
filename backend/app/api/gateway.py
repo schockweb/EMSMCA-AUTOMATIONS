@@ -54,6 +54,8 @@ async def submit_gateway_request(
 
         return JSONResponse(status_code=status_code, content=response_payload)
 
-    return await process_idempotent_request(request, db, _execute)
+    # `_current` scopes the key to this actor — without it, one tenant's
+    # cached scheme response is served to another.
+    return await process_idempotent_request(request, db, _execute, actor=_current)
 
 

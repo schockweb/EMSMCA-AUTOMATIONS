@@ -141,3 +141,57 @@ def report_retention_status():
         return loop.run_until_complete(_run())
     finally:
         loop.close()
+
+
+@shared_task(name="purge_expired_idempotency_keys", acks_late=True)
+def purge_expired_idempotency_keys():
+    """Delete idempotency rows whose window has passed.
+
+    NOTHING deleted from this table before. `expires_at` stopped a row being
+    SERVED, never being STORED, so every medical-scheme response body ever
+    proxied accumulated forever — the crash_events shape (which reached 3.68
+    million rows) except these rows contain patient data.
+
+    Deleting an expired row is not destructive in the sense the monitor's safety
+    model means: the row's own recorded policy says it may no longer be used,
+    and its purpose — collapsing a duplicate submission onto one outcome — has
+    lapsed. Abandoned IN_PROGRESS locks are cleared on the same pass, well past
+    the reclaim window that app/utils/idempotency.py already honours inline.
+    """
+    import asyncio
+
+    async def _run():
+        from sqlalchemy import delete, or_, func, select
+        from app.models.idempotency import IdempotencyKey
+        from app.tasks.prf_processing import _make_celery_session
+
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+        engine, Session = _make_celery_session()
+        try:
+            async with Session() as db:
+                before = (await db.execute(
+                    select(func.count(IdempotencyKey.key))
+                )).scalar() or 0
+                result = await db.execute(
+                    delete(IdempotencyKey).where(or_(
+                        IdempotencyKey.expires_at < datetime.now(timezone.utc),
+                        IdempotencyKey.created_at < cutoff,
+                    ))
+                )
+                await db.commit()
+                deleted = result.rowcount or 0
+        finally:
+            await engine.dispose()
+
+        if deleted:
+            logger.info(
+                "IDEMPOTENCY: purged %d expired key(s) of %d.", deleted, before
+            )
+        return {"purged": deleted, "before": before}
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(_run())
+    finally:
+        loop.close()
