@@ -250,9 +250,28 @@ echo "$CURRENT_SHA" > "$RELEASE_DIR/.rolled-back-from"
 git -C "$EMS_DIR" checkout --detach "$TARGET" --quiet || fail "git checkout $TARGET failed"
 log "checkout now at $(git -C "$EMS_DIR" rev-parse --short HEAD) (detached)"
 
+# Remember where :latest pointed. If the swap fails AFTER retagging, the tags
+# name the target while the old containers are still serving — so the next
+# routine `up -d` would quietly start the rolled-back code with nobody having
+# asked for it. This happened on the first run: a failed compose step left
+# :latest on 83bea1f with b2bd454 still running.
+_saved=""
+for svc in $SERVICES; do
+  _id=$(docker image inspect "ems-$svc:latest" --format '{{.Id}}' 2>/dev/null)
+  [ -n "${_id:-}" ] && _saved="$_saved $svc=$_id"
+done
+restore_tags() {
+  local pair s i
+  for pair in $_saved; do
+    s=${pair%%=*}; i=${pair#*=}
+    docker tag "$i" "ems-$s:latest" 2>/dev/null
+  done
+  log "restored :latest to the images that were serving before this attempt"
+}
+
 # Point the names compose builds to at the release images.
 for svc in $SERVICES; do
-  docker tag "ems-$svc:release-$TARGET" "ems-$svc:latest" || fail "could not retag $svc"
+  docker tag "ems-$svc:release-$TARGET" "ems-$svc:latest" || { restore_tags; fail "could not retag $svc"; }
 done
 log "image tags repointed to release-$TARGET"
 
@@ -262,20 +281,25 @@ cd "$EMS_DIR" || fail "cannot cd $EMS_DIR"
 # from the SHELL, not from env_file. Without them compose substitutes empty
 # strings — and if rabbitmq is ever recreated in that state it comes up with
 # blank credentials and every worker silently loses its broker. Compose only
-# warns. Load .env.prod into the environment for the compose calls, in a
-# subshell so the secrets do not outlive them.
+# warns.
 #
+# Read them out; do NOT `. .env.prod`. That idiom is everywhere and it is wrong
+# for this file: the values contain '$'. Sourcing it under `set -u` died on
+# `line 2: $9: unbound variable`, and WITHOUT `set -u` it is worse — the shell
+# would silently expand '$9' to nothing and export a truncated password, giving
+# a broker that rejects every worker for a reason nothing reports. grep -oP
+# takes the bytes literally, which is what backup-ems.sh already does.
+for _v in RABBITMQ_USER RABBITMQ_PASS VITE_GOOGLE_MAPS_KEY; do
+  _val=$(grep -oP "^${_v}=\K.*" "$EMS_DIR/.env.prod" 2>/dev/null)
+  [ -n "${_val:-}" ] && export "$_v=$_val"
+done
+unset _v _val
+
 # --no-build is the whole point: use the images we just pointed at, do not
 # rebuild from the checked-out source (which would take minutes and could
 # produce something subtly different from what was tested).
-(
-  set -a
-  # shellcheck disable=SC1091
-  [ -f "$EMS_DIR/.env.prod" ] && . "$EMS_DIR/.env.prod"
-  set +a
-  docker compose -f docker-compose.prod.yml   up -d --no-build &&
-  docker compose -f docker-compose.worker.yml up -d --no-build
-) || fail "the stack did not come up"
+docker compose -f docker-compose.prod.yml   up -d --no-build || { restore_tags; fail "app stack did not come up"; }
+docker compose -f docker-compose.worker.yml up -d --no-build || { restore_tags; fail "worker stack did not come up"; }
 
 # nginx caches its upstream's IP from startup; recreating backend containers can
 # move it, and every request then 502s while `docker ps` shows all healthy.
