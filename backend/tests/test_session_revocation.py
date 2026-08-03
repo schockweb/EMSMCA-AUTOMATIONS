@@ -402,3 +402,34 @@ async def test_revoke_rejects_unknown_account_type(client, auth_headers, crew_ro
     r = await client.post("/api/account-security/revoke-sessions", headers=auth_headers,
                           json={"account_type": "wizard", "id": crew_row["id"]})
     assert r.status_code == 400
+
+
+def test_the_login_decoy_is_prebuilt_at_startup():
+    """The residual timing tell, removed.
+
+    verify_password_or_dummy equalises the cost of a known and an unknown
+    account — but the decoy digest was generated lazily, so the FIRST unknown
+    login in each process cost 2x (512ms vs 254ms, measured on production).
+    Four gunicorn workers meant four observably slow responses after every
+    deploy. The lifespan now pre-builds it.
+
+    Asserted by INSPECTING the lifespan source, not by running it. Running the
+    real lifespan in a test is what this file did first, and it called
+    seed_super_admin(), which permanently promoted the shared seed admin to
+    SUPER_ADMIN in the test database and broke an unrelated authorisation test.
+    A startup hook is not a thing to invoke casually from a test.
+    """
+    import inspect
+
+    from app.main import lifespan
+    from app.utils.security import _dummy_hash
+
+    src = inspect.getsource(lifespan)
+    assert "_dummy_hash" in src, (
+        "startup no longer pre-builds the login decoy — the first "
+        "unknown-account login in each worker will cost twice a real one again"
+    )
+
+    # ...and the thing it warms must actually produce a usable bcrypt digest.
+    assert _dummy_hash().startswith("$2")
+    assert _dummy_hash() == _dummy_hash(), "the decoy must be stable per process"

@@ -76,6 +76,22 @@ async def lifespan(app: FastAPI):
     # Auto-purge crash events older than 90 days
     await purge_old_crashes()
 
+    # Build the constant-time login decoy now, not on the first unknown login.
+    #
+    # verify_password_or_dummy hashes against a throwaway digest so an address
+    # that does not exist costs the same bcrypt as one that does. That digest
+    # was generated lazily, so the FIRST unknown-account login in each process
+    # paid for BOTH generating it and verifying against it — measured on
+    # production at 512 ms against 254 ms warm, exactly 2x. With four gunicorn
+    # workers that is four observably slow responses after every deploy: a small
+    # residue of the very oracle the function exists to remove. One bcrypt at
+    # startup leaves no first-request tell.
+    try:
+        from app.utils.security import _dummy_hash
+        await asyncio.get_running_loop().run_in_executor(None, _dummy_hash)
+    except Exception:      # never let a hardening detail block startup
+        logger.warning("Could not pre-build the login decoy hash", exc_info=True)
+
     logger.info("EMS Claims Portal ready.")
     yield
     logger.info("EMS Claims Portal shutting down.")

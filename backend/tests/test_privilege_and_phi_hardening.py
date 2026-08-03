@@ -164,8 +164,24 @@ async def test_a_role_change_is_audited(client, auth_headers, plain_admin):
             )
         )).scalars().all()
     assert rows, "a role change wrote no audit row"
-    assert rows[-1].before_state["role"] == "admin"
-    assert rows[-1].after_state["role"] == "billing_clerk"
+
+    # Assert a MATCHING row exists, rather than indexing into the list.
+    #
+    # The first version took rows[-1] on a query with no ORDER BY. Audit rows
+    # accumulate across runs and this test file makes several other USER_UPDATED
+    # writes against the same account (the password-reset test among them), so
+    # "the last row" was whichever one Postgres felt like returning. It passed
+    # by luck and went red on an unrelated change — the worst kind of test,
+    # because the natural reading is that the code broke.
+    match = [
+        r for r in rows
+        if (r.before_state or {}).get("role") == "admin"
+        and (r.after_state or {}).get("role") == "billing_clerk"
+    ]
+    assert match, (
+        "no audit row records the admin -> billing_clerk change; "
+        f"found {[( (r.before_state or {}).get('role'), (r.after_state or {}).get('role')) for r in rows]}"
+    )
 
 
 async def test_an_admin_password_reset_ends_the_old_sessions(client, auth_headers, plain_admin):
