@@ -162,14 +162,28 @@ def upgrade() -> None:
     # the column alone is the bulk of the win (it is ~1/60th the bytes). If the
     # extension cannot be created, the search is still correct and still fast;
     # it just scans a small column instead of using an index.
+    #
+    # SAVEPOINT, not a bare try/except. Alembic runs this migration inside one
+    # transaction, and a failed statement does not merely raise in Python — it
+    # puts the PostgreSQL transaction into an aborted state where EVERY
+    # subsequent statement, including the final COMMIT, fails. Catching the
+    # Python exception would therefore look like graceful degradation and
+    # actually discard the whole migration, on precisely the deployment where
+    # the extension is not allow-listed. begin_nested() confines the damage.
+    conn = op.get_bind()
+    sp = conn.begin_nested()
     try:
-        op.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
-        op.execute("""
-            CREATE INDEX IF NOT EXISTS ix_digital_prfs_search_text_trgm
-            ON digital_prfs USING gin (search_text gin_trgm_ops)
-        """)
+        conn.execute(sa.text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
+        conn.execute(sa.text(
+            "CREATE INDEX IF NOT EXISTS ix_digital_prfs_search_text_trgm "
+            "ON digital_prfs USING gin (search_text gin_trgm_ops)"
+        ))
+        sp.commit()
     except Exception as exc:  # noqa: BLE001
-        print(f"pg_trgm unavailable ({exc}); search_text created without a trigram index")
+        sp.rollback()
+        print(f"pg_trgm unavailable ({exc}); search_text created without a "
+              f"trigram index — the search is still correct and still fast, it "
+              f"scans a small column instead of using an index")
 
 
 def downgrade() -> None:
