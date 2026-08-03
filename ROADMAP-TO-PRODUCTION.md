@@ -1,9 +1,14 @@
 # What is left to get this system running properly
 
-**Prepared 2026-08-03** · portal.emsmca.co.za · code state `9f166cb`
+**Prepared 2026-08-03** · portal.emsmca.co.za · production `842029c` · origin `98da1d3`
 
 Everything in this document was verified against the running system on the date
 above, not recalled. Where I could not verify something, it says so.
+
+> **Revision, later on 2026-08-03.** Section B is closed. A2 and A4 are closed
+> and, unusually, *rehearsed*. D2 has been replaced by measured numbers. One new
+> section (H) was added because the load test surfaced something nobody had
+> looked at. The changes are summarised under "What changed today".
 
 ---
 
@@ -17,218 +22,205 @@ Effort bands: **Minutes** · **Hours** · **A day** · **A week** · **Longer /
 third party**.
 
 A caution about "perfect": the useful target is not a system with no remaining
-work. It is a system where you find out *before your customers do* when
-something breaks, where a bad change can be undone quickly, and where the claims
-you make to a medical scheme are all true. That target is close.
+work. It is a system where you find out *before your customers do* when something
+breaks, where a bad change can be undone quickly, and where the claims you make
+to a medical scheme are all true.
+
+A second caution, earned today: **"written" and "works" are different claims, and
+the gap between them is larger than it feels.** Every single thing that was
+exercised for the first time today turned out to be broken in some way — the
+restore checker, the rollback script, and my own load harness twice. None of
+those defects were visible by reading the code. Where this document says
+something is *rehearsed*, that word is load-bearing.
 
 ---
 
-## Where things stand today
+## What changed today
+
+| | |
+|---|---|
+| **A2 rollback** | Built and **rehearsed on production**: back in 36 s, forward in 29 s, health 200 throughout. Four defects found on first real use. |
+| **A4 restore rehearsal** | Run. It **failed**, correctly, and the failure was in the checker's premise rather than the backup. Fixed and fault-tested. |
+| **A5 single VM** | `rebuild-vm.sh` written with a `--check` mode. Still a decision, but now a documented procedure rather than a memory exercise. |
+| **B2–B9** | All eight closed, deployed and verified against production. |
+| **D2 load** | No longer a projection. Measured: **500 concurrent = 188 req/s, zero errors.** |
+| **H (new)** | The claims path — 1,716 lines that decide what a scheme gets billed — has **no tests at all**. |
+
+---
+
+## Where things stand
 
 Verified on 2026-08-03:
 
 | | |
 |---|---|
-| Local, origin and production | all on `9f166cb` |
-| Backend tests | 503 passing (run twice consecutively), 4 skipped |
-| Frontend tests | 410 passing, typecheck clean |
-| Database schema | alembic head `f7c1a9e35b84`, matches code |
-| Production health | HTTP 200; fault sweep 10 checks, 9 healthy, 0 faults |
-| Anonymous access | 401 on every gated route probed |
-| Login timing oracle | closed — 254 ms known vs 254 ms unknown, 0 ms delta |
-| Patient identifiers | encrypted at rest, 10 keys across 3 stores, prod + dev |
-| Backups | 15 consecutive daily dumps, no gaps; one restored from scratch today |
+| Production | `842029c`, health 200 |
+| origin/main | `98da1d3` — ahead by the load-test harness only, no application code |
+| Backend tests | **539 collected** |
+| Frontend tests | **415 passing** |
+| Database schema | alembic head `c2f9a48d61be`, matches code |
+| Rollback points | 6 tagged releases, images present |
+| Backups | restore rehearsed today; content proven to match production |
+| Patient identifiers | encrypted at rest; **independently re-proven today** — all 9 field types round-trip on real records |
+| Load ceiling | 500 concurrent → 188 req/s, 0 errors, 230% of a 400% CPU budget |
+| Database connections | `max_connections` **859** (the "200" in older notes was wrong) |
 | TLS | valid to 11 October 2026, auto-renewing |
 | Disk | 18 GB of 123 GB used (15%) |
-| Reboot survival | all containers `unless-stopped`, Docker enabled at boot |
-
-What landed in the last two days: 24 confirmed security findings closed, patient
-identifiers encrypted across every store, PHI reads and record changes audited,
-bulk session revocation, and a fault-detection engine with gated self-healing.
 
 ---
 
 ## Section A — Blocks running 24/7
 
-### A1. Nothing tells anyone when something breaks · **Hours** · *needs a URL from you*
+### A1. Nothing tells anyone when something breaks · **Hours** · *needs a URL from you* · **OPEN**
 
 `HEALTHCHECK_URL` is unset, so the dead-man's switch on backups is inert. The
 fault monitor writes to a database table and a web page — at 03:00 nobody is
-looking at a web page. Today the monitor caught three real faults, and with no
-alerting it would have caught them silently.
+looking at a web page.
 
-This is the single highest-value item in this document and the cheapest.
+**Still the single highest-value item in this document, and the cheapest.**
 
 **To close:** create a free healthchecks.io (or UptimeRobot) account, send me the
 ping URL. I wire it to the backup switch, the fault sweep, and a keyword check on
 `/health` from outside the VM so it survives the VM dying.
 
-### A2. There is no quick rollback for the backend · **Hours**
+### A2. Quick rollback for the backend · **DONE 2026-08-03, rehearsed**
 
-`ems_nginx` has tagged rollback images. `ems_backend`, `ems_celery_worker` and
-`ems_celery_beat` are `:latest` only. A bad deploy at 02:00 means git-reset and
-rebuild — several minutes of downtime — instead of an image swap in seconds.
+`deploy/ops/tag-release.sh` stamps the image each container is *using* — not
+`:latest`, not a fresh build of current source; those three differ and only one is
+serving requests — together with the commit and the Alembic revision the database
+was at. `deploy/ops/rollback.sh` swaps the tags back.
 
-**To close:** tag each image with the commit on build, keep the last five, and
-add a documented one-line rollback to the runbook.
+**Measured on production: 36 s back, 29 s forward, health 200 throughout.** No
+rebuild, no network. Wired into the runbook and the deploy workflow, before and
+after.
 
-### A3. Backups exist only on this VM · **Minutes** · *needs a value from you*
+It refuses three things, each for a reason: images already pruned, a checkout
+with hand edits (`git checkout` would destroy them), and a database ahead of the
+target — where it lists the exact migrations the old code has never seen and
+demands `--accept-schema-drift`. **Code rolls back; schema does not.**
+`alembic downgrade` is deliberately not automated.
 
-`AZURE_SAS_URL` is unset, so nothing leaves the box. Less severe than it sounds
-because the live database is Azure-managed with point-in-time recovery — losing
-the VM does not lose patient data. But the 7-year archive is single-copy.
+*Four defects the rehearsal found that reading had not: a health probe that could
+never pass (nginx 301s plain HTTP — the same bug was in CI, which would have
+failed every deploy); a script that deleted itself mid-run (it lives in the tree
+it checks out, and bash reads scripts incrementally by file offset); a comparison
+against git HEAD rather than the running images; and `. .env.prod` truncating a
+password at a `$`.*
+
+### A3. Backups exist only on this VM · **Minutes** · *needs a value from you* · **OPEN**
+
+`AZURE_SAS_URL` is unset, so nothing leaves the box.
+
+**One correction to the earlier wording, and it matters.** This was described as
+"less severe than it sounds" because the database is Azure-managed with
+point-in-time recovery. That is true of the *database*. It is **not** true of the
+uploads volume — PRF attachments, photos, provider logos — which is a local
+Docker volume backed up to `/opt/backups` **on the same VM**. If that VM is lost
+today, every attachment is lost with it.
 
 **To close:** create a storage container, paste the SAS URL into
 `/etc/default/ems-backup`. Encrypt the dumps before upload (`age -R`) in the same
-change.
+change. The SAS must be Create+Write+List and **not** Delete, so a compromised VM
+cannot erase the off-site copies with the credential stored on it.
 
-### A4. The restore rehearsal cannot be confirmed to be running · **Minutes**
+### A4. Restore rehearsal · **DONE 2026-08-03** — *and it failed, usefully*
 
-The `ems-restore-test` cron exists; `/var/log/ems-restore-test.log` is empty. A
-restore you have not rehearsed is a hope, not a backup. I restored one manually
-today and it was clean, so the capability works — what is unproven is that the
-weekly check is actually firing.
+Run by hand. It reported **70 of 81 finalised PRFs altered** and refused to call
+the backup trustworthy.
 
-**To close:** run it once by hand, confirm it writes to the log, and add its
-result to the alerting from A1.
+It was right that they had changed and wrong about what that meant. The second
+patient-identifier encryption pass had rewritten those records by direct UPDATE,
+after the 03:09 dump, without touching `updated_at`. Decrypting **both** sides
+showed **81 of 81 identical, 0 undecryptable** — which independently re-proved
+that every encrypted field type round-trips correctly on real production data.
+
+The checker's premise — that a finalised PRF is byte-immutable forever — was
+wrong, because an at-rest encryption migration legitimately rewrites them. That
+is the worst kind of alarm: narrowly true, badly wrong in its conclusion, and
+fired by planned work. **An alarm that cries wolf on a migration trains its
+reader to dismiss it, which is exactly how the 2026-07-18 backup failure went
+unnoticed for eight days.**
+
+Now: the content fingerprint excludes the identifier fields and those are checked
+separately for *presence* — ciphertext may change, an identifier may not vanish.
+Fault-tested both ways, and the two checks proven independent.
 
 ### A5. One virtual machine, no failover · **Longer** · *a decision, not a task*
 
-If the VM dies you are down until someone rebuilds it. For ambulances running at
-03:00 that may or may not be acceptable — but it should be a decision you have
-made, not one you discover.
+Now with a written procedure: `deploy/ops/rebuild-vm.sh --check | --run`.
+`--check` reports recovery readiness in seconds; `--run` performs the rebuild and
+stops rather than guessing at DNS, escrow or the database firewall.
 
-**Options, cheapest first:** accept it and document the recovery time · keep a
-warm rebuild script and a tested restore (a few hours of downtime) · a second VM
-behind a load balancer (real money, real complexity).
+**What survives the VM:** the database. Azure-managed, off-box, with PITR.
+Losing the VM does not lose a single PRF record.
+**What does not:** the uploads volume (see A3), and `.env.prod` — which is not in
+the repository and whose `ENCRYPTION_KEY` cannot be regenerated. Without it every
+patient identifier in the database is permanently unreadable.
 
-### A6. There is no on-call arrangement · **Process**
+**Three options, in the order I would consider them.** *Accept it* and publish a
+recovery time — realistically 2–4 hours, now that the rebuild is scripted rather
+than remembered; this is my recommendation at current load, but it should be a
+decision you have made, not one you discover at 03:00. *Warm standby* — a second
+VM kept current but idle, roughly 15 minutes to switch, about double the hosting
+cost. *Active-active* behind a load balancer — the only zero-downtime option, and
+it requires D1 (uploads off local disk) first.
 
-It is you. With no alerting (A1), you *are* the monitoring system. A1 changes
-that; a second pair of hands changes it more.
+**Not yet rehearsed on a fresh VM.** Until it is, the 2–4 hours is an estimate,
+and this document has spent today demonstrating what estimates are worth.
+
+### A6. There is no on-call arrangement · **Process** · **OPEN**
+
+It is you. With no alerting (A1), you *are* the monitoring system.
 
 ---
 
-## Section B — Security backlog
+## Section B — Security backlog · **B2–B9 CLOSED**
 
-Nine items, in the order I would do them. None is an emergency; all are real.
+### B1. The facility email has no recipient allowlist · **A day** · **OPEN — highest consequence in this document**
 
-### B1. The facility email has no recipient allowlist · **A day** · *highest consequence*
+`POST /api/digital-prf/.../email-facility` will send a complete patient PRF to any
+syntactically valid email address on the internet, from the provider's own
+mailbox. The entire recipient check is a regular expression for an `@` and a dot.
 
-`POST /api/digital-prf/.../email-facility` will send a complete patient PRF to
-any syntactically valid email address on the internet, from the provider's own
-mailbox. The entire recipient check is a regular expression that the address
-contains an `@` and a dot.
-
-Two realistic failures: a crew member mistypes a hospital address on a tablet
-and a full clinical record goes to a stranger — a notifiable breach, faithfully
+Two realistic failures: a crew member mistypes a hospital address on a tablet and
+a full clinical record goes to a stranger — a notifiable breach, faithfully
 recorded in the audit log as a successful delivery. Or a back-office admin loops
-every case and mails the lot out. It is audited, which is worth something, but
-auditing is detection and this is the highest-consequence action in the product.
+every case and mails the lot out.
 
 **To close:** a per-provider facility list managed in Client Settings; the
-endpoint takes a facility ID rather than a free-text address, with a
-"other address" path that needs a second confirmation and a distinct audit
-action. Cheaper interim: a per-provider allowed-domain list and a daily cap.
+endpoint takes a facility ID rather than free text, with an "other address" path
+needing a second confirmation and a distinct audit action. Cheaper interim: a
+per-provider allowed-domain list and a daily cap.
 
-### B2. Permission checks pass when permissions are unset · **Hours**
+### Closed on 2026-08-03 — all verified against production
 
-`has_permission` returns `True` when a user's `permissions` column is `NULL`.
-That was a deliberate call, but `require_permission` is now the *only* guard on
-several routers, so any account with a `NULL` column holds every permission
-regardless of role — including rows created by scripts or migrations.
+| | | Evidence on production |
+|---|---|---|
+| **B2** | Permission checks no longer pass when permissions are unset | `permissions` NOT NULL, default `'[]'`; fail-open branch deleted |
+| **B3** | Idempotency keys scoped to an actor, reclaimable, purged | `scope` + `path` columns present; purge task registered |
+| **B4** | Both shared-password endpoints under the strict auth limit | `401 401 401 401 401 401 503 503` on `/api/crew/portal-unlock` |
+| **B5** | Audit log append-only in fact, and readable | trigger installed; `/api/audit-logs` 401 anonymous |
+| **B6** | No inline scripts in the CSP | `script-src 'self' https://maps.googleapis.com` |
+| **B7** | Encryption key rotatable, and fails loudly | MultiFernet; fingerprint `70f73a53f6e3` |
+| **B8** | Database certificate actually verified | `check_hostname=True`, `verify_mode=CERT_REQUIRED` |
+| **B9** | Secret scanning in CI | gitleaks clean across 303 commits |
 
-**To close:** one migration to populate `NULL` rows, make the column `NOT NULL`
-defaulting to `[]`, and drop the fail-open branch.
-
-### B3. Idempotency keys are chosen by the caller and shared across tenants · **A day**
-
-Three problems in one function on the scheme submission proxy:
-
-- **Cross-tenant replay** — the `Idempotency-Key` header is the primary key of a
-  global table with no tenant component. Send the same key as another tenant and
-  you are handed their cached scheme response, with no ownership check.
-- **Permanent lockout** — a row stuck `IN_PROGRESS` (worker killed mid-flight)
-  rejects that claim forever; nothing ages it out.
-- **Unbounded growth of patient data** — nothing ever deletes from the table, and
-  the rows contain scheme response bodies.
-
-**To close:** key on (actor, path, client key); reclaim stale in-progress rows
-after a timeout; add a purge to the scheduled jobs.
-
-### B4. Two password endpoints sit outside the strict rate limits · **Hours**
-
-`/api/crew/portal-unlock` and `/api/providers/{slug}/portal-login` both verify
-the shared company password that unlocks every tablet at an ambulance service,
-and both land in the ordinary API bucket rather than the strict auth one. The
-strict list is a set of exact strings, which structurally cannot express a
-parameterised path — which is why it was missed.
-
-Per-source throttling covers them today, but that degrades to per-worker memory
-when Redis is down, and the rate limiter fails open under the same condition.
-
-**To close:** make the match a prefix/pattern, add the matching nginx location,
-and decide deliberately whether the shared-password paths should fail *closed*
-when Redis is unavailable.
-
-### B5. The audit log is append-only in name only · **A day**
-
-The model calls it an immutable POPIA ledger. Nothing enforces that: the app's
-database role can update and delete it, there are 31 write sites and **zero read
-sites**, and it has no retention rule. It is the fastest-growing table in the
-system and the one you would need during a breach — and today it can only be
-read with `psql` on production.
-
-**To close:** a database trigger (or an append-only role) that refuses UPDATE and
-DELETE; an admin-gated read API with actor/entity/date filters; a retention
-decision recorded in writing by the responsible party.
-
-### B6. The content security policy allows inline scripts · **Hours**
-
-Checklist item 8 is marked done on the basis that a strict CSP compensates for
-storing tokens in `localStorage`. The policy contains `'unsafe-inline'` in
-`script-src`, which means it stops almost none of the injection cases that would
-read those tokens — so the compensating control is currently inert.
-
-**To close:** remove `'unsafe-inline'`; a Vite production build needs no inline
-scripts. Hash any bootstrap snippet that remains. One line and a smoke test.
-
-### B7. The encryption key has no version and cannot be rotated · **A day**
-
-Three related problems: a wrong key silently produces a valid cipher object
-rather than an error; decryption failures return "absent" rather than raising, so
-a mistyped key makes every patient ID, passport number and SMTP credential read
-as blank with no log line; and ciphertext carries no key id, so re-keying needs a
-bespoke one-shot script with no way to run two keys at once.
-
-If that key is ever disclosed, there is currently no remediation available.
-
-**To close:** log loudly when the configured key is not a valid Fernet key;
-distinguish "not encrypted" from "cannot decrypt" at call sites; prefix new
-tokens with a key id and accept a `MultiFernet` of current plus previous.
-
-### B8. The database connection is encrypted but the server is not verified · **Hours**
-
-`DB_SSL_MODE=require` under asyncpg performs no certificate or hostname
-validation. The boot guard proves the connection is encrypted, not that it
-terminates at your Azure database.
-
-**To close:** `verify-full` plus the DigiCert Global Root CA bundle.
-
-### B9. No secret scanning in CI · **Minutes**
-
-CI gates `pip-audit` and `npm audit`. There is no gitleaks step. This repository
-was public for two months with a plaintext super-admin password and database
-dumps in it — this targets a failure the project has actually had.
+Two notes worth keeping. **B8 was not what the audit said**: the code already
+built a verifying context, but production set `?ssl=require` in the connection
+URL instead of `DB_SSL_MODE`, and asyncpg's string form encrypts *without*
+checking the certificate — the boot guard accepted the weaker spelling. **B9's
+nine hits were all false positives**, verified by inspecting value shapes rather
+than printing them.
 
 ### Also tracked, lower priority
 
 - **Production Redis has no password.** Needs `REDIS_PASSWORD` *and* `REDIS_URL`
   changed in `.env.prod` in the same edit or the backend cannot authenticate.
   Mitigated: no published port, no on-disk persistence, and cached patient
-  records are now encrypted before they reach Redis.
-- **JWTs in `localStorage`.** The robust fix is httpOnly cookies, which is a real
-  refactor with CSRF implications across both auth systems. B6 is the interim.
+  records are encrypted before they reach Redis.
+- **JWTs in `localStorage`.** The robust fix is httpOnly cookies — a real refactor
+  with CSRF implications across both auth systems. B6 is no longer merely an
+  interim: with `'unsafe-inline'` gone, the compensating control actually works.
 - **The emailed PDF is client-supplied** and never compared to the stored record,
   so the audit trail proves a transmission happened and to whom, but not what it
   contained. Fixing it properly means rendering the PDF server-side.
@@ -241,9 +233,6 @@ dumps in it — this targets a failure the project has actually had.
 themselves; seven only report. Unattended repair is **off** and should stay off
 for about two weeks while you watch what it *would* have done.
 
-A full inventory of 36 detectable faults exists. The ten built are the ones that
-need nothing but the application itself.
-
 ### C1. A host-level agent · **A week**
 
 Roughly a third of the remaining remedies are "restart a container" or "reload
@@ -252,53 +241,117 @@ the Docker socket into the worker, is **not acceptable**: it grants root on a
 machine holding patient records to a container that runs OCR on
 attacker-supplied PDFs.
 
-The right shape is a small agent on the host that polls a job table for a fixed
+The right shape is a small agent on the host polling a job table for a fixed
 allowlist of commands. That unlocks the highest-value remaining probes:
 
-- **A worker attached to the broker but consuming nothing** — the silent
-  critical one. `/health` returns "healthy" with zero consumers, and every PRF
-  submitted meanwhile is heading for the failed queue.
-- **nginx serving 502 while the backend is healthy** — the cached-upstream trap;
-  last occurrence ran about four minutes.
+- **A worker attached to the broker but consuming nothing** — the silent critical
+  one. `/health` returns "healthy" with zero consumers, and every PRF submitted
+  meanwhile is heading for the failed queue.
+- **nginx serving 502 while the backend is healthy** — the cached-upstream trap.
 - **Scheduled jobs missing or drifted after a deploy.**
 
 ### C2. Beat liveness · **Hours**
 
 "Beat is fine" and "beat has been dead a week" currently produce identical
-evidence. A heartbeat task makes the difference observable and is a prerequisite
-for trusting several other checks.
+evidence.
 
 ### C3. Dead-letter queue and unregistered-task checks · **Hours**
 
 Every message in the dead-letter queue is a task that will never run and about
-which nothing else will ever tell you. The unregistered-task fault has already
-happened once in this system.
+which nothing else will ever tell you.
 
 ### C4. Turn on unattended repair · **A decision**
 
-After two weeks of observation, and only for the probes that pass every safety
-gate. Nothing that touches patient data will ever be in that set.
+After two weeks of observation, and only for probes that pass every safety gate.
+Nothing that touches patient data will ever be in that set.
 
 ---
 
 ## Section D — Scale and resilience
 
-### D1. Uploads live on a local Docker volume · **A week**
+### D1. Uploads live on a local Docker volume · **A week** · **OPEN**
 
-This is what prevents running more than one backend host. Moving to Azure Blob
-is the unlock for any horizontal scaling.
+This is what prevents running more than one backend host, and — see A3 — it is
+also the one category of application data that a VM loss actually destroys. It is
+the unlock for any horizontal scaling and the fix for the biggest data-loss risk
+at the same time.
 
-### D2. Load is modelled, not observed · **A week**
+### D2. Load · **MEASURED 2026-08-03** — no longer a projection
 
-Production has one active user and 82 patient report forms. The 105 providers and
-1500 crew figure is a projection. A load rehearsal against a copy would tell you
-where it actually bends.
+Harness in `loadtest/` + `docker-compose.loadtest.yml`: isolated stack, the
+production image, gunicorn with 4 workers pinned to the same 4 vCPU / 2 GB as the
+VM, seeded to **105 providers / 1,470 crew / 10,000 PRFs / 1 GB**.
+
+**Headline: 500 concurrent request streams → 188 req/s, zero errors**, autosave
+p50 76 ms, backend at 230% of a 400% CPU budget.
+
+**And the framing that matters more than the number.** The PRF runs *on the
+crew's device*. Crews do not hold a server session through a call — the form is
+local and syncs. 500 crew autosaving every ~25 s generate roughly **20 req/s**,
+not 188. **500 crew is comfortably within capacity**; it took four separate
+driver containers to even stress the server.
+
+Four cliffs, measured:
+
+| Finding | Measured | Why it matters |
+|---|---|---|
+| **Login capped at 15/min per client IP** | 200-crew storm → **75% rejected (429)**, p50 2.6 s | Crews on one base WiFi or carrier CGNAT present as one IP. **This is the one that will bite, at shift change.** |
+| **PRF create serialises per provider** | p50 254 ms, **p95 6.6 s** at 500 concurrent | A `SELECT … FOR UPDATE` on the provider row held for the whole transaction. Softened because crews create offline. Fix: a per-provider sequence rather than `max()+1` under a lock. |
+| **Search costs 59× what it should** | **146 ms vs 2.5 ms** with the blob clause removed, on a provider with 559 PRFs | `cast(form_data, Text).ilike` detoasts every record. At 5,000 PRFs/provider ≈ 1.3 s *per keystroke*, on a 400 ms debounce with no minimum term length. |
+| **Sync burst survives** | 500 devices flushing at once: create p50 9.4 s, **0.04% errors** | Latency degrades badly; nothing is lost. The correct failure mode for offline-first. |
+
+**Not bottlenecks:** CPU (52.5 of a possible 252 core-seconds, zero cgroup
+throttling), database locks (1 active connection, no lock waits), or connections
+(`max_connections` is 859).
+
+*Two ways this nearly produced confident nonsense, both caught by checking the
+server while the client complained. The first runs reported **148-second**
+responses while the backend sat at 0.5% CPU — that was Docker Desktop's Windows
+port proxy, not the platform. And the first seed built narratives by repeating one
+sentence, so compression squashed 31 KB rows to 1.5 KB on disk, **230× less I/O
+than production**, which averages 150 KB logical and 340 KB on disk per PRF. Real
+PRFs are mostly incompressible base64. The remaining test bed is still ~1.5×
+lighter than production, so the results above are mildly optimistic.*
 
 ### D3. Disk is not a near-term risk
 
-An earlier estimate suggested backups would outgrow the disk. Measured: the
-uploads archive is 456 KB and a database dump is 12 MB, so full seven-year
-retention is about **1.2 GB** against 106 GB free. Revisit when uploads grow.
+Measured: the uploads archive is 456 KB and a database dump is 12 MB, so full
+seven-year retention is about **1.2 GB** against 106 GB free.
+
+---
+
+## Section H — The claims path has no tests · **NEW, and the largest unexamined risk**
+
+Everything this month has been infrastructure, security and operations. The code
+that decides **whether a claim is valid and what it is worth** has no test file
+referencing it at all:
+
+| Module | Lines | Test files referencing it |
+|---|---|---|
+| `adjudication_engine.py` | 864 | **0** |
+| `edi_generator.py` | 495 | **0** |
+| `claims_pipeline.py` | 357 | **0** |
+| `ocr_extraction.py` | 743 | 2 |
+| `tariff_engine.py` | 1,501 | 2 |
+
+That is **1,716 lines on the money path with nothing exercising them.** A defect
+there does not crash anything and does not page anyone. It quietly under-bills a
+provider, or sends a scheme something wrong, and it surfaces at reconciliation —
+weeks later, in someone else's spreadsheet.
+
+Given that every component exercised for the first time today was broken, I would
+not assume this code is correct because it has not complained. It has never been
+asked a question it could fail.
+
+**Mitigation in place:** the tariff engine is disabled in both environments, so
+nothing is billing on it today. That is a reason this is not an emergency, not a
+reason it is fine.
+
+**To close:** `backend/golden_claims_replay.py` already replays real claims
+through the live pipeline and diffs five checkpoints. Point it at the adjudication
+path, add fault injection, and build out unit coverage from whatever it catches.
+Estimate: **a week**, and the highest-value week left in this document once A1 and
+A3 are done.
 
 ---
 
@@ -322,6 +375,11 @@ Two cross-border transfers are still live and are decisions only you can make:
 incident-scene GPS is sent to a geocoding service in Europe on every Mark Time,
 and crews dictating clinical narrative send audio to Google or Apple.
 
+One thing that got materially easier today: **B5 means breach scoping is now
+possible without a database client.** `/api/audit-logs/patient/{id}` answers "who
+has seen this patient's file" directly — which is the POPIA s22 question, asked
+the way it actually arrives, under a 72-hour clock.
+
 ---
 
 ## Section F — Things to buy
@@ -340,61 +398,72 @@ unlicensed code sets today.
 
 ## Section G — Deliberately not doing
 
-These are decisions, not omissions. Each one looks like an easy win and is not.
+These are decisions, not omissions. Each looks like an easy win and is not.
 
-- **Multi-factor authentication** — deferred by your decision. Worth knowing it
-  is the first control a scheme's officer asks about.
+- **Multi-factor authentication** — deferred by your decision. Worth knowing it is
+  the first control a scheme's officer asks about.
 - **Auto-applying migrations** — a migration rewrites the schema of a live
-  medical-records database, and several in this project rewrite rows. "The
-  numbers do not match" does not tell you whether to roll the schema forward or
-  the image back.
-- **Auto-running the encryption backfill** — if the process holds a wrong key
-  when it fires, it encrypts every remaining identifier under a key nobody has.
-  Unrecoverable.
+  medical-records database, and several in this project rewrite rows.
+- **Auto-running the encryption backfill** — if the process holds a wrong key when
+  it fires, it encrypts every remaining identifier under a key nobody has.
 - **Auto-replaying the dead-letter queue** — those payloads re-run the billing
-  pipeline. A message is in that queue precisely because something abnormal
-  happened to it.
-- **Auto-unlocking a locked account** — the attacker is the party causing the
-  lock, so an auto-unlocker is indistinguishable from having no lockout.
+  pipeline.
+- **Auto-unlocking a locked account** — the attacker is the party causing the lock.
 - **Trimming the audit log to save space** — it is the record of who opened which
-  patient's file. No correct automatic deletion exists.
-- **Forcing the crew app to reload after a deploy** — a tablet may be mid-form at
-  a roadside with a patient present.
+  patient's file.
+- **Forcing the crew app to reload after a deploy** — a tablet may be mid-form at a
+  roadside with a patient present.
 - **Mounting the Docker socket into a container** — see C1.
+- **Automatic `alembic downgrade` during a rollback** — new today. An unattended
+  schema downgrade of a database holding patient records is a worse failure than
+  the outage it would be fixing.
 
 ---
 
 ## Suggested sequence
 
 **This week**
-1. Alerting (A1) — highest value, lowest cost, needs one URL from you.
-2. Off-site backups (A3) and confirm the restore rehearsal (A4).
-3. Rollback image tags (A2).
-4. Secret scanning (B9) and the CSP fix (B6) — both quick.
+1. **Alerting (A1)** — highest value, lowest cost, needs one URL from you.
+2. **Off-site backups (A3)** — needs one value from you, and until it is set a VM
+   loss destroys every PRF attachment.
+3. **The login rate limit** (D2) — small change, and the difference between a
+   shift starting and a whole base locked out a minute at a time.
 
 **Next two weeks**
-5. Permission fail-open (B2) and the rate-limit path coverage (B4).
+4. **Tests for the claims path (H)** — the largest unexamined risk in the system.
+5. Start the facility allowlist design (B1) — a product change, not a patch.
 6. Watch the fault monitor; decide on unattended repair (C4).
-7. Start the facility allowlist design (B1) — it is a product change, not a patch.
-8. Get an attorney onto the operator agreements (Section E) in parallel.
+7. Get an attorney onto the operator agreements (Section E) in parallel.
 
 **The month after**
-9. Idempotency keys (B3), audit log read API and retention (B5).
-10. Encryption key versioning (B7), database certificate verification (B8).
+8. Uploads to Azure Blob (D1) — closes the attachment data-loss risk permanently
+   and unlocks horizontal scaling.
+9. Denormalise the PRF search columns (D2) and put a minimum term length in the UI.
+10. Per-provider PRF numbering sequence (D2).
 11. Host agent and the remaining probes (C1–C3).
-12. Decide on the single-VM question (A5).
+12. Rehearse `rebuild-vm.sh` on a throwaway VM, then decide A5 with a real number.
 
 ---
 
 ## One honest note on process
 
-Three times in the last two days a control was written correctly in one place and
-not carried to the second route into the same thing — including twice in work I
-had just finished and described as complete. The pattern is consistent enough to
-plan around: when a security control is added, the question to ask is not "does
-this work?" but "what is the *other* door into this, and does it have the same
-lock?"
+The previous edition of this document recorded that three times in two days a
+control was written correctly in one place and not carried to the second route
+into the same thing. That pattern held again today: the same wrong health probe
+existed in both the rollback script and CI.
 
-Two of the tests I wrote in that period also passed for the wrong reasons. Both
-are fixed, and both were found by deliberately breaking the code to check the
-test noticed. That step is worth keeping.
+Today added a sharper version of the same lesson. **Four separate pieces of
+tooling were exercised for the first time, and all four were broken** — the
+restore checker, the rollback script, and the load harness in two independent
+ways. Not one of those defects was visible by reading the code; every one of them
+appeared within seconds of the thing actually running.
+
+Two of those failures would have been worse than silence, because they came with
+a number attached: a restore check confidently reporting that finalised patient
+records had been altered in production, and a load test confidently reporting
+148-second response times for a server that was 99.5% idle. **A wrong measurement
+is more dangerous than no measurement.**
+
+So the question to ask of anything in this document marked "done" is not "does the
+code look right?" — it is "has it been run, and did anyone check the server while
+the client was complaining?"
