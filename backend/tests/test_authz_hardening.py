@@ -23,6 +23,7 @@ from app.utils.security import hash_password
 # ── Fixtures: one user per role we need to distinguish ──────────────────────
 
 _LOW_PRIV_EMAIL = "paramedic_authz_pytest@emsclaims.test"
+_ADMIN_EMAIL = "admin_authz_pytest@emsclaims.test"
 _SUPER_EMAIL = "superadmin_authz_pytest@emsclaims.test"
 _PASSWORD = "AuthzTest@2026!Strong"
 
@@ -61,6 +62,22 @@ async def low_priv_headers(client):
     """
     await _ensure_user(_LOW_PRIV_EMAIL, UserRole.PARAMEDIC)
     return await _login(client, _LOW_PRIV_EMAIL)
+
+
+@pytest_asyncio.fixture
+async def plain_admin_headers(client):
+    """An ADMIN, pinned to that role by the fixture itself.
+
+    Not the shared `auth_headers` seed admin: what role THAT account holds is a
+    property of the database the suite is pointed at, not of the test. On a
+    developer's dev DB it has been promoted to SUPER_ADMIN by the app lifespan,
+    which turned the deny-assertion below into a call that sailed past the guard
+    and into the route body — the 403 the test claimed to be proving had not
+    been proven on that machine for as long as the promotion had been in place.
+    A test that asserts a refusal has to own the principal being refused.
+    """
+    await _ensure_user(_ADMIN_EMAIL, UserRole.ADMIN)
+    return await _login(client, _ADMIN_EMAIL)
 
 
 @pytest_asyncio.fixture
@@ -231,15 +248,16 @@ async def test_delete_all_cases_denied_to_low_privilege_user(client, low_priv_he
 
 
 @pytest.mark.asyncio
-async def test_delete_all_cases_denied_to_plain_admin(client, auth_headers):
+async def test_delete_all_cases_denied_to_plain_admin(client, plain_admin_headers):
     """Deliberately SUPER_ADMIN-only, not ADMIN.
 
     NOTE: this test never asserts a successful wipe. Doing so would delete every
-    case in whatever database the suite is pointed at.
+    case in whatever database the suite is pointed at — so the allowed path is
+    proven in tests/test_delete_all_cases_ordering.py, which builds a database of
+    its own to be destroyed. Without that counterpart this assertion is only half
+    a guard: a route that 500s, or 403s, for EVERY caller passes it too.
     """
-    if auth_headers is None:
-        pytest.skip("seed admin unavailable")
-    resp = await client.delete("/api/cases/all", headers=auth_headers)
+    resp = await client.delete("/api/cases/all", headers=plain_admin_headers)
     assert resp.status_code == 403, (
         f"a plain ADMIN reached the wipe-everything route ({resp.status_code})"
     )

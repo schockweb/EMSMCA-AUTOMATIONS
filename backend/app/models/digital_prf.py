@@ -330,5 +330,12 @@ FOR EACH ROW EXECUTE FUNCTION ems_digital_prfs_search_text();
 for _ddl in (SEARCH_TEXT_BUILD_FN, SEARCH_TEXT_TRIGGER_FN,
              "DROP TRIGGER IF EXISTS trg_digital_prfs_search_text ON digital_prfs",
              SEARCH_TEXT_TRIGGER):
+    # `%` DOUBLED for the DDL construct only — see the identical note in
+    # app/models/audit_log.py. SQLAlchemy runs `statement % context` to fill in
+    # %(table)s, so the literal per-cent in the ciphertext guard above
+    # (v NOT LIKE 'gAAAAA%') is read as a format spec and create_all() raises
+    # before any table is made. The constants stay unescaped because migration
+    # d5b7e91a3c62 executes them as raw SQL and test_prf_search_text.py compares
+    # them verbatim.
     _event.listen(DigitalPRF.__table__, "after_create",
-                  _DDL(_ddl).execute_if(dialect="postgresql"))
+                  _DDL(_ddl.replace("%", "%%")).execute_if(dialect="postgresql"))

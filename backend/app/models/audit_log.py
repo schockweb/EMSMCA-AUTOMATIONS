@@ -114,5 +114,19 @@ FOR EACH ROW EXECUTE FUNCTION ems_audit_logs_append_only();
 for _ddl in (AUDIT_APPEND_ONLY_FN,
              "DROP TRIGGER IF EXISTS trg_audit_logs_append_only ON audit_logs",
              AUDIT_APPEND_ONLY_TRIGGER):
+    # `%` is DOUBLED for the DDL construct only. SQLAlchemy runs
+    # `statement % context` to substitute %(table)s and friends, so the literal
+    # per-cent in the RAISE EXCEPTION message above ("...: % is not permitted")
+    # is read as a format spec and create_all() dies with
+    # "TypeError: %i format: a real number is required, not dict" — not on the
+    # audit table alone, but on the WHOLE metadata, so a brand-new database
+    # could not be built at all: CI's fresh postgres and bootstrap_schema.py
+    # both raise before a single table is created. Existing databases never see
+    # it, because after_create does not fire for a table that is already there,
+    # which is why it survived the commit that added the trigger.
+    #
+    # The escaping is applied here rather than in the constants because those
+    # are executed as raw SQL by migration d5b7e91a3c62 and compared verbatim by
+    # test_audit_log_integrity.py — doubling them at the source would break both.
     _event.listen(AuditLog.__table__, "after_create",
-                  _DDL(_ddl).execute_if(dialect="postgresql"))
+                  _DDL(_ddl.replace("%", "%%")).execute_if(dialect="postgresql"))

@@ -372,13 +372,16 @@ async def delete_all_cases(
     could empty a client's entire claim history in one request.
     """
     import os
-    from sqlalchemy import delete
+    from sqlalchemy import delete, update
     from app.models.document import Document
     from app.models.claim import Claim
     from app.models.claim_line import ClaimLine
     from app.models.rfi import RFI
     from app.models.auth_request import SchemeAuthRequest
     from app.models.case import Case
+    from app.models.digital_prf import DigitalPRF
+    from app.models.edi_submission import EDISubmission
+    from app.models.era import ERA
     from app.utils.storage import get_full_path
 
     # First determine which cases we are deleting
@@ -416,10 +419,26 @@ async def delete_all_cases(
 
     # Wipe tables (order matters for FKs) scoped to these case IDs
     # Process in chunks of 500 to avoid PostgreSQL's 32,767 parameter limit (TooManyParametersError)
+    #
+    # The order below is the FULL dependant set of cases/claims/documents, not
+    # the four tables this route happened to know about. It listed rfis,
+    # scheme_auth_requests, claim_lines and documents, and every OTHER referencing
+    # table 500'd the request on a ForeignKeyViolationError — digital_prfs on both
+    # of its FKs (document_id was the one that fired in practice, because a
+    # submitted PRF always has a document), plus eras, edi_submissions and claims'
+    # own amended_by_id self-reference. The route was therefore unusable on any
+    # instance carrying real data, which is also why it went unnoticed: it only
+    # ever ran on databases with nothing in them.
+    #
+    #   cases    ← documents, claims, scheme_auth_requests, digital_prfs
+    #   claims   ← claim_lines, rfis, scheme_auth_requests, edi_submissions,
+    #              eras, claims.amended_by_id
+    #   documents← digital_prfs
+    #   edi_submissions ← eras
     chunk_size = 500
     for i in range(0, len(case_ids), chunk_size):
         chunk_cases = case_ids[i:i + chunk_size]
-        
+
         # Get all claim IDs tied to these chunked cases
         claims_result = await db.execute(select(Claim.id).where(Claim.case_id.in_(chunk_cases)))
         chunk_claims = claims_result.scalars().all()
@@ -430,10 +449,55 @@ async def delete_all_cases(
                 await db.execute(delete(RFI).where(RFI.claim_id.in_(sub_claims)))
                 await db.execute(delete(SchemeAuthRequest).where(SchemeAuthRequest.claim_id.in_(sub_claims)))
                 await db.execute(delete(ClaimLine).where(ClaimLine.claim_id.in_(sub_claims)))
+                # ERAs before EDI submissions — eras.edi_submission_id points at
+                # the submission. An ERA can hang off a submission whose claim
+                # landed in a different sub-chunk, so it is matched on both FKs.
+                await db.execute(delete(ERA).where(or_(
+                    ERA.claim_id.in_(sub_claims),
+                    ERA.edi_submission_id.in_(
+                        select(EDISubmission.id).where(EDISubmission.claim_id.in_(sub_claims))
+                    ),
+                )))
+                await db.execute(delete(EDISubmission).where(EDISubmission.claim_id.in_(sub_claims)))
+                # A voided claim's amended_by_id names its replacement. The
+                # referencing row can sit in another sub-chunk, or — when `queue`
+                # narrows this wipe — on a case that survives it, so the pointer
+                # is cleared wherever it lives rather than assumed to be doomed.
+                await db.execute(
+                    update(Claim)
+                    .where(Claim.amended_by_id.in_(sub_claims))
+                    .values(amended_by_id=None)
+                )
                 await db.execute(delete(Claim).where(Claim.id.in_(sub_claims)))
 
         # Scheme Auth requests can also be tied to case directly
         await db.execute(delete(SchemeAuthRequest).where(SchemeAuthRequest.case_id.in_(chunk_cases)))
+
+        # Sever the digital PRF's two links before the rows they point at go.
+        # The PRF row itself is deliberately KEPT: it is the crew's clinical
+        # record of the call, captured at the patient's side and retained for
+        # seven years, not a billing artefact. This route wipes the billing
+        # pipeline; destroying the source record with it would be unrecoverable
+        # and would put the retention obligation in breach. Same treatment the
+        # single-case DELETE /api/cases/{id} already applies.
+        #
+        # Two separate statements, each clearing only the column about to
+        # dangle: a PRF matched by document_id may belong to a case that is NOT
+        # in this wipe (queue-scoped runs), and blanking its case_id would
+        # silently orphan a record nobody asked to touch.
+        await db.execute(
+            update(DigitalPRF)
+            .where(DigitalPRF.document_id.in_(
+                select(Document.id).where(Document.case_id.in_(chunk_cases))
+            ))
+            .values(document_id=None)
+        )
+        await db.execute(
+            update(DigitalPRF)
+            .where(DigitalPRF.case_id.in_(chunk_cases))
+            .values(case_id=None)
+        )
+
         await db.execute(delete(Document).where(Document.case_id.in_(chunk_cases)))
         await db.execute(delete(Case).where(Case.id.in_(chunk_cases)))
 
