@@ -106,13 +106,26 @@ async def test_formatting_does_not_change_who_is_found(client, auth_headers, sub
     The protection lives in normalise_id, which id_hash calls internally — so
     this stays green if the route's own (redundant) normalise call is removed,
     and goes red the moment the real one is. Verified by mutating both.
+
+    The identifier is OUR subject's, spaced into the shape an SA ID is printed
+    in. It used to be the literal "900101 5800 083", which this module never
+    creates — `_ID` is randomised per run precisely so the subject is ours. The
+    test therefore passed only when test_by_case_privilege.py had left its own
+    9001015800083 record lying in a shared database, and reported `found: false`
+    on the fresh database CI builds. It was measuring the leftovers of another
+    module, not normalisation.
     """
+    spaced = f"{_ID[:6]} {_ID[6:10]} {_ID[10:]}"
+    assert spaced != _ID and spaced.replace(" ", "") == _ID, "the fixture ID is not 13 digits"
+
     res = await client.post(
         "/api/data-rights/subject-access",
-        json={"id_number": "900101 5800 083"}, headers=auth_headers,
+        json={"id_number": spaced}, headers=auth_headers,
     )
     assert res.status_code == 200
-    assert res.json()["found"] is True
+    assert res.json()["found"] is True, (
+        f"a spaced identifier ({spaced}) found nothing, unspaced finds the subject"
+    )
 
 
 async def test_a_subject_access_request_is_logged_as_a_transmit(
@@ -144,7 +157,21 @@ async def test_a_provider_can_get_its_own_data_back(client, auth_headers, subjec
     assert res.status_code == 200, res.text[:200]
     body = res.json()
     assert body["record_counts"]["patient_report_forms"] >= 2
-    assert body["patient_report_forms"][0]["clinical_record"], "records came back empty"
+
+    # OUR records, not [0]. The export orders by prf_number ascending and this
+    # provider is shared with every other module in the suite, so [0] is
+    # whichever PRF happens to hold the lowest number — in a fresh database that
+    # is an empty draft another module created through the API, and asserting on
+    # its clinical_record checked nothing about this export. Which module wins
+    # the low number decides whether the test passes.
+    mine = [p for p in body["patient_report_forms"]
+            if (p["case_number"] or "").startswith(_MARKER)]
+    assert len(mine) >= 2, f"the fixture's own PRFs are missing from the export ({len(mine)})"
+    for prf in mine:
+        assert prf["clinical_record"], f"{prf['case_number']} came back empty"
+        assert prf["clinical_record"].get("chief_complaint") == "chest pain", (
+            "the export returned a record without the clinical content the fixture wrote"
+        )
 
 
 async def test_the_retention_policy_is_reported_not_just_documented(client, auth_headers):

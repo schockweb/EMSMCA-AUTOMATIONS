@@ -203,7 +203,7 @@ async def _ensure_schema():
 
     from sqlalchemy import select
     from app.database import Base
-    from app.models.user import User, UserRole
+    from app.models.user import User, UserRole, ALL_PERMISSIONS
     from app.utils.security import hash_password
 
     # app.main is already imported above, so every model is registered on Base.
@@ -212,6 +212,30 @@ async def _ensure_schema():
 
     # Seed the admin the auth fixtures log in as. Without it every
     # authenticated test silently skips, which looks like success.
+    #
+    # PERMISSIONS ARE SET EXPLICITLY, and re-set on every session.
+    # -----------------------------------------------------------
+    # `users.permissions` defaults to `[]` — deliberately, because NULL used to
+    # mean "grant everything" and that made any fixture-created row omnipotent.
+    # The model says the safe default "only fires for something that bypassed
+    # app/api/users.py"; this seed IS that something. So the account this suite
+    # calls "the admin" was created with NO permissions at all, and every route
+    # behind require_permission answered it with 403.
+    #
+    # That went unseen because it is invisible on a database the application has
+    # booted against: app.main's lifespan promotes this address to SUPER_ADMIN,
+    # and SUPER_ADMIN bypasses has_permission outright. So the suite passed on
+    # every developer's machine and failed 18 tests on the fresh database CI
+    # creates — the tests were not wrong, the principal was.
+    #
+    # ALL_PERMISSIONS is the same grant POST /api/users gives an admin created
+    # without an explicit list, so this is the product's own idea of a full
+    # back-office account rather than a list invented here that would drift.
+    #
+    # The ROLE is deliberately left alone. Pinning it to ADMIN would demote a
+    # developer's SUPER_ADMIN seed account as a side effect of running the
+    # tests; a fixture that needs a specific role should pin its own principal,
+    # the way tests/test_authz_hardening.py does.
     async with _TestSession() as db:
         existing = (await db.execute(
             select(User).where(User.email == "admin@emsclaims.co.za")
@@ -223,7 +247,11 @@ async def _ensure_schema():
                 full_name="Test Administrator",
                 role=UserRole.ADMIN,
                 bhf_practice_number="0000000",
+                permissions=list(ALL_PERMISSIONS),
             ))
+            await db.commit()
+        elif set(existing.permissions or []) != set(ALL_PERMISSIONS):
+            existing.permissions = list(ALL_PERMISSIONS)
             await db.commit()
 
     _SCHEMA_READY = True
