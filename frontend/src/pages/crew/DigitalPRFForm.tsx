@@ -6977,7 +6977,7 @@ export default function DigitalPRFForm() {
       {/* ── RHT flow ── */}
       <FadeIn show={fd.call_type === 'RHT'} delay={150}>
         <div style={{ marginBottom: 14 }}>
-          <Lbl t="Call Out Fee" />
+          <Lbl t="Call-Out Fee Basis" />
           <div
             onClick={() => setRhtCallOutFeeOpen(true)}
             style={{
@@ -9752,7 +9752,7 @@ export default function DigitalPRFForm() {
           const dispatch = [
             v('call_type', 'Call Type'), v('transfer_subtype', 'Transfer Subtype'),
             v('preauth_number', 'Pre-Auth Number'), v('med_aid_quoted_amount', 'Quoted Amount'),
-            v('rht_call_out_fee', 'RHT Call-Out Fee'),
+            v('rht_call_out_fee', 'RHT Call-Out Fee Basis'),
           ].filter(Boolean) as { label: string; value: string }[];
           if (timestamps.time_dispatched) dispatch.push({ label: 'Dispatched', value: timestamps.time_dispatched });
           if (dispatch.length) card2Sections.push({ title: 'Dispatch & Mobilisation', items: dispatch });
@@ -10933,7 +10933,7 @@ export default function DigitalPRFForm() {
 
         <Modal open={rhtCallOutFeeOpen} onClose={() => setRhtCallOutFeeOpen(false)}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-            <div style={{ fontSize: '1.2rem', fontWeight: 900, color: S900, letterSpacing: '-0.02em' }}>Call Out Fee</div>
+            <div style={{ fontSize: '1.2rem', fontWeight: 900, color: S900, letterSpacing: '-0.02em' }}>Call-Out Fee Basis</div>
             <button type="button" onClick={() => setRhtCallOutFeeOpen(false)} style={{ width: 32, height: 32, borderRadius: 16, border: 'none', background: S200, color: S600, fontSize: '1.2rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', touchAction: 'manipulation' }}>×</button>
           </div>
           <div style={{ overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 10 }}>

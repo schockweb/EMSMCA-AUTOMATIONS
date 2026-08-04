@@ -1734,7 +1734,17 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
             )}
             <FieldRow label="Date" value={fmtDate(ts.time_call_received || prf.submitted_at)} />
             <FieldRow label="Case No" value={prf.case_number} />
-            {fd.rht_call_out_fee && <FieldRow label="Call-Out Fee" value={fd.rht_call_out_fee} />}
+            {/* "Basis", because the value is a category — Standard, After
+                Hours, No Patient Loaded, Refusal Of Treatment — and not an
+                amount. Printed under a bare "Call-Out Fee" heading, "Refusal Of
+                Treatment" reads as a charge description on a document a scheme
+                assesses.
+
+                Deliberately left on the default label width: every other row in
+                this stack uses it, and widening one would step the label column
+                out of line. The longer label wraps to two lines, which the
+                values in this block already do. */}
+            {fd.rht_call_out_fee && <FieldRow label="Call-Out Fee Basis" value={fd.rht_call_out_fee} />}
             {/* Assessment level + Billing Type. PVT shows its payment method
                 too ("PVT — Cash") so cash settlements are visible at a glance. */}
             {fd.call_type !== 'DOD' && <FieldRow label="Assessment"   value={fd.assessment_level} />}
