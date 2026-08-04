@@ -36,18 +36,67 @@ Usage
 from __future__ import annotations
 import json
 import logging
+import time
 from typing import Any, Optional
 
 logger = logging.getLogger("ems.cache")
 
-# ── Redis client (module-level singleton) ──────────────────────────────────
+# ── Redis client (module-level singleton) + circuit breaker ─────────────────
 # Lazily initialised on first use so import doesn't fail if Redis is down.
+#
+# THE BROWNOUT THIS BREAKER FIXES
+# -------------------------------
+# _get_redis() used to cache the client and NEVER re-ping. When Redis went down
+# the cached client was handed back on every call, and each operation then blocked
+# for the full socket_timeout (2s) before raising — so during a Redis outage every
+# rate-limited request paid 2s × (number of Redis ops), turning a cache outage into
+# an API-wide brownout (measured: ~3s per login with Redis stopped).
+#
+# The breaker: the first consumer whose op fails calls note_redis_failure(), which
+# drops the client and opens the breaker for a short cooldown. While open,
+# _get_redis() returns None IMMEDIATELY — so the rate limiter passes through
+# (its deliberate fail-open), login_throttle uses its in-memory fallback, and the
+# caches skip, all without blocking. After the cooldown one call re-probes; on
+# success the breaker closes. Fail-open policy is unchanged — only the 2s stall is.
 _redis: Any = None
+_redis_down_until: float = 0.0
+_REDIS_BREAKER_COOLDOWN = 10.0  # seconds the breaker stays open before re-probing
+
+
+def note_redis_failure() -> None:
+    """Trip the breaker after a live Redis operation failed on a hot path.
+
+    Called from the Redis except-handlers in this module, the rate-limit
+    middleware and login_throttle. Idempotent and cheap.
+    """
+    global _redis, _redis_down_until
+    _redis = None
+    _redis_down_until = time.monotonic() + _REDIS_BREAKER_COOLDOWN
+
+
+def _maybe_trip(exc: Exception) -> None:
+    """Trip the breaker only for genuine Redis connectivity errors.
+
+    Handlers in this module wrap Redis ops AND (de)serialisation, so a JSON error
+    after a successful GET must not disable Redis — only ConnectionError/TimeoutError
+    and their kin (all RedisError subclasses) should.
+    """
+    try:
+        from redis.exceptions import RedisError
+    except Exception:
+        RedisError = ()  # type: ignore[assignment]
+    if isinstance(exc, RedisError):
+        note_redis_failure()
 
 
 async def _get_redis():
-    """Return the shared async Redis client, creating it on first call."""
-    global _redis
+    """Return the shared async Redis client, or None when the breaker is open."""
+    global _redis, _redis_down_until
+
+    # Breaker open — a recent op failed; don't pay the socket timeout again yet.
+    if _redis_down_until and time.monotonic() < _redis_down_until:
+        return None
+
     if _redis is not None:
         return _redis
 
@@ -59,19 +108,22 @@ async def _get_redis():
 
     try:
         import redis.asyncio as aioredis
-        _redis = aioredis.from_url(
+        client = aioredis.from_url(
             settings.REDIS_URL,
             encoding="utf-8",
             decode_responses=True,
             socket_connect_timeout=2,
             socket_timeout=2,
         )
-        # Ping to verify connection on startup
-        await _redis.ping()
+        # Ping to verify connection before adopting the client.
+        await client.ping()
+        _redis = client
+        _redis_down_until = 0.0  # close the breaker
         logger.info("Redis cache connected: %s", settings.REDIS_URL)
     except Exception as exc:
         logger.warning("Redis unavailable — caching disabled: %s", exc)
         _redis = None
+        _redis_down_until = time.monotonic() + _REDIS_BREAKER_COOLDOWN  # open the breaker
 
     return _redis
 
@@ -97,6 +149,7 @@ async def get_cache(key: str) -> Optional[dict]:
             return json.loads(plain)
         return json.loads(raw)
     except Exception as exc:
+        _maybe_trip(exc)
         logger.debug("Cache GET error for key=%s: %s", key, exc)
         return None
 
@@ -147,6 +200,7 @@ async def set_cache(key: str, value: dict, ttl: int = 60, sensitive: bool = Fals
                 return
         await r.set(key, payload, ex=ttl)
     except Exception as exc:
+        _maybe_trip(exc)
         logger.debug("Cache SET error for key=%s: %s", key, exc)
 
 
@@ -158,6 +212,7 @@ async def delete_cache(key: str) -> None:
             return
         await r.delete(key)
     except Exception as exc:
+        _maybe_trip(exc)
         logger.debug("Cache DELETE error for key=%s: %s", key, exc)
 
 
@@ -212,6 +267,7 @@ async def delete_cache_pattern(pattern: str) -> int:
             deleted += await _unlink_batch(r, batch)
         return deleted
     except Exception as exc:
+        _maybe_trip(exc)
         logger.debug("Cache DELETE pattern error for pattern=%s: %s", pattern, exc)
         return 0
 

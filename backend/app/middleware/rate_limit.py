@@ -203,7 +203,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
             return count > limit, int(count)
         except Exception as exc:
-            # Redis error — fail-open (Nginx is the hard edge)
+            # Redis error — fail-open (Nginx is the hard edge). Trip the breaker
+            # so the NEXT request skips Redis entirely instead of each one paying
+            # the 2s socket timeout (a Redis outage otherwise browns out the API).
+            from app.cache import note_redis_failure
+            note_redis_failure()
             logger.warning("Rate limit Redis error for key=%s: %s", key, exc)
             return False, 0
 
@@ -272,6 +276,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             try:
                 failures = int(await redis_client.get(fail_key) or 0)
             except Exception:
+                # First op to hit a dead Redis: trip the breaker and drop the
+                # client so the rest of THIS request skips Redis too (else the
+                # login pays the socket timeout again on _check_limit).
+                from app.cache import note_redis_failure
+                note_redis_failure()
+                redis_client = None
                 failures = 0
             if failures >= self.auth_limit:
                 retry_after = self.window

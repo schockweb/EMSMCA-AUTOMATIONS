@@ -89,6 +89,8 @@ async def is_source_blocked(scope: str, identity: str, ip: str) -> bool:
             raw = await r.get(_key(scope, identity, ip))
             return raw is not None and int(raw) >= MAX_SOURCE_FAILURES
         except Exception as exc:
+            from app.cache import note_redis_failure
+            note_redis_failure()
             logger.debug("throttle read failed, falling back to memory: %s", exc)
 
     now = time.time()
@@ -110,6 +112,8 @@ async def register_source_failure(scope: str, identity: str, ip: str) -> int:
                 await r.expire(key, BLOCK_SECONDS)
             return int(count)
         except Exception as exc:
+            from app.cache import note_redis_failure
+            note_redis_failure()
             logger.debug("throttle write failed, falling back to memory: %s", exc)
 
     now = time.time()
