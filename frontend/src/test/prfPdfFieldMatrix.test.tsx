@@ -31,7 +31,8 @@
  *     RHT and DOD (`noTransport` in PRFView: the patient was never conveyed).
  *   • patient bucket    — the Patient Information panel, replaced on a DOD by
  *     the deceased's particulars in the Declaration of Death block.
- *   • clinical bucket   — page 2, omitted entirely for a DOD.
+ *   • clinical bucket   — page 2, omitted entirely for a DOD and for an RHT
+ *     (a refusal has no clinical content; page 2 is the watermark alone).
  *
  * Each scenario uses unique sentinel values so a missing field is unambiguous:
  * the failing assertion prints the exact value that dropped off the PDF.
@@ -443,7 +444,13 @@ function buildPrf(callType: string, billingType: string) {
     ...common.always,
     ...(isDoD ? [] : common.patient),
     ...(noTransport ? [] : common.transport),
-    ...(isDoD ? [] : common.clinical),
+    // The clinical sheet is omitted for a Declaration of Death AND for a
+    // refusal. On a refusal nothing clinical exists — the patient declined
+    // before any observation or intervention was made — so page 2 is the
+    // "Patient Refused Treatment" watermark and nothing else. Printing the
+    // grid produced section headings over empty rows, which reads as an
+    // unfinished form rather than a completed refusal.
+    ...(isDoD || noTransport ? [] : common.clinical),
     ...call.visible,
     ...billing.visible,
   ];
@@ -847,6 +854,56 @@ describe('RHT — the refusal reaches the printed record', () => {
   // refusal marks left the "Signatures" band sitting above white space; the
   // 415-test suite passed straight through it, because every existing
   // assertion asked what IS on the page and none asked what is on it POINTLESSLY.
+  // ── Layout: a refusal is not a billing document ─────────────────────────
+
+  it('does not print Terms and Conditions on a refusal', async () => {
+    await renderRefusal();
+    // The digital PRF never presents these clauses for a refusal, so nobody
+    // agreed to them — and they open with "I acknowledge that the treatment
+    // and/or transportation noted on this document was received by the patient"
+    // and "I accept full responsibility for all payments", on the one record
+    // whose entire content is that treatment was DECLINED.
+    expect(screen.queryAllByText('Terms and Conditions').length,
+      'the billing/indemnity clauses print on a refusal'
+    ).toBe(0);
+    expect(screen.queryAllByText((c) => c.includes('was received by the patient'),
+      { exact: false }).length,
+      'a clause asserting treatment was received prints on a refusal'
+    ).toBe(0);
+  });
+
+  it('states the refusal in the patient and billing blocks', async () => {
+    await renderRefusal();
+    // Both blocks are otherwise near-empty on a refusal, and an empty block
+    // reads exactly like a call where the crew captured nothing. Twice: once
+    // under Patient Information, once under Billing Information.
+    const notes = screen.queryAllByText('Patient refused treatment', { exact: false });
+    expect(notes.length,
+      'the refusal is not stated on the face of the patient / billing blocks'
+    ).toBeGreaterThanOrEqual(2);
+  });
+
+  it('still prints the payer details, because a call-out fee is billable', async () => {
+    const built = await renderRefusal();
+    // "Refusal Of Treatment" is one of the selectable call-out fee bases, so
+    // the scheme and member number are what that fee is claimed against.
+    // Replacing the payer grid with a refusal notice was the first attempt and
+    // would have stripped the payer from the call type most likely to be queried.
+    expect(screen.queryAllByText('Billing Information').length).toBeGreaterThan(0);
+    expect(built).toBeTruthy();
+  });
+
+  it('keeps a next-of-kin signature that was actually captured', async () => {
+    // The crew form presents Terms & Conditions for every call type except
+    // RESUS, so a next-of-kin mark CAN exist on a refusal. Dropping the clauses
+    // must not drop the signature with them — a captured signature that never
+    // reaches the PDF is the exact defect this whole block was rewritten to fix.
+    await renderRefusal();
+    expect(screen.queryAllByText('Next of Kin').length,
+      'a captured next-of-kin signature vanished with the T&C clauses'
+    ).toBeGreaterThan(0);
+  });
+
   it('does not print an empty Signatures heading', async () => {
     const built = await renderRefusal();
     // The shared fixture carries a next-of-kin signature, which legitimately

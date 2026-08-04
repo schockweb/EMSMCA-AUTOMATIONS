@@ -257,6 +257,32 @@ const Chk = ({ label, checked, color }: { label: string; checked: boolean; color
 // (no CSS gradients) so html2canvas capture and browser print render
 // identically; overflow:hidden clips to whole lines (tall gaps show more
 // lines, short gaps fewer, never a half line).
+// Printed in the Patient and Billing blocks when the patient refused.
+//
+// Both blocks are otherwise near-empty on a refusal — no transport happened and
+// there is nothing to bill — and an empty block on this form is ambiguous in the
+// worst way: it looks exactly like a call where the crew captured nothing. The
+// distinction between "nothing was recorded" and "the patient declined" is the
+// entire point of the document, so each block says which it is.
+const RefusedNote = ({ detail }: { detail?: string }) => (
+  <div style={{
+    padding: '7px 9px', borderTop: `1px solid ${LN}`,
+    background: SOFT_BG, textAlign: 'center',
+  }}>
+    <div style={{
+      fontSize: '0.63rem', fontWeight: 900, color: GREEN_DK,
+      letterSpacing: '0.04em', textTransform: 'uppercase',
+    }}>
+      Patient refused treatment
+    </div>
+    {detail && (
+      <div style={{ fontSize: '0.55rem', color: MUT, marginTop: 3, lineHeight: 1.4 }}>
+        {detail}
+      </div>
+    )}
+  </div>
+);
+
 const FillLines = ({ minHeight = 0 }: { minHeight?: number }) => (
   // The line stack is absolutely positioned so it contributes ZERO intrinsic
   // height — the container only ever absorbs the column's genuine leftover
@@ -1135,6 +1161,16 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
   // transported: a Declaration of Death (deceased at scene) or an RHT
   // (Refused Hospital Transport) — so those two rows are omitted for both.
   const noTransport = fd.call_type === 'DOD' || fd.call_type === 'RHT';
+
+  // A refusal, however it was reached.
+  //
+  // NOT just `call_type === 'RHT'`: the crew can tap "Patient Refuses Treatment"
+  // on a call that was dispatched as a PRIMARY, which is how most refusals
+  // actually happen — nobody is dispatched to a refusal. Keying the printed
+  // layout off the call type alone would give a refused PRIMARY the full
+  // billing-and-debtor layout with the refusal squeezed into a quarter of the
+  // page, which is the arrangement this change exists to remove.
+  const refused = fd.call_type === 'RHT' || !!fd.patient_refused_treatment;
   const timeRows = [
     { label: 'Call Disp',           t: 'time_dispatched',     k: 'km_dispatched'     },
     { label: 'Scene',               t: 'time_on_scene',       k: 'km_on_scene'       },
@@ -1980,15 +2016,37 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
           </div>
         )}
         
+        {/* On a refusal the four columns collapse to two, and the payer columns
+            stack down the left.
+
+            The refusal declaration, the practitioner's capacity checklist, the
+            patient's stated reason and two signatures were being rendered into
+            a quarter-width column, while three columns carried Patient, Debtor
+            and Billing — of which Debtor and Billing are almost entirely blank,
+            because nobody was transported and there is nothing to bill. The
+            document's most important block had the least room on the page.
+
+            Placed with CSS rather than by reordering the JSX: these four are
+            long, deeply nested siblings, and moving them physically to change
+            their visual order is a large edit with nothing to gain. Grid
+            placement expresses the same result in one property each. */}
         <div style={{
-          display: 'grid', gridTemplateColumns: (fd.call_type === 'DOD' && fd.med_aid_dec_death) ? '1fr 1fr' : '1.64fr 1.36fr 1.8fr 1.6fr',
+          display: 'grid',
+          gridTemplateColumns: refused
+            ? '1.5fr 2.7fr'
+            : (fd.call_type === 'DOD' && fd.med_aid_dec_death) ? '1fr 1fr' : '1.64fr 1.36fr 1.8fr 1.6fr',
+          // auto/auto/1fr: Patient and Billing take only the height they need,
+          // Debtor absorbs the remainder so the left column still reaches the
+          // bottom rule and the page does not end in a ragged edge.
+          ...(refused ? { gridTemplateRows: 'auto auto 1fr' } : {}),
           borderTop: `2px solid ${LN}`, flex: 1, minHeight: 0,
         }}>
           {/* Patient Information — only fields the crew actually captured are
               shown; blank rows are omitted (no column of "—"). DOB prints
               dd/mm/yyyy. */}
           {!(fd.call_type === 'DOD' && fd.med_aid_dec_death) && (
-          <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
+          <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column',
+                        ...(refused ? { gridColumn: 1, gridRow: 1 } : {}) }}>
             <SectionHead label="Patient Information" />
             {(([
               ['Gender',        fd.gender],
@@ -2042,12 +2100,22 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
                 </>
               );
             })()}
+            {/* Stated on the face of the patient block, not only in the refusal
+                panel. Anyone scanning this form for "what happened to this
+                patient" reads the left column first, and until now it ended in
+                blank ruled lines that look identical to a call where the crew
+                simply captured nothing. */}
+            {refused && <RefusedNote />}
             <FillLines />
           </div>
           )}
 
-          {/* Debtor Information — grouped here alongside Patient + Medical Aid. */}
-          <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
+          {/* Debtor Information — grouped here alongside Patient + Medical Aid.
+              On a refusal it sits at the bottom of the left column, below
+              Billing: there is no debtor when nothing was provided, so it is
+              the least useful block on the page and takes the leftover height. */}
+          <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column',
+                        ...(refused ? { gridColumn: 1, gridRow: 3, borderTop: `1px solid ${LN}` } : {}) }}>
             <SectionHead label="Debtor Information" />
             {debtorSameAsPatient ? (
               <div style={{
@@ -2103,10 +2171,23 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
               so no payer block is captured or shown. The Handover Signature +
               Hospital Sticker below still render — they are handover artefacts,
               not billing. */}
-          <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
+          <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column',
+                        ...(refused ? { gridColumn: 1, gridRow: 2, borderTop: `1px solid ${LN}` } : {}) }}>
             {fd.call_type !== 'COURTESY' && (
               <>
             <SectionHead label="Billing Information" />
+            {/* The refusal is stated at the TOP of the billing block, above the
+                payer rows — not instead of them.
+
+                Replacing the payer grid was the first attempt and it was wrong:
+                a refusal is still billable. "Refusal Of Treatment" is one of the
+                call-out fee bases the crew can select, so the scheme, member
+                number and authorisation are exactly what the call-out fee is
+                claimed against. Dropping them would have removed the payer
+                details from the one call type most likely to be queried. */}
+            {refused && (
+              <RefusedNote detail="No treatment or transport was provided. Any charge is limited to the call-out fee shown in the call details above." />
+            )}
             {(billingType === 'WCA / IOD' || (fd.call_type || '').toUpperCase() === 'WCA_IOD') ? (
               <>
                 <FieldRow label="Reference"    value={fd.compensation_reference} />
@@ -2259,7 +2340,8 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
               Information, matching the JEMS paper form. This column always
               renders so the T&C are on every PRF. */}
           {!(fd.call_type === 'DOD' && fd.med_aid_dec_death) && (
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
+          <div style={{ display: 'flex', flexDirection: 'column',
+                        ...(refused ? { gridColumn: 2, gridRow: '1 / -1' } : {}) }}>
             {/* "Channel Detail" section removed per request. The return-trip
                 times are retained below for inter-facility transfers. */}
             {returnTripHasContent && (
@@ -2359,8 +2441,19 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
             )}
 
             {/* Terms & Conditions (page-1 right column, like the paper form) */}
+            {/* Terms and Conditions are omitted on a refusal.
+
+                The digital PRF never presents them for an RHT, so nobody has
+                agreed to them — and printing them anyway put clauses beginning
+                "I acknowledge that the treatment and/or transportation noted on
+                this document was received by the patient" and "I accept full
+                responsibility for all payments" onto the one record whose whole
+                content is that treatment was DECLINED. Unsigned or not, a
+                scheme or a court reads what is on the page. */}
             {fd.call_type !== 'DOD' && (
               <>
+                {!refused && (
+                <>
                 <SectionHead label="Terms and Conditions" />
                 {(() => {
                   const company = prov?.name || 'the Service Provider';
@@ -2385,6 +2478,19 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
                     </div>
                   );
                 })()}
+                </>
+                )}
+                {/* The signature block still runs on a refusal, even though the
+                    clauses above do not.
+
+                    The crew form presents Terms & Conditions for every call type
+                    except RESUS — an RHT included — so a next-of-kin signature
+                    CAN be captured on a refusal. Suppressing the whole section
+                    dropped it from the printed record: a captured signature that
+                    does not reach the PDF is precisely the defect this block was
+                    rewritten to fix, and repeating it while fixing the layout
+                    would be a poor trade. It self-hides when nothing was
+                    captured, so a refusal with no next-of-kin prints nothing. */}
                 {(() => {
                   const sigLabel: React.CSSProperties = { fontSize: '0.65rem', fontWeight: 900, color: MUT, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 };
                   const witnessSig = fd.tc_witness_signature || prf.signatures?.witness_signature;
@@ -2585,7 +2691,12 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
             whole clinical sheet so the empty clinical sections read as
             intentional. pointer-events:none keeps the (empty) fields
             selectable; sits above the grid but translucent. */}
-        {fd.patient_refused_treatment && (
+        {/* `refused`, not `patient_refused_treatment`: the clinical grid below
+            is now hidden for ANY refusal, so gating the watermark on the
+            narrower flag would leave an RHT that never had the button tapped
+            printing a completely blank sheet — strictly worse than what this
+            change replaced. The two conditions must not drift apart. */}
+        {refused && (
           <div style={{
             position: 'absolute', inset: 0, zIndex: 5,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -2606,7 +2717,15 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
           </div>
         )}
 
-        {/* Main clinical grid: 3 cols (short checks + surveys | History | wide records) */}
+        {/* On a refusal the clinical sheet is the watermark and nothing else.
+
+            No observations, interventions, vitals or medications exist, because
+            the patient declined before any were made. Printing the full grid
+            produced a page of section headings over empty rows — which does not
+            read as "nothing was done", it reads as "the crew did not complete
+            the form". The watermark above says exactly what happened; the
+            headings underneath only argued with it. */}
+        {refused ? null : (
         <div style={{
           display: 'grid', gridTemplateColumns: '1fr 1.3fr 2.5fr',
           borderTop: `2px solid ${LN}`, flex: 1, minHeight: 0,
@@ -2874,6 +2993,7 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
             <FillLines />
           </div>
         </div>
+        )}
 
 
       </div>{/* /prf-page (page 2) */}

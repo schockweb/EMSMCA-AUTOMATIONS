@@ -5067,6 +5067,23 @@ export default function DigitalPRFForm() {
   ]);
 
   const sf = (k: string, v: any) => { setFd(p => ({ ...p, [k]: v })); dirtyRef.current = true; };
+
+  // Has the dispatch leg already been marked?
+  //
+  // Picking a call type, and picking an RHT call-out fee, both used to open the
+  // Dispatch modal unconditionally. A call routinely CHANGES type mid-job — a
+  // PRIMARY becomes an RHT the moment the patient declines — and every such
+  // change re-asked for a dispatch time and odometer the crew had entered
+  // twenty minutes earlier, at the roadside, with a patient in front of them.
+  //
+  // Worse than an annoyance: the modal is the only way to reach the odometer
+  // field, so re-opening it invites a second, later reading over the real one,
+  // and the dispatch km is what the mileage claim is calculated from.
+  //
+  // The prompt is for CAPTURING the leg, so it opens only when the leg has not
+  // been captured. Correcting a wrong value is a separate, deliberate action:
+  // tapping the time cell itself, which is unchanged.
+  const dispatchAlreadyMarked = () => !!String(fd.time_dispatched ?? '').trim();
   const toggleArr = (k: string, v: string) => {
     const arr: string[] = Array.isArray(fd[k]) ? [...fd[k]] : [];
     const i = arr.indexOf(v); if (i >= 0) arr.splice(i, 1); else arr.push(v);
@@ -6913,9 +6930,12 @@ export default function DigitalPRFForm() {
 
       <CallTypePicker onPick={(type) => {
         if (type === 'PRIMARY' || type === 'RESUS' || type === 'COURTESY' || type === 'DOD' || type === 'WCA_IOD') {
-          setDispatchPromptOpen(true);
-          // Wait briefly for the modal to render before focusing the input
-          window.setTimeout(() => dispatchKmRef.current?.focus(), 50);
+          // Only when the leg has not been marked — see dispatchAlreadyMarked.
+          if (!dispatchAlreadyMarked()) {
+            setDispatchPromptOpen(true);
+            // Wait briefly for the modal to render before focusing the input
+            window.setTimeout(() => dispatchKmRef.current?.focus(), 50);
+          }
         } else if (type === 'RHT') {
           setRhtCallOutFeeOpen(true);
         }
@@ -10923,11 +10943,16 @@ export default function DigitalPRFForm() {
                 <button
                   key={reason}
                   type="button"
-                  onClick={() => { 
-                    sf('rht_call_out_fee', reason); 
-                    setRhtCallOutFeeOpen(false); 
-                    setDispatchPromptOpen(true);
-                    window.setTimeout(() => dispatchKmRef.current?.focus(), 50);
+                  onClick={() => {
+                    sf('rht_call_out_fee', reason);
+                    setRhtCallOutFeeOpen(false);
+                    // Changing the fee basis is a billing correction and says
+                    // nothing about the dispatch leg, so it must never re-ask
+                    // for a time and odometer already captured.
+                    if (!dispatchAlreadyMarked()) {
+                      setDispatchPromptOpen(true);
+                      window.setTimeout(() => dispatchKmRef.current?.focus(), 50);
+                    }
                   }}
                   style={{
                     padding: '16px 12px', borderRadius: 12, fontSize: '0.88rem', fontWeight: 800,
