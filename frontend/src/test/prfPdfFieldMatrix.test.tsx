@@ -841,6 +841,45 @@ describe('RHT — the refusal reaches the printed record', () => {
     expect(body, 'the refusal names a hard-coded company').not.toContain('JEMS');
   });
 
+  // An empty section heading on a legal record does not read as "nothing to
+  // show here" — it reads as "something failed to print", which invites exactly
+  // the question this document exists to answer. Suppressing the duplicated
+  // refusal marks left the "Signatures" band sitting above white space; the
+  // 415-test suite passed straight through it, because every existing
+  // assertion asked what IS on the page and none asked what is on it POINTLESSLY.
+  it('does not print an empty Signatures heading', async () => {
+    const built = await renderRefusal();
+    // The shared fixture carries a next-of-kin signature, which legitimately
+    // fills the Signatures band. A real refusal has none — the only marks are
+    // the patient's and the witness's, and both belong under the Refusal
+    // heading — so clear it to reproduce the case that actually printed empty.
+    delete built.prf.form_data.next_of_kin_signature;
+    delete (built.prf as any).signatures?.next_of_kin_signature;
+    cleanup();
+    currentPrf = built.prf;
+    renderPrfView();
+    await screen.findByText((c) => c.includes(built.anchor), { exact: false });
+
+    const heads = screen.queryAllByText('Signatures', { exact: true });
+    expect(heads.length,
+      'the Signatures band prints on an RHT with nothing under it — the refusal ' +
+      'signatures are in the Refusal block'
+    ).toBe(0);
+  });
+
+  it('still prints the Signatures heading on a call that has its own signatures', async () => {
+    // The negative control. Hiding the heading whenever it is empty must not
+    // hide it when it is not — otherwise the "fix" silently drops the patient
+    // signature off every ordinary PRF.
+    const built = buildPrf('PRIMARY', 'PVT');
+    currentPrf = built.prf;
+    renderPrfView();
+    await screen.findByText((c) => c.includes(built.anchor), { exact: false });
+    expect(screen.queryAllByText('Signatures', { exact: true }).length,
+      'a normal call lost its Signatures section'
+    ).toBeGreaterThan(0);
+  });
+
   it('shows the patient signature exactly once, under the refusal', async () => {
     // It used to appear under Terms & Conditions only. Adding a refusal block
     // without suppressing that one put the same mark under two different

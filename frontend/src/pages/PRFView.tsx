@@ -2385,7 +2385,6 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
                     </div>
                   );
                 })()}
-                <SectionHead label="Signatures" />
                 {(() => {
                   const sigLabel: React.CSSProperties = { fontSize: '0.65rem', fontWeight: 900, color: MUT, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 };
                   const witnessSig = fd.tc_witness_signature || prf.signatures?.witness_signature;
@@ -2400,7 +2399,25 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
                   // muddies precisely what was assented to. A signature is
                   // evidence of what sits above it, so it appears once.
                   const refusalOwnsSignatures = fd.call_type === 'RHT';
+
+                  // Print the heading only if something will appear under it.
+                  //
+                  // Suppressing the duplicated marks on an RHT left the
+                  // "Signatures" band sitting above empty white space on the
+                  // printed form. On a legal record an empty section heading
+                  // does not read as "nothing to show here" — it reads as
+                  // "something failed to print", which invites exactly the
+                  // question this document exists to answer. The refusal
+                  // signatures are on the page, under the Refusal heading,
+                  // where they belong.
+                  const showPatientSig = fd.call_type !== 'DOD' && !refusalOwnsSignatures;
+                  const showWitnessSig = (witnessSig || fd.call_type === 'DOD') && !refusalOwnsSignatures;
+                  const showNokSig     = nokSig || fd.call_type === 'DOD';
+                  if (!showPatientSig && !showWitnessSig && !showNokSig) return null;
+
                   return (
+                    <>
+                    <SectionHead label="Signatures" />
                     <div style={{ display: 'flex', flexDirection: 'column', borderTop: `1px solid ${LN}` }}>
                       {fd.call_type !== 'DOD' && !refusalOwnsSignatures && (
                         <div style={{ padding: '5px 7px', borderBottom: (witnessSig || nokSig || fd.call_type === 'DOD') ? `1px solid ${LN}` : 'none' }}>
@@ -2421,6 +2438,7 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
                         </div>
                       )}
                     </div>
+                    </>
                   );
                 })()}
               </>

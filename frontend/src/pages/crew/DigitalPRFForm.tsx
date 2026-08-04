@@ -7802,7 +7802,36 @@ export default function DigitalPRFForm() {
                 compact
                 label="Patient / Responsible Person Signature"
                 value={sigs.patient_signature}
-                onChange={v => { setSigs(p => ({ ...p, patient_signature: v })); dirtyRef.current = true; }}
+                onChange={v => {
+                  setSigs(p => ({ ...p, patient_signature: v }));
+                  dirtyRef.current = true;
+                  // Stamp the refusal date the moment the refusal is signed.
+                  //
+                  // The field below is a plain date input, so it stayed blank
+                  // whenever nobody typed into it — and a printed PRF showed a
+                  // signed refusal of transport with no date against it. An
+                  // undated refusal is the weakest possible version of this
+                  // record: it is the one document whose whole purpose is to
+                  // show WHEN the patient declined and what they were told.
+                  //
+                  // Filled here rather than by a validation rule, because the
+                  // crew must never be blocked or nagged mid-call. It is a
+                  // default, not a lock: the input stays editable, and an
+                  // existing value is never overwritten.
+                  // setFd, not sf: sf(k, v) assigns the value directly, so a
+                  // functional updater would store the FUNCTION in form_data.
+                  // The functional form is what makes "don't overwrite" safe
+                  // against a concurrent autosave.
+                  //
+                  // en-CA renders yyyy-mm-dd, which is what DateInp parses, and
+                  // it uses LOCAL time — toISOString() would roll the date back
+                  // a day for any refusal signed before 02:00 SAST.
+                  if (v) {
+                    setFd(p => p.rht_waiver_date
+                      ? p
+                      : { ...p, rht_waiver_date: new Date().toLocaleDateString('en-CA') });
+                  }
+                }}
               />
             </div>
 
