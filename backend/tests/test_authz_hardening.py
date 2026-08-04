@@ -366,3 +366,180 @@ def test_mock_scheme_routes_exist_when_not_production():
     assert any(p.startswith("/api/mock-scheme") for p in paths), (
         "mock scheme routes are absent even though APP_ENV is not production"
     )
+
+
+# ── 8. create_user / delete_user never got update_user's anti-escalation guards ──
+#
+# update_user was hardened (2026-08-03) so only a SUPER_ADMIN may assign or remove
+# the super-admin role, nobody may escalate themselves, and a non-super may not
+# modify a super. Those guards were never mirrored onto create_user or
+# delete_user, so:
+#   AZ-1 (critical) — a plain ADMIN could POST a new account with role=super_admin
+#                     and own every tenant.
+#   AZ-2 (high)     — a plain ADMIN could DELETE (deactivate) the real SUPER_ADMIN.
+# Each test asserts the refusal AND that nothing was written; the "allowed"
+# counterparts prove the guards key on the caller's role and are not blanket-deny.
+
+
+async def _user_id(email: str) -> str:
+    from tests.conftest import _TestSession
+
+    async with _TestSession() as db:
+        u = (await db.execute(select(User).where(User.email == email))).scalar_one()
+        return str(u.id)
+
+
+async def _user_exists(email: str) -> bool:
+    from tests.conftest import _TestSession
+
+    async with _TestSession() as db:
+        row = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
+        return row is not None
+
+
+async def _is_active(email: str) -> bool:
+    from tests.conftest import _TestSession
+
+    async with _TestSession() as db:
+        return (await db.execute(select(User).where(User.email == email))).scalar_one().is_active
+
+
+def _fresh_email(prefix: str) -> str:
+    # Unique per run so the "allowed" creates don't 409 against a persistent DB.
+    return f"{prefix}_{uuid.uuid4().hex}@emsclaims.test"
+
+
+# create_user ---------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_create_user_rejects_anonymous(client):
+    resp = await client.post("/api/users/", json={
+        "email": _fresh_email("anon_created"),
+        "password": _PASSWORD,
+        "full_name": "Anon",
+        "role": "paramedic",
+    })
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_create_user_rejects_low_privilege_user(client, low_priv_headers):
+    resp = await client.post("/api/users/", headers=low_priv_headers, json={
+        "email": _fresh_email("lowpriv_created"),
+        "password": _PASSWORD,
+        "full_name": "Made By Paramedic",
+        "role": "paramedic",
+    })
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_create_super_admin_denied_to_plain_admin(client, plain_admin_headers):
+    """AZ-1 — the escalation. A plain ADMIN must not mint a SUPER_ADMIN."""
+    email = _fresh_email("escalated_super")
+    resp = await client.post("/api/users/", headers=plain_admin_headers, json={
+        "email": email,
+        "password": _PASSWORD,
+        "full_name": "Escalation Attempt",
+        "role": "super_admin",
+    })
+    assert resp.status_code == 403, (
+        f"a plain ADMIN created a SUPER_ADMIN ({resp.status_code}): {resp.text}"
+    )
+    # The refusal must precede the insert — no orphan super-admin row.
+    assert not await _user_exists(email), "the super-admin row was created despite the 403"
+
+
+@pytest.mark.asyncio
+async def test_create_regular_user_allowed_for_plain_admin(client, plain_admin_headers):
+    """The guard must not block an ADMIN creating an ordinary account."""
+    resp = await client.post("/api/users/", headers=plain_admin_headers, json={
+        "email": _fresh_email("regular_by_admin"),
+        "password": _PASSWORD,
+        "full_name": "Regular User",
+        "role": "paramedic",
+        "permissions": [],
+    })
+    assert resp.status_code == 201, f"ADMIN blocked from creating a normal user: {resp.text}"
+
+
+@pytest.mark.asyncio
+async def test_create_super_admin_allowed_for_super_admin(client, super_admin_headers):
+    """Counterpart to AZ-1: a SUPER_ADMIN legitimately may create one, proving
+    the guard keys on the caller's role rather than being blanket-deny."""
+    resp = await client.post("/api/users/", headers=super_admin_headers, json={
+        "email": _fresh_email("super_by_super"),
+        "password": _PASSWORD,
+        "full_name": "Legit Super",
+        "role": "super_admin",
+    })
+    assert resp.status_code == 201, f"SUPER_ADMIN blocked from creating a super: {resp.text}"
+
+
+@pytest.mark.asyncio
+async def test_create_user_is_audited(client, super_admin_headers):
+    """Account creation is a privileged write and must leave an audit row —
+    it was previously the one privileged write on the user router with no trace."""
+    from tests.conftest import _TestSession
+    from app.models.audit_log import AuditLog
+
+    resp = await client.post("/api/users/", headers=super_admin_headers, json={
+        "email": _fresh_email("audited_create"),
+        "password": _PASSWORD,
+        "full_name": "Audited",
+        "role": "paramedic",
+    })
+    assert resp.status_code == 201, resp.text
+    created_id = uuid.UUID(resp.json()["id"])
+    async with _TestSession() as db:
+        row = (await db.execute(
+            select(AuditLog).where(
+                AuditLog.action == "USER_CREATED",
+                AuditLog.entity_id == created_id,
+            )
+        )).scalar_one_or_none()
+    assert row is not None, "no USER_CREATED audit row was written"
+
+
+# delete_user ---------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_delete_user_rejects_low_privilege_user(client, low_priv_headers):
+    resp = await client.delete(f"/api/users/{uuid.uuid4()}", headers=low_priv_headers)
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_delete_super_admin_denied_to_plain_admin(client, plain_admin_headers):
+    """AZ-2 — a plain ADMIN must not be able to deactivate a SUPER_ADMIN."""
+    await _ensure_user(_SUPER_EMAIL, UserRole.SUPER_ADMIN)
+    target_id = await _user_id(_SUPER_EMAIL)
+    resp = await client.delete(f"/api/users/{target_id}", headers=plain_admin_headers)
+    assert resp.status_code == 403, (
+        f"a plain ADMIN deactivated a SUPER_ADMIN ({resp.status_code})"
+    )
+    assert await _is_active(_SUPER_EMAIL), "the SUPER_ADMIN was deactivated despite the 403"
+
+
+@pytest.mark.asyncio
+async def test_delete_self_denied(client, plain_admin_headers):
+    """Nobody may deactivate their own account — matches update_user's self rule
+    and prevents an admin locking themselves out."""
+    await _ensure_user(_ADMIN_EMAIL, UserRole.ADMIN)
+    own_id = await _user_id(_ADMIN_EMAIL)
+    resp = await client.delete(f"/api/users/{own_id}", headers=plain_admin_headers)
+    assert resp.status_code == 403
+    assert await _is_active(_ADMIN_EMAIL), "self-deactivation succeeded despite the 403"
+
+
+@pytest.mark.asyncio
+async def test_delete_regular_user_allowed_for_admin(client, plain_admin_headers):
+    """Counterpart to AZ-2: an ADMIN may still deactivate an ordinary account."""
+    throwaway = _fresh_email("deactivate_me")
+    await _ensure_user(throwaway, UserRole.PARAMEDIC)
+    target_id = await _user_id(throwaway)
+    resp = await client.delete(f"/api/users/{target_id}", headers=plain_admin_headers)
+    assert resp.status_code == 204, (
+        f"ADMIN blocked from deactivating a normal user ({resp.status_code})"
+    )
+    assert not await _is_active(throwaway), "target was not deactivated"

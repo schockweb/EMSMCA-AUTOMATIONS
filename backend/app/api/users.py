@@ -64,15 +64,54 @@ async def get_all_permissions(
 @router.post("/", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def create_user(
     body: UserCreate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     _admin: User = Depends(require_role(UserRole.ADMIN)),
 ):
-    """Create a new user (admin only)."""
+    """Create a new user (admin only).
+
+    THE HOLE THIS CLOSES
+    --------------------
+    Creating an account IS a privilege grant, so this route needs the same
+    anti-escalation rule update_user got — and it was missing it. This route is
+    reachable by ADMIN (the role a SUPER_ADMIN hands to client office staff) and
+    wrote `role = UserRole(body.role)` with no restriction on the value and no
+    audit record. So any ADMIN could `POST /api/users/ {"role": "super_admin"}`
+    and mint a SUPER_ADMIN, which short-circuits every guard in the system
+    (require_role and has_permission both return True for it) — instance-wide
+    control across all tenants. The guard added to update_user ("only a
+    super-admin may assign the super-admin role") was trivially sidestepped by
+    creating the account super instead of promoting it afterwards.
+
+    Rules now, matching update_user:
+      * Only a SUPER_ADMIN may create a SUPER_ADMIN.
+      * An unknown role is a 400, not a 500.
+    And the creation is written to the audit log.
+    """
     existing = await db.execute(select(User).where(User.email == body.email))
     if existing.scalar_one_or_none():
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Email already registered",
+        )
+
+    # Parse the role explicitly so an unknown value is a clean 400 and so the
+    # escalation check below runs against a real UserRole.
+    try:
+        new_role = UserRole(body.role)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown role '{body.role}'",
+        )
+
+    # Only a super-admin may create a super-admin — the create-time twin of the
+    # update_user rule. An ADMIN minting a SUPER_ADMIN is vertical privilege
+    # escalation to instance-wide control.
+    if new_role == UserRole.SUPER_ADMIN and _admin.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only a super administrator may create a super administrator account.",
         )
 
     # Enforce password complexity
@@ -88,7 +127,7 @@ async def create_user(
         email=body.email,
         hashed_password=hash_password(body.password),
         full_name=body.full_name,
-        role=UserRole(body.role),
+        role=new_role,
         bhf_practice_number=body.bhf_practice_number,
         # `or` would treat an explicitly EMPTY list as "not supplied" and hand
         # the new account every permission — the same falsy-empty-list bug that
@@ -98,6 +137,30 @@ async def create_user(
                      else body.permissions),
     )
     db.add(user)
+    # Flush so the Python-side uuid default is populated before it is referenced
+    # as the audit row's entity_id.
+    await db.flush()
+
+    # Audited unconditionally, mirroring update_user — account creation is a
+    # privileged write and was the one privileged write that left no trace.
+    db.add(AuditLog(
+        user_id=_admin.id,
+        action="USER_CREATED",
+        entity_type="user",
+        entity_id=user.id,
+        details={
+            "target_email": user.email,
+            "created_by": _admin.email,
+        },
+        before_state=None,
+        after_state={
+            "role": new_role.value,
+            "is_active": user.is_active,
+            "permissions": list(user.permissions) if user.permissions is not None else None,
+        },
+        ip_address=get_trusted_client_ip(request),
+    ))
+
     await db.commit()
     await db.refresh(user)
     return _user_response(user)
@@ -288,13 +351,50 @@ async def update_user(
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_user(
     user_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     _admin: User = Depends(require_role(UserRole.ADMIN)),
 ):
-    """Deactivate a user (admin only). Does not hard-delete for audit trail."""
+    """Deactivate a user (admin only). Does not hard-delete for audit trail.
+
+    Carries the same two rules update_user enforces on the active flag, which
+    this route was missing — it set `is_active = False` on any target with no
+    check and no audit record:
+      * A non-super-admin may not deactivate a SUPER_ADMIN — otherwise an ADMIN
+        locks out the highest account and is left the most privileged standing.
+      * Nobody may deactivate their own account.
+    get_current_user rejects an inactive user, so this genuinely ends the
+    target's sessions on their next request. The deactivation is audited.
+    """
     result = await db.execute(select(User).where(User.id == uuid.UUID(user_id)))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    user.is_active = False
+
+    if user.role == UserRole.SUPER_ADMIN and _admin.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only a super administrator may deactivate a super administrator account.",
+        )
+    if user.id == _admin.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You cannot deactivate your own account.",
+        )
+
+    if user.is_active:
+        user.is_active = False
+        db.add(AuditLog(
+            user_id=_admin.id,
+            action="USER_DEACTIVATED",
+            entity_type="user",
+            entity_id=user.id,
+            details={
+                "target_email": user.email,
+                "deactivated_by": _admin.email,
+            },
+            before_state={"is_active": True},
+            after_state={"is_active": False},
+            ip_address=get_trusted_client_ip(request),
+        ))
     await db.commit()
