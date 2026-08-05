@@ -77,7 +77,7 @@ httpx==0.28.1
 # vulnerable copy (PYSEC-2026-1284), plus DNS name-constraint validation and
 # public_key_from_numbers issues. This library backs Fernet, which encrypts the
 # per-provider SMTP credentials.
-cryptography==49.0.0
+cryptography==50.0.0
 aiofiles==25.1.0
 python-dateutil==2.9.0.post0
 

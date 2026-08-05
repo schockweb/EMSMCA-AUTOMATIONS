@@ -23,6 +23,14 @@
 **/*.pem
 **/*.key
 
+# ── Developer tool installs (never belong in a runtime image) ──
+# `pip install --user` puts packages here, and `COPY . .` then bakes the whole
+# lot into the image: a Trivy scan of the built image found pip-audit, ruff,
+# cyclonedx and their dependency trees shipped to production. They are not
+# imported by the app, so they are pure image bloat and extra attack surface —
+# and Trivy reports their CVEs against the running image forever.
+.local/
+
 # ── Tests and dev-only tooling (not needed at runtime) ──
 # Excluding tests/ from the image is also a safety control: on 2026-07-28 the
 # suite was run via `docker exec ems_backend pytest` and, picking up the
