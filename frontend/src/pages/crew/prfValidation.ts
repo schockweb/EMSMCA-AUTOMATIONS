@@ -181,21 +181,12 @@ export const RULES: ValidationRule[] = [
     message: 'Full physical scene address (or GPS coordinates) is required.',
     source: 'Netcare CMG §3.7 — Scene address: Full physical location or GPS points',
   },
-  {
-    id: 'NTC-3.7-PATIENT-WEIGHT',
-    schemes: ['netcare'],
-    phases: [2, 6],
-    severity: 'warn',
-    field: 'patient_weight_kg',
-    check: (d) => {
-      if (has(d, 'patient_weight_kg')) return true;
-      // Only warn if any medication has been administered (weight needed for dose calc)
-      return medListLower(d).length === 0;
-    },
-    message:
-      'Patient weight should be recorded — required for dose calculation when medications are given.',
-    source: 'Netcare CMG §3.7 — Patient weight: To be included for calculation of appropriate medication dose',
-  },
+  // NTC-3.7-PATIENT-WEIGHT was removed 2026-08-05. It warned whenever any
+  // medication was given and `patient_weight_kg` was blank — but the form has
+  // no weight input, only a phase anchor for the key, so the warning could
+  // never be cleared by the crew. An unsatisfiable nag trains crews to ignore
+  // the banner, which costs more than the rule was worth. If a weight input is
+  // ever added, reinstate it from git history.
 
   // ── Phase 2/6 — medical scheme details (only when billing to scheme) ──
   {
@@ -1955,12 +1946,260 @@ const ER24_RULES: ValidationRule[] = [
   },
 ];
 
+// ────────────────────────────────────────────────────────────────────────────
+// SCHEME-AGNOSTIC COMPLETENESS RULES (added 2026-08-05)
+//
+// These are the rules that stop a claim being rejected over an administrative
+// blank rather than over the care given: a missing member number, an unsigned
+// PRF, no destination, a mistyped observation. They are deliberately NOT
+// clinical — nothing here second-guesses a crew's treatment decisions.
+//
+// Three hard design rules, all of which exist because of prior incidents:
+//
+//   1. WARN ONLY, LATE ONLY. Every rule is `severity: 'warn'` and every rule
+//      fires at handover (5) and/or submission (6) — never during the phases
+//      where a crew is treating a patient. `validatePhase` downgrades
+//      everything to 'warn' anyway, but the phase list is what actually keeps
+//      the banner off the screen mid-call.
+//   2. NO FALSE POSITIVES. A banner that cries wolf trains crews to dismiss it,
+//      which costs more than the rule earns. Where a check cannot be made
+//      reliably (midnight rollover on HH:MM row times, unparseable numbers) the
+//      rule stays SILENT rather than guessing.
+//   3. NOTHING THE CREW CANNOT FIX. No rule may reference a field with no input
+//      widget. That is what made NTC-3.7-PATIENT-WEIGHT unsatisfiable.
+// ────────────────────────────────────────────────────────────────────────────
+
+/** Patient age in years, or null when it cannot be read. `age` is a String field. */
+const ageYears = (d: PrfData): number | null => {
+  const raw = d.age;
+  if (raw === undefined || raw === null || String(raw).trim() === '') return null;
+  const n = Number(String(raw).replace(/[^\d.]/g, ''));
+  return isNaN(n) || n < 0 || n > 130 ? null : n;
+};
+
+/** First numeric value in a free-text field, else null (temp is a text input). */
+const firstNum = (v: any): number | null => {
+  if (v === undefined || v === null || String(v).trim() === '') return null;
+  const m = String(v).match(/-?\d+(\.\d+)?/);
+  if (!m) return null;
+  const n = Number(m[0]);
+  return isNaN(n) ? null : n;
+};
+
+/** RHT = refused transport, DOD = dead on scene: neither conveys a patient. */
+const wasTransported = (d: PrfData): boolean => {
+  const t = (d.call_type || '').toString().toUpperCase();
+  return t !== 'RHT' && t !== 'DOD';
+};
+
+const vitalsRows = (d: PrfData): any[] => (Array.isArray(d.vitals_sets) ? d.vitals_sets : []);
+
+/** True when ANY vitals row holds an implausible value for `key`. */
+const anyVitalOutside = (d: PrfData, key: string, lo: number, hi: number): boolean =>
+  vitalsRows(d).some(r => {
+    const n = firstNum(r?.[key]);
+    return n !== null && (n < lo || n > hi);
+  });
+
+/** "HH:MM" → minutes since midnight, else null. */
+const hhmmToMinutes = (v: any): number | null => {
+  const m = String(v || '').match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return null;
+  const h = Number(m[1]), min = Number(m[2]);
+  if (h > 23 || min > 59) return null;
+  return h * 60 + min;
+};
+
+export const COMPLETENESS_RULES: ValidationRule[] = [
+  // ── A. Completeness ────────────────────────────────────────────────────────
+  {
+    id: 'ALL-A1-SCHEME-DETAILS',
+    schemes: ['all'],
+    phases: [5, 6],
+    severity: 'warn',
+    field: 'medical_aid_number',
+    check: (d) => {
+      if ((d.billing_type || '').toString().toUpperCase() !== 'MED AID') return true;
+      const hasMember = has(d, 'medical_aid_number') || has(d, 'main_member_id');
+      return has(d, 'medical_scheme') && hasMember;
+    },
+    message: 'Medical aid details are incomplete — add the scheme and member number if you have them.',
+    source: 'Completeness — a scheme claim with no payer identity is rejected outright.',
+  },
+  {
+    id: 'ALL-A2-PATIENT-SIG',
+    schemes: ['all'],
+    phases: [5, 6],
+    severity: 'warn',
+    field: 'patient_signature',
+    // A refusal is a perfectly valid outcome — it just has to be recorded as one.
+    check: (d, ctx) => ctx.hasPatientSig || has(d, 'signature_refused_reason'),
+    message: "No patient signature yet — capture one, or note why it wasn't possible.",
+    source: 'Completeness — unsigned PRFs are a common administrative rejection.',
+  },
+  {
+    id: 'ALL-A3-HANDOVER-SIG',
+    schemes: ['all'],
+    phases: [5, 6],
+    severity: 'warn',
+    field: 'handover_signature',
+    check: (d, ctx) => !wasTransported(d) || ctx.hasHandoverSig,
+    message: 'Handover signature missing — get it before you leave the facility.',
+    source: 'Completeness — proof of delivery for a transported patient.',
+  },
+  {
+    id: 'ALL-A4-CREW-SIG',
+    schemes: ['all'],
+    phases: [6],
+    severity: 'warn',
+    field: 'crew_signature',
+    check: (_d, ctx) => ctx.hasCrewSig,
+    message: 'Crew signature missing.',
+    source: 'Completeness — the PRF is unattributed without it.',
+  },
+  {
+    id: 'ALL-A5-DESTINATION',
+    schemes: ['all'],
+    phases: [5, 6],
+    severity: 'warn',
+    field: 'receiving_facility',
+    check: (d) => !wasTransported(d) || has(d, 'receiving_facility'),
+    message: 'Destination not recorded.',
+    source: 'Completeness — transport billed with no destination cannot be supported.',
+  },
+  {
+    id: 'ALL-A6-PATIENT-IDENTITY',
+    schemes: ['all'],
+    phases: [6],
+    severity: 'warn',
+    field: 'patient_surname',
+    check: (d) => has(d, 'patient_surname') && has(d, 'patient_id_number'),
+    message: 'Patient details incomplete — surname and ID help the claim get paid.',
+    source: 'Completeness — the payer matches the claim to a member on these.',
+  },
+
+  // ── C. Plausibility — transcription errors only ────────────────────────────
+  //
+  // These bounds are deliberately WIDE — they catch a slipped keystroke (a pulse
+  // of 1200, a respiratory rate of 160), never a sick patient. Two failure modes
+  // were designed out on purpose, both found while testing:
+  //
+  //   • ZERO IS A REAL READING. An arrest patient has a pulse of 0 and a
+  //     respiratory rate of 0. An earlier draft used a lower bound of 20/4 and
+  //     would have fired a warning on every single resuscitation.
+  //   • REAL EXTREMES REACH FURTHER THAN EXPECTED. Infant SVT runs past 280, and
+  //     accidental hypothermia is survivable well below 25 °C.
+  //
+  // So each bound sits where a value stops being physiologically possible and
+  // starts being a typo. Anything narrower turns the banner into background
+  // noise, and a banner crews dismiss on reflex is worse than no banner at all.
+  {
+    id: 'ALL-C1-HR-RANGE',
+    schemes: ['all'],
+    phases: [6],
+    severity: 'warn',
+    field: 'vitals_sets',
+    check: (d) => !anyVitalOutside(d, 'hr', 0, 300),
+    message: 'A pulse reading looks unusual — tap to check it.',
+    source: 'Plausibility — catches transcription slips, not clinical extremes.',
+  },
+  {
+    id: 'ALL-C2-RR-RANGE',
+    schemes: ['all'],
+    phases: [6],
+    severity: 'warn',
+    field: 'vitals_sets',
+    check: (d) => !anyVitalOutside(d, 'resp_rate', 0, 80),
+    message: 'A breathing rate looks unusual — tap to check it.',
+    source: 'Plausibility — catches transcription slips, not clinical extremes.',
+  },
+  {
+    id: 'ALL-C3-SPO2-RANGE',
+    schemes: ['all'],
+    phases: [6],
+    severity: 'warn',
+    field: 'vitals_sets',
+    // There is no valid saturation above 100%, so this one is unambiguous.
+    check: (d) => !anyVitalOutside(d, 'spo2', 0, 100),
+    message: 'An oxygen saturation looks unusual — tap to check it.',
+    source: 'Plausibility — SpO2 cannot exceed 100%.',
+  },
+  {
+    id: 'ALL-C4-TEMP-RANGE',
+    schemes: ['all'],
+    phases: [6],
+    severity: 'warn',
+    field: 'vitals_sets',
+    check: (d) => !anyVitalOutside(d, 'temp', 20, 45),
+    message: 'A temperature looks unusual — tap to check it.',
+    source: 'Plausibility — outside survivable range, so almost always a typo.',
+  },
+
+  // ── D. Internal consistency ────────────────────────────────────────────────
+  {
+    id: 'ALL-D1-TIME-BEFORE-SCENE',
+    schemes: ['all'],
+    phases: [6],
+    severity: 'warn',
+    field: 'vitals_sets',
+    check: (d) => {
+      const sceneMin = hhmmToMinutes(
+        // time_on_scene is a full datetime; the rows are plain "HH:MM".
+        (() => {
+          const t = new Date(d.time_on_scene);
+          if (isNaN(t.getTime())) return null;
+          return `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`;
+        })(),
+      );
+      if (sceneMin === null) return true;                 // no usable scene time → silent
+
+      const rowTimes: any[] = [
+        ...vitalsRows(d).map(r => r?.time),
+        ...(Array.isArray(d.medications) ? d.medications.map((r: any) => r?.time) : []),
+        ...(Array.isArray(d.iv_therapy) ? d.iv_therapy.map((r: any) => r?.time_up) : []),
+      ];
+
+      return !rowTimes.some(v => {
+        const m = hhmmToMinutes(v);
+        if (m === null) return false;
+        const delta = m - sceneMin;
+        // A call that runs over midnight makes an legitimate later entry look
+        // hours "earlier" (00:10 vs 23:50 = -1420). Only flag a small negative
+        // gap, which is the shape of a genuine mistyped time. Anything beyond
+        // 12 hours back is treated as a rollover and left alone. The -5 floor
+        // absorbs clock jitter between separately-stamped rows.
+        return delta < -5 && delta > -720;
+      });
+    },
+    message: 'A recorded time is before you arrived on scene — worth a check.',
+    source: 'Consistency — out-of-order times are queried by payers.',
+  },
+  {
+    id: 'ALL-D2-CPR-CALL-TYPE',
+    schemes: ['all'],
+    phases: [6],
+    severity: 'warn',
+    field: 'call_type',
+    check: (d) => {
+      const circ = Array.isArray(d.circulation_interventions) ? d.circulation_interventions : [];
+      const cprDone = circ.some((i: any) => String(i || '').toUpperCase() === 'CPR');
+      if (!cprDone) return true;
+      const t = (d.call_type || '').toString().toUpperCase();
+      return t === 'RESUS' || t === 'DOD';
+    },
+    message: 'CPR recorded — check the call type matches.',
+    source: 'Consistency — a resuscitation billed against a routine call type is queried.',
+  },
+];
+
 // Register every scheme's rules into the shared RULES table. Each rule is
 // scheme-scoped (Netcare / Discovery / GEMS / ER24); validatePhase() surfaces
 // only the active scheme's rules, and always as non-blocking warnings - a crew
 // on a live call is never blocked by a billing rule (June 2026 crew-safety policy).
 // Post-submit adjudication + tariff pricing are unaffected (they don't call this).
-RULES.push(...DISCOVERY_RULES, ...GEMS_RULES, ...ER24_RULES);
+// COMPLETENESS_RULES are scheme-agnostic ('all') and evaluate on every PRF —
+// see validatePhase for why that no longer requires a resolved scheme.
+RULES.push(...DISCOVERY_RULES, ...GEMS_RULES, ...ER24_RULES, ...COMPLETENESS_RULES);
 
 // ────────────────────────────────────────────────────────────────────────────
 // Public API
@@ -2034,18 +2273,26 @@ export function validatePhase(
   ctx: ValidationContext,
   schemeId?: string,
 ): ValidationFinding[] {
-  // Crew-safety policy (June 2026): a crew working a live call is NEVER blocked
-  // or warned by the legacy scheme-agnostic ('all') rules — those stay
-  // suppressed. We surface ONLY the active scheme's guidance, and ONLY as
-  // non-blocking warnings, so a Discovery claim shows amber "may be downgraded /
-  // rejected" nudges the crew can act on but can always submit past. Post-submit
-  // adjudication and tariff pricing are unaffected (they don't call this).
+  // Crew-safety policy (June 2026): a crew working a live call is NEVER blocked,
+  // and scheme billing guidance is surfaced ONLY as non-blocking warnings — so a
+  // Discovery claim shows amber "may be downgraded / rejected" nudges the crew
+  // can act on but can always submit past. Post-submit adjudication and tariff
+  // pricing are unaffected (they don't call this).
+  //
+  // Scheme-scoped rules still require a resolved scheme. The curated
+  // COMPLETENESS_RULES (schemes: ['all'], added 2026-08-05) do NOT: an unsigned
+  // PRF, a missing destination or a mistyped observation is worth the same
+  // gentle nudge whether the patient is on a medical aid, private or RAF — and
+  // the "medical aid details are incomplete" rule is unreachable by definition
+  // if a blank scheme means no rules run at all. They are warn-only and fire at
+  // handover/submission only, so this widens what the crew is told AFTER the
+  // call without adding anything during it.
   const scheme = normalizeScheme(schemeId);
-  if (!scheme) return [];
 
   const findings: ValidationFinding[] = [];
   for (const r of RULES) {
-    if (!r.schemes.includes(scheme) && !r.schemes.includes('all')) continue;
+    const schemeAgnostic = r.schemes.includes('all');
+    if (!schemeAgnostic && (!scheme || !r.schemes.includes(scheme))) continue;
     if (!r.phases.includes(phase)) continue;
     let passed = true;
     try {

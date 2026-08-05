@@ -339,13 +339,35 @@ describe('blockers() and warnings() filter functions', () => {
 // validatePhase — Discovery warn-only surfacing
 // ══════════════════════════════════════════════════════════════════════════════
 describe('validatePhase — unknown scheme silent, known schemes surface', () => {
-  it('returns [] when no scheme is supplied (crew never warned by all-rules)', () => {
-    expect(validatePhase(6, { icd10_primary: 'INVALID' }, ctx())).toEqual([]);
-    expect(validatePhase(0, {}, ctx({ vitalsCount: 0 }))).toEqual([]);
+  // Scheme-scoped rule IDs are prefixed by scheme; the scheme-agnostic
+  // completeness rules added 2026-08-05 are prefixed ALL-.
+  const isSchemeScoped = (id: string) => !id.startsWith('ALL-');
+
+  it('surfaces NO scheme-scoped rule when no scheme is supplied', () => {
+    const findings = validatePhase(6, { icd10_primary: 'INVALID' }, ctx());
+    expect(findings.filter(f => isSchemeScoped(f.id))).toEqual([]);
   });
 
-  it('returns [] for an unrecognised scheme name', () => {
-    expect(validatePhase(6, { icd10_primary: 'INVALID' }, ctx(), 'Some Unknown Scheme')).toEqual([]);
+  it('surfaces NO scheme-scoped rule for an unrecognised scheme name', () => {
+    const findings = validatePhase(6, { icd10_primary: 'INVALID' }, ctx(), 'Some Unknown Scheme');
+    expect(findings.filter(f => isSchemeScoped(f.id))).toEqual([]);
+  });
+
+  it('still says nothing at all during the phases a crew is treating a patient', () => {
+    // Phases 0-4 carry no completeness rules by design — the banner must stay
+    // off the screen while the crew is working the call.
+    for (const phase of [0, 1, 2, 3, 4] as const) {
+      expect(validatePhase(phase, {}, ctx({ vitalsCount: 0 }))).toEqual([]);
+    }
+  });
+
+  it('DOES surface scheme-agnostic completeness rules with no scheme set', () => {
+    // This is the point of the ALL- rules: an unsigned PRF with no destination
+    // is worth a nudge whether or not a medical aid is involved.
+    const findings = validatePhase(6, {}, ctx({ hasCrewSig: false }));
+    expect(findings.some(f => f.id === 'ALL-A4-CREW-SIG')).toBe(true);
+    expect(findings.every(f => f.severity === 'warn')).toBe(true);
+    expect(blockers(findings)).toHaveLength(0);
   });
 });
 
@@ -486,6 +508,180 @@ describe('validatePhase - Netcare rules surface as non-blocking warnings', () =>
 
   it('does not leak Netcare findings into a Discovery claim', () => {
     const f = validatePhase(6, { call_type: 'IFT' }, ctx(), 'Discovery Health Medical Scheme');
-    expect(f.every(x => x.id.startsWith('DISC-'))).toBe(true);
+    // Scheme-scoped findings must all be Discovery's. Scheme-agnostic ALL-
+    // completeness rules legitimately appear alongside them.
+    expect(f.filter(x => !x.id.startsWith('ALL-')).every(x => x.id.startsWith('DISC-'))).toBe(true);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Scheme-agnostic completeness rules (ALL-*) — added 2026-08-05
+//
+// Evaluated with NO scheme so only the ALL- rules fire, which keeps each
+// assertion isolated from scheme billing rules.
+// ══════════════════════════════════════════════════════════════════════════════
+describe('ALL-* completeness rules', () => {
+  const fire = (data: PrfData, c: Partial<ValidationContext> = {}, phase: 5 | 6 = 6) =>
+    validatePhase(phase, data, ctx(c)).map(f => f.id);
+
+  // ── Global safety properties ──
+  it('every completeness finding is a non-blocking warning', () => {
+    const findings = validatePhase(6, {}, ctx({ hasPatientSig: false, hasCrewSig: false, hasHandoverSig: false }));
+    expect(findings.length).toBeGreaterThan(0);
+    expect(findings.every(f => f.severity === 'warn')).toBe(true);
+    expect(blockers(findings)).toHaveLength(0);
+  });
+
+  it('never fires during the treating phases (0-4)', () => {
+    const messy: PrfData = {
+      billing_type: 'MED AID', call_type: 'PRIMARY',
+      vitals_sets: [{ hr: '1200', spo2: '140' }],
+      circulation_interventions: ['CPR'],
+    };
+    for (const phase of [0, 1, 2, 3, 4] as const) {
+      const ids = validatePhase(phase, messy, ctx({ hasPatientSig: false, hasCrewSig: false })).map(f => f.id);
+      expect(ids.filter(id => id.startsWith('ALL-'))).toEqual([]);
+    }
+  });
+
+  // ── A. Completeness ──
+  it('A1 warns on a med-aid claim with no scheme or member number', () => {
+    expect(fire({ billing_type: 'MED AID' })).toContain('ALL-A1-SCHEME-DETAILS');
+    expect(fire({ billing_type: 'MED AID', medical_scheme: 'GEMS', medical_aid_number: 'M123' }))
+      .not.toContain('ALL-A1-SCHEME-DETAILS');
+    // main_member_id is an accepted alternative to medical_aid_number
+    expect(fire({ billing_type: 'MED AID', medical_scheme: 'GEMS', main_member_id: 'X1' }))
+      .not.toContain('ALL-A1-SCHEME-DETAILS');
+    // Not a scheme claim → not this rule's business
+    expect(fire({ billing_type: 'PVT' })).not.toContain('ALL-A1-SCHEME-DETAILS');
+  });
+
+  it('A2 accepts a recorded refusal instead of a signature', () => {
+    expect(fire({}, { hasPatientSig: false })).toContain('ALL-A2-PATIENT-SIG');
+    expect(fire({ signature_refused_reason: 'Patient unconscious' }, { hasPatientSig: false }))
+      .not.toContain('ALL-A2-PATIENT-SIG');
+  });
+
+  it('A3 asks for a handover signature only when a patient was transported', () => {
+    expect(fire({ call_type: 'PRIMARY' }, { hasHandoverSig: false })).toContain('ALL-A3-HANDOVER-SIG');
+    expect(fire({ call_type: 'RHT' }, { hasHandoverSig: false })).not.toContain('ALL-A3-HANDOVER-SIG');
+    expect(fire({ call_type: 'DOD' }, { hasHandoverSig: false })).not.toContain('ALL-A3-HANDOVER-SIG');
+  });
+
+  it('A3 and A5 are available at handover, where they can still be fixed', () => {
+    const ids = fire({ call_type: 'PRIMARY' }, { hasHandoverSig: false }, 5);
+    expect(ids).toContain('ALL-A3-HANDOVER-SIG');
+    expect(ids).toContain('ALL-A5-DESTINATION');
+  });
+
+  it('A4 warns on a missing crew signature', () => {
+    expect(fire({}, { hasCrewSig: false })).toContain('ALL-A4-CREW-SIG');
+    expect(fire({}, { hasCrewSig: true })).not.toContain('ALL-A4-CREW-SIG');
+  });
+
+  it('A5 warns on a transported patient with no destination', () => {
+    expect(fire({ call_type: 'PRIMARY' })).toContain('ALL-A5-DESTINATION');
+    expect(fire({ call_type: 'PRIMARY', receiving_facility: 'Milpark' })).not.toContain('ALL-A5-DESTINATION');
+    expect(fire({ call_type: 'DOD' })).not.toContain('ALL-A5-DESTINATION');
+  });
+
+  it('A6 warns when surname or ID is missing', () => {
+    expect(fire({})).toContain('ALL-A6-PATIENT-IDENTITY');
+    expect(fire({ patient_surname: 'Dlamini' })).toContain('ALL-A6-PATIENT-IDENTITY');
+    expect(fire({ patient_surname: 'Dlamini', patient_id_number: '8001015009087' }))
+      .not.toContain('ALL-A6-PATIENT-IDENTITY');
+  });
+
+  // ── C. Plausibility — must catch typos WITHOUT firing on sick patients ──
+  it('C1 flags an impossible pulse but stays silent on a real tachycardia', () => {
+    expect(fire({ vitals_sets: [{ hr: '1200' }] })).toContain('ALL-C1-HR-RANGE');
+    expect(fire({ vitals_sets: [{ hr: '280' }] })).not.toContain('ALL-C1-HR-RANGE');   // infant SVT is real
+    expect(fire({ vitals_sets: [{ hr: '38' }] })).not.toContain('ALL-C1-HR-RANGE');    // bradycardia is real
+  });
+
+  it('C2 flags an impossible respiratory rate but not a neonatal one', () => {
+    expect(fire({ vitals_sets: [{ resp_rate: '160' }] })).toContain('ALL-C2-RR-RANGE');
+    expect(fire({ vitals_sets: [{ resp_rate: '55' }] })).not.toContain('ALL-C2-RR-RANGE'); // neonate
+  });
+
+  it('says NOTHING about an arrest patient recorded as 0/0 — the key false positive', () => {
+    // A pulse and respiratory rate of zero is the correct record for a patient
+    // in cardiac arrest. Warning here would fire on every resuscitation.
+    const ids = fire({
+      call_type: 'RESUS',
+      circulation_interventions: ['CPR'],
+      vitals_sets: [{ hr: '0', resp_rate: '0', spo2: '0' }],
+    });
+    expect(ids.filter(id => id.startsWith('ALL-C'))).toEqual([]);
+    expect(ids).not.toContain('ALL-D2-CPR-CALL-TYPE');   // RESUS is the right call type
+  });
+
+  it('C3 flags a saturation above 100%', () => {
+    expect(fire({ vitals_sets: [{ spo2: '101' }] })).toContain('ALL-C3-SPO2-RANGE');
+    expect(fire({ vitals_sets: [{ spo2: '88' }] })).not.toContain('ALL-C3-SPO2-RANGE');
+  });
+
+  it('C4 flags an impossible temperature but not a real fever or hypothermia', () => {
+    expect(fire({ vitals_sets: [{ temp: '400' }] })).toContain('ALL-C4-TEMP-RANGE');
+    expect(fire({ vitals_sets: [{ temp: '41.5' }] })).not.toContain('ALL-C4-TEMP-RANGE');
+    expect(fire({ vitals_sets: [{ temp: '28' }] })).not.toContain('ALL-C4-TEMP-RANGE');
+  });
+
+  it('C rules stay silent on blank or unparseable readings', () => {
+    const ids = fire({ vitals_sets: [{ hr: '', spo2: null, temp: 'see chart', resp_rate: undefined }] });
+    expect(ids.filter(id => id.startsWith('ALL-C'))).toEqual([]);
+  });
+
+  // ── D. Consistency ──
+  it('D1 flags a time recorded before arrival on scene', () => {
+    expect(fire({
+      time_on_scene: '2026-08-05T14:00:00',
+      medications: [{ type: 'Morphine', time: '13:30' }],
+    })).toContain('ALL-D1-TIME-BEFORE-SCENE');
+  });
+
+  it('D1 does NOT fire on a call that runs past midnight', () => {
+    // On scene 23:50, observation at 00:10 the next day — legitimate, and the
+    // single most likely false positive for this rule.
+    expect(fire({
+      time_on_scene: '2026-08-05T23:50:00',
+      vitals_sets: [{ time: '00:10' }],
+    })).not.toContain('ALL-D1-TIME-BEFORE-SCENE');
+  });
+
+  it('D1 stays silent without a usable scene time, and tolerates clock jitter', () => {
+    expect(fire({ medications: [{ time: '10:00' }] })).not.toContain('ALL-D1-TIME-BEFORE-SCENE');
+    expect(fire({
+      time_on_scene: '2026-08-05T14:00:00',
+      vitals_sets: [{ time: '13:58' }],           // 2 min — jitter, not a typo
+    })).not.toContain('ALL-D1-TIME-BEFORE-SCENE');
+  });
+
+  it('D2 flags CPR recorded against a routine call type', () => {
+    expect(fire({ circulation_interventions: ['CPR'], call_type: 'PRIMARY' }))
+      .toContain('ALL-D2-CPR-CALL-TYPE');
+    expect(fire({ circulation_interventions: ['CPR'], call_type: 'RESUS' }))
+      .not.toContain('ALL-D2-CPR-CALL-TYPE');
+    expect(fire({ circulation_interventions: ['Periph. IV Line'], call_type: 'PRIMARY' }))
+      .not.toContain('ALL-D2-CPR-CALL-TYPE');
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Removed rules
+// ══════════════════════════════════════════════════════════════════════════════
+describe('NTC-3.7-PATIENT-WEIGHT is gone', () => {
+  it('is no longer registered (the form has no weight input, so it was unsatisfiable)', () => {
+    expect(RULES.some(r => r.id === 'NTC-3.7-PATIENT-WEIGHT')).toBe(false);
+  });
+
+  it('a Netcare claim with medications and no weight raises no weight warning', () => {
+    const findings = validatePhase(
+      6,
+      { call_type: 'PRIMARY', medications: [{ type: 'Morphine' }] },
+      ctx({ medCount: 1, medTypesLower: 'morphine' }),
+      'Netcare 911',
+    );
+    expect(findings.some(f => f.field === 'patient_weight_kg')).toBe(false);
   });
 });
