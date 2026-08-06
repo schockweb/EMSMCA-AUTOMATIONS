@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import api from '../api/client';
 import { useScrollLock } from '../hooks/useScrollLock';
+import useIsMobile from '../hooks/useIsMobile';
 
 interface Case {
   id: string;
@@ -44,6 +45,7 @@ interface RFI {
 
 export default function Cases() {
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
   const [cases, setCases] = useState<Case[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -180,7 +182,7 @@ export default function Cases() {
   const openRfiCount = activeRfis.filter(r => r.rfi_status === 'open').length;
 
   return (
-    <div className="page-content" style={{ padding: '28px 36px 48px', maxWidth: 1320, margin: '0 auto', fontFamily: 'var(--font-sans)' }}>
+    <div className="page-content" style={{ padding: isMobile ? '14px 0 32px' : '28px 36px 48px', maxWidth: 1320, margin: '0 auto', fontFamily: 'var(--font-sans)' }}>
       <style>{`
         @keyframes casesSpin { to { transform: rotate(360deg); } }
         @keyframes casesFadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
@@ -333,6 +335,49 @@ export default function Cases() {
           borderRadius: 'var(--radius-lg)', overflow: 'hidden',
           boxShadow: 'var(--glass-shadow)',
         }}>
+          {isMobile ? (
+            /* Cards on a phone. The desktop layout is a two-column table whose
+               PRF name is nowrap + ellipsis — at 375px that truncated almost
+               every name to a few characters, and renaming was reachable only
+               by DOUBLE-CLICK, which mobile browsers do not reliably deliver.
+               Each card wraps the full name and carries explicit buttons. */
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              {sortedCases.map(c => (
+                <div key={c.id} style={{
+                  padding: '14px 14px 12px',
+                  borderBottom: '1px solid var(--surface-100)',
+                  background: c.auth_flag ? 'rgba(245,124,0,0.04)' : undefined,
+                }}>
+                  <div style={{
+                    fontWeight: 700, fontSize: '0.98rem', color: 'var(--text-primary)',
+                    lineHeight: 1.35, wordBreak: 'break-word', marginBottom: 10,
+                  }}>
+                    {getPrfDisplayName(c)}
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button onClick={() => navigate(`/cases/${c.id}/prf`)}
+                      style={{
+                        flex: 1, minHeight: 44, borderRadius: 9, cursor: 'pointer',
+                        border: '1px solid rgba(8,131,149,0.35)', background: 'rgba(8,131,149,0.06)',
+                        color: 'var(--brand-teal)', fontSize: '0.88rem', fontWeight: 800,
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                      }}>
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>
+                      View PRF
+                    </button>
+                    <button onClick={() => setRenameCase(c)}
+                      style={{
+                        minHeight: 44, padding: '0 16px', borderRadius: 9, cursor: 'pointer',
+                        border: '1px solid var(--surface-200)', background: 'var(--surface-0)',
+                        color: 'var(--text-secondary)', fontSize: '0.88rem', fontWeight: 700,
+                      }}>
+                      Rename
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
           <table className="cases-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr>
@@ -378,6 +423,7 @@ export default function Cases() {
               ))}
             </tbody>
           </table>
+          )}
           <div style={{
             display: 'flex', justifyContent: 'space-between', alignItems: 'center',
             padding: '12px 20px', borderTop: '1px solid var(--surface-100)',

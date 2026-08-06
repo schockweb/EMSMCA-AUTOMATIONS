@@ -929,11 +929,14 @@ tr:hover td {
 
 /* ─── Responsive ────────────────────────────────────────────── */
 @media (max-width: 768px) {
-  .sidebar {
-    transform: translateX(-100%);
-  }
-  .main-content {
-    margin-left: 0;
+  /* Every admin page is wrapped in .container by App.tsx, which paid 32px a
+     side with no mobile override — and each page then added ~36px of its own
+     inline padding. That was 136px of a 375px viewport spent on chrome, so
+     content had a 239px column to live in. The pages drop their own
+     horizontal padding on mobile (isMobile branches); this supplies the one
+     remaining gutter. */
+  .container {
+    padding: 16px 12px 32px;
   }
   .page-content {
     padding: 20px;
@@ -1912,9 +1915,38 @@ label:has(+ .pulsate-red),
     height: 28px;
   }
 
+  /* The navbar used to be a single nowrap row: logo (with the words "Medical
+     Claims Administrators") + three full-label nav buttons + the user cluster,
+     ~600px of min-content against 343px of viewport. html/body/#root all set
+     overflow-x:hidden (a deliberate Samsung-Internet fling defence — do not
+     remove), so the excess was CLIPPED with no way to pan: the avatar and the
+     Sign Out button sat off-screen and an admin could not log out on a phone.
+     Wrapping the nav onto its own full-width row fixes that without touching
+     the overflow guards. */
   .navbar-inner {
-    padding: 0 16px;
-    height: 68px;
+    padding: 6px 12px;
+    height: auto;
+    min-height: 60px;
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+  .navbar-nav {
+    order: 3;
+    width: 100%;
+    min-width: 0;
+    gap: 4px;
+  }
+  .navbar-user {
+    flex-shrink: 0;
+  }
+  .nav-item {
+    flex: 1 1 0;
+    min-width: 0;
+    justify-content: center;
+    white-space: nowrap;
+    padding: 9px 6px;
+    font-size: 0.8rem;
+    gap: 6px;
   }
 }
 

@@ -32,6 +32,7 @@ import ProviderLogin from './pages/crew/ProviderLogin';
 import ProviderAdminDashboard from './pages/crew/ProviderAdminDashboard';
 import './index.css';
 import SilentFacilityEmailSender from './components/SilentFacilityEmailSender';
+import useIsMobile from './hooks/useIsMobile';
 
 // Legacy `/${slug}/crew/login` URL — bounces to the unified provider login
 // at `/${slug}/login`. The old CrewLogin page was removed.
@@ -58,15 +59,17 @@ function AppLayout({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
 
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
   const userPerms = user?.permissions || [];
 
   const navItems = [
-    { path: '/dashboard', label: 'Dashboard', perm: 'dashboard', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6' },
+    // `short` is used on mobile, where the three labels share one row.
+    { path: '/dashboard', label: 'Dashboard', short: 'Home', perm: 'dashboard', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6' },
     // OCR Verification nav parked — restore once paper-PRF intake comes back:
     // { path: '/verify', label: 'Verification', perm: 'admin_queue', icon: '...' },
-    { path: '/cases', label: 'Case Management', perm: 'cases', icon: 'M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10' },
+    { path: '/cases', label: 'Case Management', short: 'Cases', perm: 'cases', icon: 'M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10' },
     { path: '/providers', label: 'Clients', perm: 'providers', icon: 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4' },
     // { path: '/add-schemas', label: 'Med. Schemes', perm: 'providers', icon: 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4' },
     // { path: '/tariff-billing', label: 'Tariff Billing', perm: 'tariff_billing', icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01' },
@@ -119,7 +122,10 @@ function AppLayout({ children }: { children: React.ReactNode }) {
         <nav className="navbar">
           <div className="navbar-inner">
             <div className="navbar-logo">
-              <Logo size={32} />
+              {/* The wordmark ("Medical Claims Administrators") is ~141px of
+                  min-content — on a phone that is what pushed the user cluster
+                  off the clipped edge. The mark alone still identifies it. */}
+              <Logo size={isMobile ? 28 : 32} showText={!isMobile} />
             </div>
 
             <div className="navbar-nav">
@@ -133,7 +139,7 @@ function AppLayout({ children }: { children: React.ReactNode }) {
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d={item.icon} />
                   </svg>
-                  {item.label}
+                  {isMobile ? ((item as { short?: string }).short ?? item.label) : item.label}
                   {item.path === '/providers' && lockedCount > 0 && (
                     <span
                       title={`${lockedCount} account${lockedCount > 1 ? 's are' : ' is'} locked out — open Clients to review and unlock`}
@@ -159,7 +165,14 @@ function AppLayout({ children }: { children: React.ReactNode }) {
                 </div>
                 <button
                   onClick={logout}
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 8, borderRadius: 'var(--radius-sm)' }}
+                  style={{
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    color: 'var(--text-muted)', padding: 8, borderRadius: 'var(--radius-sm)',
+                    // 44px is the minimum comfortable touch target; the icon
+                    // alone was ~34px and easy to miss on a phone.
+                    minWidth: 44, minHeight: 44,
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  }}
                   className="btn-secondary"
                   title="Sign Out"
                   id="btn-logout"

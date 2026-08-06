@@ -9,6 +9,7 @@ import { useNavigate } from 'react-router';
 import api from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
 import { LoadErrorPanel, LoadErrorBar } from '../components/LoadError';
+import useIsMobile from '../hooks/useIsMobile';
 
 // ── Palette (locked to white / teal / green / orange) ──────────────────────
 const TEAL = 'var(--brand-teal)';     // #088395
@@ -122,6 +123,7 @@ function StatCard({
 
 // ── Main Dashboard ─────────────────────────────────────────────────────────
 export default function Dashboard() {
+  const isMobile = useIsMobile();
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastRefresh, setLastRefresh] = useState(new Date());
@@ -195,11 +197,13 @@ export default function Dashboard() {
 
   return (
     <div style={{
-      padding: '28px 36px 48px',
+      // No horizontal padding on mobile: .container already supplies the
+      // gutter, and paying both left only a 239px content column on a phone.
+      padding: isMobile ? '14px 0 32px' : '28px 36px 48px',
       maxWidth: 1320,
       margin: '0 auto',
       fontFamily: 'var(--font-sans)',
-      minHeight: '100vh',
+      minHeight: isMobile ? 'auto' : '100vh',
     }}>
       <style>{`
         @keyframes dashFadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
@@ -213,8 +217,10 @@ export default function Dashboard() {
 
       {/* ── Header ───────────────────────────────────────────────────── */}
       <div className="dash-in" style={{
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        gap: 16, marginBottom: 26, flexWrap: 'wrap',
+        display: 'flex', justifyContent: 'space-between',
+        flexDirection: isMobile ? 'column' : 'row',
+        alignItems: isMobile ? 'stretch' : 'center',
+        gap: isMobile ? 12 : 16, marginBottom: isMobile ? 18 : 26, flexWrap: 'wrap',
       }}>
         <div>
           <h1 style={{
@@ -262,7 +268,7 @@ export default function Dashboard() {
       {/* ── KPIs ────────────────────────────────────────────────────── */}
       <div className="dash-in" style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(232px, 1fr))',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(min(232px, 100%), 1fr))',
         gap: 16,
         marginBottom: 24,
       }}>

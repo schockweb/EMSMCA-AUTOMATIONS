@@ -5,6 +5,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import api from '../api/client';
 import { useScrollLock } from '../hooks/useScrollLock';
+import useIsMobile from '../hooks/useIsMobile';
 import { LoadErrorPanel, LoadErrorBar } from '../components/LoadError';
 import { HPCSA_CATEGORIES, CATEGORY_META } from '../data/hpcsaScope';
 
@@ -146,6 +147,7 @@ interface LockedAccount {
 }
 
 export default function ProviderManagement() {
+  const isMobile = useIsMobile();
   const [providers, setProviders] = useState<Provider[]>([]);
   const [loading, setLoading] = useState(true);
   const [locked, setLocked] = useState<LockedAccount[]>([]);
@@ -617,7 +619,7 @@ export default function ProviderManagement() {
         {/* Add Provider Modal */}
         {showAddProvider && (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
-            <div style={{ ...cardStyle, maxWidth: 600, width: '90%', padding: 32, maxHeight: '85vh', overflowY: 'auto', position: 'relative' }}>
+            <div style={{ ...cardStyle, maxWidth: 600, width: isMobile ? '94%' : '90%', padding: isMobile ? 18 : 32, maxHeight: isMobile ? '92vh' : '85vh', overflowY: 'auto', position: 'relative' }}>
               <button onClick={() => setShowAddProvider(false)} style={{ position: 'absolute', top: 12, right: 16, background: 'none', border: 'none', fontSize: '1.3rem', cursor: 'pointer', color: 'var(--text-muted)' }}>&times;</button>
               <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 16, color: teal }}>Add New Client</h3>
               
@@ -628,7 +630,7 @@ export default function ProviderManagement() {
                 </div>
 
                 {/* Company details — auto-filled into the top-left corner of every PDF PRF (mirrors Company Settings). */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12 }}>
                   <div>
                     <label style={labelStyle}>Phone Number</label>
                     <input style={inputStyle} value={newProvider.phone} onChange={e => setNewProvider({ ...newProvider, phone: e.target.value })} />
@@ -639,7 +641,7 @@ export default function ProviderManagement() {
                   </div>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12 }}>
                   <div>
                     <label style={labelStyle}>PR Number</label>
                     <input style={inputStyle} value={newProvider.prNumber} onChange={e => setNewProvider({ ...newProvider, prNumber: e.target.value })} />
@@ -682,7 +684,7 @@ export default function ProviderManagement() {
 
                 <div style={{ background: 'var(--surface-50)', padding: 16, borderRadius: 8, border: '1px solid var(--surface-100)' }}>
                   <h4 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: 12, color: 'var(--text)' }}>EMSMCA Client Login</h4>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12 }}>
                     <div>
                       <label style={labelStyle}>Username *</label>
                       <input style={inputStyle} value={newProvider.clientEmail}
@@ -700,7 +702,7 @@ export default function ProviderManagement() {
 
                 <div style={{ background: 'var(--surface-50)', padding: 16, borderRadius: 8, border: '1px solid var(--surface-100)' }}>
                   <h4 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: 12, color: 'var(--text)' }}>Portal Admin Login</h4>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12 }}>
                     <div>
                       <label style={labelStyle}>Admin Email</label>
                       <input style={inputStyle} type="email" value={newProvider.adminEmail}
@@ -720,7 +722,7 @@ export default function ProviderManagement() {
                     receiving facility FROM this address. */}
                 <div style={{ background: 'var(--surface-50)', padding: 16, borderRadius: 8, border: '1px solid var(--surface-100)' }}>
                   <h4 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: 12, color: 'var(--text)' }}>PRF Sending Email</h4>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12 }}>
                     <div>
                       <label style={labelStyle}>Email Service</label>
                       <select style={inputStyle} value={newProvider.smtpService}
@@ -836,7 +838,7 @@ export default function ProviderManagement() {
       {/* Edit Client Modal */}
       {showEditClient && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
-          <div style={{ ...cardStyle, maxWidth: 560, width: '90%', padding: 32, maxHeight: '90vh', overflowY: 'auto', position: 'relative' }}>
+          <div style={{ ...cardStyle, maxWidth: 560, width: isMobile ? '94%' : '90%', padding: isMobile ? 18 : 32, maxHeight: '90vh', overflowY: 'auto', position: 'relative' }}>
             <button onClick={() => setShowEditClient(false)} style={{ position: 'absolute', top: 12, right: 16, background: 'none', border: 'none', fontSize: '1.4rem', cursor: 'pointer', color: 'var(--text-muted)' }}>&times;</button>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
               <div style={{ width: 36, height: 36, borderRadius: 8, background: `rgba(8,131,149,0.1)`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: teal }}>
@@ -887,7 +889,7 @@ export default function ProviderManagement() {
                 <label style={labelStyle}>Company Name *</label>
                 <input style={inputStyle} value={editForm.name} onChange={e => setEditForm({ ...editForm, name: e.target.value })} />
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12 }}>
                 <div>
                   <label style={labelStyle}>PR Number</label>
                   <input style={inputStyle} value={editForm.pr_number} onChange={e => setEditForm({ ...editForm, pr_number: e.target.value })} />
@@ -939,7 +941,7 @@ export default function ProviderManagement() {
               {/* ── EMSMCA Client Login ── */}
               <div style={{ background: 'var(--surface-50)', padding: '14px 16px', borderRadius: 10, border: '1px solid var(--surface-200)' }}>
                 <div style={{ fontSize: '0.7rem', fontWeight: 800, color: teal, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>EMSMCA Client Login</div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 10 }}>
                   <div>
                     <label style={labelStyle}>Username</label>
                     <input
@@ -965,7 +967,7 @@ export default function ProviderManagement() {
               {/* ── Portal Admin Login ── */}
               <div style={{ background: 'var(--surface-50)', padding: '14px 16px', borderRadius: 10, border: '1px solid var(--surface-200)' }}>
                 <div style={{ fontSize: '0.7rem', fontWeight: 800, color: '#2563eb', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>Portal Admin Login</div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 10 }}>
                   <div>
                     <label style={labelStyle}>Admin Email</label>
                     <input
@@ -996,7 +998,7 @@ export default function ProviderManagement() {
                 <div style={{ fontSize: '0.7rem', fontWeight: 800, color: teal, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
                   PRF Sending Email{selectedProvider?.smtp_configured ? ' — configured' : ''}
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 10 }}>
                   <div>
                     <label style={labelStyle}>Email Service</label>
                     <select
@@ -1244,6 +1246,49 @@ export default function ProviderManagement() {
 
           {/* Crew Table */}
           <div style={{ ...cardStyle, padding: 0, overflow: 'hidden' }}>
+            {isMobile ? (
+              /* Cards on a phone: a 3-column table at 375px squeezed the name
+                 column to a few characters and pushed the delete action to a
+                 tap target too small to hit reliably. */
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                {crew.map(c => (
+                  <div key={c.id} style={{ padding: '13px 14px', borderBottom: '1px solid var(--surface-100)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+                      <span style={{
+                        width: 38, height: 38, borderRadius: '50%', flexShrink: 0,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        background: 'rgba(8,131,149,0.1)', color: teal,
+                        fontSize: '0.82rem', fontWeight: 800,
+                      }}>
+                        {(c.initials || c.full_name.split(' ').map(p => p[0]).join('').slice(0, 2) || '—').toUpperCase()}
+                      </span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: '0.92rem', color: 'var(--text)', wordBreak: 'break-word' }}>{c.full_name}</div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>
+                          {c.hpcsa_number ? `HPCSA ${c.hpcsa_number}` : 'No HPCSA number'}
+                          {c.phone ? ` · ${c.phone}` : ''}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleDeleteCrew(c.id)}
+                        aria-label={`Delete ${c.full_name}`}
+                        style={{
+                          flexShrink: 0, minWidth: 44, minHeight: 44, borderRadius: 9,
+                          border: '1px solid var(--surface-200)', background: 'var(--surface-0)',
+                          color: rose, cursor: 'pointer',
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        }}
+                      >
+                        <TrashIcon size={16} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                {crew.length === 0 && (
+                  <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>No crew members yet</div>
+                )}
+              </div>
+            ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.86rem' }}>
               <thead>
                 <tr style={{ background: 'var(--surface-100)', textAlign: 'left' }}>
@@ -1301,6 +1346,7 @@ export default function ProviderManagement() {
                 )}
               </tbody>
             </table>
+            )}
           </div>
         </>
       ) : (
@@ -1402,6 +1448,46 @@ export default function ProviderManagement() {
 
           {/* Vehicle Table */}
           <div style={{ ...cardStyle, padding: 0, overflow: 'hidden' }}>
+            {isMobile ? (
+              /* Cards on a phone — a 4-column table cannot show callsign,
+                 registration, type AND two actions in 375px. */
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                {vehicles.map(v => (
+                  <div key={v.id} style={{ padding: '13px 14px', borderBottom: '1px solid var(--surface-100)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+                      <span style={{
+                        width: 38, height: 38, borderRadius: 10, flexShrink: 0,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        background: 'rgba(230,81,0,0.1)', color: '#E65100',
+                      }}>
+                        <AmbulanceIcon size={20} />
+                      </span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: '0.92rem', color: 'var(--text)', wordBreak: 'break-word' }}>{v.callsign}</div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2, fontFamily: 'monospace' }}>
+                          {v.registration}{v.vehicle_type ? ` · ${v.vehicle_type}` : ''}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => openEditVehicle(v)}
+                        aria-label={`Edit ${v.callsign}`}
+                        style={{
+                          flexShrink: 0, minWidth: 44, minHeight: 44, borderRadius: 9,
+                          border: '1px solid var(--surface-200)', background: 'var(--surface-0)',
+                          color: teal, cursor: 'pointer',
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        }}
+                      >
+                        <EditIcon size={16} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                {vehicles.length === 0 && (
+                  <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>No vehicles yet</div>
+                )}
+              </div>
+            ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.86rem' }}>
               <thead>
                 <tr style={{ background: 'var(--surface-100)', textAlign: 'left' }}>
@@ -1455,6 +1541,7 @@ export default function ProviderManagement() {
                 )}
               </tbody>
             </table>
+            )}
           </div>
         </>
       )}
