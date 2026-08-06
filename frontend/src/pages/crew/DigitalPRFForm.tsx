@@ -5532,7 +5532,7 @@ export default function DigitalPRFForm() {
     closest_facility_bypassed: 4, direct_admission: 4,
     receiving_facility: 5, handover_qualification: 5, handover_name: 5,
     ward: 5, handover_doctor_email: 5, handover_notes: 5, receiving_doctor: 5,
-    hospital_sticker: 5, tc_patient_signature: 5,
+    hospital_sticker: 5, tc_patient_signature: 5, handover_signature: 5,
     gender: 2, patient_phone_cell: 2, dependent_number: 2, main_member_id: 2,
     debtor_gender: 2, debtor_name: 2, debtor_surname: 2, debtor_phone_cell: 2,
     patient_index_of_total: 6,
@@ -8761,12 +8761,14 @@ export default function DigitalPRFForm() {
                   style={{ ...base, marginBottom: 0, borderColor: '#e2e8f0' }}
                 />
               </div>
-              <FullscreenSignaturePad
-                compact
-                label="Practitioner Signature"
-                value={sigs.handover_signature}
-                onChange={v => { setSigs(p => ({ ...p, handover_signature: v })); dirtyRef.current = true; }}
-              />
+              <div id="prf-field-handover_signature">
+                <FullscreenSignaturePad
+                  compact
+                  label="Practitioner Signature"
+                  value={sigs.handover_signature}
+                  onChange={v => { setSigs(p => ({ ...p, handover_signature: v })); dirtyRef.current = true; }}
+                />
+              </div>
             </div>
             <Lbl t="Receiving Facility Email" /><Inp fk="handover_doctor_email" ph="dr@hospital.co.za" type="email" />
           </>
@@ -8810,12 +8812,17 @@ export default function DigitalPRFForm() {
                     style={{ ...base, marginBottom: 0, borderColor: '#e2e8f0' }}
                   />
                 </div>
-                <FullscreenSignaturePad
-                  compact
-                  label="Handover Signature"
-                  value={sigs.handover_signature}
-                  onChange={v => { setSigs(p => ({ ...p, handover_signature: v })); dirtyRef.current = true; }}
-                />
+                {/* Anchored so the submit-review warning can jump straight
+                    here. Only one of the two handover variants (undertaker /
+                    normal) is ever mounted, so the id is not duplicated. */}
+                <div id="prf-field-handover_signature">
+                  <FullscreenSignaturePad
+                    compact
+                    label="Handover Signature"
+                    value={sigs.handover_signature}
+                    onChange={v => { setSigs(p => ({ ...p, handover_signature: v })); dirtyRef.current = true; }}
+                  />
+                </div>
               </div>
             </div>
 
@@ -9698,6 +9705,19 @@ export default function DigitalPRFForm() {
             // Patient / representative signature.
             if (missing(sigs.patient_signature) && missing(fd.tc_patient_signature)) {
               push('Patient / representative signature', 'tc_patient_signature');
+            }
+
+            // Handover signature — the receiving practitioner's confirmation
+            // that the patient was actually handed over. It was missing from
+            // this list, and it is the easiest signature on the form to skip:
+            // it sits inline beside the practitioner's name rather than in a
+            // signature block of its own, and nothing downstream asks for it
+            // again. Once the crew has left the facility it cannot be obtained
+            // at all, so the submit review is the last useful moment to ask.
+            // The early return above already exempts DOD / RHT / refused-
+            // treatment calls, where there is no handover to sign for.
+            if (missing(sigs.handover_signature)) {
+              push('Handover signature (receiving practitioner)', 'handover_signature');
             }
 
             // Medical aid billing — every field on the card.
