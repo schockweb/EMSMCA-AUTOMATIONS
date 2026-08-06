@@ -788,6 +788,86 @@ describe('PRF PDF — attachments and extra sheets', () => {
 // refused transport, who witnessed it, or when.
 //
 // A signature is only evidence of what sits above it.
+// ════════════════════════════════════════════════════════════════════════════
+// Page 1 has a hard height ceiling, so the tallest blocks live on page 2
+// ════════════════════════════════════════════════════════════════════════════
+//
+// The ceiling is ~944 CSS px and comes from the legibility floor: printed text
+// may not drop below 0.9 of design size, so the exporter may reflow no wider
+// than 1220/0.9 ≈ 1355px, and at the A4-landscape ratio (0.697) that is 944px
+// of height. Reallocating budget between reflow-widening and uniform shrink
+// does NOT move it — widening lets a taller page fit but shrinks text by the
+// same factor. Above the ceiling the exporter slices into even bands, which is
+// what put half an IFT/IHT page 1 onto a second sheet, cut through the patient
+// panel.
+//
+// So the two tallest blocks moved to page 2. jsdom has no layout engine and
+// cannot measure any of that — what it CAN pin is the invariant that keeps the
+// fix honest: each block renders EXACTLY ONCE, and never disappears on a call
+// type that has no page 2 to hold it.
+describe('page 1 height — the tall blocks moved, and did not go missing', () => {
+  const withSticker = { hospital_sticker: 'data:image/png;base64,iVBORw0KGgo=' };
+
+  async function renderCall(callType: string, billing: string, extra: Record<string, unknown> = {}) {
+    const built = buildPrf(callType, billing);
+    Object.assign(built.prf.form_data, extra);
+    currentPrf = built.prf;
+    renderPrfView();
+    await screen.findByText((c) => c.includes(built.anchor), { exact: false });
+    return built;
+  }
+
+  // Which SHEET a block lands on — not merely that it rendered.
+  //
+  // The first version of these tests only counted occurrences, and a mutation
+  // that removed the no-page-2 guards passed all of them: the block still
+  // rendered exactly once, just on the wrong sheet (or, for a Declaration of
+  // Death, not at all). Counting is not placement.
+  const sheetContaining = (label: string): number => {
+    const pages = Array.from(document.querySelectorAll('.prf-page'));
+    return pages.findIndex(pg =>
+      Array.from(pg.querySelectorAll('*')).some(
+        el => el.children.length === 0 && el.textContent?.trim() === label));
+  };
+
+  it('prints the hospital sticker exactly once, on page 2, for an IHT', async () => {
+    await renderCall('IHT', 'PVT', withSticker);
+    expect(screen.queryAllByText('Hospital Sticker', { exact: true }).length,
+      'the sticker prints on both sheets'
+    ).toBe(1);
+    expect(sheetContaining('Hospital Sticker'),
+      'the sticker is still on page 1, where it blows the height ceiling'
+    ).toBe(1);
+  });
+
+  it('leaves a pointer on page 1 so nobody hunts for it', async () => {
+    await renderCall('IHT', 'PVT', withSticker);
+    expect(screen.queryAllByText((c) => c.includes('Hospital sticker — see page 2'),
+      { exact: false }).length).toBeGreaterThan(0);
+  });
+
+  it('keeps the cash receipt ON PAGE 1 when page 2 cannot hold it', async () => {
+    // The guard that matters. A block moved to page 2 unconditionally vanishes
+    // from every call type whose page 2 cannot carry it. On a refusal page 2 is
+    // the watermark alone — and a refusal can still take cash, since "Refusal Of
+    // Treatment" is a selectable call-out fee basis. This is the only record of
+    // who handed money over.
+    await renderCall('RHT', 'PVT', { pvt_payment_method: 'Cash' });
+    expect(screen.queryAllByText('Cash Verification', { exact: true }).length).toBe(1);
+    expect(sheetContaining('Cash Verification'),
+      'the cash receipt moved off page 1 on a call whose page 2 is watermark-only'
+    ).toBe(0);
+  });
+
+  it('prints cash and sticker once each, both on page 2, when both apply', async () => {
+    await renderCall('IHT', 'PVT', { pvt_payment_method: 'Cash', ...withSticker });
+    expect(screen.queryAllByText('Cash Verification', { exact: true }).length).toBe(1);
+    expect(screen.queryAllByText('Hospital Sticker', { exact: true }).length).toBe(1);
+    expect(sheetContaining('Cash Verification')).toBe(1);
+    expect(sheetContaining('Hospital Sticker')).toBe(1);
+  });
+});
+
 describe('RHT — the refusal reaches the printed record', () => {
   const REFUSAL = {
     rht_waiver_signatory_name: 'Thandi Mokoena',

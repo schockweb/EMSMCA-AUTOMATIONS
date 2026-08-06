@@ -322,6 +322,55 @@ const CashVerification = ({ fd, wide = false }: { fd: any; wide?: boolean }) => 
   </>
 );
 
+// The hospital sticker slot.
+//
+// ONE definition, rendered in one of two places — see `stickerOnPage2`. With a
+// sticker captured it is the tallest single element the sheet carries: the slot
+// plus a 200px image plus its heading is ~230px, all of it in the same column
+// as Billing, which is already the tallest.
+//
+// That matters because page 1 has a HARD one-sheet ceiling of ~944 CSS px. It
+// comes from the legibility floor: text may not print below 0.9 of design size,
+// so the widest the exporter may reflow to is 1220/0.9 ≈ 1355px, and at the A4
+// landscape ratio (0.697) that is 944px of height. Reallocating budget between
+// reflow-widening and uniform shrink does not move that number — widening lets a
+// taller page fit but shrinks the text by exactly the same factor. The only way
+// a too-tall page 1 stops being sliced across two half-empty sheets is to make
+// it shorter, and this is the largest thing on it.
+//
+// It is NOT shrunk to win those pixels. A hospital sticker carries the
+// receiving facility's own patient label in small print; scaling it down to fit
+// trades one legibility problem for a worse one on the part of the page that is
+// evidence rather than layout.
+const HospitalSticker = ({ fd, wide = false }: { fd: any; wide?: boolean }) => (
+  <>
+    <SectionHead label="Hospital Sticker" />
+    <div style={{
+      borderTop: `1px solid ${LN}`, padding: 6,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }}>
+      <div style={{
+        width: '96%', minHeight: wide ? 150 : 110,
+        border: `1.6px dashed ${MUT}`, borderRadius: 4,
+        background: SOFT_BG,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: 6, overflow: 'hidden',
+      }}>
+        {fd.hospital_sticker ? (
+          <img src={fd.hospital_sticker} alt="hospital sticker"
+               style={{ maxWidth: '100%', maxHeight: wide ? 260 : 200, objectFit: 'contain' }} />
+        ) : (
+          <div style={{
+            fontSize: '0.62rem', fontWeight: 700, color: DIM,
+            textTransform: 'uppercase', letterSpacing: '0.08em', textAlign: 'center',
+            lineHeight: 1.6,
+          }}>Affix hospital sticker here</div>
+        )}
+      </div>
+    </div>
+  </>
+);
+
 const FillLines = ({ minHeight = 0 }: { minHeight?: number }) => (
   // The line stack is absolutely positioned so it contributes ZERO intrinsic
   // height — the container only ever absorbs the column's genuine leftover
@@ -1303,6 +1352,21 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
   // Exactly one of the two call sites renders it, so it cannot print twice.
   const isCash = billingType === 'PVT' && fd.pvt_payment_method === 'Cash';
   const cashOnPage2 = isCash && fd.call_type !== 'DOD' && !refused;
+
+  // The hospital sticker moves for the same reason and under the same rules.
+  //
+  // It is the single tallest element page 1 carries and it sits in the same
+  // column as Billing, which is already the tallest — which is why an IFT/IHT
+  // with a sticker captured went over the ~944px one-sheet ceiling and the
+  // exporter cut it into two half-empty sheets, through the middle of the
+  // patient panel.
+  //
+  // Same guarantee as the cash receipt: exactly one of the two call sites
+  // renders it, so it can neither vanish nor print twice. It stays on page 1
+  // wherever page 2 cannot carry it — a Declaration of Death has no page 2, and
+  // on a refusal page 2 is the watermark alone.
+  const stickerVisible = !(fd.call_type === 'DOD' && fd.med_aid_dec_death) && fd.call_type !== 'RHT';
+  const stickerOnPage2 = stickerVisible && fd.call_type !== 'DOD' && !refused;
 
   // ── Empty-section detection ──
   const debtorKeys = [
@@ -2436,44 +2500,18 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
               </>
             )}
 
-            {/* Hospital Sticker — dedicated placeholder, now positioned beneath
-                Medical Aid Information. Shows the captured sticker inline when
-                present, otherwise a reserved "affix here" box so the slot is
-                always visible on the printed / exported PRF. Hidden for RHT
-                (no hospital transport, so no sticker). */}
-            {!(fd.call_type === 'DOD' && fd.med_aid_dec_death) && fd.call_type !== 'RHT' && (
-              <>
-                <SectionHead label="Hospital Sticker" />
-                {/* Fixed-size slot (real stickers are ~credit-card sized) — it
-                    used to flex-grow and swallow the column's leftover height
-                    as a huge dashed void. Leftover space now becomes ruled
-                    write-in lines below instead. */}
-                <div style={{
-                  borderTop: `1px solid ${LN}`, padding: 6,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                }}>
-                  <div style={{
-                    width: '96%', minHeight: 110,
-                    border: `1.6px dashed ${MUT}`, borderRadius: 4,
-                    background: SOFT_BG,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    padding: 6, overflow: 'hidden',
-                  }}>
-                    {fd.hospital_sticker ? (
-                      <img src={fd.hospital_sticker} alt="hospital sticker"
-                           style={{ maxWidth: '100%', maxHeight: 200, objectFit: 'contain' }} />
-                    ) : (
-                      <div style={{
-                        fontSize: '0.62rem', fontWeight: 700, color: DIM,
-                        textTransform: 'uppercase', letterSpacing: '0.08em', textAlign: 'center',
-                        lineHeight: 1.6,
-                      }}>Affix hospital sticker here</div>
-                    )}
-                  </div>
-                </div>
-                <FillLines />
-              </>
+            {/* Hospital Sticker — normally printed on page 2 (see
+                stickerOnPage2): it is the tallest element on the sheet and page
+                1 has a hard ~944px ceiling. It stays here only when there is no
+                page 2 to move it to. Hidden entirely for RHT (no hospital
+                transport, so no sticker). */}
+            {stickerVisible && !stickerOnPage2 && <HospitalSticker fd={fd} />}
+            {stickerOnPage2 && (
+              <div style={{ padding: '3px 6px', borderTop: `1px solid ${LN}`, fontSize: '0.5rem', color: MUT, fontStyle: 'italic' }}>
+                Hospital sticker — see page 2.
+              </div>
             )}
+            <FillLines />
           </div>
 
           {/* Channel-specific + Return Trip (when present) + Terms & Conditions.
@@ -3137,9 +3175,22 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
             the two signatures sit side by side with room to be legible, which
             is the point of capturing them: this is the only record of who
             handed the money over and who took it. */}
-        {cashOnPage2 && (
-          <div style={{ borderTop: `2px solid ${LN}` }}>
-            <CashVerification fd={fd} wide />
+        {(cashOnPage2 || stickerOnPage2) && (
+          <div style={{
+            borderTop: `2px solid ${LN}`,
+            display: 'grid',
+            // Side by side when both are present, so the pair costs one band
+            // rather than two. Either alone takes the full width.
+            gridTemplateColumns: (cashOnPage2 && stickerOnPage2) ? '2fr 1fr' : '1fr',
+          }}>
+            {cashOnPage2 && (
+              <div style={{ borderRight: (cashOnPage2 && stickerOnPage2) ? `1px solid ${LN}` : undefined }}>
+                <CashVerification fd={fd} wide />
+              </div>
+            )}
+            {stickerOnPage2 && (
+              <div><HospitalSticker fd={fd} wide /></div>
+            )}
           </div>
         )}
 
