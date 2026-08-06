@@ -10,6 +10,23 @@ above, not recalled. Where I could not verify something, it says so.
 > section (H) was added because the load test surfaced something nobody had
 > looked at. The changes are summarised under "What changed today".
 
+> **Revision, 2026-08-06 — the move to the client's Azure VM carries no data.**
+> The current VM holds pilot data only, and by decision **none of it moves**: no
+> database dump, no uploads volume, no accounts, no backup archives, and new
+> `SECRET_KEY` / `ENCRYPTION_KEY`. The new instance starts empty and its first
+> PRF is a real one. The only thing copied is the TLS certificate, which is a
+> file for a domain the client owns, not data. Procedure:
+> `deploy/MIGRATE-TO-CLIENT-VM.md`.
+>
+> Two consequences worth carrying into the rest of this document. **A4's
+> encryption-key gate no longer applies to the move** — a wrong key is only
+> catastrophic when there is something already encrypted to read, and there is
+> not. And **the pilot data does not live only on the VM**: the crew app's
+> offline outbox is kept in the browser origin, the hostname is unchanged, and
+> `services/offlineDb.ts` states it is not cleared on End Shift or logout — so an
+> unpurged tablet will sync pilot PRFs into the clean database and the server will
+> correctly accept them. Purging the devices is a required step, not tidying.
+
 ---
 
 ## How to read this
