@@ -19,7 +19,11 @@ import type { CrewOption, VehicleOption } from './StartShiftWizard';
 import { saveAdminSession, ensureProviderSession } from '../../utils/crewSession';
 import { getPortalGrant, savePortalGrant, grantHeaders } from '../../utils/portalGrant';
 import { reportSuccess, reportFailure } from '../../services/serverHealth';
-import { cacheCrewRoster, getCachedCrewRoster } from '../../services/offlineShiftCache';
+import {
+  cacheCrewRoster, getCachedCrewRoster,
+  cacheVehicles, getCachedVehicles,
+  isUsableOffline,
+} from '../../services/offlineShiftCache';
 
 interface ProviderInfo {
   name: string;
@@ -49,7 +53,16 @@ export default function ProviderLogin() {
   // The crew/vehicle lists and the shift-start endpoints now require proof the
   // company password was entered on this device. Without it anyone could post a
   // crew UUID and receive a 12-hour patient-record token.
-  const [unlocked, setUnlocked] = useState<boolean>(() => !!getPortalGrant(providerSlug));
+  // Unlocked means "this device holds a grant that is STILL VALID", not merely
+  // "a grant is present". Presence alone let an expired grant render the crew
+  // picker, and the failure then surfaced as an unexplained 401 at the moment
+  // of starting a shift. Offline that is worse: with no server to answer, the
+  // device would sit on a picker that could never work. Checking `exp` locally
+  // re-prompts for the company password while the crew can still do something
+  // about it.
+  const [unlocked, setUnlocked] = useState<boolean>(
+    () => isUsableOffline(getPortalGrant(providerSlug)),
+  );
   const [unlockPassword, setUnlockPassword] = useState('');
   const [unlockError, setUnlockError] = useState('');
   const [unlockLoading, setUnlockLoading] = useState(false);
@@ -125,12 +138,26 @@ export default function ProviderLogin() {
         const cached = getCachedCrewRoster(providerSlug);
         if (cached && cached.length) setCrewList(cached as any);
       });
+    // Vehicles get the same treatment as the crew roster above. They did not
+    // before: the failure was swallowed whole, so an offline device showed an
+    // empty vehicle picker and the shift could not be started even though the
+    // crew list had come back from cache. Half a cached shift-start flow is no
+    // shift-start flow.
     axios.get(`/api/providers/${providerSlug}/public-vehicles`, cfg)
       .then(res => {
         const data = res.data;
-        setVehicleList(Array.isArray(data) ? data : []);
+        const list = Array.isArray(data) ? data : [];
+        setVehicleList(list);
+        cacheVehicles(providerSlug, list as any);
       })
-      .catch(() => {});
+      .catch(err => {
+        // A 401/403 is the server ANSWERING that the grant is no longer good;
+        // the crew-roster handler above already drops back to the unlock
+        // prompt, so do not paper over it with a cached list here.
+        if (err?.response?.status === 401 || err?.response?.status === 403) return;
+        const cached = getCachedVehicles(providerSlug);
+        if (cached && cached.length) setVehicleList(cached as any);
+      });
   }, [providerSlug, unlocked]);
 
   // ── Admin Login ──
