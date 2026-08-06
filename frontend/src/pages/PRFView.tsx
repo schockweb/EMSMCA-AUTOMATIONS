@@ -324,7 +324,9 @@ const CashVerification = ({ fd, wide = false }: { fd: any; wide?: boolean }) => 
 
 // The hospital sticker slot.
 //
-// ONE definition, rendered on the attachments sheet — see `stickerOnOwnSheet`. With a
+// Page 1 renders this ONLY as the empty "affix here" slot. A CAPTURED sticker
+// prints full-size on its own "Patient Documents (Attachments)" sheet instead —
+// see `stickerOnDocumentSheet`. With a
 // sticker captured it is the tallest single element the sheet carries: the slot
 // plus a 200px image plus its heading is ~230px, all of it in the same column
 // as Billing, which is already the tallest.
@@ -1382,25 +1384,26 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
   // sits on page 1 quite happily; it is the 200px image that takes the block to
   // ~230px and pushes the sheet past the ceiling.
   //
-  // Without this, every primary and every transfer gained an extra, nearly
-  // blank sheet — because the slot renders whether or not a sticker was
-  // captured, so that it can be affixed to the printed form by hand. Trading a
-  // layout bug on some PRFs for an extra page on all of them is a bad deal, and
-  // one nobody would notice until a scheme complained about the volume.
-  // ...and only on a TRANSFER, which is the sheet that actually overflows.
+  // A captured sticker ALREADY gets a full sheet of its own further down, from
+  // the "Patient Documents (Attachments)" loop, which renders one page per
+  // captured image and lists `hospital_sticker` first. So page 1 does not need
+  // to carry the image and the attachments sheet must not carry it either —
+  // rendering it there produced the SAME picture twice, once compact on the
+  // attachments sheet and once full-size on its own page.
   //
-  // An inter-facility page 1 carries what a primary does PLUS the transfer
-  // reason, the receiving doctor, qualification, condition and facility email,
-  // and the return-trip leg. That is what takes it past the ceiling; a primary
-  // fits with the sticker in place and always did. Moving it there too would
-  // buy nothing and cost an extra sheet on the most common call type in the
-  // system — the medical-aid render test caught exactly that, going from 4
-  // sheets to 5 on a PRIMARY.
-  const isTransfer = ['IHT', 'IFT'].includes(fd.call_type);
-  const stickerOnOwnSheet = stickerVisible && !!fd.hospital_sticker && isTransfer;
+  // That is the identical mistake `raf_oar_report_pdf` made (see the NOTE in
+  // the attachments loop): one field fed into two page-producing lists. The
+  // rule this file follows is that exactly ONE call site renders any given
+  // artefact.
+  //
+  // Because the document sheet exists whenever a sticker was captured, no
+  // extra page is created by deferring to it — so this applies to every call
+  // type, not just transfers, and it removes the duplicate on all of them.
+  const stickerOnDocumentSheet = stickerVisible && !!fd.hospital_sticker;
 
-  // The sheet exists only when it has something to carry.
-  const hasAttachmentSheet = cashOnOwnSheet || stickerOnOwnSheet;
+  // The sheet exists only when it has something to carry. The sticker is no
+  // longer a reason to create it — the document sheet above covers that.
+  const hasAttachmentSheet = cashOnOwnSheet;
 
   // ── Empty-section detection ──
   const debtorKeys = [
@@ -2532,14 +2535,17 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
               </>
             )}
 
-            {/* Hospital Sticker — normally printed on page 2 (see
-                stickerOnOwnSheet): it is the tallest element on the sheet and
-                page 1 has a hard ~944px ceiling. Hidden entirely for RHT (no
+            {/* Hospital Sticker. When one was captured it prints full-size on
+                its own "Patient Documents (Attachments)" sheet, so page 1 only
+                cross-references it — the image is the tallest element this
+                column can carry and page 1 has a hard ~944px ceiling. With no
+                sticker captured the empty slot still prints, so it can be
+                affixed to the paper form by hand. Hidden entirely for RHT (no
                 hospital transport, so no sticker). */}
-            {stickerVisible && !stickerOnOwnSheet && <HospitalSticker fd={fd} />}
-            {stickerOnOwnSheet && (
+            {stickerVisible && !stickerOnDocumentSheet && <HospitalSticker fd={fd} />}
+            {stickerOnDocumentSheet && (
               <div style={{ padding: '3px 6px', borderTop: `1px solid ${LN}`, fontSize: '0.5rem', color: MUT, fontStyle: 'italic' }}>
-                Hospital sticker — see the attachments sheet.
+                Hospital sticker — see the patient documents sheet.
               </div>
             )}
             <FillLines />
@@ -3307,17 +3313,12 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
             border: `2px solid ${LN}`, boxShadow: '0 6px 24px rgba(0,0,0,0.1)',
             display: 'flex', flexDirection: 'column',
           }}>
-            <div style={{
-              display: 'grid',
-              // Side by side when both apply; either alone takes the width.
-              gridTemplateColumns: (cashOnOwnSheet && stickerOnOwnSheet) ? '2fr 1fr' : '1fr',
-            }}>
-              {cashOnOwnSheet && (
-                <div style={{ borderRight: (cashOnOwnSheet && stickerOnOwnSheet) ? `1px solid ${LN}` : undefined }}>
-                  <CashVerification fd={fd} wide />
-                </div>
-              )}
-              {stickerOnOwnSheet && <div><HospitalSticker fd={fd} wide /></div>}
+            {/* The cash receipt is the only thing this sheet carries. The
+                hospital sticker used to render here too, which printed it twice
+                — the "Patient Documents (Attachments)" loop below already gives
+                a captured sticker a full sheet of its own. */}
+            <div>
+              {cashOnOwnSheet && <CashVerification fd={fd} wide />}
             </div>
             <FillLines />
           </div>

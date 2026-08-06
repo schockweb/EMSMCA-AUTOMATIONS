@@ -828,24 +828,30 @@ describe('page 1 height — the tall blocks moved, and did not go missing', () =
       Array.from(pg.querySelectorAll('*')).some(
         el => el.children.length === 0 && el.textContent?.trim() === label));
 
-  it('keeps the hospital sticker off page 1, on its own sheet', async () => {
+  // Assert on the IMAGE, not on a heading. The reported defect was the same
+  // picture printed TWICE — compact on the attachments sheet and full-size on
+  // its own patient-documents page — and a heading count cannot see that,
+  // because the two copies sit under different headings.
+  const stickerImgs = () =>
+    Array.from(document.querySelectorAll('img'))
+      .filter(im => im.getAttribute('src') === withSticker.hospital_sticker);
+
+  it('prints the hospital sticker EXACTLY once, and never on page 1', async () => {
     await renderCall('IHT', 'PVT', withSticker);
-    expect(screen.queryAllByText('Hospital Sticker', { exact: true }).length,
-      'the sticker prints on more than one sheet'
+    expect(stickerImgs().length,
+      'the sticker image is rendered on more than one sheet'
     ).toBe(1);
-    // >= 2: off page 1 (index 0), which has the ~944px ceiling, AND off the
-    // clinical sheet (index 1), which is already close to the same ceiling —
-    // putting it there was the first attempt and merely moved the slice.
-    // Not pinned to the LAST sheet: attached documents get their own sheets
-    // after this one, so the last index is not a stable anchor.
-    expect(sheetContaining('Hospital Sticker'),
-      'the sticker is on page 1 or on the clinical sheet — both are at the ceiling'
-    ).toBeGreaterThanOrEqual(2);
+    // Page 1 carries the ~944px ceiling; the image is the tallest thing its
+    // column can hold, so it must not be there.
+    const pageOne = sheets()[0];
+    expect(pageOne.contains(stickerImgs()[0]),
+      'the sticker image is on page 1, which is at the height ceiling'
+    ).toBe(false);
   });
 
   it('leaves a pointer on page 1 so nobody hunts for it', async () => {
     await renderCall('IHT', 'PVT', withSticker);
-    expect(screen.queryAllByText((c) => c.includes('Hospital sticker — see the attachments sheet'),
+    expect(screen.queryAllByText((c) => c.includes('Hospital sticker — see the patient documents sheet'),
       { exact: false }).length).toBeGreaterThan(0);
   });
 
@@ -861,11 +867,20 @@ describe('page 1 height — the tall blocks moved, and did not go missing', () =
     expect(sheetContaining('Cash Verification')).toBeGreaterThan(0);
   });
 
-  it('puts cash and sticker on the SAME extra sheet, not one each', async () => {
+  it('does not create a second sheet for the sticker — it already has one', async () => {
+    // The attachments sheet carries the cash receipt only. A captured sticker
+    // is served by the "Patient Documents (Attachments)" loop, which gives it a
+    // full sheet of its own; rendering it in both places is what printed it
+    // twice. Exactly the mistake raf_oar_report_pdf made — one field feeding
+    // two page-producing lists.
     await renderCall('IHT', 'PVT', { pvt_payment_method: 'Cash', ...withSticker });
     expect(screen.queryAllByText('Cash Verification', { exact: true }).length).toBe(1);
-    expect(screen.queryAllByText('Hospital Sticker', { exact: true }).length).toBe(1);
-    expect(sheetContaining('Cash Verification')).toBe(sheetContaining('Hospital Sticker'));
+    expect(stickerImgs().length, 'the sticker image printed twice').toBe(1);
+    const cashSheet = sheetContaining('Cash Verification');
+    expect(cashSheet).toBeGreaterThan(0);
+    // The two live on DIFFERENT sheets now: cash on the on-demand attachments
+    // sheet, the sticker on its own full-size document page.
+    expect(sheets()[cashSheet].contains(stickerImgs()[0])).toBe(false);
   });
 
   it('creates the extra sheet ON DEMAND, not for every PRF', async () => {

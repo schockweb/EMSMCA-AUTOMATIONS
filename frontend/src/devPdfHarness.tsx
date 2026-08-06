@@ -74,6 +74,20 @@ const vitalsSets = Array.from({ length: VITALS }, (_, i) => ({
 const CALL_TYPE = qs.get('call') || 'Primary';
 const IS_IFT = CALL_TYPE === 'IHT' || CALL_TYPE === 'IFT';
 
+// ?sticker=1 attaches a hospital sticker. A CAPTURED sticker is what changes
+// pagination (the empty slot is ~110px, the image takes the block to ~230px)
+// and it is also the artefact that was being printed twice — once compact on
+// the attachments sheet and once full-size on its own patient-documents page.
+// Without a sticker in the fixture the harness cannot see either behaviour.
+const STICKER = qs.get('sticker') === '1'
+  ? 'data:image/svg+xml;base64,' + btoa(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="420" height="200">' +
+      '<rect width="420" height="200" fill="#e5e7eb"/>' +
+      '<text x="24" y="60" font-size="20" font-family="monospace">HOSPITAL LABEL</text>' +
+      '<text x="24" y="100" font-size="16" font-family="monospace">HARNESS PATIENT</text>' +
+      '<text x="24" y="140" font-size="16" font-family="monospace">MRN 0099887</text></svg>')
+  : '';
+
 const FD: Record<string, any> = {
   // ?billing=PVT exercises the private-cash block (Cash Verification).
   call_type: CALL_TYPE, billing_type: (qs.get('billing') || 'MED AID'), priority: 'RED',
@@ -103,6 +117,7 @@ const FD: Record<string, any> = {
   transport_priority: 'RED',
   // Fields that were captured by the crew but never reached the PDF until
   // 2026-07-28. Present here so the harness proves they now render.
+  ...(STICKER ? { hospital_sticker: STICKER } : {}),
   assessment_level: 'BLS',
   monitoring_level: 'ALS',
   transfer_subtype: 'Hospital to Hospital',
