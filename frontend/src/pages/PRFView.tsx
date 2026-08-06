@@ -746,7 +746,13 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
         } else {
           // Very tall page — slice into full-width A4 bands across consecutive
           // sheets so every row stays full size and readable, never clipped.
-          const sliceHpx = Math.max(1, Math.floor(maxH / wScale));   // source px per sheet
+          //
+          // The band height comes from the plan, NOT from a second copy of the
+          // formula here. The two used to be independent expressions of the same
+          // arithmetic, so making the policy emit even bands while this loop
+          // still cut fill-then-remainder would have left the sliver in place
+          // while the tests reported it fixed.
+          const sliceHpx = plan.bandHpx;
           for (let sy = 0; sy < ch; sy += sliceHpx) {
             const hpx = Math.min(sliceHpx, ch - sy);
             const band = document.createElement('canvas');
@@ -1171,7 +1177,17 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
   // billing-and-debtor layout with the refusal squeezed into a quarter of the
   // page, which is the arrangement this change exists to remove.
   const refused = fd.call_type === 'RHT' || !!fd.patient_refused_treatment;
-  const timeRows = [
+  // Must cover EVERY field the Return Trip rows render — a guard that misses one
+  // silently drops captured times from the PDF that goes to the scheme.
+  // `return_depart_time` was checked here but is never written by the crew form;
+  // the real keys are return_depart_scene_time and return_at_destination_time.
+  const returnTripHasContent = !!(
+    fd.return_despatch_time || fd.return_on_scene_time ||
+    fd.return_depart_scene_time || fd.return_at_destination_time ||
+    fd.return_handover_time || fd.return_available_time
+  );
+
+  const timeRows: Array<{ label: string; t: string; k: string; ret?: boolean }> = [
     { label: 'Call Disp',           t: 'time_dispatched',     k: 'km_dispatched'     },
     { label: 'Scene',               t: 'time_on_scene',       k: 'km_on_scene'       },
     ...(!noTransport ? [
@@ -1181,16 +1197,25 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
     { label: 'Available',           t: 'time_available',      k: 'km_available'      },
   ];
 
-  // Must cover EVERY field the Return Trip block renders (see the FieldRow
-  // stack below) — a guard that misses one silently drops captured times from
-  // the PDF that goes to the scheme. `return_depart_time` was checked here but
-  // is never written by the crew form; the real keys are return_depart_scene_time
-  // and return_at_destination_time.
-  const returnTripHasContent = !!(
-    fd.return_despatch_time || fd.return_on_scene_time ||
-    fd.return_depart_scene_time || fd.return_at_destination_time ||
-    fd.return_handover_time || fd.return_available_time
-  );
+  // Return leg (inter-facility only), paired two-up.
+  //
+  // These six times used to render as their own SectionHead + six FieldRows
+  // inside BAND B's fourth column. That column also carries the Terms &
+  // Conditions and the signatures and is already the tallest on the sheet, so
+  // the 166px block pushed page 1 from 862px to 1030px — past the ~944px at
+  // which the exporter can still place it on one A4 sheet. The export then
+  // sliced the sheet in two THROUGH the crew signature boxes, leaving a
+  // near-empty second page. That is the IFT/IHT "page 1 overlaps page 2" bug.
+  //
+  // They render in the journey-times column instead: the two legs belong
+  // together, and paired two-up the block costs ~70px, which fits inside the
+  // slack that column already had. Page 1 returns to the same height as a
+  // Primary call, so IFT no longer sits on the edge of the sheet limit.
+  const returnTripPairs: Array<[string, string, string, string]> = [
+    ['Despatch', fd.return_despatch_time,     'On Scene',  fd.return_on_scene_time],
+    ['Depart',   fd.return_depart_scene_time, 'At Dest',   fd.return_at_destination_time],
+    ['Handover', fd.return_handover_time,     'Available', fd.return_available_time],
+  ];
 
   // The payer-specific block lives in the "Billing Information" column and is
   // driven by billing_type. (The separate "Channel Detail" block was removed.)
@@ -1857,10 +1882,34 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
                 }}>
                   <div style={{ padding: '2px 6px', display: 'flex', alignItems: 'center', fontWeight: 700, borderRight: `1px solid ${LN}`, background: GREEN_TINT, fontSize: '0.56rem', textTransform: 'uppercase', letterSpacing: '0.04em', color: INK }}>{r.label}</div>
                   <div style={{ padding: '2px 6px', display: 'flex', alignItems: 'center', borderRight: `1px solid ${LN}`, fontFamily: 'ui-monospace, monospace' }}>{fmtTime(ts[r.t])}</div>
-                  <div style={{ padding: '2px 6px', display: 'flex', alignItems: 'center', fontFamily: 'ui-monospace, monospace' }}>{km[r.k] || ''}</div>
+                  <div style={{ padding: '2px 6px', display: 'flex', alignItems: 'center', fontFamily: 'ui-monospace, monospace' }}>{(r.k && km[r.k]) || ''}</div>
                 </div>
               ))}
             </div>
+            {/* Return leg — inter-facility transfers only. Paired two-up so the
+                six times cost ~70px here instead of 166px in the Band B column
+                that was overflowing the sheet. See `returnTripPairs` above. */}
+            {returnTripHasContent && (
+              <div style={{ flexShrink: 0 }}>
+                <div style={{
+                  padding: '2px 6px', minHeight: 13, fontSize: '0.54rem', fontWeight: 800,
+                  textTransform: 'uppercase', letterSpacing: '0.06em',
+                  background: GREEN_TINT, borderTop: `1px solid ${LN}`,
+                  borderBottom: `1px solid ${LN}`, color: INK,
+                }}>Return Trip</div>
+                {returnTripPairs.map(([l1, v1, l2, v2]) => (
+                  <div key={l1} style={{
+                    display: 'grid', gridTemplateColumns: '1fr 0.62fr 1fr 0.62fr',
+                    borderBottom: `1px solid ${LN}`, fontSize: '0.7rem',
+                  }}>
+                    <div style={{ padding: '1px 6px', display: 'flex', alignItems: 'center', fontWeight: 700, borderRight: `1px solid ${LN}`, background: GREEN_TINT, fontSize: '0.52rem', textTransform: 'uppercase', letterSpacing: '0.03em', color: INK }}>{l1}</div>
+                    <div style={{ padding: '1px 4px', display: 'flex', alignItems: 'center', borderRight: `1px solid ${LN}`, fontFamily: 'ui-monospace, monospace' }}>{v1 || ''}</div>
+                    <div style={{ padding: '1px 6px', display: 'flex', alignItems: 'center', fontWeight: 700, borderRight: `1px solid ${LN}`, background: GREEN_TINT, fontSize: '0.52rem', textTransform: 'uppercase', letterSpacing: '0.03em', color: INK }}>{l2}</div>
+                    <div style={{ padding: '1px 4px', display: 'flex', alignItems: 'center', fontFamily: 'ui-monospace, monospace' }}>{v2 || ''}</div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
@@ -2353,18 +2402,13 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
           <div style={{ display: 'flex', flexDirection: 'column',
                         ...(refused ? { gridColumn: 2, gridRow: '1 / -1' } : {}) }}>
             {/* "Channel Detail" section removed per request. The return-trip
-                times are retained below for inter-facility transfers. */}
-            {returnTripHasContent && (
-              <>
-                <SectionHead label="Return Trip" />
-                <FieldRow label="Despatch"  value={fd.return_despatch_time} />
-                <FieldRow label="On Scene"  value={fd.return_on_scene_time} />
-                <FieldRow label="Depart"    value={fd.return_depart_scene_time} />
-                <FieldRow label="At Dest"   value={fd.return_at_destination_time} />
-                <FieldRow label="Handover"  value={fd.return_handover_time} />
-                <FieldRow label="Available" value={fd.return_available_time} />
-              </>
-            )}
+                times used to render here as a SectionHead + six FieldRows.
+                They now render as "Ret. …" rows in the journey-times table in
+                BAND A — see the `timeRows` comment for why: this column is the
+                tallest on the sheet, and 166px of extra rows here pushed page 1
+                past the one-A4-sheet limit, so the export sliced it in two
+                through the crew signature boxes. Every one of the six times is
+                still printed; only its position changed. */}
 
             {/* ── Refusal of Transport ─────────────────────────────────────
                 THE GAP THIS CLOSES. The crew captures a refusal declaration,

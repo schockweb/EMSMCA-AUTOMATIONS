@@ -24,6 +24,10 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { MemoryRouter, Routes, Route } from 'react-router';
 import axios from 'axios';
+// The app's global reset — WITHOUT it the harness lays out at content-box, so
+// the 2px page border fell outside the 1220px design width and every measured
+// height was taken from a box model the real app never uses.
+import './index.css';
 import {
   DESIGN_W_PX, MAX_FIT_W as SHIPPED_MAX_FIT_W, MIN_LEGIBLE_SCALE,
   SHRINK_LIMIT_MM, planPlacement, printedPt,
@@ -63,9 +67,25 @@ const vitalsSets = Array.from({ length: VITALS }, (_, i) => ({
   gcs_e: '4', gcs_v: '5', gcs_m: '6', bgl: `${5 + i}.4`, pain: `${7 - i}`,
 }));
 
+// ?call=IHT renders the inter-facility variant of page 1 — which carries the
+// Return Trip block that a Primary call does not. That block is what pushed
+// page 1 past one A4 sheet and made the export slice mid-signature-box; the
+// harness could never reproduce it while the fixture was hard-coded to Primary.
+const CALL_TYPE = qs.get('call') || 'Primary';
+const IS_IFT = CALL_TYPE === 'IHT' || CALL_TYPE === 'IFT';
+
 const FD: Record<string, any> = {
   // ?billing=PVT exercises the private-cash block (Cash Verification).
-  call_type: 'Primary', billing_type: (qs.get('billing') || 'MED AID'), priority: 'RED',
+  call_type: CALL_TYPE, billing_type: (qs.get('billing') || 'MED AID'), priority: 'RED',
+  // Return-trip times only exist on an inter-facility transfer.
+  ...(IS_IFT ? {
+    return_despatch_time: '11:48',
+    return_on_scene_time: '12:49',
+    return_depart_scene_time: '11:49',
+    return_at_destination_time: '11:49',
+    return_handover_time: '11:49',
+    return_available_time: '11:49',
+  } : {}),
   patient_name: 'Sipho', patient_surname: 'Harness',
   patient_id_number: '9001015800083', patient_age: '42', patient_gender: 'Male',
   medical_scheme: 'GEMS', medical_aid_number: 'GEMS-1234567',
@@ -145,7 +165,14 @@ const PAGE_W_MM = 297, PAGE_H_MM = 210, INSET_MM = 5;
 const maxW = PAGE_W_MM - INSET_MM * 2;          // 287
 const maxH = PAGE_H_MM - INSET_MM * 2;          // 200
 const SHEET_RATIO = maxH / maxW;                // ~0.697
-const LABEL_REM = 0.56;                         // FieldRow label, PRFView.tsx:191
+// The SMALLEST text on the sheet, not merely a representative one. The probe
+// used to be the 0.56rem FieldRow label, which made the harness report "ok"
+// while the Terms & Conditions clause body (PRFView.tsx, 0.46rem — 18% smaller,
+// and on page 1 of every non-DOD call) printed a full point smaller than the
+// number shown. A legibility probe anchored above the true minimum certifies
+// pages it has not actually checked.
+const LABEL_REM = 0.56;                         // FieldRow label
+const SMALLEST_REM = 0.46;                      // T&C clause body — the real floor
 const ROOT_PX = 16;
 // Imported from the shipped policy so the harness can never drift from it.
 // `?cap=2400` replays the pre-fix behaviour for a like-for-like comparison.
@@ -153,9 +180,16 @@ const DESIGN_W = DESIGN_W_PX;
 const MAX_FIT_W = Number(qs.get('cap') ?? SHIPPED_MAX_FIT_W);
 
 function measure() {
-  const frames = Array.from(document.querySelectorAll<HTMLElement>('.prf-print-frame'));
+  // Measure the .prf-page — the element BOTH real pipelines measure and widen
+  // (buildPrfPdf and the beforeprint fit()). The probe used to read
+  // .prf-print-frame, which is styled only inside `@media print`: on screen it
+  // is an unstyled block, so its offsetWidth was the container's, and setting a
+  // width on it could not override the inline width:1220 on the .prf-page
+  // inside it. The widen loop was therefore a no-op and every number this
+  // harness printed described a page the exporter never sees.
+  const frames = Array.from(document.querySelectorAll<HTMLElement>('.prf-page'));
   const lines: string[] = [];
-  lines.push(`iv=${IV_ROWS} med=${MED_ROWS} vitals=${VITALS}  sheets=${frames.length}`);
+  lines.push(`call=${CALL_TYPE} iv=${IV_ROWS} med=${MED_ROWS} vitals=${VITALS}  sheets=${frames.length}`);
   lines.push('');
   frames.forEach((el, i) => {
     const w0 = el.offsetWidth || DESIGN_W;
@@ -177,11 +211,13 @@ function measure() {
     const plan = planPlacement(cw, ch, w);
     const branch = plan.kind === 'slice' ? `slice x${plan.sheets}` : plan.kind;
     const labelPt = printedPt(LABEL_REM, plan.textScale, ROOT_PX);
+    const smallestPt = printedPt(SMALLEST_REM, plan.textScale, ROOT_PX);
     const capped = w >= MAX_FIT_W;
     lines.push(
       `sheet ${i + 1}: ${w0}x${h0}px -> width ${w}px (${passes} pass${passes === 1 ? '' : 'es'})` +
       `${capped ? ' [at cap]' : ''}  branch=${branch}\n` +
-      `          label text: ${labelPt.toFixed(2)}pt${labelPt < 5 ? '   <<< BELOW LEGIBILITY' : '   ok'}`,
+      `          label  ${LABEL_REM}rem: ${labelPt.toFixed(2)}pt${labelPt < 5 ? '   <<< BELOW LEGIBILITY' : '   ok'}\n` +
+      `          T&C ${SMALLEST_REM}rem: ${smallestPt.toFixed(2)}pt   (smallest text on the sheet)`,
     );
   });
   return lines.join('\n');

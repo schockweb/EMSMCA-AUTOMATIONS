@@ -73,7 +73,7 @@ export const SHRINK_LIMIT_MM = MAX_H_MM * 1.4;
 export type Placement =
   | { kind: 'fit'; drawWmm: number; drawHmm: number; textScale: number }
   | { kind: 'shrink'; drawWmm: number; drawHmm: number; textScale: number }
-  | { kind: 'slice'; sheets: number; textScale: number };
+  | { kind: 'slice'; sheets: number; bandHpx: number; textScale: number };
 
 /**
  * Decide how one rasterised sheet is placed on paper.
@@ -107,10 +107,25 @@ export function planPlacement(canvasW: number, canvasH: number, reflowW: number)
   }
 
   // Otherwise slice into full-width bands: every row keeps its full size.
-  const sliceHpx = Math.max(1, Math.floor(MAX_H_MM / wScale));
+  //
+  // The bands are EVEN, not fill-then-remainder. Filling each sheet to the brim
+  // and letting the last one take what is left is what produced the near-empty
+  // trailing sheet: a page 2% too tall spilled ~1.5% of itself onto a second A4
+  // page, which is what "page 1 overlaps onto page 2" looked like on an IFT.
+  //
+  // Splitting the same content into `sheets` equal bands makes that impossible.
+  // For sheets >= 2, `sheets = ceil(canvasH / sheetHpx)` gives
+  // `canvasH > (sheets - 1) * sheetHpx`, so
+  // `bandHpx >= canvasH / sheets > sheetHpx * (sheets - 1) / sheets >= sheetHpx / 2`
+  // — every emitted sheet is more than half full. `bandHpx <= sheetHpx` also
+  // holds (sheetHpx is an integer >= canvasH / sheets), so a band can never be
+  // drawn taller than the printable area.
+  const sheetHpx = Math.max(1, Math.floor(MAX_H_MM / wScale));
+  const sheets = Math.max(1, Math.ceil(canvasH / sheetHpx));
   return {
     kind: 'slice',
-    sheets: Math.max(1, Math.ceil(canvasH / sliceHpx)),
+    sheets,
+    bandHpx: Math.max(1, Math.ceil(canvasH / sheets)),
     textScale: fullWidthTextScale,
   };
 }

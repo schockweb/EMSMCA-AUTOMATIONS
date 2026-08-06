@@ -140,6 +140,66 @@ describe('placement — the shrink branch may not breach the floor', () => {
   });
 });
 
+// ── The IFT/IHT "page 1 overlaps onto page 2" defect ───────────────────────
+//
+// Reported from the field: on an inter-facility transfer the exported PDF cut
+// page 1 horizontally THROUGH the crew signature boxes and put a thin sliver on
+// an otherwise blank second sheet. Primary calls were fine.
+//
+// Two causes compounded. The layout half is fixed in PRFView (the return-leg
+// times moved out of the tallest Band B column, which took page 1 from 1030px
+// back to 864px — measured in Chrome via devPdfHarness `?call=IHT`). The half
+// tested here is the placement policy: bands were cut fill-then-remainder, so a
+// page 2% too tall spilled ~1.5% of itself onto a whole extra A4 sheet.
+describe('placement — slicing may never emit a near-empty sheet', () => {
+  it('splits into EVEN bands, so every sheet is more than half full', () => {
+    for (let cssH = 850; cssH <= 3200; cssH += 7) {
+      const { cw, ch } = canvasFor(MAX_FIT_W, cssH);
+      const plan = planPlacement(cw, ch, MAX_FIT_W);
+      if (plan.kind !== 'slice') continue;
+      const lastBand = ch - plan.bandHpx * (plan.sheets - 1);
+      expect(
+        lastBand / plan.bandHpx,
+        `height ${cssH}px left a trailing sheet only ${((lastBand / plan.bandHpx) * 100).toFixed(1)}% full`,
+      ).toBeGreaterThan(0.5);
+    }
+  });
+
+  it('never draws a band taller than the printable area', () => {
+    // bandHpx > sheetHpx would scale the band past MAX_H_MM and push content
+    // off the bottom of the sheet — losing fields rather than paginating them.
+    for (let cssH = 850; cssH <= 3200; cssH += 7) {
+      const { cw, ch } = canvasFor(MAX_FIT_W, cssH);
+      const plan = planPlacement(cw, ch, MAX_FIT_W);
+      if (plan.kind !== 'slice') continue;
+      const sheetHpx = Math.floor(MAX_H_MM / (MAX_W_MM / cw));
+      expect(plan.bandHpx).toBeLessThanOrEqual(sheetHpx);
+    }
+  });
+
+  it('covers the whole canvas — no band boundary can drop content', () => {
+    for (let cssH = 850; cssH <= 3200; cssH += 37) {
+      const { cw, ch } = canvasFor(MAX_FIT_W, cssH);
+      const plan = planPlacement(cw, ch, MAX_FIT_W);
+      if (plan.kind !== 'slice') continue;
+      expect(plan.bandHpx * plan.sheets).toBeGreaterThanOrEqual(ch);
+    }
+  });
+
+  it('an IFT page 1 at its measured height still lands on ONE sheet', () => {
+    // 864px is the real post-fix height of an IFT/IHT page 1 (Chrome,
+    // devPdfHarness ?call=IHT&iv=2&med=4); Primary measures 862px. The reflow
+    // widens it to ~1240px, well inside the cap. If a future edit pushes this
+    // page over ~944px it slices again — which is the bug this encodes.
+    for (const cssH of [862, 864, 900, 944]) {
+      const w = Math.min(Math.ceil(cssH / SHEET_RATIO), MAX_FIT_W);
+      const { cw, ch } = canvasFor(w, cssH);
+      const plan = planPlacement(cw, ch, w);
+      expect(plan.kind, `page 1 at ${cssH}px produced "${plan.kind}"`).toBe('fit');
+    }
+  });
+});
+
 // ── On-screen legibility floor ─────────────────────────────────────────────
 //
 // Reported from the field: "on mobile, when viewing the PDF ... the layout is
