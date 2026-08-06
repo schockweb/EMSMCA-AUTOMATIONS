@@ -819,53 +819,77 @@ describe('page 1 height — the tall blocks moved, and did not go missing', () =
 
   // Which SHEET a block lands on — not merely that it rendered.
   //
-  // The first version of these tests only counted occurrences, and a mutation
-  // that removed the no-page-2 guards passed all of them: the block still
-  // rendered exactly once, just on the wrong sheet (or, for a Declaration of
-  // Death, not at all). Counting is not placement.
-  const sheetContaining = (label: string): number => {
-    const pages = Array.from(document.querySelectorAll('.prf-page'));
-    return pages.findIndex(pg =>
+  // An earlier version only counted occurrences, and a mutation removing the
+  // placement guards passed all of it: the block still rendered exactly once,
+  // just on the wrong sheet. Counting is not placement.
+  const sheets = () => Array.from(document.querySelectorAll('.prf-page'));
+  const sheetContaining = (label: string): number =>
+    sheets().findIndex(pg =>
       Array.from(pg.querySelectorAll('*')).some(
         el => el.children.length === 0 && el.textContent?.trim() === label));
-  };
 
-  it('prints the hospital sticker exactly once, on page 2, for an IHT', async () => {
+  it('keeps the hospital sticker off page 1, on its own sheet', async () => {
     await renderCall('IHT', 'PVT', withSticker);
     expect(screen.queryAllByText('Hospital Sticker', { exact: true }).length,
-      'the sticker prints on both sheets'
+      'the sticker prints on more than one sheet'
     ).toBe(1);
+    // >= 2: off page 1 (index 0), which has the ~944px ceiling, AND off the
+    // clinical sheet (index 1), which is already close to the same ceiling —
+    // putting it there was the first attempt and merely moved the slice.
+    // Not pinned to the LAST sheet: attached documents get their own sheets
+    // after this one, so the last index is not a stable anchor.
     expect(sheetContaining('Hospital Sticker'),
-      'the sticker is still on page 1, where it blows the height ceiling'
-    ).toBe(1);
+      'the sticker is on page 1 or on the clinical sheet — both are at the ceiling'
+    ).toBeGreaterThanOrEqual(2);
   });
 
   it('leaves a pointer on page 1 so nobody hunts for it', async () => {
     await renderCall('IHT', 'PVT', withSticker);
-    expect(screen.queryAllByText((c) => c.includes('Hospital sticker — see page 2'),
+    expect(screen.queryAllByText((c) => c.includes('Hospital sticker — see the attachments sheet'),
       { exact: false }).length).toBeGreaterThan(0);
   });
 
-  it('keeps the cash receipt ON PAGE 1 when page 2 cannot hold it', async () => {
-    // The guard that matters. A block moved to page 2 unconditionally vanishes
-    // from every call type whose page 2 cannot carry it. On a refusal page 2 is
-    // the watermark alone — and a refusal can still take cash, since "Refusal Of
-    // Treatment" is a selectable call-out fee basis. This is the only record of
-    // who handed money over.
+  it('still prints the cash receipt on a refusal, whose page 2 is watermark-only', async () => {
+    // A refusal can take cash — "Refusal Of Treatment" is a selectable call-out
+    // fee basis — and this is the only record of who handed money over. The
+    // sheet is created on demand, so it exists whatever the call type; the
+    // earlier page-2 version needed a fallback here and could drop the block.
     await renderCall('RHT', 'PVT', { pvt_payment_method: 'Cash' });
-    expect(screen.queryAllByText('Cash Verification', { exact: true }).length).toBe(1);
-    expect(sheetContaining('Cash Verification'),
-      'the cash receipt moved off page 1 on a call whose page 2 is watermark-only'
-    ).toBe(0);
+    expect(screen.queryAllByText('Cash Verification', { exact: true }).length,
+      'the cash receipt vanished on a refusal'
+    ).toBe(1);
+    expect(sheetContaining('Cash Verification')).toBeGreaterThan(0);
   });
 
-  it('prints cash and sticker once each, both on page 2, when both apply', async () => {
+  it('puts cash and sticker on the SAME extra sheet, not one each', async () => {
     await renderCall('IHT', 'PVT', { pvt_payment_method: 'Cash', ...withSticker });
     expect(screen.queryAllByText('Cash Verification', { exact: true }).length).toBe(1);
     expect(screen.queryAllByText('Hospital Sticker', { exact: true }).length).toBe(1);
-    expect(sheetContaining('Cash Verification')).toBe(1);
-    expect(sheetContaining('Hospital Sticker')).toBe(1);
+    expect(sheetContaining('Cash Verification')).toBe(sheetContaining('Hospital Sticker'));
   });
+
+  it('creates the extra sheet ON DEMAND, not for every PRF', async () => {
+    // If it rendered unconditionally every PRF would gain a blank page — worse
+    // than the layout bug it fixes, and nobody would notice until a scheme
+    // complained about the volume. Measured as a DIFFERENCE: the fixture also
+    // emits sheets for attached documents, so an absolute count proves nothing.
+    // hospital_sticker is cleared explicitly: the SHARED fixture sets one on
+    // every PRF, so "no overrides" is not "nothing to put on the sheet" — the
+    // first version of this test measured a difference of zero for that reason.
+    await renderCall('IHT', 'PVT', { hospital_sticker: '' });
+    const without = sheets().length;
+    expect(screen.queryAllByText('Cash Verification', { exact: true }).length).toBe(0);
+    expect(screen.queryAllByText('Hospital Sticker', { exact: true }).length,
+      'an empty sticker slot should stay on page 1, not claim a sheet'
+    ).toBe(1);
+    cleanup();
+
+    await renderCall('IHT', 'PVT', { hospital_sticker: '', pvt_payment_method: 'Cash' });
+    expect(sheets().length - without,
+      'the cash receipt did not add exactly one sheet'
+    ).toBe(1);
+  });
+
 });
 
 describe('RHT — the refusal reaches the printed record', () => {

@@ -286,7 +286,7 @@ const RefusedNote = ({ detail }: { detail?: string }) => (
 
 // Cash receipt: amounts, payer, and both signatures.
 //
-// ONE definition, rendered in one of two places — see `cashOnPage2`. It is the
+// ONE definition, rendered on the attachments sheet — see `cashOnOwnSheet`. It is the
 // bulkiest thing that can appear in the Billing column (a section head, four
 // rows and TWO signature boxes), and on page 1 it squeezed every other payer
 // block. A second copy for the second location would drift, and the way that
@@ -324,7 +324,7 @@ const CashVerification = ({ fd, wide = false }: { fd: any; wide?: boolean }) => 
 
 // The hospital sticker slot.
 //
-// ONE definition, rendered in one of two places — see `stickerOnPage2`. With a
+// ONE definition, rendered on the attachments sheet — see `stickerOnOwnSheet`. With a
 // sticker captured it is the tallest single element the sheet carries: the slot
 // plus a 200px image plus its heading is ~230px, all of it in the same column
 // as Billing, which is already the tallest.
@@ -1351,7 +1351,19 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
   //
   // Exactly one of the two call sites renders it, so it cannot print twice.
   const isCash = billingType === 'PVT' && fd.pvt_payment_method === 'Cash';
-  const cashOnPage2 = isCash && fd.call_type !== 'DOD' && !refused;
+  // Moved off page 1 onto a sheet of their own — NOT onto page 2.
+  //
+  // Page 2 was the first attempt and it was wrong: the clinical sheet is
+  // already close to the same ~944px ceiling, so adding the cash receipt and
+  // the sticker (~380px together) simply moved the slice from page 1 to page 2,
+  // cutting the secondary survey in half instead of the patient panel.
+  //
+  // A dedicated sheet also removes the special cases the page-2 version needed.
+  // There was a "keep it on page 1 when there is no page 2" fallback for a
+  // Declaration of Death (no clinical sheet at all) and for a refusal (page 2 is
+  // the watermark alone). A sheet that is created on demand always exists, so
+  // the blocks can neither vanish nor be squeezed, whatever the call type.
+  const cashOnOwnSheet = isCash;
 
   // The hospital sticker moves for the same reason and under the same rules.
   //
@@ -1366,7 +1378,29 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
   // wherever page 2 cannot carry it — a Declaration of Death has no page 2, and
   // on a refusal page 2 is the watermark alone.
   const stickerVisible = !(fd.call_type === 'DOD' && fd.med_aid_dec_death) && fd.call_type !== 'RHT';
-  const stickerOnPage2 = stickerVisible && fd.call_type !== 'DOD' && !refused;
+  // Only a CAPTURED sticker moves. The empty "affix here" slot is ~110px and
+  // sits on page 1 quite happily; it is the 200px image that takes the block to
+  // ~230px and pushes the sheet past the ceiling.
+  //
+  // Without this, every primary and every transfer gained an extra, nearly
+  // blank sheet — because the slot renders whether or not a sticker was
+  // captured, so that it can be affixed to the printed form by hand. Trading a
+  // layout bug on some PRFs for an extra page on all of them is a bad deal, and
+  // one nobody would notice until a scheme complained about the volume.
+  // ...and only on a TRANSFER, which is the sheet that actually overflows.
+  //
+  // An inter-facility page 1 carries what a primary does PLUS the transfer
+  // reason, the receiving doctor, qualification, condition and facility email,
+  // and the return-trip leg. That is what takes it past the ceiling; a primary
+  // fits with the sticker in place and always did. Moving it there too would
+  // buy nothing and cost an extra sheet on the most common call type in the
+  // system — the medical-aid render test caught exactly that, going from 4
+  // sheets to 5 on a PRIMARY.
+  const isTransfer = ['IHT', 'IFT'].includes(fd.call_type);
+  const stickerOnOwnSheet = stickerVisible && !!fd.hospital_sticker && isTransfer;
+
+  // The sheet exists only when it has something to carry.
+  const hasAttachmentSheet = cashOnOwnSheet || stickerOnOwnSheet;
 
   // ── Empty-section detection ──
   const debtorKeys = [
@@ -2441,13 +2475,11 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
                     <FieldRow label="Address"   value={fd.pvt_account_holder_address} valueMin={24} />
                   </>
                 )}
-                {/* The cash receipt normally prints on page 2 (see cashOnPage2)
-                    — it is the bulkiest block this column can carry. It stays
-                    here only when there is no page 2 to move it to. */}
-                {isCash && !cashOnPage2 && <CashVerification fd={fd} />}
-                {cashOnPage2 && (
+                {/* The cash receipt always prints on its own sheet — it is the
+                    bulkiest block this column can carry. */}
+                {cashOnOwnSheet && (
                   <div style={{ padding: '3px 6px', borderTop: `1px solid ${LN}`, fontSize: '0.5rem', color: MUT, fontStyle: 'italic' }}>
-                    Cash verification and signatures — see page 2.
+                    Cash verification and signatures — see the attachments sheet.
                   </div>
                 )}
               </>
@@ -2501,14 +2533,13 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
             )}
 
             {/* Hospital Sticker — normally printed on page 2 (see
-                stickerOnPage2): it is the tallest element on the sheet and page
-                1 has a hard ~944px ceiling. It stays here only when there is no
-                page 2 to move it to. Hidden entirely for RHT (no hospital
-                transport, so no sticker). */}
-            {stickerVisible && !stickerOnPage2 && <HospitalSticker fd={fd} />}
-            {stickerOnPage2 && (
+                stickerOnOwnSheet): it is the tallest element on the sheet and
+                page 1 has a hard ~944px ceiling. Hidden entirely for RHT (no
+                hospital transport, so no sticker). */}
+            {stickerVisible && !stickerOnOwnSheet && <HospitalSticker fd={fd} />}
+            {stickerOnOwnSheet && (
               <div style={{ padding: '3px 6px', borderTop: `1px solid ${LN}`, fontSize: '0.5rem', color: MUT, fontStyle: 'italic' }}>
-                Hospital sticker — see page 2.
+                Hospital sticker — see the attachments sheet.
               </div>
             )}
             <FillLines />
@@ -3169,30 +3200,6 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
         </div>
         )}
 
-        {/* Cash receipt — full-width band at the foot of the clinical sheet.
-            Moved off page 1, where a section head, four rows and two signature
-            boxes crushed the rest of the Billing column. Full width here means
-            the two signatures sit side by side with room to be legible, which
-            is the point of capturing them: this is the only record of who
-            handed the money over and who took it. */}
-        {(cashOnPage2 || stickerOnPage2) && (
-          <div style={{
-            borderTop: `2px solid ${LN}`,
-            display: 'grid',
-            // Side by side when both are present, so the pair costs one band
-            // rather than two. Either alone takes the full width.
-            gridTemplateColumns: (cashOnPage2 && stickerOnPage2) ? '2fr 1fr' : '1fr',
-          }}>
-            {cashOnPage2 && (
-              <div style={{ borderRight: (cashOnPage2 && stickerOnPage2) ? `1px solid ${LN}` : undefined }}>
-                <CashVerification fd={fd} wide />
-              </div>
-            )}
-            {stickerOnPage2 && (
-              <div><HospitalSticker fd={fd} wide /></div>
-            )}
-          </div>
-        )}
 
       </div>{/* /prf-page (page 2) */}
       </div>{/* /prf-print-frame (page 2) */}
@@ -3269,6 +3276,50 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
             </div>
 
             <div style={{ flex: 1 }} />
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════ RECEIPTS & ATTACHMENTS ═══════════════════
+          The cash receipt and the hospital sticker, on a sheet of their own.
+
+          Both used to sit in the Billing column on page 1, where together they
+          are ~380px in the tallest column on the sheet — enough to push an
+          IFT/IHT past the ~944px ceiling, after which the exporter slices the
+          page into even bands and half of it lands on a second, mostly empty
+          sheet. Moving them onto page 2 was the first attempt and merely moved
+          the slice: the clinical sheet is already close to the same ceiling, so
+          it began cutting through the secondary survey instead.
+
+          A sheet of their own is the only placement that adds nothing to a page
+          that is already full. It also removes every special case the page-2
+          version needed — no "keep it on page 1 when there is no page 2"
+          fallback for a Declaration of Death or a refusal — because a sheet
+          created on demand always exists.
+
+          Same A4-landscape frame as the other pages, so the print and PDF
+          pipelines pick it up through the existing .prf-page selector. */}
+      {hasAttachmentSheet && (
+        <div className="prf-print-frame">
+          <div className="prf-page" style={{
+            width: 1220, minHeight: 862,
+            margin: '28px auto 0', background: '#fff', color: INK,
+            border: `2px solid ${LN}`, boxShadow: '0 6px 24px rgba(0,0,0,0.1)',
+            display: 'flex', flexDirection: 'column',
+          }}>
+            <div style={{
+              display: 'grid',
+              // Side by side when both apply; either alone takes the width.
+              gridTemplateColumns: (cashOnOwnSheet && stickerOnOwnSheet) ? '2fr 1fr' : '1fr',
+            }}>
+              {cashOnOwnSheet && (
+                <div style={{ borderRight: (cashOnOwnSheet && stickerOnOwnSheet) ? `1px solid ${LN}` : undefined }}>
+                  <CashVerification fd={fd} wide />
+                </div>
+              )}
+              {stickerOnOwnSheet && <div><HospitalSticker fd={fd} wide /></div>}
+            </div>
+            <FillLines />
           </div>
         </div>
       )}
