@@ -22,6 +22,15 @@ from app.models.crew_member import CrewMember
 from app.models.digital_prf import DigitalPRF, PRFStatus
 from app.models.rate_schema import RateSchema
 from app.models.scheme_tariff_line import SchemeTariffLine
+# system_faults was created by migration f7c1a9e35b84 in raw DDL and the model
+# was never imported here. Existing installs therefore have the table and a
+# FRESH one does not: bootstrap_schema.py builds the schema from
+# Base.metadata and then stamps Alembic at head WITHOUT running the
+# migrations, so a table that only a migration knows about is silently
+# skipped. The fault monitor then writes to a table that does not exist — on
+# the one box where nobody is watching yet, which is exactly where the fault
+# monitor is the thing you are relying on.
+from app.models.system_fault import SystemFault, FaultStatus, FaultSeverity
 
 __all__ = [
     "User", "UserRole",
@@ -45,4 +54,5 @@ __all__ = [
     "DigitalPRF", "PRFStatus",
     "RateSchema",
     "SchemeTariffLine",
+    "SystemFault", "FaultStatus", "FaultSeverity",
 ]
