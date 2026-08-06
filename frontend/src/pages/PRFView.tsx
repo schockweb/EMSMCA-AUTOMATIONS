@@ -284,6 +284,44 @@ const RefusedNote = ({ detail }: { detail?: string }) => (
   </div>
 );
 
+// Cash receipt: amounts, payer, and both signatures.
+//
+// ONE definition, rendered in one of two places — see `cashOnPage2`. It is the
+// bulkiest thing that can appear in the Billing column (a section head, four
+// rows and TWO signature boxes), and on page 1 it squeezed every other payer
+// block. A second copy for the second location would drift, and the way that
+// drift shows up is a cash receipt that prints differently depending on the
+// call type.
+const CashVerification = ({ fd, wide = false }: { fd: any; wide?: boolean }) => (
+  <>
+    <SectionHead label="Cash Verification" />
+    <div style={wide
+      ? { display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 0 }
+      : undefined}>
+      <div>
+        <FieldRow label="Amount Paid" value={fd.pvt_cash_amount_paid ? `R ${fd.pvt_cash_amount_paid}` : ''} />
+        {/* Who actually handed the cash over. The crew captures it, but it
+            never reached the PDF — so the cash-receipt block was an
+            unattributed signature against a rand amount. If the payer later
+            disputes paying, or money goes missing between crew and office, the
+            record could not say who handed it over. */}
+        <FieldRow label="Payer" value={fd.pvt_cash_payer_name} />
+        <div style={{ padding: '4px 6px', borderTop: `1px solid ${LN}` }}>
+          <div style={{ fontSize: '0.48rem', fontWeight: 800, color: MUT, textTransform: 'uppercase', marginBottom: 2 }}>Payer Signature</div>
+          <SignatureBox src={fd.pvt_cash_payer_signature} minHeight={wide ? 54 : 40} />
+        </div>
+      </div>
+      <div style={wide ? { borderLeft: `1px solid ${LN}` } : undefined}>
+        <FieldRow label="Crew Received" value={fd.pvt_cash_crew_received ? `R ${fd.pvt_cash_crew_received}` : ''} />
+        <div style={{ padding: '4px 6px', borderTop: `1px solid ${LN}` }}>
+          <div style={{ fontSize: '0.48rem', fontWeight: 800, color: MUT, textTransform: 'uppercase', marginBottom: 2 }}>Crew Signature</div>
+          <SignatureBox src={fd.pvt_cash_crew_signature} minHeight={wide ? 54 : 40} />
+        </div>
+      </div>
+    </div>
+  </>
+);
+
 const FillLines = ({ minHeight = 0 }: { minHeight?: number }) => (
   // The line stack is absolutely positioned so it contributes ZERO intrinsic
   // height — the container only ever absorbs the column's genuine leftover
@@ -1202,6 +1240,7 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
   // billing-and-debtor layout with the refusal squeezed into a quarter of the
   // page, which is the arrangement this change exists to remove.
   const refused = fd.call_type === 'RHT' || !!fd.patient_refused_treatment;
+
   // Must cover EVERY field the Return Trip rows render — a guard that misses one
   // silently drops captured times from the PDF that goes to the scheme.
   // `return_depart_time` was checked here but is never written by the crew form;
@@ -1245,6 +1284,25 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
   // The payer-specific block lives in the "Billing Information" column and is
   // driven by billing_type. (The separate "Channel Detail" block was removed.)
   const billingType = (fd.billing_type || '').toString().toUpperCase();
+
+  // Where the cash receipt prints.
+  //
+  // It is the bulkiest block the Billing column can carry — a section head,
+  // four rows and two signature boxes — and on page 1 it crushed everything
+  // beside it. Page 2 has room.
+  //
+  // But page 2 is not always available, and the receipt must NEVER simply
+  // vanish: money changed hands, and this is the only record of who handed it
+  // over. Two cases keep it on page 1:
+  //   DOD      — page 2 is not rendered at all for a Declaration of Death.
+  //   refused  — page 2 is the "Patient Refused Treatment" watermark and
+  //              nothing else, and a refusal can still carry a cash call-out
+  //              fee. Page 1 has room on a refusal anyway: the payer column
+  //              moved into the stacked left-hand column and is mostly empty.
+  //
+  // Exactly one of the two call sites renders it, so it cannot print twice.
+  const isCash = billingType === 'PVT' && fd.pvt_payment_method === 'Cash';
+  const cashOnPage2 = isCash && fd.call_type !== 'DOD' && !refused;
 
   // ── Empty-section detection ──
   const debtorKeys = [
@@ -2319,27 +2377,14 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
                     <FieldRow label="Address"   value={fd.pvt_account_holder_address} valueMin={24} />
                   </>
                 )}
-                {fd.pvt_payment_method === 'Cash' && (
-                  <>
-                    <SectionHead label="Cash Verification" />
-                    <FieldRow label="Amount Paid" value={fd.pvt_cash_amount_paid ? `R ${fd.pvt_cash_amount_paid}` : ''} />
-                    {/* Who actually handed the cash over. The crew captures it,
-                        but it never reached the PDF — so the cash-receipt block
-                        was an unattributed signature against a rand amount. If
-                        the payer later disputes paying, or money goes missing
-                        between crew and office, the record could not say who
-                        handed it over. */}
-                    <FieldRow label="Payer" value={fd.pvt_cash_payer_name} />
-                    <div style={{ padding: '4px 6px', borderTop: `1px solid ${LN}` }}>
-                      <div style={{ fontSize: '0.48rem', fontWeight: 800, color: MUT, textTransform: 'uppercase', marginBottom: 2 }}>Payer Signature</div>
-                      <SignatureBox src={fd.pvt_cash_payer_signature} minHeight={40} />
-                    </div>
-                    <FieldRow label="Crew Received" value={fd.pvt_cash_crew_received ? `R ${fd.pvt_cash_crew_received}` : ''} />
-                    <div style={{ padding: '4px 6px', borderTop: `1px solid ${LN}` }}>
-                      <div style={{ fontSize: '0.48rem', fontWeight: 800, color: MUT, textTransform: 'uppercase', marginBottom: 2 }}>Crew Signature</div>
-                      <SignatureBox src={fd.pvt_cash_crew_signature} minHeight={40} />
-                    </div>
-                  </>
+                {/* The cash receipt normally prints on page 2 (see cashOnPage2)
+                    — it is the bulkiest block this column can carry. It stays
+                    here only when there is no page 2 to move it to. */}
+                {isCash && !cashOnPage2 && <CashVerification fd={fd} />}
+                {cashOnPage2 && (
+                  <div style={{ padding: '3px 6px', borderTop: `1px solid ${LN}`, fontSize: '0.5rem', color: MUT, fontStyle: 'italic' }}>
+                    Cash verification and signatures — see page 2.
+                  </div>
                 )}
               </>
             ) : billingType === 'CALL OUT FEE' ? (
@@ -3086,6 +3131,17 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
         </div>
         )}
 
+        {/* Cash receipt — full-width band at the foot of the clinical sheet.
+            Moved off page 1, where a section head, four rows and two signature
+            boxes crushed the rest of the Billing column. Full width here means
+            the two signatures sit side by side with room to be legible, which
+            is the point of capturing them: this is the only record of who
+            handed the money over and who took it. */}
+        {cashOnPage2 && (
+          <div style={{ borderTop: `2px solid ${LN}` }}>
+            <CashVerification fd={fd} wide />
+          </div>
+        )}
 
       </div>{/* /prf-page (page 2) */}
       </div>{/* /prf-print-frame (page 2) */}
