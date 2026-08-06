@@ -250,13 +250,52 @@ ssh -i ~/.ssh/ems_vm azureuser@<NEW_IP> "cd /opt/ems/backend && sudo docker comp
 > encryption key against real records. There is nothing to restore and nothing
 > encrypted yet, so that gate no longer exists.
 
-**2.9 Create the first administrator.** Seeding is disabled outside development,
-so there is no default account and no default password to change — the first
-SUPER_ADMIN is created explicitly. Then create the client's own accounts through
-the application, not the database.
+**2.9 Create the accounts, in this order.** Seeding is disabled outside
+development, so there is no default account and no default password to change.
+This whole sequence was rehearsed end to end against an empty database on
+2026-08-06 and every step below is what actually worked:
+
+```bash
+cd /opt/ems/backend && ADMIN_PASSWORD='<chosen>' python create_admin.py --email admin@<client> --from-env
+```
+
+Then, through the application rather than the database:
+
+1. **Provider** — including `portal_login_email` and `portal_login_password`.
+   That password is the company-wide device unlock; **without it no crew can
+   start a shift**, and the error message is the same whether it is wrong or
+   unset, so a crew guessing gets no diagnostic.
+2. **`prf_start_number`** — see the warning below. Set it *before* the first
+   call, not after.
+3. **Crew members** — HPCSA number is the identifier and must be unique per
+   provider.
+4. **Vehicles** — one record per ambulance that will actually run. A second
+   crew cannot start a shift on a fleet of one; the shift wizard only lists
+   vehicles the server returns.
+
+> **PRF numbering starts at 1 on an empty database.** The next number is
+> `max(highest existing, prf_start_number) + 1`, and it is baked into the case
+> number, so it appears on the clinical document itself. If the provider is
+> carrying on from a paper book that ended at 23, set `prf_start_number` to 23
+> and the first digital PRF is 24. Get this wrong and the correction is not
+> retrospective — issued numbers stay issued.
 
 > `PARAMEDIC` is the default role for a new account and has no
-> provider-administration access. Grant `SUPER_ADMIN` to one or two people only.
+> provider-administration access. Grant `SUPER_ADMIN` to one or two people only,
+> and create a **second** administrative account — a day-one lockout on a single
+> credential leaves the system unadministrable during a live shift.
+
+**Verify the whole chain before you trust it**, in this order: device unlock
+returns a grant → the crew and vehicle lists come back non-empty → a shift
+starts → a PRF creates, saves and submits. Each step gates the next, so testing
+only the last one tells you nothing about why it failed.
+
+> **`/health` returns 503 until a Celery worker is attached** — it reports
+> `celery_workers: no active workers` and the whole endpoint goes amber. Bring
+> up `docker-compose.worker.yml` before treating a 503 as a fault. This also
+> matters for the record itself: **submit hands off to Celery**, so with no
+> worker a PRF submits successfully and no case, claim or document is ever
+> created. The 202 response does not mean the billing pipeline ran.
 
 **2.10 Start the stack and verify on the IP, not the domain** (DNS still points at
 the old VM, which is the point):
