@@ -77,10 +77,15 @@ for ln in raw:
         # A bullet or numbered item continues onto indented following lines.
         if buf and re.match(r"^\s{2,}\S", ln) and not SPECIAL.match(ln.strip()):
             buf.append(ln)
+        # Consecutive blockquote lines are ONE quote. Flushing each separately
+        # split any bold span straddling the wrap and left literal asterisks in
+        # the Word file — the same defect the prose unwrapping above fixes.
+        elif ln.lstrip().startswith(">") and buf and buf[0].lstrip().startswith(">"):
+            buf.append(re.sub(r"^\s*>\s?", "", ln))
         else:
             flush()
             buf.append(ln)
-            if ln.lstrip().startswith(("#", ">", "|")) or ln.strip() == "---":
+            if ln.lstrip().startswith(("#", "|")) or ln.strip() == "---":
                 flush()
     else:
         if buf and SPECIAL.match(buf[0]) and not buf[0].lstrip().startswith(("#", ">", "|")):
