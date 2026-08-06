@@ -90,13 +90,25 @@ alternative above.
 
 ---
 
-## Timing
+## Timing — this order matters, and it is not the obvious one
 
-Clear devices **before** the changeover, not after. A device that is opened
-after the changeover but before it is cleared is exactly the case this is meant
-to prevent.
+Clear each device **after the changeover and before its first login**, and keep
+the app **closed** on every device in between.
 
-After clearing, the device may sit unused until the shift — that is fine.
+It is tempting to do it the night before and have it out of the way. That does
+not work: a device cleared the night before downloads the *old* server's copy
+of the app, and the new server has a newer one — so it ends up one version
+behind again, which is half of what the clearing was for.
+
+Clearing after the changeover gets both halves at once: the old forms are gone
+and the app it downloads is the current one.
+
+The reason the app must stay closed in between: a device that is opened after
+the changeover but before it is cleared will try to send its old forms to the
+new system, which is precisely what this is meant to prevent. Closed is safe.
+Opened-then-cleared is not — by then it has already sent.
+
+After clearing, the device may sit unused until the shift. That is fine.
 Nothing expires.
 
 ---

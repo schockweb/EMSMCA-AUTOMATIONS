@@ -369,9 +369,24 @@ nobody is affected.
 Pick a low-volume hour. There is no database freeze and no final copy — the work
 here is the device purge and a DNS change.
 
-**3.1 Purge the crew devices.** Do this on **every** device that was used during
-the pilot, before it is allowed to reach the new system. Until a device is
-purged, keep it signed out.
+**3.1 Purge the crew devices — AFTER 3.4, not before.** Full instructions for
+whoever holds the tablets: `CREW-DEVICE-RESET.md`.
+
+> **Order corrected 2026-08-06.** The purge must happen **after DNS moves** and
+> before the first crew login, with the app kept CLOSED on every device in
+> between. Purging the night before looks tidier and is wrong: the device then
+> caches the OLD server's bundle and comes up one build behind on the new one.
+> The asset hash differs between the two (`index-v3t07HlH.js` on the old build,
+> `index-Ey6WBrVW.js` on the new), which is exactly the staleness the purge was
+> meant to remove. Purging after the cutover clears the old outbox AND fetches
+> the current app in one action.
+>
+> "Closed" is doing real work in that sentence. A device merely *opened* against
+> the new server before being purged has already drained its outbox — the purge
+> afterwards is too late.
+
+Do this on **every** device that was used during the pilot, before it is allowed
+to reach the new system. Until a device is purged, keep it signed out.
 
 On the device, in the browser: **Settings → Site settings →
 `portal.emsmca.co.za` → Delete data** (Chrome/Android), or **Settings → Safari →
