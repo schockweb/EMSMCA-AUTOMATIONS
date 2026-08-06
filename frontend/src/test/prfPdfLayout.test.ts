@@ -24,6 +24,7 @@ import {
   planPlacement, printedPt,
   MAX_W_MM, MAX_H_MM, DESIGN_W_PX, MAX_FIT_W, MIN_LEGIBLE_SCALE, SHEET_RATIO,
   screenZoomFor, MIN_SCREEN_ZOOM,
+  printScaleFor, PRINT_TEXT_SCALE_PER_S,
 } from '../pages/prfPdfLayout';
 
 /** html2canvas runs at scale 1.5 in PRFView. */
@@ -196,6 +197,63 @@ describe('placement — slicing may never emit a near-empty sheet', () => {
       const { cw, ch } = canvasFor(w, cssH);
       const plan = planPlacement(cw, ch, w);
       expect(plan.kind, `page 1 at ${cssH}px produced "${plan.kind}"`).toBe('fit');
+    }
+  });
+});
+
+// ── Native-print legibility floor (Ctrl-P) ─────────────────────────────────
+//
+// The print path had NO floor: its scale was min(frameW/w, frameH/h, 1), which
+// for a tall page is height-bound and unbounded downwards. Measured: a 3079px
+// clinical page (an ordinary busy call) printed at ~1.7pt — the same defect the
+// PDF export was fixed for, still live on the print button.
+describe('printScaleFor — the native print path may not print illegibly', () => {
+  const PX_PER_MM_T = 96 / 25.4;
+  const frameW = 293 * PX_PER_MM_T;
+  const frameH = 203 * PX_PER_MM_T;
+  const printedScale = (s: number) => s * PRINT_TEXT_SCALE_PER_S;
+
+  it('never returns a scale that prints below the legibility floor', () => {
+    for (let cssH = 850; cssH <= 3200; cssH += 13) {
+      const w = Math.min(Math.ceil(cssH / SHEET_RATIO), MAX_FIT_W);
+      const { scale } = printScaleFor(w, cssH, frameW, frameH);
+      expect(
+        printedScale(scale),
+        `a ${cssH}px page printed at textScale ${printedScale(scale).toFixed(3)} (${printedPt(0.46, printedScale(scale)).toFixed(2)}pt on the 0.46rem T&C text)`,
+      ).toBeGreaterThanOrEqual(MIN_LEGIBLE_SCALE - 1e-9);
+    }
+  });
+
+  it('the old unbounded rule DID breach the floor — so this test can fail', () => {
+    // Guards against a vacuous assertion: the previous implementation.
+    const cssH = 3079;                       // measured busy clinical page
+    const w = Math.min(Math.ceil(cssH / SHEET_RATIO), MAX_FIT_W);
+    const old = Math.min(frameW / w, frameH / cssH, 1);
+    expect(printedScale(old)).toBeLessThan(0.35);          // ~1.7pt — unreadable
+    expect(printedScale(printScaleFor(w, cssH, frameW, frameH).scale))
+      .toBeGreaterThanOrEqual(MIN_LEGIBLE_SCALE - 1e-9);
+  });
+
+  it('flags a page that must flow onto more sheets rather than be clipped', () => {
+    const tall = printScaleFor(MAX_FIT_W, 3079, frameW, frameH);
+    expect(tall.flow).toBe(true);            // holds the floor -> taller than a sheet
+    const ok = printScaleFor(1240, 864, frameW, frameH);
+    expect(ok.flow).toBe(false);             // an IFT page 1 still fits one sheet
+  });
+
+  it('never scales a page wider than the frame, and never blows one up', () => {
+    for (const [w, h] of [[1220, 500], [MAX_FIT_W, 900], [MAX_FIT_W, 3079], [1240, 864]]) {
+      const { scale } = printScaleFor(w, h, frameW, frameH);
+      expect(w * scale).toBeLessThanOrEqual(frameW + 1e-6);
+      expect(scale).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('handles degenerate sizes without producing NaN', () => {
+    for (const [w, h] of [[0, 0], [-10, 500], [1220, 0]]) {
+      const { scale } = printScaleFor(w, h, frameW, frameH);
+      expect(Number.isFinite(scale)).toBe(true);
+      expect(scale).toBeGreaterThan(0);
     }
   });
 });

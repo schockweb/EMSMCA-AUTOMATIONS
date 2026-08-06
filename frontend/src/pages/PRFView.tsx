@@ -23,6 +23,7 @@ import { PrintableInjuryDiagram } from '../components/BodyDiagram';
 import {
   INSET_MM, MAX_W_MM, MAX_H_MM, SHEET_RATIO,
   DESIGN_W_PX, MAX_FIT_W, planPlacement, screenZoomFor,
+  PX_PER_MM, printScaleFor,
 } from './prfPdfLayout';
 const INK      = '#0b1020';      // body text
 const MUT      = '#5b6478';      // secondary text
@@ -832,12 +833,15 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
     // page at its natural 1220px width, then scale it down so both width and
     // height fit inside one sheet. The .prf-print-frame (fixed sheet size,
     // overflow hidden) clips any rounding so nothing bleeds onto the next sheet.
-    const PX_PER_MM = 96 / 25.4;
     // Must stay ≤ the .prf-print-frame box (295×205mm) so the scaled page
     // never overflows the frame and bleeds onto a second (blank) sheet.
     const frameW = 293 * PX_PER_MM;   // 2mm under frame width (rounding safety)
     const frameH = 203 * PX_PER_MM;   // 2mm under frame height
-    const SHEET_RATIO = frameH / frameW;   // sheet aspect the page must match
+    // The reflow target is the SHARED SHEET_RATIO imported from prfPdfLayout,
+    // not a locally-derived frameH/frameW. This path used to shadow it with
+    // 203/293 = 0.6928 while the PDF export used 200/287 = 0.6969, so the two
+    // pipelines widened the same page to different widths and disagreed about
+    // how it would print.
     const fit = () => {
       // Drop the on-screen fit zoom first — the measurements below read each
       // page's true offsetWidth, and an ancestor `zoom` would scale them.
@@ -870,14 +874,35 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
           w = p.offsetWidth || w;
           if (w >= MAX_FIT_W) break;
         }
-        const s = Math.min(frameW / w, frameH / h, 1);
-        p.style.transformOrigin = 'top left';
-        p.style.transform = `scale(${s > 0 ? s : 1})`;
+        // Scale with a legibility floor. A page too tall to fit one sheet at a
+        // readable size is NOT shrunk into illegibility — it holds the floor
+        // and flows onto further sheets, the same trade the PDF export makes
+        // when it slices instead of shrinking.
+        const { scale, flow } = printScaleFor(w, h, frameW, frameH);
+        const frame = p.closest('.prf-print-frame') as HTMLElement | null;
+        if (flow) {
+          // `zoom` (not transform) because it shrinks the LAYOUT BOX, so the
+          // print engine paginates against the scaled-down page. transform
+          // only moves pixels — the box would stay full height and the frame's
+          // overflow:hidden would CLIP the overflow off the paper entirely,
+          // silently losing fields. The frame is released from its fixed height
+          // for this page only, via a class the print CSS understands.
+          p.style.transform = 'none';
+          p.style.zoom = String(scale > 0 ? scale : 1);
+          frame?.classList.add('prf-frame-flow');
+        } else {
+          p.style.zoom = '';
+          p.style.transformOrigin = 'top left';
+          p.style.transform = `scale(${scale > 0 ? scale : 1})`;
+          frame?.classList.remove('prf-frame-flow');
+        }
       });
     };
     const reset = () => {
       document.querySelectorAll<HTMLElement>('.prf-page').forEach(p => {
         p.style.transform = '';
+        p.style.zoom = '';
+        (p.closest('.prf-print-frame') as HTMLElement | null)?.classList.remove('prf-frame-flow');
         if (p.dataset.prfPrevWidth !== undefined) {
           p.style.width = p.dataset.prfPrevWidth;
           p.style.minWidth = p.dataset.prfPrevMinWidth || '';
@@ -1664,6 +1689,18 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
             display: block;
           }
           .prf-print-frame:last-child { page-break-after: auto; }
+          /* A page too tall to fit ONE sheet at a readable size. beforeprint
+             adds this class and shrinks that page with CSS zoom (which shrinks
+             the layout box) rather than transform, so the print engine can
+             paginate it. The frame must release its fixed height and its
+             clipping here or the overflow would be cut off the paper instead
+             of flowing — losing fields rather than spending an extra sheet. */
+          .prf-print-frame.prf-frame-flow {
+            height: auto;
+            overflow: visible;
+            page-break-inside: auto;
+            break-inside: auto;
+          }
           .prf-page {
             box-shadow: none !important;
             margin: 0 !important;

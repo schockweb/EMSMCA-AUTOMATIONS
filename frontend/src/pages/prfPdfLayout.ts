@@ -130,6 +130,47 @@ export function planPlacement(canvasW: number, canvasH: number, reflowW: number)
   };
 }
 
+// ── NATIVE-PRINT legibility floor (window.print / Ctrl-P) ──────────────────
+//
+// The Ctrl-P path is a different mechanism from the PDF export: instead of
+// rasterising and placing an image, it CSS-scales the live sheet inside a fixed
+// print frame. It had NO legibility floor at all — its scale was simply
+// `min(frameW/w, frameH/h, 1)`, which for a tall page is height-bound and
+// unbounded downwards. A 3079px clinical page (an ordinary busy call) printed
+// at roughly 1.7pt: the same defect the PDF export was fixed for, still live on
+// the print button.
+//
+// Converting between the two: a glyph authored for the 1220px design sheet and
+// CSS-scaled by `s` prints at `s * PRINT_TEXT_SCALE_PER_S` relative to its size
+// in a full-width PDF placement, so the shared MIN_LEGIBLE_SCALE maps onto a
+// minimum CSS scale of MIN_PRINT_SCALE.
+export const PX_PER_MM = 96 / 25.4;
+export const PRINT_TEXT_SCALE_PER_S = DESIGN_W_PX / (MAX_W_MM * PX_PER_MM);   // ~1.1247
+export const MIN_PRINT_SCALE = MIN_LEGIBLE_SCALE / PRINT_TEXT_SCALE_PER_S;    // ~0.8002
+
+/**
+ * Decide the CSS scale for one sheet on the native-print path.
+ *
+ * Width is a HARD constraint — a page wider than the frame loses columns off
+ * the side, which is unrecoverable. Height is relaxed down to the legibility
+ * floor: rather than shrink a tall page into illegibility, we keep it readable
+ * and let it flow across more sheets (`flow: true`), exactly as the PDF export
+ * spends an extra sheet instead of spending legibility.
+ */
+export function printScaleFor(
+  pageW: number, pageH: number, frameW: number, frameH: number,
+): { scale: number; flow: boolean } {
+  if (!(pageW > 0) || !(pageH > 0)) return { scale: 1, flow: false };
+  const widthFit = frameW / pageW;
+  const heightFit = frameH / pageH;
+  // Never blow a page up, never let it exceed the frame width.
+  const scale = Math.min(widthFit, 1, Math.max(heightFit, MIN_PRINT_SCALE));
+  // If we held the floor rather than meeting the height, the scaled page is
+  // taller than one sheet and must be allowed to paginate instead of being
+  // clipped by the frame's overflow:hidden.
+  return { scale, flow: scale > heightFit + 1e-9 };
+}
+
 // ── On-SCREEN legibility floor ──────────────────────────────────────────────
 
 /**
