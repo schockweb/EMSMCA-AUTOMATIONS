@@ -14,9 +14,15 @@ import { useState, useEffect } from 'react';
  * band of widths where the CSS thinks "mobile" and the JS thinks "desktop",
  * which is how half-broken layouts ship.
  *
- * NOTE: the crew pages carry their own copies of this hook tuned to 720px.
- * They are the highest-risk screens in the product and are deliberately left
- * alone — do not migrate them to this hook as a drive-by.
+ * The crew pages pass their own breakpoints (720 for the provider dashboard,
+ * 480/640 for the narrow-viewport form grids) — always pass the value that
+ * screen was tuned to rather than relying on the default, or the layout flips
+ * at a different width than it was designed for.
+ *
+ * `orientationchange` is listened to alongside `resize` because some older iOS
+ * versions fire it WITHOUT a resize, which would otherwise leave a rotated
+ * tablet rendering the portrait layout until something else forced a render —
+ * on the PRF form, that is mid-call.
  */
 export default function useIsMobile(breakpoint = 768) {
   const [isMobile, setIsMobile] = useState(
@@ -25,8 +31,13 @@ export default function useIsMobile(breakpoint = 768) {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const onResize = () => setIsMobile(window.innerWidth < breakpoint);
+    onResize();   // re-sync in case the width changed before this effect ran
     window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
+    window.addEventListener('orientationchange', onResize);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('orientationchange', onResize);
+    };
   }, [breakpoint]);
   return isMobile;
 }

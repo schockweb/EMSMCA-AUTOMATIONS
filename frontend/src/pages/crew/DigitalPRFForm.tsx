@@ -6,6 +6,7 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, createContext, useContext } from 'react';
 import ReactDOM from 'react-dom';
 import { useScrollLock } from '../../hooks/useScrollLock';
+import useIsMobile from '../../hooks/useIsMobile';
 import { useParams, useNavigate } from 'react-router';
 // Raw axios — the PRF form builds its own crew_token-authenticated instance via
 // api() below; it must not inherit the admin api/client interceptor.
@@ -3147,24 +3148,9 @@ const DodSubHdr = ({ t }: { t: string }) => (
 // past their column even when CSS `width:100%` is set. JS-based viewport
 // detection sidesteps that by collapsing to a single column outright on
 // any device narrower than ~480px (i.e. every phone in portrait).
-const useIsNarrowViewport = (threshold = 480) => {
-  const [narrow, setNarrow] = useState(
-    typeof window !== 'undefined' && window.innerWidth < threshold,
-  );
-  useEffect(() => {
-    const onResize = () => setNarrow(window.innerWidth < threshold);
-    window.addEventListener('resize', onResize);
-    window.addEventListener('orientationchange', onResize);
-    return () => {
-      window.removeEventListener('resize', onResize);
-      window.removeEventListener('orientationchange', onResize);
-    };
-  }, [threshold]);
-  return narrow;
-};
 
 const DodG2 = ({ children }: { children: React.ReactNode }) => {
-  const narrow = useIsNarrowViewport(480);
+  const narrow = useIsMobile(480);
   return (
     <div style={{
       display: 'grid',
@@ -3753,7 +3739,7 @@ const Card = ({ children, style }: { children: React.ReactNode; style?: React.CS
 // auto-zoom guard in index.css) that otherwise pushes each track past half the
 // container, blowing the whole form past the viewport on phone widths.
 const G2 = ({ children }: { children: React.ReactNode }) => {
-  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+  const isMobile = useIsMobile();
   return (
     <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) minmax(0, 1fr)', gap: isMobile ? '12px' : '0 12px' }}>
       {children}
@@ -3989,7 +3975,7 @@ function GeoConfirmOverlay({
 
 const FadeIn = ({ children, show, delay = 0 }: { children: React.ReactNode; show: boolean; delay?: number }) => {
   const [visible, setVisible] = useState(false);
-  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+  const isMobile = useIsMobile();
   
   // Scale down delay for mobile to make it super snappy (max 50ms)
   const activeDelay = isMobile ? Math.min(delay, 50) : delay;
@@ -4054,8 +4040,11 @@ const Modal = ({ open, onClose, children, dismissOnBackdrop = true, centerOnMobi
     return () => clearTimeout(t);
   }, [open]);
 
+  // Called BEFORE the early return below — a hook after a conditional return
+  // would change the hook order the moment this modal closes.
+  const isMobile = useIsMobile();
+
   if (!open) return null;
-  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
   // Keyboard is up when the visual viewport is much shorter than the layout
   // viewport — then anchor the tile to the BOTTOM of the visible area so it sits
   // right above the keyboard instead of floating at the top with a big gap.
@@ -4574,7 +4563,7 @@ export default function DigitalPRFForm() {
   const [destinationPromptOpen, setDestinationPromptOpen] = useState(false);
   const destinationKmRef = useRef<HTMLInputElement>(null);
   const chiefComplaintRef = useRef<HTMLDivElement>(null);
-  const isMobileView = typeof window !== 'undefined' && window.innerWidth < 768;
+  const isMobileView = useIsMobile();
 
 
   // ── IFT/IHT Automation Flow ──
@@ -6319,7 +6308,7 @@ export default function DigitalPRFForm() {
   // border into the address column. Below the threshold we drop the
   // address out of the row grid and place it on a second row beneath,
   // full-width — leaves the km cell comfortable.
-  const timeRowsNarrow = useIsNarrowViewport(640);
+  const timeRowsNarrow = useIsMobile(640);
   const TIME_ROW_COLS = timeRowsNarrow ? '1.3fr 1.5fr 1.5fr' : '1.4fr 1.7fr 1.7fr 2.4fr';
   const TIME_HEADERS = timeRowsNarrow ? ['EVENT', 'TIME', 'KM'] : ['EVENT', 'TIME', 'KM', 'ADDRESS'];
   const TimeRow = ({ row }: { row: typeof ALL_TIME_ROWS[0] }) => {
@@ -6859,8 +6848,6 @@ export default function DigitalPRFForm() {
         </button>
       </>
     );
-
-    const isMobileView = typeof window !== 'undefined' && window.innerWidth < 768;
 
     return (
     <div>

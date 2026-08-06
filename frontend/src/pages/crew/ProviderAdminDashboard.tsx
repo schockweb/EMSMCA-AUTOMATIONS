@@ -8,6 +8,7 @@ import { useParams, useNavigate, useSearchParams } from 'react-router';
 // getApi() and must stay off the admin api/client interceptor.
 import axios from 'axios';
 import { useScrollLock } from '../../hooks/useScrollLock';
+import useIsMobile from '../../hooks/useIsMobile';
 import { HPCSA_CATEGORIES, CATEGORY_META, type HpcsaCategory } from '../../data/hpcsaScope';
 import { getCrewToken, getCrewProfile, ensureProviderSession, CREW_SESSION_KEYS } from '../../utils/crewSession';
 import { LoadErrorBar } from '../../components/LoadError';
@@ -224,25 +225,12 @@ function Btn({ onClick, children, kind = 'secondary', type = 'button', disabled,
   );
 }
 
-// Hook: re-renders when the viewport crosses the mobile breakpoint, so
-// layout decisions (sidebar vs top-tabs, table vs cards, etc.) react to
-// orientation changes without a manual reload.
-function useIsMobile(breakpoint = 720) {
-  const [isMobile, setIsMobile] = useState(
-    typeof window !== 'undefined' ? window.innerWidth < breakpoint : false,
-  );
-  useEffect(() => {
-    const onResize = () => setIsMobile(window.innerWidth < breakpoint);
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, [breakpoint]);
-  return isMobile;
-}
-
 export default function ProviderAdminDashboard() {
   const { providerSlug } = useParams<{ providerSlug: string }>();
   const navigate = useNavigate();
-  const isMobile = useIsMobile();
+  // 720 is the width this screen was laid out for; the shared hook
+  // defaults to 768, so it must be passed explicitly.
+  const isMobile = useIsMobile(720);
 
   // ── Tenant guard — MUST run before reading the profile ──
   // providerId below comes from the STORED profile, not the URL: without this
