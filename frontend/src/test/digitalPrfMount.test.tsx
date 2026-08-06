@@ -18,7 +18,7 @@
  */
 import 'fake-indexeddb/auto';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, cleanup } from '@testing-library/react';
+import { render, screen, waitFor, cleanup, act } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router';
 import axios from 'axios';
 
@@ -278,5 +278,69 @@ describe('DigitalPRFForm — a 403 is never suppressed by a local draft', () => 
     await waitFor(() => expect(container.textContent).toBeTruthy());
     expect(container.textContent).not.toMatch(/different service provider/i);
     expect(container.textContent).not.toMatch(/could not reach the server/i);
+  });
+});
+
+// ── Viewport reactivity (the useIsMobile migration) ────────────────────────
+//
+// Four layout reads in this form used to sample window.innerWidth ONCE at
+// render and never update — rotating a tablet left the previous orientation's
+// layout on screen until something else forced a render, mid-call. They now go
+// through the shared useIsMobile hook. These tests exist because that migration
+// touched the riskiest screen in the product: a hook called in the wrong place
+// (after Modal's early return, or inside the conditionally-invoked P0) throws
+// "rendered fewer hooks than expected" only at runtime, on a phone.
+describe('DigitalPRFForm — viewport handling', () => {
+  const setWidth = (w: number) => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: w });
+  };
+
+  afterEach(() => setWidth(1024));
+
+  it('mounts at a phone width without throwing', async () => {
+    setWidth(375);
+    const { container } = mountForm();
+    await waitFor(() => expect(container.textContent).toBeTruthy());
+    expect(container.textContent).not.toMatch(/something went wrong/i);
+  });
+
+  it('mounts at a phone width with no console error', async () => {
+    setWidth(375);
+    const errors: any[][] = [];
+    const spy = vi.spyOn(console, 'error').mockImplementation((...a) => { errors.push(a); });
+    mountForm();
+    await waitFor(() => expect(screen.queryByText(/PRF/i)).toBeTruthy());
+    spy.mockRestore();
+    const text = errors.map(e => String(e[0])).join(' | ');
+    expect(text, 'console.error at 375px: ' + text).toBe('');
+  });
+
+  it('survives rotation — resize and orientationchange keep hook order intact', async () => {
+    // The failure this guards against surfaces on the RE-RENDER, not on mount:
+    // a conditionally-called hook throws "rendered fewer hooks than expected".
+    setWidth(375);
+    const errors: any[][] = [];
+    const spy = vi.spyOn(console, 'error').mockImplementation((...a) => { errors.push(a); });
+    const { container } = mountForm();
+    await waitFor(() => expect(container.textContent).toBeTruthy());
+
+    await act(async () => {
+      setWidth(1024);                                   // rotate to landscape
+      window.dispatchEvent(new Event('resize'));
+      window.dispatchEvent(new Event('orientationchange'));
+    });
+    await waitFor(() => expect(container.textContent).toBeTruthy());
+
+    await act(async () => {
+      setWidth(375);                                    // and back to portrait
+      window.dispatchEvent(new Event('resize'));
+      window.dispatchEvent(new Event('orientationchange'));
+    });
+    await waitFor(() => expect(container.textContent).toBeTruthy());
+
+    spy.mockRestore();
+    const text = errors.map(e => String(e[0])).join(' | ');
+    expect(text, 'console.error while rotating: ' + text).toBe('');
+    expect(container.textContent).not.toMatch(/something went wrong/i);
   });
 });
