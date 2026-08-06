@@ -85,7 +85,7 @@ const FD: Record<string, any> = {
   // 2026-07-28. Present here so the harness proves they now render.
   assessment_level: 'BLS',
   monitoring_level: 'ALS',
-  transfer_subtype: 'Upgrade Transfer',
+  transfer_subtype: 'Hospital to Hospital',
   primary_iv_fluid_resuscitation: true,
   primary_iv_profuse_bleeding: true,
   iv_medication_administration: true,

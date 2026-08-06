@@ -460,8 +460,6 @@ const SCHEME_PLANS: Record<string, string[]> = {
 const TRANSFER_SUBTYPES = [
   'Return Trip',
   'Social Transfer',
-  'Upgrade Transfer',
-  'Downgrade Transfer',
   'Hospital to Hospital',
   'Hospital to Residence',
   'Hospital to Stepdown',

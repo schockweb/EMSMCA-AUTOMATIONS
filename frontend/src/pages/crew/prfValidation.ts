@@ -131,7 +131,7 @@ export const RULES: ValidationRule[] = [
     field: 'transfer_subtype',
     check: (d) => !isIFT(d) || has(d, 'transfer_subtype'),
     message:
-      'Select the IFT subtype (social / upgrade / downgrade / sideways / hospital-to-hospital / residence-to-hospital / psychiatric).',
+      'Select the IFT subtype (return trip / social / hospital-to-hospital / hospital-to-residence / hospital-to-stepdown / residence-to-hospital / psychiatric).',
     source: 'Netcare CMG §3.2.1 — IFT classification list',
   },
   {
