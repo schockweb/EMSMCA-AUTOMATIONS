@@ -1956,11 +1956,17 @@ const ER24_RULES: ValidationRule[] = [
 //
 // Three hard design rules, all of which exist because of prior incidents:
 //
-//   1. WARN ONLY, LATE ONLY. Every rule is `severity: 'warn'` and every rule
-//      fires at handover (5) and/or submission (6) — never during the phases
-//      where a crew is treating a patient. `validatePhase` downgrades
-//      everything to 'warn' anyway, but the phase list is what actually keeps
-//      the banner off the screen mid-call.
+//   1. WARN ONLY, AT SUBMISSION ONLY. Every rule is `severity: 'warn'` and
+//      every rule fires at phase 6 (submission) and NOWHERE else.
+//      An earlier version also fired the signature/destination rules at
+//      handover (5), on the reasoning that a signature is unobtainable once the
+//      patient has been handed over. In practice that put an amber banner on
+//      screen the instant the crew opened the handover page, before they had
+//      any chance to fill the fields in — nagging them for work they were on
+//      their way to do. Being told at submission is early enough to act and
+//      late enough to be fair. `validatePhase` downgrades everything to 'warn'
+//      anyway, but the phase list is what actually keeps the banner off the
+//      screen while a crew is working.
 //   2. NO FALSE POSITIVES. A banner that cries wolf trains crews to dismiss it,
 //      which costs more than the rule earns. Where a check cannot be made
 //      reliably (midnight rollover on HH:MM row times, unparseable numbers) the
@@ -2015,7 +2021,7 @@ export const COMPLETENESS_RULES: ValidationRule[] = [
   {
     id: 'ALL-A1-SCHEME-DETAILS',
     schemes: ['all'],
-    phases: [5, 6],
+    phases: [6],
     severity: 'warn',
     field: 'medical_aid_number',
     check: (d) => {
@@ -2029,7 +2035,7 @@ export const COMPLETENESS_RULES: ValidationRule[] = [
   {
     id: 'ALL-A2-PATIENT-SIG',
     schemes: ['all'],
-    phases: [5, 6],
+    phases: [6],
     severity: 'warn',
     field: 'patient_signature',
     // A refusal is a perfectly valid outcome — it just has to be recorded as one.
@@ -2040,7 +2046,7 @@ export const COMPLETENESS_RULES: ValidationRule[] = [
   {
     id: 'ALL-A3-HANDOVER-SIG',
     schemes: ['all'],
-    phases: [5, 6],
+    phases: [6],
     severity: 'warn',
     field: 'handover_signature',
     check: (d, ctx) => !wasTransported(d) || ctx.hasHandoverSig,
@@ -2060,7 +2066,7 @@ export const COMPLETENESS_RULES: ValidationRule[] = [
   {
     id: 'ALL-A5-DESTINATION',
     schemes: ['all'],
-    phases: [5, 6],
+    phases: [6],
     severity: 'warn',
     field: 'receiving_facility',
     check: (d) => !wasTransported(d) || has(d, 'receiving_facility'),

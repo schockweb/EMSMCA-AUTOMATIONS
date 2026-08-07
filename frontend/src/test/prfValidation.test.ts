@@ -532,14 +532,17 @@ describe('ALL-* completeness rules', () => {
     expect(blockers(findings)).toHaveLength(0);
   });
 
-  it('never fires during the treating phases (0-4)', () => {
+  it('never fires while the crew is working the call — phases 0-5 inclusive', () => {
+    // Phase 5 (handover) is deliberately included. Firing there put a banner on
+    // screen the moment the crew opened the handover page, before they had a
+    // chance to fill anything in. Submission is the only place these speak.
     const messy: PrfData = {
       billing_type: 'MED AID', call_type: 'PRIMARY',
       vitals_sets: [{ hr: '1200', spo2: '140' }],
       circulation_interventions: ['CPR'],
     };
-    for (const phase of [0, 1, 2, 3, 4] as const) {
-      const ids = validatePhase(phase, messy, ctx({ hasPatientSig: false, hasCrewSig: false })).map(f => f.id);
+    for (const phase of [0, 1, 2, 3, 4, 5] as const) {
+      const ids = validatePhase(phase, messy, ctx({ hasPatientSig: false, hasCrewSig: false, hasHandoverSig: false })).map(f => f.id);
       expect(ids.filter(id => id.startsWith('ALL-'))).toEqual([]);
     }
   });
@@ -568,10 +571,14 @@ describe('ALL-* completeness rules', () => {
     expect(fire({ call_type: 'DOD' }, { hasHandoverSig: false })).not.toContain('ALL-A3-HANDOVER-SIG');
   });
 
-  it('A3 and A5 are available at handover, where they can still be fixed', () => {
-    const ids = fire({ call_type: 'PRIMARY' }, { hasHandoverSig: false }, 5);
-    expect(ids).toContain('ALL-A3-HANDOVER-SIG');
-    expect(ids).toContain('ALL-A5-DESTINATION');
+  it('A3 and A5 stay silent at handover and speak only at submission', () => {
+    const atHandover = fire({ call_type: 'PRIMARY' }, { hasHandoverSig: false }, 5);
+    expect(atHandover).not.toContain('ALL-A3-HANDOVER-SIG');
+    expect(atHandover).not.toContain('ALL-A5-DESTINATION');
+
+    const atSubmit = fire({ call_type: 'PRIMARY' }, { hasHandoverSig: false }, 6);
+    expect(atSubmit).toContain('ALL-A3-HANDOVER-SIG');
+    expect(atSubmit).toContain('ALL-A5-DESTINATION');
   });
 
   it('A4 warns on a missing crew signature', () => {
