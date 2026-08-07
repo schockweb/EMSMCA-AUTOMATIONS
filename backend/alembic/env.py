@@ -34,7 +34,18 @@ except ImportError:
 
 database_url = os.getenv("DATABASE_URL")
 if database_url:
-    config.set_main_option("sqlalchemy.url", database_url)
+    # `%` MUST be escaped as `%%`. set_main_option writes into a ConfigParser,
+    # which treats % as interpolation syntax — so a password containing any
+    # character that percent-encodes (a $ becomes %24, an @ becomes %40) makes
+    # every alembic command die with:
+    #     ValueError: invalid interpolation syntax ... at position N
+    #
+    # Found standing up a fresh instance whose database password contained a
+    # `$`: bootstrap_schema.py created all 22 tables and then failed on the
+    # stamp, leaving a schema with no alembic_version — a database that looks
+    # complete and that no future migration can touch. The failure names
+    # interpolation, not the password, so it reads like a corrupt config file.
+    config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
 
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode.
