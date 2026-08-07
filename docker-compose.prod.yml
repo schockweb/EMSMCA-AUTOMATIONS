@@ -65,6 +65,24 @@ services:
       retries: 3
     networks:
       - ems_app_net
+      # The Celery worker and beat live on the WORKER network and could not
+      # resolve `redis` at all — `Name or service not known`, not a refused
+      # connection. On the client VM that raised a HIGH `redis_unavailable`
+      # fault 39 times in three hours.
+      #
+      # Functionally it mattered less than it read: the rate limiter and login
+      # throttle run in the backend, which reaches Redis fine. The real cost is
+      # that a GENUINE Redis outage produces exactly this signal, so the alarm
+      # was permanently lit and could no longer tell anyone anything.
+      #
+      # The registered auto-heal remedy (`reconnect_redis`) could never have
+      # fixed it either — you cannot reconnect your way onto a network you were
+      # never attached to. It would have burned its 3 attempts and given up.
+      #
+      # `docker network connect` alone is NOT enough as a permanent fix: a
+      # manual attach registers only the CONTAINER name, so `redis` still fails
+      # to resolve. The alias below is what makes the service name work.
+      - ems_worker_net
 
   # ── FastAPI Backend ──────────────────────────────────────
   # Gunicorn + Uvicorn workers.
@@ -181,6 +199,12 @@ volumes:
 networks:
   ems_app_net:
     driver: bridge
+  # Declared external because docker-compose.worker.yml owns it — the worker
+  # and beat are defined there. Redis attaches to it so those two can resolve
+  # `redis`; see the comment on the redis service.
+  ems_worker_net:
+    external: true
+    name: ems_ems_worker_net
   ems_shared_net:
     name: ems_shared_net
     driver: bridge
