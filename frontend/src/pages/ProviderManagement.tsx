@@ -129,6 +129,28 @@ const HospitalIcon = ({ size = 16 }: IconProps) => (
     <path d="M3 21h18M5 21V7l7-4 7 4v14" /><path d="M12 8v6M9 11h6" />
   </svg>
 );
+const PowerIcon = ({ size = 16 }: IconProps) => (
+  <svg {...svgBase(size)}><path d="M18.36 6.64a9 9 0 1 1-12.73 0M12 2v10" /></svg>
+);
+// Deactivation is visible on the name tag itself, in the client list and the
+// crew list, rather than only inside the edit form. A deactivated company that
+// looks identical to a working one is how a crew ends up phoning to ask why
+// their sign-in stopped.
+const DeactivatedBadge = ({ compact = false }: { compact?: boolean }) => (
+  <span
+    title="Deactivated — cannot sign in"
+    style={{
+      display: 'inline-flex', alignItems: 'center', flexShrink: 0,
+      background: 'rgba(180,83,9,0.12)', color: '#b45309',
+      border: '1px solid rgba(180,83,9,0.35)', borderRadius: 999,
+      padding: compact ? '1px 7px' : '2px 9px',
+      fontSize: compact ? '0.6rem' : '0.65rem', fontWeight: 800,
+      textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap',
+    }}
+  >
+    Deactivated
+  </span>
+);
 const SpinnerIcon = ({ size = 16 }: IconProps) => (
   <svg {...svgBase(size)} style={{ animation: 'pm-spin 0.8s linear infinite' }}>
     <path d="M21 12a9 9 0 1 1-6.219-8.56" />
@@ -162,9 +184,11 @@ export default function ProviderManagement() {
   const [showEditClient, setShowEditClient] = useState(false);
   const [editForm, setEditForm] = useState({ name: '', pr_number: '', prf_name: '', phone: '', email: '', address: '', is_active: true, portal_username: '', portal_password: '', admin_email: '', admin_password: '', prfNumber: '', smtp_service: 'gmail', smtp_email: '', smtp_password: '' });
   const [editSaving, setEditSaving] = useState(false);
-  const [deleteConfirmText, setDeleteConfirmText] = useState('');
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [deleting, setDeleting] = useState(false);
+  // Deactivate, not delete. A client cannot be removed: their crew are named on
+  // submitted PRFs and on the record of who opened which patient's file, and
+  // both have to be retained. See the danger-zone panel below.
+  const [showDeactivateConfirm, setShowDeactivateConfirm] = useState(false);
+  const [togglingActive, setTogglingActive] = useState(false);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [logoUploading, setLogoUploading] = useState(false);
 
@@ -202,7 +226,11 @@ export default function ProviderManagement() {
   const fetchProviders = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.get('/api/providers');
+      // Revalidate rather than reading the browser's 60s copy — see
+      // fetchProviderDetails. This list carries the Deactivated badge.
+      const res = await api.get('/api/providers', {
+        headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
+      });
       setProviders(res.data);
       setLoadError(false);
     } catch { setLoadError(true); }
@@ -274,9 +302,16 @@ export default function ProviderManagement() {
     setSelectedProvider(provider);
     setCrewLoading(true);
     try {
+      // Ask the BROWSER to revalidate. /api/providers is served with
+      // `Cache-Control: private, max-age=60`, so after deactivating a client —
+      // or adding, editing or removing a crew member — this refetch was
+      // answered out of the browser's own cache and the table kept showing the
+      // pre-change state for up to a minute. Purging the server-side cache
+      // (which the write already does) cannot reach that copy.
+      const fresh = { headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' } };
       const [crewRes, vehicleRes] = await Promise.all([
-        api.get(`/api/providers/${provider.id}/crew`),
-        api.get(`/api/providers/${provider.id}/vehicles`),
+        api.get(`/api/providers/${provider.id}/crew`, fresh),
+        api.get(`/api/providers/${provider.id}/vehicles`, fresh),
       ]);
       setCrew(crewRes.data);
       setVehicles(vehicleRes.data);
@@ -310,7 +345,7 @@ export default function ProviderManagement() {
     });
     setLogoPreview(selectedProvider.logo_url || null);
     setShowEditClient(true);
-    setShowDeleteConfirm(false);
+    setShowDeactivateConfirm(false);
   };
 
   const handleSaveClient = async () => {
@@ -326,7 +361,9 @@ export default function ProviderManagement() {
         phone: editForm.phone || undefined,
         email: editForm.email || undefined,
         address: editForm.address || undefined,
-        is_active: editForm.is_active,
+        // is_active is NOT sent from this form. Activation is a lifecycle
+        // action with a crew cascade behind it — /deactivate and /reactivate,
+        // below — and saving contact details must never move it.
         // Credential fields — only send if user typed something
         portal_login_username: editForm.portal_username.trim() || undefined,
         portal_login_password: editForm.portal_password.trim() || undefined,
@@ -352,23 +389,28 @@ export default function ProviderManagement() {
     setEditSaving(false);
   };
 
-  const handleDeleteClient = async () => {
+  const handleToggleActive = async (activate: boolean) => {
     if (!selectedProvider) return;
-    if (deleteConfirmText !== selectedProvider.name) {
-      alert('Client name does not match. Deletion cancelled.');
-      return;
-    }
-    setDeleting(true);
+    setTogglingActive(true);
     try {
-      await api.delete(`/api/providers/${selectedProvider.id}`);
+      const res = await api.post(
+        `/api/providers/${selectedProvider.id}/${activate ? 'reactivate' : 'deactivate'}`,
+      );
+      const updated = { ...selectedProvider, is_active: activate };
+      setEditForm(f => ({ ...f, is_active: activate }));
+      setShowDeactivateConfirm(false);
       setShowEditClient(false);
-      setShowDeleteConfirm(false);
-      setSelectedProvider(null);
+      // Refetch with the UPDATED provider, not the one still in state.
+      // fetchProviderDetails re-seeds selectedProvider from its argument, so
+      // passing the stale object put the old is_active straight back and the
+      // badge did not appear until the page was reloaded.
+      fetchProviderDetails(updated);
       fetchProviders();
+      alert(res.data?.message || (activate ? 'Client reactivated' : 'Client deactivated'));
     } catch (e: any) {
-      alert(e.response?.data?.detail || 'Failed to delete client');
+      alert(e.response?.data?.detail || `Failed to ${activate ? 'reactivate' : 'deactivate'} client`);
     }
-    setDeleting(false);
+    setTogglingActive(false);
   };
 
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -784,8 +826,9 @@ export default function ProviderManagement() {
                       </div>
                     )}
                     <div>
-                      <div style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ fontSize: '1.05rem', fontWeight: 700, color: p.is_active ? 'var(--text)' : 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                         {p.name}
+                        {!p.is_active && <DeactivatedBadge />}
                         {isLocked && (
                           <span title={lockTooltip(lk)} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 20, height: 20, borderRadius: 10, background: '#dc2626', color: '#fff', fontSize: '0.8rem', fontWeight: 900, cursor: 'help', flexShrink: 0 }}>!</span>
                         )}
@@ -925,17 +968,15 @@ export default function ProviderManagement() {
                   onChange={e => setEditForm({ ...editForm, prf_name: e.target.value })}
                 />
               </div>
+              {/* The "Client is Active" checkbox used to live here. It flipped
+                  the same flag as Deactivate but without the crew cascade, so
+                  unticking it hid the company while its paramedics could still
+                  sign in. One control, at the bottom of this dialog. */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 8, background: 'var(--surface-100)', border: '1px solid var(--surface-200)' }}>
-                <input
-                  id="edit-is-active"
-                  type="checkbox"
-                  checked={editForm.is_active}
-                  onChange={e => setEditForm({ ...editForm, is_active: e.target.checked })}
-                  style={{ width: 16, height: 16, cursor: 'pointer', accentColor: teal }}
-                />
-                <label htmlFor="edit-is-active" style={{ fontSize: '0.83rem', fontWeight: 600, color: 'var(--text)', cursor: 'pointer', margin: 0 }}>
-                  Client is Active
-                </label>
+                <span style={{ width: 9, height: 9, borderRadius: '50%', flexShrink: 0, background: editForm.is_active ? '#16a34a' : '#9ca3af' }} />
+                <span style={{ fontSize: '0.83rem', fontWeight: 600, color: 'var(--text)' }}>
+                  {editForm.is_active ? 'Client is active' : 'Client is deactivated'}
+                </span>
               </div>
 
               {/* ── EMSMCA Client Login ── */}
@@ -1035,14 +1076,24 @@ export default function ProviderManagement() {
             </div>
 
             <div style={{ marginTop: 24 }}>
-              {!showDeleteConfirm ? (
-                <div style={{ display: 'flex', gap: 8, justifyContent: 'space-between', alignItems: 'center' }}>
-                  <button
-                    onClick={() => { setShowDeleteConfirm(true); setDeleteConfirmText(''); }}
-                    style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: 'none', border: '1px solid #e53e3e', borderRadius: 8, color: '#e53e3e', padding: '8px 14px', fontSize: '0.78rem', fontWeight: 700, cursor: 'pointer' }}
-                  >
-                    <TrashIcon size={14} /> Delete Client
-                  </button>
+              {!showDeactivateConfirm ? (
+                <div style={{ display: 'flex', gap: 8, justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap' }}>
+                  {selectedProvider?.is_active ? (
+                    <button
+                      onClick={() => setShowDeactivateConfirm(true)}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: 'none', border: '1px solid #b45309', borderRadius: 8, color: '#b45309', padding: '8px 14px', fontSize: '0.78rem', fontWeight: 700, cursor: 'pointer' }}
+                    >
+                      <PowerIcon size={14} /> Deactivate Client
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => handleToggleActive(true)}
+                      disabled={togglingActive}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: 'none', border: `1px solid ${teal}`, borderRadius: 8, color: teal, padding: '8px 14px', fontSize: '0.78rem', fontWeight: 700, cursor: 'pointer', opacity: togglingActive ? 0.6 : 1 }}
+                    >
+                      <PowerIcon size={14} /> {togglingActive ? 'Reactivating…' : 'Reactivate Client'}
+                    </button>
+                  )}
                   <div style={{ display: 'flex', gap: 8 }}>
                     <button style={{ ...btnPrimary, background: 'var(--surface-200)', color: 'var(--text)' }} onClick={() => setShowEditClient(false)}>Cancel</button>
                     <button style={{ ...btnPrimary, opacity: editSaving ? 0.6 : 1 }} onClick={handleSaveClient} disabled={editSaving}>
@@ -1051,24 +1102,26 @@ export default function ProviderManagement() {
                   </div>
                 </div>
               ) : (
-                <div style={{ background: 'rgba(229,62,62,0.06)', border: '1px solid rgba(229,62,62,0.3)', borderRadius: 10, padding: '16px' }}>
-                  <p style={{ display: 'flex', alignItems: 'flex-start', gap: 7, fontSize: '0.82rem', fontWeight: 700, color: '#e53e3e', margin: '0 0 4px' }}><span style={{ flexShrink: 0, marginTop: 1 }}><WarnIcon size={15} /></span> This will permanently delete this client and ALL their crew, vehicles, and PRFs.</p>
-                  <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: '0 0 12px' }}>Type <strong>{selectedProvider?.name}</strong> to confirm:</p>
-                  <input
-                    style={{ ...inputStyle, marginBottom: 12, borderColor: 'rgba(229,62,62,0.4)' }}
-                    placeholder={selectedProvider?.name}
-                    value={deleteConfirmText}
-                    onChange={e => setDeleteConfirmText(e.target.value)}
-                  />
+                <div style={{ background: 'rgba(180,83,9,0.06)', border: '1px solid rgba(180,83,9,0.3)', borderRadius: 10, padding: '16px' }}>
+                  <p style={{ display: 'flex', alignItems: 'flex-start', gap: 7, fontSize: '0.82rem', fontWeight: 700, color: '#b45309', margin: '0 0 8px' }}>
+                    <span style={{ flexShrink: 0, marginTop: 1 }}><WarnIcon size={15} /></span>
+                    Deactivate {selectedProvider?.name}?
+                  </p>
+                  <ul style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: '0 0 12px', paddingLeft: 18, lineHeight: 1.7 }}>
+                    <li>{crew.length} crew member{crew.length === 1 ? ' is' : 's are'} signed out and blocked from starting a shift.</li>
+                    <li>The company disappears from the ePRF sign-in list.</li>
+                    <li>Nothing is deleted — PRFs, cases and claims stay exactly as they are.</li>
+                    <li>You can reactivate at any time, and the same crew come back.</li>
+                  </ul>
                   <div style={{ display: 'flex', gap: 8 }}>
                     <button
-                      onClick={handleDeleteClient}
-                      disabled={deleteConfirmText !== selectedProvider?.name || deleting}
-                      style={{ ...btnPrimary, background: deleteConfirmText === selectedProvider?.name ? '#e53e3e' : 'var(--surface-200)', color: deleteConfirmText === selectedProvider?.name ? '#fff' : 'var(--text-muted)', opacity: deleting ? 0.6 : 1 }}
+                      onClick={() => handleToggleActive(false)}
+                      disabled={togglingActive}
+                      style={{ ...btnPrimary, background: '#b45309', color: '#fff', opacity: togglingActive ? 0.6 : 1 }}
                     >
-                      {deleting ? 'Deleting…' : 'Permanently Delete'}
+                      {togglingActive ? 'Deactivating…' : 'Deactivate Client'}
                     </button>
-                    <button style={{ ...btnPrimary, background: 'var(--surface-200)', color: 'var(--text)' }} onClick={() => setShowDeleteConfirm(false)}>Cancel</button>
+                    <button style={{ ...btnPrimary, background: 'var(--surface-200)', color: 'var(--text)' }} onClick={() => setShowDeactivateConfirm(false)}>Cancel</button>
                   </div>
                 </div>
               )}
@@ -1081,8 +1134,9 @@ export default function ProviderManagement() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
         <button onClick={() => { setSelectedProvider(null); fetchProviders(); }} title="Back to clients" style={{ background: 'none', border: 'none', cursor: 'pointer', color: teal, display: 'inline-flex', alignItems: 'center', padding: 4 }}><BackIcon size={20} /></button>
         <div style={{ flex: 1 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <h1 style={{ fontSize: '1.3rem', fontWeight: 800, margin: 0, color: 'var(--text)' }}>{selectedProvider.name}</h1>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <h1 style={{ fontSize: '1.3rem', fontWeight: 800, margin: 0, color: selectedProvider.is_active ? 'var(--text)' : 'var(--text-muted)' }}>{selectedProvider.name}</h1>
+            {!selectedProvider.is_active && <DeactivatedBadge />}
             <button
               id="edit-client-settings-btn"
               onClick={openEditClient}
@@ -1263,7 +1317,10 @@ export default function ProviderManagement() {
                         {(c.initials || c.full_name.split(' ').map(p => p[0]).join('').slice(0, 2) || '—').toUpperCase()}
                       </span>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 700, fontSize: '0.92rem', color: 'var(--text)', wordBreak: 'break-word' }}>{c.full_name}</div>
+                        <div style={{ fontWeight: 700, fontSize: '0.92rem', color: c.is_active ? 'var(--text)' : 'var(--text-muted)', wordBreak: 'break-word', display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
+                          {c.full_name}
+                          {!c.is_active && <DeactivatedBadge compact />}
+                        </div>
                         <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>
                           {c.hpcsa_number ? `HPCSA ${c.hpcsa_number}` : 'No HPCSA number'}
                           {c.phone ? ` · ${c.phone}` : ''}
@@ -1311,7 +1368,10 @@ export default function ProviderManagement() {
                           {(c.initials || c.full_name.split(' ').map(p => p[0]).join('').slice(0, 2) || '—').toUpperCase()}
                         </span>
                         <div style={{ minWidth: 0 }}>
-                          <div style={{ fontWeight: 700, color: 'var(--text)', fontSize: '0.9rem' }}>{c.full_name}</div>
+                          <div style={{ fontWeight: 700, color: c.is_active ? 'var(--text)' : 'var(--text-muted)', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
+                            {c.full_name}
+                            {!c.is_active && <DeactivatedBadge compact />}
+                          </div>
                           {c.phone && (
                             <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: 1 }}>{c.phone}</div>
                           )}

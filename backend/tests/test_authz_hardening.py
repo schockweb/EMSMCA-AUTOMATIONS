@@ -220,6 +220,25 @@ async def test_provider_delete_denied_to_low_privilege_user(client, low_priv_hea
 
 
 @pytest.mark.asyncio
+async def test_provider_deactivate_denied_to_low_privilege_user(client, low_priv_headers, provider_id):
+    """Deactivation signs out every one of a client's crew — same privilege as delete."""
+    resp = await client.post(
+        f"/api/providers/{provider_id}/deactivate", headers=low_priv_headers
+    )
+    assert resp.status_code == 403, (
+        f"low-privilege user could deactivate a provider ({resp.status_code})"
+    )
+
+
+@pytest.mark.asyncio
+async def test_provider_reactivate_denied_to_low_privilege_user(client, low_priv_headers, provider_id):
+    resp = await client.post(
+        f"/api/providers/{provider_id}/reactivate", headers=low_priv_headers
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
 async def test_provider_patch_denied_to_low_privilege_user(client, low_priv_headers, provider_id):
     resp = await client.patch(
         f"/api/providers/{provider_id}",

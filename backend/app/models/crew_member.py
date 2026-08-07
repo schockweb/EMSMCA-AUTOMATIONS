@@ -50,6 +50,18 @@ class CrewMember(Base):
         comment="'admin' = provider admin dashboard, 'crew' = mobile PRF"
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Set only by the provider-level deactivation cascade, so that reactivating
+    # the company restores exactly the crew IT switched off — and nobody else.
+    #
+    # Without this, reactivation would have to be "set every crew member of this
+    # provider active", which silently hands a login back to the paramedic who
+    # left last year and was deactivated individually. Their record is
+    # indistinguishable from a cascaded one once both are just is_active=false.
+    deactivated_with_provider: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false",
+        comment="True when this crew member was deactivated BY the provider "
+                "cascade; cleared when the provider is reactivated",
+    )
     last_login: Mapped[Union[datetime, None]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

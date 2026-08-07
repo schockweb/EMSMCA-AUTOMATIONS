@@ -162,9 +162,18 @@ async def get_admin_or_crew_admin(
                 jti = payload.get("jti")
                 if not (jti and await _blacklisted(jti, db)):
                     crew_id = payload.get("crew_id")
-                    result = await db.execute(select(CrewMember).where(CrewMember.id == crew_id))
-                    crew = result.scalar_one_or_none()
-                    if crew and crew.is_active and not _revoked(payload, crew.tokens_revoked_at):
+                    # Provider flag carried over from get_current_crew (see the
+                    # note above about the second door): a deactivated client's
+                    # crew admin must lose these endpoints too, and the cascade
+                    # alone would leave a manually re-enabled admin holding them.
+                    row = (await db.execute(
+                        select(CrewMember, ServiceProvider.is_active)
+                        .join(ServiceProvider, ServiceProvider.id == CrewMember.provider_id)
+                        .where(CrewMember.id == crew_id)
+                    )).first()
+                    crew = row[0] if row else None
+                    if (crew and crew.is_active and row[1]
+                            and not _revoked(payload, crew.tokens_revoked_at)):
                         return crew
         except Exception:
             pass
@@ -849,6 +858,7 @@ async def get_provider(
 async def update_provider(
     provider_id: str,
     body: ProviderUpdate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(_provider_admin),
 ):
@@ -860,13 +870,27 @@ async def update_provider(
     if not provider:
         raise HTTPException(404, "Provider not found")
 
-    # Standard fields — set directly on the model
-    standard_fields = {"name", "pr_number", "pty_reg_number", "prf_name", "phone", "email", "address", "logo_url", "is_active"}
+    # Standard fields — set directly on the model.
+    #
+    # `is_active` is deliberately NOT in this set. Flipping it is a lifecycle
+    # operation with a cascade and an audit entry attached (see
+    # _apply_provider_active); assigning it here would have produced a provider
+    # that is hidden from the portal while every one of its crew members can
+    # still start a shift and open patient records — the exact hole the cascade
+    # exists to close. The field is still accepted on this route so existing
+    # callers keep working; it is routed through the same helper below.
+    standard_fields = {"name", "pr_number", "pty_reg_number", "prf_name", "phone", "email", "address", "logo_url"}
     for key, val in body.model_dump(exclude_unset=True).items():
         if key in standard_fields:
             if key == "prf_name":
                 val = (val or "").strip() or None
             setattr(provider, key, val)
+
+    if body.is_active is not None and body.is_active != provider.is_active:
+        await _apply_provider_active(
+            db, provider, active=body.is_active,
+            actor_id=user.id, ip=get_trusted_client_ip(request),
+        )
 
     # PRF numbering baseline. Only touched when the admin entered a value — a
     # blank field leaves the existing counter untouched. The next digital
@@ -921,15 +945,209 @@ async def update_provider(
     return {"message": "Provider updated", "id": str(provider.id)}
 
 
+# ═══════════════════════════════════════════════════════════
+# PROVIDER LIFECYCLE — deactivate / reactivate
+# ═══════════════════════════════════════════════════════════
+#
+# There is no "remove a client" in this system, and that is a design decision
+# rather than a missing feature. `audit_logs.crew_member_id` records which crew
+# member read which patient's record — the POPIA subject-access trail — and the
+# table carries an append-only trigger, so the rows cannot be cleared to free
+# the foreign key. Crew names and HPCSA numbers are also on submitted PRFs,
+# which are the legal record of who treated a patient. Deleting a client orphans
+# both, permanently. Deactivation is the operation that was actually wanted:
+# the company stops working, and the clinical record stays answerable.
+
+
+async def _apply_provider_active(
+    db: AsyncSession,
+    provider: ServiceProvider,
+    *,
+    active: bool,
+    actor_id: uuid.UUID | None,
+    ip: str | None,
+) -> int:
+    """Flip a provider's active flag and carry the change to its crew.
+
+    Returns the number of crew members whose state changed. Does NOT commit —
+    the caller owns the transaction, so the provider row and its crew always
+    move together.
+
+    Deactivating the provider alone is not enough. Every gate that reads
+    `ServiceProvider.is_active` (portal-login, portal-unlock, the shift-start
+    routes) refuses a deactivated company, but `get_current_crew` authorises on
+    the crew row, so a tablet already holding a 12-hour token would keep reading
+    and writing patient records for the rest of that token's life. Switching the
+    crew off, and stamping `tokens_revoked_at`, ends those sessions on the next
+    request instead of up to twelve hours later.
+
+    Reactivation restores only the crew this cascade switched off — see
+    `CrewMember.deactivated_with_provider`.
+    """
+    from sqlalchemy import update as sql_update
+
+    now = datetime.now(timezone.utc)
+    provider.is_active = active
+
+    if not active:
+        # Kill outstanding device unlocks for the company. Without this a valid
+        # portal grant survives in a tablet's storage; it cannot be redeemed
+        # while the provider is inactive, but it must not spring back to life
+        # the moment the client is reactivated either.
+        provider.tokens_revoked_at = now
+        result = await db.execute(
+            sql_update(CrewMember)
+            .where(
+                CrewMember.provider_id == provider.id,
+                CrewMember.is_active == True,  # noqa: E712
+            )
+            .values(
+                is_active=False,
+                deactivated_with_provider=True,
+                tokens_revoked_at=now,
+                updated_at=now,
+            )
+        )
+    else:
+        result = await db.execute(
+            sql_update(CrewMember)
+            .where(
+                CrewMember.provider_id == provider.id,
+                CrewMember.deactivated_with_provider == True,  # noqa: E712
+            )
+            .values(
+                is_active=True,
+                deactivated_with_provider=False,
+                updated_at=now,
+            )
+        )
+
+    crew_affected = result.rowcount or 0
+
+    db.add(AuditLog(
+        user_id=actor_id,
+        action="PROVIDER_REACTIVATED" if active else "PROVIDER_DEACTIVATED",
+        entity_type="service_provider",
+        entity_id=provider.id,
+        before_state={"is_active": not active},
+        after_state={"is_active": active},
+        details={"provider_slug": provider.slug, "crew_affected": crew_affected},
+        ip_address=ip,
+    ))
+
+    # The response cache answers a HIT before the route's auth dependency runs,
+    # and /api/providers is cached for 60s — including this client's crew list
+    # and its PRF list. Without this, a crew admin whose company was just
+    # deactivated keeps receiving cached 200s carrying patient report data for
+    # up to a minute, on every gunicorn worker that did not handle this request.
+    # Same treatment as revoke-sessions, for the same reason.
+    try:
+        from app.core.response_cache import (
+            bump_revocation_epoch, purge_all_cached_responses,
+        )
+        purge_all_cached_responses()      # this worker, immediately
+        bump_revocation_epoch()           # every other worker, within a second
+    except Exception:  # cache housekeeping must never fail the operation
+        pass
+
+    logger.info(
+        "Provider %s %s by user=%s (%d crew members affected)",
+        provider.slug, "reactivated" if active else "deactivated",
+        actor_id, crew_affected,
+    )
+    return crew_affected
+
+
+@router.post("/{provider_id}/deactivate")
+async def deactivate_provider(
+    provider_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(_provider_admin),
+):
+    """Deactivate a client: the company and all of its crew stop working.
+
+    Reversible. Nothing is deleted — PRFs, cases, claims, documents and the
+    audit trail are untouched, and deactivated crew keep their names on the
+    reports they signed, because the clinical record still has to answer who
+    treated a patient and what they were qualified to give.
+    """
+    provider = await _load_provider(db, uuid.UUID(provider_id))
+    was_active = provider.is_active
+
+    # Runs the cascade even when the client is already inactive. A crew member
+    # added while the company was switched off is created active, and clicking
+    # Deactivate again is the obvious way an admin would expect to catch that.
+    crew_affected = await _apply_provider_active(
+        db, provider, active=False,
+        actor_id=user.id, ip=get_trusted_client_ip(request),
+    )
+    await db.commit()
+
+    lead = f"{provider.name} deactivated." if was_active else f"{provider.name} was already deactivated."
+    return {
+        "message": (
+            f"{lead} {crew_affected} crew member"
+            f"{'' if crew_affected == 1 else 's'} can no longer sign in."
+        ),
+        "is_active": False,
+        "crew_affected": crew_affected,
+    }
+
+
+@router.post("/{provider_id}/reactivate")
+async def reactivate_provider(
+    provider_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(_provider_admin),
+):
+    """Reactivate a client and the crew that were switched off with it.
+
+    Crew members deactivated individually — a paramedic who left the service —
+    stay deactivated. Only the ones this client's deactivation switched off come
+    back.
+    """
+    provider = await _load_provider(db, uuid.UUID(provider_id))
+
+    crew_affected = await _apply_provider_active(
+        db, provider, active=True,
+        actor_id=user.id, ip=get_trusted_client_ip(request),
+    )
+    await db.commit()
+    return {
+        "message": (
+            f"{provider.name} reactivated. {crew_affected} crew member"
+            f"{'' if crew_affected == 1 else 's'} restored."
+        ),
+        "is_active": True,
+        "crew_affected": crew_affected,
+    }
+
+
 @router.delete("/{provider_id}", status_code=204)
 async def delete_provider(
     provider_id: str,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(_provider_admin),
 ):
-    """Hard-delete a provider and ALL related data (crew, vehicles, PRFs, logos)."""
+    """Hard-delete a provider — refused once the client has clinical history.
+
+    This used to answer a plain 500 "An internal error occurred" for any client
+    that had ever been used, because the cascade below deletes `crew_members`
+    and PostgreSQL refuses:
+
+        DELETE FROM crew_members WHERE provider_id = $1
+        violates foreign key constraint "audit_logs_crew_member_id_fkey"
+
+    That is not a bug to be worked around — it is the POPIA access trail
+    refusing to be unpicked, and it reads to an admin as a crash in the product.
+    The refusal is now explicit, states the reason, and points at Deactivate.
+
+    A client created by mistake and never used has no such history, and removing
+    it is harmless, so that case is still allowed.
+    """
     from sqlalchemy import delete as sql_delete
-    from app.models.digital_prf import DigitalPRF
 
     pid = uuid.UUID(provider_id)
 
@@ -937,6 +1155,32 @@ async def delete_provider(
     provider = result.scalar_one_or_none()
     if not provider:
         raise HTTPException(404, "Provider not found")
+
+    # Everything that a hard delete would have to destroy or orphan. These are
+    # the only FK paths into this provider's rows: digital_prfs and vehicles
+    # reference the provider, digital_prfs and audit_logs reference its crew.
+    prf_count = (await db.execute(
+        select(func.count(DigitalPRF.id)).where(DigitalPRF.provider_id == pid)
+    )).scalar_one() or 0
+    audit_count = (await db.execute(
+        select(func.count(AuditLog.id)).where(
+            AuditLog.crew_member_id.in_(
+                select(CrewMember.id).where(CrewMember.provider_id == pid)
+            )
+        )
+    )).scalar_one() or 0
+
+    if prf_count or audit_count:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"{provider.name} has clinical history — {prf_count} Patient Report "
+                f"Form(s) and {audit_count} patient-access record(s) — which must be "
+                f"retained and cannot be deleted. Deactivate this client instead: the "
+                f"company and its crew stop being able to sign in, and everything on "
+                f"record stays intact."
+            ),
+        )
 
     # Delete logo file from disk if present
     if provider.logo_url:
@@ -948,17 +1192,15 @@ async def delete_provider(
                 pass
 
     # Cascade delete in FK-safe order:
-    # 1. PRFs linked to this provider
-    await db.execute(sql_delete(DigitalPRF).where(DigitalPRF.provider_id == pid))
-    # 2. Vehicles
+    # 1. Vehicles
     await db.execute(sql_delete(Vehicle).where(Vehicle.provider_id == pid))
-    # 3. Crew members
+    # 2. Crew members
     await db.execute(sql_delete(CrewMember).where(CrewMember.provider_id == pid))
-    # 4. Provider itself
+    # 3. Provider itself
     await db.execute(sql_delete(ServiceProvider).where(ServiceProvider.id == pid))
 
     await db.commit()
-    logger.info("Deleted provider %s (%s) and all related data", provider.name, provider_id)
+    logger.info("Deleted unused provider %s (%s)", provider.name, provider_id)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -1314,12 +1556,35 @@ async def update_crew_member(
     crew = result.scalar_one_or_none()
     if not crew:
         raise HTTPException(404, "Crew member not found")
+
+    # Reactivating one person cannot quietly reopen a deactivated client. Their
+    # login would still be refused (every sign-in gate reads the provider's
+    # flag), so the only thing this would achieve is a crew member who looks
+    # active in the admin list and cannot start a shift.
+    if body.is_active is True and not crew.is_active:
+        provider = await _load_provider(db, uuid.UUID(provider_id))
+        if not provider.is_active:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"{provider.name} is deactivated, so its crew cannot be "
+                    f"reactivated individually. Reactivate the client first."
+                ),
+            )
+
     for key, val in body.model_dump(exclude_unset=True).items():
         if key == "qualification":
             val = _validate_category(val, required=False)
             if val is None:
                 continue   # silently skip "unset" qualification PATCHes
         setattr(crew, key, val)
+
+    # An individual deactivation is not a cascaded one: reactivating the client
+    # must not hand this person their login back. Clearing the flag on an
+    # individual reactivation keeps the two states from blurring together.
+    if body.is_active is not None:
+        crew.deactivated_with_provider = False
+
     await db.commit()
     return {"message": "Crew member updated", "id": str(crew.id)}
 

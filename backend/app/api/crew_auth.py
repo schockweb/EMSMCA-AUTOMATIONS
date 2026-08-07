@@ -100,10 +100,25 @@ async def get_current_crew(
     jti = payload.get("jti")
     if jti and await is_token_blacklisted(jti, db):
         raise HTTPException(status_code=401, detail="Session ended")
-    result = await db.execute(select(CrewMember).where(CrewMember.id == crew_id))
-    crew = result.scalar_one_or_none()
+    # Crew row AND the employer's active flag in ONE round-trip. Every crew
+    # request passes through here, so this must not become two queries.
+    #
+    # The provider flag is checked because a deactivated CLIENT must stop
+    # working immediately, not in twelve hours. Deactivation cascades to the
+    # crew rows, which alone would be enough — but a back-office admin can
+    # re-enable an individual crew member, and every other gate that could catch
+    # that (portal-login, portal-unlock, shift-start) is a SIGN-IN gate. A tablet
+    # already holding a token never touches one again for the life of that token.
+    row = (await db.execute(
+        select(CrewMember, ServiceProvider.is_active)
+        .join(ServiceProvider, ServiceProvider.id == CrewMember.provider_id)
+        .where(CrewMember.id == crew_id)
+    )).first()
+    crew = row[0] if row else None
     if not crew or not crew.is_active:
         raise HTTPException(status_code=401, detail="Crew member not found or inactive")
+    if not row[1]:
+        raise HTTPException(status_code=401, detail="This service is no longer active. Contact your administrator.")
 
     # Bulk revocation — the lost-tablet case. Blacklisting by JTI can only kill
     # a token someone presents; this kills every session minted for this
