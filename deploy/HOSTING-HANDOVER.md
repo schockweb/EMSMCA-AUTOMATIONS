@@ -78,8 +78,24 @@ Verified on the VM as handed over, not assumed:
   measured in seconds (`deploy/ops/rollback.sh`). Note there is currently only
   **one** tagged release, so there is nothing earlier to roll back to yet
 - Nightly database dump, weekly restore rehearsal, off-site copy and
-  certificate reload are installed as scheduled jobs, and a first backup has
-  been taken by hand and verified on disk
+  certificate reload are installed as scheduled jobs (`/etc/cron.d/ems-*`)
+- A first dump has been taken and **restored** — the weekly rehearsal was run
+  by hand and reported
+  `OK: ...sql.gz restores cleanly and its records match production`. That is
+  the only evidence that distinguishes a backup from a file, and it is the one
+  claim here that has actually been exercised end to end
+
+> **Expect `backup-verify` to FAIL nightly until real data exists — this is
+> not a fault.** The job refuses any dump under 100 KB as a truncation guard.
+> The current dump is legitimately ~15 KB because the database is nearly
+> empty, so the check reports:
+> `FAIL: newest dump is only 14716 bytes (min 102400) — truncated`
+>
+> It will start passing on its own once the database carries real records. We
+> are calling it out because it is the first thing you will see, and an alarm
+> that cries wolf on day one teaches everyone to ignore the channel that
+> matters. If it is still failing once the platform is carrying live claims,
+> that IS a real fault and should be escalated.
 
 > **Corrected 2026-08-07, and worth reading as a warning.** An audit of this VM
 > found that the nightly backup job had never been installed. The installer
