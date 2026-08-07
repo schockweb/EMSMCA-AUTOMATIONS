@@ -1182,14 +1182,17 @@ async def delete_provider(
             ),
         )
 
-    # Delete logo file from disk if present
-    if provider.logo_url:
-        logo_path = os.path.join("/app", provider.logo_url.lstrip("/"))
-        if os.path.exists(logo_path):
-            try:
-                os.remove(logo_path)
-            except OSError:
-                pass
+    # The logo file is removed AFTER the transaction commits — see below.
+    # Deleting it here, before the cascade, is what destroyed a live client's
+    # logo on 2026-08-07: removing a file is not transactional, the cascade
+    # below then failed on a foreign key these two pre-checks do not cover
+    # (they count digital_prfs and audit_logs only), the transaction rolled
+    # back — and the provider survived with logo_url still set, pointing at a
+    # file that no longer existed. The row and the image have to fail together.
+    logo_path = (
+        os.path.join("/app", provider.logo_url.lstrip("/"))
+        if provider.logo_url else None
+    )
 
     # Cascade delete in FK-safe order:
     # 1. Vehicles
@@ -1200,6 +1203,15 @@ async def delete_provider(
     await db.execute(sql_delete(ServiceProvider).where(ServiceProvider.id == pid))
 
     await db.commit()
+
+    # Only now that the row is definitely gone. If the commit above had raised,
+    # the client would still exist and would still need its logo.
+    if logo_path and os.path.exists(logo_path):
+        try:
+            os.remove(logo_path)
+        except OSError:
+            pass
+
     logger.info("Deleted unused provider %s (%s)", provider.name, provider_id)
 
 
