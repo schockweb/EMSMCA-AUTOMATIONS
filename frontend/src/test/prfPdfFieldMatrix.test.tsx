@@ -38,7 +38,7 @@
  * the failing assertion prints the exact value that dropped off the PDF.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router';
 import axios from 'axios';
 import PRFView from '../pages/PRFView';
@@ -1075,5 +1075,77 @@ describe('RHT — the refusal reaches the printed record', () => {
     const occurrences = Array.from(document.querySelectorAll('img'))
       .filter((i) => i.getAttribute('src') === UNIQUE).length;
     expect(occurrences, 'the patient signature is printed more than once').toBe(1);
+  });
+});
+
+
+// ── Full Record fallback ───────────────────────────────────────────────────
+//
+// The printed sheets are a fixed-size A4 reproduction with a hard per-page
+// height ceiling, and data nobody anticipated can always push them out of
+// shape. This view is the guarantee that the INFORMATION stays readable when
+// the LAYOUT does not, so the things worth pinning are: it is offered to
+// EMSMCA admins only, it replaces the sheets rather than hiding them, and it
+// renders every captured field — including any this file has never heard of.
+describe('Full Record — the layout-independent fallback', () => {
+  const renderCrewRoute = () => render(
+    <MemoryRouter initialEntries={['/harness-ems/crew/prf-view/case-x']}>
+      <Routes>
+        <Route path="/:providerSlug/crew/prf-view/:caseId" element={<PRFView />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+
+  it('is offered on the admin cases route', async () => {
+    currentPrf = buildPrf('IHT', 'MED AID').prf;
+    renderPrfView();
+    await waitFor(() => expect(screen.queryByText('Full Record')).toBeTruthy());
+  });
+
+  it('is NOT offered on the crew route', async () => {
+    // The crew route runs a tenant guard that redirects when there is no
+    // session; an access_token short-circuits it (PRFView checks exactly that),
+    // so the view actually renders and the assertion is not vacuous.
+    localStorage.setItem('access_token', 'admin-token-for-guard');
+    try {
+      currentPrf = buildPrf('IHT', 'MED AID').prf;
+      renderCrewRoute();
+      await waitFor(() => expect(document.querySelectorAll('.prf-page').length).toBeGreaterThan(0));
+      expect(screen.queryByText('Full Record')).toBeNull();
+    } finally {
+      localStorage.removeItem('access_token');
+    }
+  });
+
+  it('replaces the sheets instead of leaving a hidden copy behind', async () => {
+    // A hidden copy would still be selected by buildPrfPdf and the print
+    // handler, which both query .prf-page — they would snapshot something the
+    // reader cannot see.
+    currentPrf = buildPrf('IHT', 'MED AID').prf;
+    renderPrfView();
+    await waitFor(() => expect(screen.queryByText('Full Record')).toBeTruthy());
+    expect(document.querySelectorAll('.prf-page').length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByText('Full Record'));
+    await waitFor(() => expect(screen.queryByText('PDF View')).toBeTruthy());
+    expect(document.querySelectorAll('.prf-page').length).toBe(0);
+  });
+
+  it('renders a field it has never been told about', async () => {
+    // The whole point: it enumerates the DATA, so a key added to the form
+    // later cannot go missing here the way it can from a curated layout.
+    const built = buildPrf('IHT', 'MED AID');
+    built.prf.form_data.some_unmapped_future_field = 'UNMAPPED-SENTINEL-42';
+    currentPrf = built.prf;
+    renderPrfView();
+    await waitFor(() => expect(screen.queryByText('Full Record')).toBeTruthy());
+    fireEvent.click(screen.getByText('Full Record'));
+    await waitFor(() => expect(screen.queryByText('PDF View')).toBeTruthy());
+    // Present under the catch-all section, which is open by default only when
+    // it is one of the first three — so expand everything first.
+    screen.getAllByRole('button').forEach(b => {
+      if (/Other captured fields/.test(b.textContent || '')) fireEvent.click(b);
+    });
+    expect(screen.queryAllByText((c) => c.includes('UNMAPPED-SENTINEL-42'), { exact: false }).length)
+      .toBeGreaterThan(0);
   });
 });

@@ -20,6 +20,7 @@ const GREEN_DK = '#005f6b';      // accent + provider brand (dark teal)
 const GREEN_TINT = '#e7f3f5';    // label cell background (teal tint)
 
 import { PrintableInjuryDiagram } from '../components/BodyDiagram';
+import PrfRecordView from './PrfRecordView';
 import {
   INSET_MM, MAX_W_MM, MAX_H_MM, SHEET_RATIO,
   DESIGN_W_PX, MAX_FIT_W, planPlacement, screenZoomFor,
@@ -470,6 +471,13 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
   // loaded AND it carries a valid receiving-facility email. Otherwise the
   // modal would flash up before we know if there's anywhere to send it.
   const [showSharePrompt, setShowSharePrompt] = useState<boolean>(false);
+
+  // Fallback "Full Record" view — see PrfRecordView. The printed layout is a
+  // fixed-size A4 reproduction and can always be pushed out of shape by data
+  // nobody anticipated; this shows every captured field as plain, collapsible
+  // data so the information is readable even when the sheet is not. Offered on
+  // the EMSMCA admin cases route only (the crew route carries a providerSlug).
+  const [recordView, setRecordView] = useState(false);
 
   // Pre-built PDF File ready for the share sheet. We MUST have this in
   // hand before the user taps the Send button — iOS Safari refuses any
@@ -1691,6 +1699,32 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
           boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
         }}>← Back</button>
         <div style={{ flex: 1 }} />
+        {/* Full Record — the layout-independent fallback. Admin cases route
+            only: the crew route carries a providerSlug. */}
+        {!providerSlug && (
+          <button
+            onClick={() => setRecordView(v => !v)}
+            title={recordView ? 'Back to the printed PRF layout' : 'View every captured field as plain data'}
+            aria-pressed={recordView}
+            style={{
+              height: 40, padding: '0 14px', marginRight: 10, borderRadius: 6, cursor: 'pointer',
+              border: recordView ? 'none' : `1px solid #cbd5e1`,
+              background: recordView ? `linear-gradient(135deg, ${LN}, #066b7a)` : '#fff',
+              color: recordView ? '#fff' : INK,
+              fontSize: '0.82rem', fontWeight: 700,
+              boxShadow: recordView ? '0 3px 10px rgba(8,131,149,0.3)' : '0 1px 3px rgba(0,0,0,0.06)',
+              display: 'inline-flex', alignItems: 'center', gap: 7,
+            }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="8" y1="6" x2="21" y2="6" /><line x1="8" y1="12" x2="21" y2="12" />
+              <line x1="8" y1="18" x2="21" y2="18" /><line x1="3" y1="6" x2="3.01" y2="6" />
+              <line x1="3" y1="12" x2="3.01" y2="12" /><line x1="3" y1="18" x2="3.01" y2="18" />
+            </svg>
+            {recordView ? 'PDF View' : 'Full Record'}
+          </button>
+        )}
+        {!recordView && (<>
         {/* Send a copy to receiving facility — builds the PDF then opens
             the device share sheet so the crew can pick Gmail. On Gmail
             the PDF arrives as a ready-attached file. On browsers without
@@ -1749,13 +1783,14 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
             </svg>
           )}
         </button>
+        </>)}
       </div>
 
       {/* Reader zoom — small screens only (fit-to-width under ~0.7, i.e. phones
           and portrait tablets). The top toolbar is already tight on a phone, so
           this rides as a floating pill above the safe-area inset where it stays
           reachable no matter how far down the sheet you have scrolled. */}
-      {fitScale < 0.7 && (
+      {!recordView && fitScale < 0.7 && (
         <div className="no-print" style={{
           position: 'fixed', left: '50%', transform: 'translateX(-50%)',
           bottom: 'calc(16px + env(safe-area-inset-bottom, 0px))',
@@ -1886,6 +1921,11 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
         }
       `}</style>
 
+      {/* The printed sheets. Unmounted entirely in Full Record mode — the PDF
+          and print pipelines both select .prf-page, so leaving a hidden copy
+          in the DOM would let them snapshot something the user cannot see. The
+          record view replaces them rather than sitting alongside. */}
+      {recordView ? <PrfRecordView prf={prf} /> : (
       <div id="prf-pdf-content">
       {/* ═══════════════════ PAGE 1 — Administrative & Context ═══════════════════
           Sized to A4-landscape aspect (1220 × 862 ≈ 297×210mm @ 96dpi),
@@ -3656,7 +3696,8 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
           </div>
         </div>
       ))}
-      </div>{/* /prf-pdf-content */}
+      </div>
+      )}
     </div>
   );
 }

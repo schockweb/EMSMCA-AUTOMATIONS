@@ -243,9 +243,9 @@ function measure() {
 // ── Mount ──────────────────────────────────────────────────────────────────
 import('./pages/PRFView').then(({ default: PRFView }) => {
   createRoot(document.getElementById('root')!).render(
-    <MemoryRouter initialEntries={['/harness-ems/cases/harness-case-1/prf']}>
+    <MemoryRouter initialEntries={['/cases/harness-case-1/prf']}>
       <Routes>
-        <Route path="/:providerSlug/cases/:caseId/prf" element={<PRFView />} />
+        <Route path="/cases/:caseId/prf" element={<PRFView />} />
       </Routes>
     </MemoryRouter>,
   );
