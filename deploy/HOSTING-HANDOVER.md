@@ -75,9 +75,26 @@ Verified on the VM as handed over, not assumed:
 
 **Recovery**
 - Release images are tagged per deployment; a rollback is an image tag swap
-  measured in seconds (`deploy/ops/rollback.sh`)
-- Nightly database dump, weekly restore rehearsal and certificate reload are
-  installed as scheduled jobs on the VM
+  measured in seconds (`deploy/ops/rollback.sh`). Note there is currently only
+  **one** tagged release, so there is nothing earlier to roll back to yet
+- Nightly database dump, weekly restore rehearsal, off-site copy and
+  certificate reload are installed as scheduled jobs, and a first backup has
+  been taken by hand and verified on disk
+
+> **Corrected 2026-08-07, and worth reading as a warning.** An audit of this VM
+> found that the nightly backup job had never been installed. The installer
+> creates the backup *script*, the off-site copy job, the verification job and
+> the weekly restore rehearsal — but not the cron that actually **takes** the
+> backup. Every job policing backups was running; the job making them was not,
+> and each of those jobs reported healthy because it had nothing to complain
+> about. The previous server only worked because that cron file had been
+> created by hand months earlier.
+>
+> It is fixed here, and a first dump has been produced and confirmed. We are
+> flagging it because it is the exact failure mode this handover is meant to
+> prevent: **a monitoring stack that is green because it is measuring nothing.**
+> Please treat "the backup job reported success" as a claim to verify rather
+> than accept — check that a dated file actually exists and grows.
 
 ---
 
