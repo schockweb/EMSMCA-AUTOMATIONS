@@ -212,10 +212,23 @@ that SSH access is never widened to the internet, even temporarily.
 | TLS certificate lifecycle | **Hosting provider** |
 | DNS | **Hosting provider** |
 
-Encryption keys stay with EMSMCA and are held in escrow. `ENCRYPTION_KEY`
-protects patient identifiers at rest and **cannot be regenerated** — if it is
-lost, every patient identifier in the database becomes permanently unreadable.
-It is not stored anywhere outside the VM's configuration file and our escrow.
+Encryption keys stay with EMSMCA. `ENCRYPTION_KEY` protects patient identifiers
+at rest and **cannot be regenerated** — if it is lost, every patient identifier
+in the database becomes permanently unreadable, including in any backup.
+
+> **Stated plainly because it is the single largest unmitigated risk on this
+> platform right now:** at the time of writing, that key exists in **exactly
+> one place** — `/opt/ems/.env.prod` on the VM. It is not in escrow, not in a
+> password manager, and not in any backup that leaves the machine.
+>
+> The consequence is not "restore from backup". The Azure database has its own
+> geo-redundant backups and would survive the loss of the VM perfectly well —
+> and every patient identifier inside it would be **permanently undecryptable**,
+> because the key that reads them was only ever on the disk that was lost.
+>
+> EMSMCA is arranging escrow. Until that is confirmed, please treat the VM's
+> disk as holding irreplaceable material and prioritise the Azure Backup item
+> above accordingly.
 
 ---
 
