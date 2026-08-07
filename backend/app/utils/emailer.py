@@ -56,6 +56,38 @@ def test_smtp_login(service: str | None, email: str, password: str) -> tuple[boo
         return True, "unverified"
 
 
+def _header_safe(value: str | None) -> str:
+    """Make a string safe to place in an email header.
+
+    Two reasons, and the second is the important one.
+
+    1. It CRASHES otherwise. Python's email policy refuses a header value
+       containing CR or LF — `msg["Subject"] = value` raises out of
+       header_store_parse, which surfaces as an opaque `internal_error` with a
+       traceback three libraries deep and no mention of the offending field.
+       A crew typing Enter in a free-text field was enough to stop the PRF
+       reaching the receiving facility, and the retry then failed identically
+       every 8 minutes.
+
+    2. It is HEADER INJECTION. A newline inside a header value ends that
+       header and starts another, so a crafted field could append
+       `Bcc: attacker@example.com` — or a second body — to a message carrying
+       a patient report. The crash was, in effect, the only thing preventing
+       it. Never pass unsanitised user text into a header.
+
+    Newlines are replaced with a space rather than stripped, so a subject does
+    not silently lose the word boundary and become unreadable.
+    """
+    if not value:
+        return ""
+    cleaned = str(value).replace("\r", " ").replace("\n", " ")
+    # Collapse the runs the replacement above can create, and trim.
+    cleaned = " ".join(cleaned.split())
+    # RFC 5322 keeps headers well under this; truncate rather than let a
+    # pathological field produce a header servers will reject.
+    return cleaned[:900]
+
+
 def send_email_via(
     *,
     host: str,
@@ -75,9 +107,9 @@ def send_email_via(
     reported distinctly so callers can tell 'wrong app password' apart from
     a transient network problem (only the latter is worth retrying)."""
     msg = EmailMessage()
-    msg["From"] = f"{from_name} <{from_email}>" if from_name else from_email
-    msg["To"] = to
-    msg["Subject"] = subject
+    msg["From"] = _header_safe(f"{from_name} <{from_email}>" if from_name else from_email)
+    msg["To"] = _header_safe(to)
+    msg["Subject"] = _header_safe(subject)
     msg.set_content(body)
 
     for att in (attachments or []):
