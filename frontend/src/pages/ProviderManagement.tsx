@@ -190,6 +190,14 @@ export default function ProviderManagement() {
   const [showDeactivateConfirm, setShowDeactivateConfirm] = useState(false);
   const [togglingActive, setTogglingActive] = useState(false);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
+  // A logo_url can outlive the file it points at — the row lives in the
+  // database while the image lives in the uploads volume, so a restore, a
+  // rebuilt volume or a failed upload leaves the URL pointing at nothing.
+  // Without an onError the browser paints its broken-image glyph, which is
+  // what "the logo is showing blank" looks like. Falling back to the initial
+  // tile keeps the row readable. Same fix PRFView's ProviderLogo already has.
+  const [logoFailed, setLogoFailed] = useState<Set<string>>(new Set());
+  const [logoPreviewFailed, setLogoPreviewFailed] = useState(false);
   const [logoUploading, setLogoUploading] = useState(false);
 
   // Crew/Vehicle lists for selected provider
@@ -344,6 +352,7 @@ export default function ProviderManagement() {
       smtp_password: '',
     });
     setLogoPreview(selectedProvider.logo_url || null);
+    setLogoPreviewFailed(false);
     setShowEditClient(true);
     setShowDeactivateConfirm(false);
   };
@@ -426,6 +435,8 @@ export default function ProviderManagement() {
       const newLogoUrl = res.data.logo_url;
       setLogoPreview(newLogoUrl);
       setSelectedProvider({ ...selectedProvider, logo_url: newLogoUrl });
+      setLogoPreviewFailed(false);
+      setLogoFailed(prev => { const n = new Set(prev); n.delete(selectedProvider.id); return n; });
       fetchProviders();
     } catch (err: any) {
       alert(err.response?.data?.detail || 'Failed to upload logo');
@@ -818,8 +829,10 @@ export default function ProviderManagement() {
                 onMouseLeave={e => (e.currentTarget.style.borderColor = isLocked ? '#f59e0b' : 'var(--surface-100)')}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    {p.logo_url ? (
-                      <img src={p.logo_url} alt={p.name} style={{ width: 36, height: 36, objectFit: 'contain', borderRadius: 6, border: '1px solid var(--surface-100)', background: '#fff', padding: 2 }} />
+                    {p.logo_url && !logoFailed.has(p.id) ? (
+                      <img src={p.logo_url} alt={p.name}
+                        onError={() => setLogoFailed(prev => new Set(prev).add(p.id))}
+                        style={{ width: 36, height: 36, objectFit: 'contain', borderRadius: 6, border: '1px solid var(--surface-100)', background: '#fff', padding: 2 }} />
                     ) : (
                       <div style={{ width: 36, height: 36, borderRadius: 6, background: `rgba(8,131,149,0.1)`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1rem', fontWeight: 800, color: teal }}>
                         {p.name[0]?.toUpperCase()}
@@ -900,8 +913,10 @@ export default function ProviderManagement() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 6 }}>
                   {/* Preview */}
                   <div style={{ width: 64, height: 64, borderRadius: 10, border: '1.5px dashed var(--surface-300)', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, overflow: 'hidden' }}>
-                    {logoPreview ? (
-                      <img src={logoPreview} alt="logo preview" style={{ width: '100%', height: '100%', objectFit: 'contain', padding: 4 }} />
+                    {logoPreview && !logoPreviewFailed ? (
+                      <img src={logoPreview} alt="logo preview"
+                        onError={() => setLogoPreviewFailed(true)}
+                        style={{ width: '100%', height: '100%', objectFit: 'contain', padding: 4 }} />
                     ) : (
                       <span style={{ color: 'var(--text-muted)' }}><HospitalIcon size={26} /></span>
                     )}

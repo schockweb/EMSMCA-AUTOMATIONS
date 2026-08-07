@@ -36,6 +36,11 @@ export default function ProviderLogin() {
   const { providerSlug } = useParams<{ providerSlug: string }>();
   const navigate = useNavigate();
 
+  // A logo_url can outlive the file it points at (restored database, rebuilt
+  // uploads volume, failed upload). This is the CLIENT'S OWN login page, so a
+  // broken-image glyph here is the worst place for it — fall back to the
+  // company name, which is what this block shows when no logo was ever set.
+  const [logoFailed, setLogoFailed] = useState(false);
   const [providerInfo, setProviderInfo] = useState<ProviderInfo | null>(null);
 
   // Admin login fields
@@ -229,8 +234,10 @@ export default function ProviderLogin() {
 
         {/* Provider Logo Header */}
         <div className="login-logo" style={{ marginBottom: '24px' }}>
-          {providerInfo?.logo_url ? (
-            <img src={providerInfo.logo_url} alt={providerInfo.name} style={{ height: 72, objectFit: 'contain', marginBottom: 16 }} />
+          {providerInfo?.logo_url && !logoFailed ? (
+            <img src={providerInfo.logo_url} alt={providerInfo.name}
+              onError={() => setLogoFailed(true)}
+              style={{ height: 72, objectFit: 'contain', marginBottom: 16 }} />
           ) : (
             <h1 style={{ marginBottom: 16 }}>{providerInfo?.name || 'Company Portal'}</h1>
           )}
