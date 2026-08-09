@@ -772,7 +772,7 @@ async def create_provider(
             hashed_password=hash_password(body.admin_password),
             full_name=f"{body.name} Admin",
             initials="AD",
-            qualification="ILS", # Default valid category
+            qualification=DEFAULT_CATEGORY,  # HPCSA category; ILS is a BILLING TIER and _validate_category rejects it
             role="admin",
             is_active=True,
         )
@@ -913,10 +913,16 @@ async def update_provider(
     # Admin crew member credentials
     if body.admin_email or body.admin_password:
         admin_result = await db.execute(
+            # .limit(1) is load-bearing. Nothing stops a provider having two crew
+            # admins — add_crew_member takes `role` verbatim and update_crew_member
+            # promotes with a bare setattr — and without the limit a second admin
+            # makes scalar_one_or_none() raise MultipleResultsFound, which turns
+            # EVERY subsequent PATCH of that provider into a permanent 500. The
+            # equivalent query in update_provider_settings already limits.
             select(CrewMember).where(
                 CrewMember.provider_id == uuid.UUID(provider_id),
                 CrewMember.role == "admin",
-            )
+            ).limit(1)
         )
         admin = admin_result.scalar_one_or_none()
 
@@ -935,7 +941,7 @@ async def update_provider(
                     hashed_password=hash_password(body.admin_password),
                     full_name=f"{provider.name} Admin",
                     initials="AD",
-                    qualification="ILS",
+                    qualification=DEFAULT_CATEGORY,
                     role="admin",
                     is_active=True,
                 )
@@ -1407,7 +1413,7 @@ async def update_provider_settings(
                 hashed_password=hash_password(body.admin_password),
                 full_name=f"{provider.name} Admin",
                 initials="AD",
-                qualification="ILS",
+                qualification=DEFAULT_CATEGORY,
                 role="admin",
                 is_active=True,
             ))

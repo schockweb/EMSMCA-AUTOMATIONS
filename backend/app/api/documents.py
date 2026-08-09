@@ -44,10 +44,27 @@ settings = get_settings()
 # follows the existing permission model rather than imposing a role hierarchy
 # on top of it. SUPER_ADMIN bypasses and a NULL permissions column still means
 # "all", so no existing account is locked out.
+
+# ROLE GATE ADDED 2026-08-09. The permission dependency below is ANY-of, and it
+# was the router's ONLY gate — every sibling back-office router pairs role AND
+# permission (cases.py:41, claims.py:36-37, failed_prfs.py:74-75). That mattered
+# because POST /api/users assigns ALL_PERMISSIONS when the permissions field is
+# omitted, so a junior account created without an explicit list holds `upload`
+# regardless of its role. It could then call GET /api/documents/export-spreadsheet,
+# whose query is a bare `select(Document)` with NO provider filter, and receive
+# every provider's extracted clinical record — with SA ID numbers DECRYPTED on
+# read by the column type — in one spreadsheet.
+#
+# Cross-provider access is still deliberate here: back-office staff process paper
+# PRFs across every company, exactly like the failed-PRF queue. The roles below
+# therefore mirror that queue rather than inventing a new hierarchy.
 router = APIRouter(
     prefix="/api/documents",
     tags=["Documents"],
-    dependencies=[Depends(require_permission("upload", "document_review", "admin_queue"))],
+    dependencies=[
+        Depends(require_role(UserRole.ADMIN, UserRole.SUPER_ADMIN)),
+        Depends(require_permission("upload", "document_review", "admin_queue")),
+    ],
 )
 
 ALLOWED_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".tiff", ".tif", ".bmp", ".webp"}
