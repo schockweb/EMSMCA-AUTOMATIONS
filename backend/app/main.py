@@ -422,7 +422,15 @@ async def root():
 # HEALTHCHECK and the load balancer poll on a 30s cadence, far longer than this
 # window, so they still see fresh results, while a flood collapses onto one
 # underlying check.
-_HEALTH_CACHE_SECONDS = 5.0
+#
+# 2026-08-09 — measured on production: a cache MISS cost 3.1s wall-clock while a
+# hit cost 40ms, so the endpoint was doing 3.1s of real work every 5 seconds,
+# continuously, forever. Almost all of it was the Celery inspect broadcast
+# below, which always waits its full timeout. Two changes: the window is now
+# 20s (still well inside the 30s probe cadence, so a genuine failure is still
+# caught on the very next poll), and the probes themselves are cheaper. Net
+# effect is roughly an order of magnitude less background work.
+_HEALTH_CACHE_SECONDS = 20.0
 _health_cache: dict = {"at": 0.0, "payload": None, "status": 200}
 _health_lock = asyncio.Lock()
 
@@ -435,7 +443,7 @@ def _blocking_broker_checks() -> dict:
     try:
         from app.tasks.celery_app import celery_app as _celery
         conn = _celery.connection()
-        conn.ensure_connection(max_retries=1, timeout=3)
+        conn.ensure_connection(max_retries=1, timeout=2)
         conn.close()
         out["rabbitmq"] = "healthy"
     except Exception as e:
@@ -444,9 +452,18 @@ def _blocking_broker_checks() -> dict:
 
     try:
         from app.tasks.celery_app import celery_app as _celery
-        inspector = _celery.control.inspect(timeout=3)
-        active = inspector.active()
-        wc = len(active) if active else 0
+        # ping(), not active(). Both broadcast and both block for the WHOLE
+        # timeout collecting replies — inspect has no early exit — but active()
+        # also serialises every running task's arguments back from each worker,
+        # which is a lot of payload to build an integer from. ping() answers the
+        # only question this endpoint asks: is anyone there?
+        #
+        # The timeout is the endpoint's latency floor on a cache miss, so it is
+        # deliberately short. Workers sit on the same host and reply in
+        # milliseconds; 3s only bought tolerance for remote nodes we do not have.
+        inspector = _celery.control.inspect(timeout=1.5)
+        replies = inspector.ping()
+        wc = len(replies) if replies else 0
         out["celery_workers"] = (
             f"healthy ({wc} nodes)" if wc > 0 else "unhealthy: no active workers"
         )
