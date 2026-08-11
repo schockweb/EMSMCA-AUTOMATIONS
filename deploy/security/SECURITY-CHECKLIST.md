@@ -55,8 +55,9 @@ Legend: ✅ done & verified · 🟡 partial / needs attention · ⬜ not yet don
 
 ## Open items (priority order)
 
-1. **Fix DNS `portal` A record** `127.209.218.22` → `172.209.218.22` (you have cPanel
-   Zone Editor access) — unblocks HTTPS + cert.
+1. ~~**Fix DNS `portal` A record** `127.209.218.22` → `172.209.218.22`~~ — ✅ DONE.
+   The portal `A` record now points at the production VM `102.37.216.162`
+   (`vm-ems-prod`); the `172.209.218.22` box is retired.
 2. **Issue TLS cert & enable HTTPS** — follow `../GO-LIVE-RUNBOOK.md` steps 1–2.
 3. **Off-box backups** — replicate `/opt/backups` to Azure Blob Storage.
 4. *(optional)* **WAF** — Cloudflare free tier once ready to move nameservers.

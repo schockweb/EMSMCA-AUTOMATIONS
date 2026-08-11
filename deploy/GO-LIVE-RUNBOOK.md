@@ -1,7 +1,8 @@
 # 🚦 portal.emsmca.co.za — Go-Live Runbook
 
 > ## ✅ STATUS: infrastructure go-live is COMPLETE (since 2026-07-13)
-> The site serves valid HTTPS today: DNS resolves to 172.209.218.22, the
+> The site serves valid HTTPS today: DNS resolves to 102.37.216.162 (the
+> production VM `vm-ems-prod`; the original `172.209.218.22` box is retired), the
 > Let's Encrypt certificate is live and auto-renewing, and the 443 block in
 > `nginx/nginx.conf` is active.
 >
@@ -41,11 +42,11 @@
 ```powershell
 nslookup portal.emsmca.co.za 8.8.8.8
 ```
-- ✅ expect: `Address: 172.209.218.22` (**172**, not 127). If still 127 → DNS not fixed, stop.
+- ✅ expect: `Address: 102.37.216.162` (the production VM). If it resolves anywhere else → DNS not pointed at prod, stop.
 
 SSH into the VM:
 ```powershell
-ssh -i $HOME\.ssh\ems_vm azureuser@172.209.218.22
+ssh -i $HOME\.ssh\ems_vm azureuser@102.37.216.162
 ```
 (All VM commands below need `sudo` for docker.)
 
@@ -86,7 +87,7 @@ Edit `/opt/ems/.env.prod` and change:
 FRONTEND_URL=https://portal.emsmca.co.za
 CORS_ORIGINS=https://portal.emsmca.co.za
 ```
-(You may keep the IP too during transition: `CORS_ORIGINS=https://portal.emsmca.co.za,http://172.209.218.22`)
+(You may keep the IP too during transition: `CORS_ORIGINS=https://portal.emsmca.co.za,http://102.37.216.162`)
 
 Restart the backend so it re-reads the env:
 ```bash

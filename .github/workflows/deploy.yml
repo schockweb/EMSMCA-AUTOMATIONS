@@ -1,6 +1,6 @@
 # ═══════════════════════════════════════════════════════════════════════════
 # EMS Claims Portal — Production Deployment
-# Single Azure VM: ems-portal-vm (172.209.218.22)
+# Single Azure VM: vm-ems-prod (102.37.216.162)   # old ems-portal-vm (172.209.218.22) is retired
 # Domain: portal.emsmca.co.za
 #
 # Trigger:
@@ -9,7 +9,7 @@
 #
 # Required GitHub Secrets:
 #   SSH_PRIVATE_KEY   — deploy key (ed25519 recommended)
-#   DEPLOY_HOST       — IP of the Azure VM (e.g. 172.209.218.22)
+#   DEPLOY_HOST       — IP of the Azure VM (e.g. 102.37.216.162)
 #   VITE_GOOGLE_MAPS_KEY — Google Maps API key (injected at build time)
 # ═══════════════════════════════════════════════════════════════════════════
 

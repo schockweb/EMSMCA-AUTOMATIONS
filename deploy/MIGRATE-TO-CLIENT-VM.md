@@ -1,5 +1,11 @@
 # Standing the portal up on the client's Azure VM
 
+> ## ✅ MIGRATION COMPLETE — this document is historical.
+> Production now runs on the client VM `vm-ems-prod` (`102.37.216.162`) and DNS
+> points there. The source box referenced below as "the current VM"
+> (`172.209.218.22`) is **retired and being decommissioned** — do not SSH to it.
+> Kept as the procedure to follow if a clean instance ever has to be stood up again.
+
 **Written 2026-08-06. Revised 2026-08-06 — no data is carried over.**
 
 This builds a **clean instance** on the client's Azure subscription. The current

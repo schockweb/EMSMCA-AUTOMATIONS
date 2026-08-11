@@ -5,7 +5,7 @@ The new password is typed by YOU at a hidden prompt and is never printed, never
 logged, and never passed on a command line (so it can't leak into shell history
 or the process list).
 
-    ssh -i ~/.ssh/ems_vm azureuser@172.209.218.22 \
+    ssh -i ~/.ssh/ems_vm azureuser@102.37.216.162 \
       -t "sudo docker exec -it ems_backend python rotate_admin_password.py"
 
 On success it also clears any lockout counters and stamps password_changed_at.
