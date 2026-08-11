@@ -3,7 +3,7 @@ Service Provider Admin API — CRUD for providers, crew members, and vehicles.
 Admin-only endpoints for onboarding and managing service providers.
 """
 from __future__ import annotations
-from typing import Optional
+from typing import Annotated, Optional
 import uuid
 import logging
 import re
@@ -13,7 +13,7 @@ import os
 import io
 import shutil
 from PIL import Image
-from fastapi import APIRouter, Depends, HTTPException, Request, status, UploadFile, File, Response
+from fastapi import APIRouter, Depends, HTTPException, Path, Request, status, UploadFile, File, Response
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select, func, or_, cast, Text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -51,6 +51,16 @@ from app.utils.hpcsa import (
 from app.models.user import User, UserRole
 
 logger = logging.getLogger("ems.providers")
+
+# provider_id / crew_id / vehicle_id path parameters are UUIDs. Constrain them at
+# the routing layer so a malformed value (a slug, a truncated id, an injection
+# probe) is rejected with a clean 422 BEFORE the handler runs. Every handler here
+# starts with uuid.UUID(provider_id); that raises ValueError on bad input, which
+# was surfacing as an unhandled 500 plus one crash-log row per bad request
+# (flagged as a low-severity robustness gap in the 2026-08-11 pre-go-live scan).
+# The value stays a `str`, so the existing uuid.UUID(...) call sites are unchanged.
+_UUID_PATTERN = r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+UUIDPath = Annotated[str, Path(pattern=_UUID_PATTERN)]
 
 # Provider lifecycle (create / re-credential / logo / delete) is a back-office
 # privilege operation, not something every authenticated account may do. Those
@@ -804,7 +814,7 @@ async def create_provider(
 
 @router.post("/{provider_id}/logo")
 async def upload_provider_logo(
-    provider_id: str,
+    provider_id: UUIDPath,
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(_provider_admin),
@@ -836,7 +846,7 @@ async def upload_provider_logo(
 
 @router.get("/{provider_id}")
 async def get_provider(
-    provider_id: str,
+    provider_id: UUIDPath,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(_provider_admin),
 ):
@@ -874,7 +884,7 @@ async def get_provider(
 
 @router.patch("/{provider_id}")
 async def update_provider(
-    provider_id: str,
+    provider_id: UUIDPath,
     body: ProviderUpdate,
     request: Request,
     db: AsyncSession = Depends(get_db),
@@ -1124,7 +1134,7 @@ async def _apply_provider_active(
 
 @router.post("/{provider_id}/deactivate")
 async def deactivate_provider(
-    provider_id: str,
+    provider_id: UUIDPath,
     request: Request,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(_provider_admin),
@@ -1161,7 +1171,7 @@ async def deactivate_provider(
 
 @router.post("/{provider_id}/reactivate")
 async def reactivate_provider(
-    provider_id: str,
+    provider_id: UUIDPath,
     request: Request,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(_provider_admin),
@@ -1191,7 +1201,7 @@ async def reactivate_provider(
 
 @router.delete("/{provider_id}", status_code=204)
 async def delete_provider(
-    provider_id: str,
+    provider_id: UUIDPath,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(_provider_admin),
 ):
@@ -1355,7 +1365,7 @@ async def _load_provider(db: AsyncSession, pid: uuid.UUID) -> ServiceProvider:
 
 @router.get("/{provider_id}/settings")
 async def get_provider_settings(
-    provider_id: str,
+    provider_id: UUIDPath,
     db: AsyncSession = Depends(get_db),
     principal = Depends(get_admin_or_crew_admin),
 ):
@@ -1391,7 +1401,7 @@ async def get_provider_settings(
 
 @router.patch("/{provider_id}/settings")
 async def update_provider_settings(
-    provider_id: str,
+    provider_id: UUIDPath,
     body: ProviderSettingsUpdate,
     db: AsyncSession = Depends(get_db),
     principal = Depends(get_admin_or_crew_admin),
@@ -1486,7 +1496,7 @@ ALLOWED_LOGO_EXTENSIONS = {".png", ".jpg", ".jpeg", ".svg", ".webp"}
 
 @router.post("/{provider_id}/settings/logo")
 async def upload_provider_logo_settings(
-    provider_id: str,
+    provider_id: UUIDPath,
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
     principal = Depends(get_admin_or_crew_admin),
@@ -1522,7 +1532,7 @@ async def upload_provider_logo_settings(
 
 @router.get("/{provider_id}/crew")
 async def list_crew(
-    provider_id: str,
+    provider_id: UUIDPath,
     db: AsyncSession = Depends(get_db),
     principal = Depends(get_admin_or_crew_admin),
 ):
@@ -1555,7 +1565,7 @@ async def list_crew(
 
 @router.post("/{provider_id}/crew", status_code=201)
 async def add_crew_member(
-    provider_id: str,
+    provider_id: UUIDPath,
     body: CrewMemberCreate,
     db: AsyncSession = Depends(get_db),
     principal = Depends(get_admin_or_crew_admin),
@@ -1615,8 +1625,8 @@ async def add_crew_member(
 
 @router.patch("/{provider_id}/crew/{crew_id}")
 async def update_crew_member(
-    provider_id: str,
-    crew_id: str,
+    provider_id: UUIDPath,
+    crew_id: UUIDPath,
     body: CrewMemberUpdate,
     db: AsyncSession = Depends(get_db),
     principal = Depends(get_admin_or_crew_admin),
@@ -1667,8 +1677,8 @@ async def update_crew_member(
 
 @router.post("/{provider_id}/crew/{crew_id}/photo")
 async def upload_crew_photo(
-    provider_id: str,
-    crew_id: str,
+    provider_id: UUIDPath,
+    crew_id: UUIDPath,
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
     principal = Depends(get_admin_or_crew_admin),
@@ -1716,8 +1726,8 @@ async def upload_crew_photo(
 
 @router.post("/{provider_id}/crew/{crew_id}/reset-password")
 async def reset_crew_password(
-    provider_id: str,
-    crew_id: str,
+    provider_id: UUIDPath,
+    crew_id: UUIDPath,
     db: AsyncSession = Depends(get_db),
     principal = Depends(get_admin_or_crew_admin),
 ):
@@ -1741,8 +1751,8 @@ async def reset_crew_password(
 
 @router.delete("/{provider_id}/crew/{crew_id}")
 async def delete_crew_member(
-    provider_id: str,
-    crew_id: str,
+    provider_id: UUIDPath,
+    crew_id: UUIDPath,
     db: AsyncSession = Depends(get_db),
     principal = Depends(get_admin_or_crew_admin),
 ):
@@ -1813,7 +1823,7 @@ async def delete_crew_member(
 
 @router.get("/{provider_id}/vehicles")
 async def list_vehicles(
-    provider_id: str,
+    provider_id: UUIDPath,
     db: AsyncSession = Depends(get_db),
     principal = Depends(get_admin_or_crew_admin),
 ):
@@ -1861,7 +1871,7 @@ async def list_vehicles(
 
 @router.post("/{provider_id}/vehicles", status_code=201)
 async def add_vehicle(
-    provider_id: str,
+    provider_id: UUIDPath,
     body: VehicleCreate,
     db: AsyncSession = Depends(get_db),
     principal = Depends(get_admin_or_crew_admin),
@@ -1883,8 +1893,8 @@ async def add_vehicle(
 
 @router.patch("/{provider_id}/vehicles/{vehicle_id}")
 async def update_vehicle(
-    provider_id: str,
-    vehicle_id: str,
+    provider_id: UUIDPath,
+    vehicle_id: UUIDPath,
     body: VehicleUpdate,
     db: AsyncSession = Depends(get_db),
     principal = Depends(get_admin_or_crew_admin),
@@ -1908,8 +1918,8 @@ async def update_vehicle(
 
 @router.post("/{provider_id}/vehicles/{vehicle_id}/photo")
 async def upload_vehicle_photo(
-    provider_id: str,
-    vehicle_id: str,
+    provider_id: UUIDPath,
+    vehicle_id: UUIDPath,
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
     principal = Depends(get_admin_or_crew_admin),
@@ -1956,8 +1966,8 @@ async def upload_vehicle_photo(
 
 @router.delete("/{provider_id}/vehicles/{vehicle_id}")
 async def delete_vehicle(
-    provider_id: str,
-    vehicle_id: str,
+    provider_id: UUIDPath,
+    vehicle_id: UUIDPath,
     db: AsyncSession = Depends(get_db),
     principal = Depends(get_admin_or_crew_admin),
 ):
@@ -1995,7 +2005,7 @@ async def delete_vehicle(
 
 @router.get("/{provider_id}/prfs")
 async def list_provider_prfs(
-    provider_id: str,
+    provider_id: UUIDPath,
     response: Response,
     search: Optional[str] = None,
     skip: int = 0,
