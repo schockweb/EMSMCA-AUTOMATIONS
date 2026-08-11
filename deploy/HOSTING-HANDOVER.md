@@ -1,7 +1,26 @@
 # Infrastructure handover — EMSMCA claims portal
 
-**Prepared 2026-08-07.** For the hosting provider taking on infrastructure,
-security and backup responsibility for `portal.emsmca.co.za`.
+**Prepared 2026-08-07. Re-verified against the live VM 2026-08-11.** For the
+hosting provider taking on infrastructure, security and backup responsibility
+for `portal.emsmca.co.za`.
+
+> ### Verified state, 2026-08-11 (read-only inspection of `vm-ems-prod`)
+>
+> **Confirmed in place and working** — SSH is key-only (`passwordauthentication
+> no`, root login off, `MaxAuthTries 3`, X11 off); `fail2ban` active; unattended
+> security upgrades active (no reboot pending, 0 security updates outstanding);
+> Docker log rotation bounded (50 MB × 5) on all 7 containers; **the nightly
+> backup cron is installed and actually running** — dated dumps exist for each of
+> the last several days (`/opt/backups/db/…_20260811_020001.sql.gz`), plus daily
+> uploads tarballs and a monthly archive. Disk 5 % used (117 GB free). TLS valid
+> **60 days** (expires 2026-10-11).
+>
+> **Gaps confirmed still open** (these are the handover asks below) — off-site
+> backup **dormant** (`AZURE_SAS_URL` unset); VM-level **Azure Backup not
+> configured**; **no alerting** (`HEALTHCHECK_URL` unset); certbot renewal not
+> yet observed to succeed on this VM. Two smaller notes: **host `ufw` is
+> inactive** (network filtering is done entirely by the Azure NSG — only
+> 22/80/443 answer, verified externally), and **there is no swap** configured.
 
 ## What this system is
 
@@ -188,7 +207,18 @@ At handover, SSH is restricted to one administrator IP and one key. Please take
 ownership of who holds access, and rotate the key if staff change. We would ask
 that SSH access is never widened to the internet, even temporarily.
 
-### 7. Worth considering
+### 7. Host firewall (`ufw`) and swap — small, do at your discretion
+
+- **`ufw` is inactive.** All network filtering is currently done by the Azure
+  NSG (verified: only 22/80/443 answer from outside). That is a legitimate
+  single-layer design, but a host firewall is cheap defence-in-depth. If you
+  enable `ufw`, allow 22/80/443 and — importantly — add a `DOCKER-USER` iptables
+  rule, because Docker inserts its own ACCEPT rules ahead of `ufw` and a naive
+  `ufw deny` does not cover published container ports.
+- **No swap is configured.** 16 GB RAM with ~11 GB free today, so not urgent,
+  but a small swap file avoids the OOM killer taking a container under a spike.
+
+### 8. Worth considering
 
 - **Azure DDoS protection / WAF** in front of the site
 - **Log retention** off the VM for incident investigation
