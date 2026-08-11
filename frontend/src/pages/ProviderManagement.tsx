@@ -177,6 +177,26 @@ export default function ProviderManagement() {
 
   // Modal states
   const [showAddProvider, setShowAddProvider] = useState(false);
+  const [addingProvider, setAddingProvider] = useState(false);
+
+  // Onboarding is a repetitive job — an admin worker enters ~100 clients in one
+  // sitting — so the modal MUST start empty every time. The reset used to live
+  // only at the end of a fully successful create, which meant Cancel, the ×, or
+  // any failure left the previous client's logo file, portal password, admin
+  // password and Gmail app password sitting in state. The next client created
+  // then silently inherited another company's credentials and logo. Opening and
+  // closing both clear it, so there is no path that carries data across.
+  const blankProvider = () => ({ name: '', phone: '', email: '', prNumber: '', ptyRegNumber: '', prfName: '', address: '', prfNumber: '', clientEmail: '', clientPassword: '', adminEmail: '', adminPassword: '', smtpService: 'gmail', smtpEmail: '', smtpPassword: '' });
+  const openAddProvider = () => {
+    setNewProvider(blankProvider());
+    setLogoFile(null);
+    setShowAddProvider(true);
+  };
+  const closeAddProvider = () => {
+    setShowAddProvider(false);
+    setNewProvider(blankProvider());
+    setLogoFile(null);
+  };
   const [selectedProvider, setSelectedProvider] = useState<Provider | null>(null);
   const [activeTab, setActiveTab] = useState<'crew' | 'vehicles'>('crew');
 
@@ -445,10 +465,16 @@ export default function ProviderManagement() {
   };
 
   const handleAddProvider = async () => {
+    if (addingProvider) return;          // double-click / slow network
+    // Every early return must happen BEFORE the in-flight flag is set. The
+    // flag is only cleared in the finally of the try below, so a validation
+    // return after setting it left the button disabled until a page reload —
+    // which, on a blank Company Name, is a certainty rather than an edge case.
     if (!newProvider.name.trim()) {
       alert('Company Name is required');
       return;
     }
+    setAddingProvider(true);
     try {
       const payload = {
         name: newProvider.name,
@@ -472,12 +498,27 @@ export default function ProviderManagement() {
       const res = await api.post('/api/providers', payload);
       const providerId = res.data.id;
 
+      // The logo is a SECOND request, and the client is already committed by
+      // now. A failure here must not be reported as "Failed to create client":
+      // that sent workers back to re-enter a client that already existed, and
+      // the second attempt then failed on the duplicate slug. Report what
+      // actually happened and let them add the logo from Edit Client Settings.
       if (logoFile && providerId) {
-        const formData = new FormData();
-        formData.append('file', logoFile);
-        await api.post(`/api/providers/${providerId}/logo`, formData, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-        });
+        try {
+          const formData = new FormData();
+          formData.append('file', logoFile);
+          await api.post(`/api/providers/${providerId}/logo`, formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+          });
+        } catch (logoErr: any) {
+          alert(
+            `${newProvider.name} was created successfully, but its logo was not uploaded: ` +
+            `${logoErr.response?.data?.detail || 'upload failed'}
+
+` +
+            `Add the logo later from the client's Edit Client Settings — do not create the client again.`
+          );
+        }
       }
 
       setShowAddProvider(false);
@@ -486,6 +527,8 @@ export default function ProviderManagement() {
       fetchProviders();
     } catch (e: any) {
       alert(e.response?.data?.detail || 'Failed to create client');
+    } finally {
+      setAddingProvider(false);
     }
   };
 
@@ -666,14 +709,14 @@ export default function ProviderManagement() {
               Manage EMS companies, crew members, and vehicles
             </p>
           </div>
-          <button style={btnPrimary} onClick={() => setShowAddProvider(true)}>+ Add Provider</button>
+          <button style={btnPrimary} onClick={openAddProvider}>+ Add Provider</button>
         </div>
 
         {/* Add Provider Modal */}
         {showAddProvider && (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
             <div style={{ ...cardStyle, maxWidth: 600, width: isMobile ? '94%' : '90%', padding: isMobile ? 18 : 32, maxHeight: isMobile ? '92vh' : '85vh', overflowY: 'auto', position: 'relative' }}>
-              <button onClick={() => setShowAddProvider(false)} style={{ position: 'absolute', top: 12, right: 16, background: 'none', border: 'none', fontSize: '1.3rem', cursor: 'pointer', color: 'var(--text-muted)' }}>&times;</button>
+              <button onClick={closeAddProvider} style={{ position: 'absolute', top: 12, right: 16, background: 'none', border: 'none', fontSize: '1.3rem', cursor: 'pointer', color: 'var(--text-muted)' }}>&times;</button>
               <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 16, color: teal }}>Add New Client</h3>
               
               <div style={{ display: 'grid', gap: 16 }}>
@@ -686,7 +729,7 @@ export default function ProviderManagement() {
                 <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12 }}>
                   <div>
                     <label style={labelStyle}>Phone Number</label>
-                    <input style={inputStyle} value={newProvider.phone} onChange={e => setNewProvider({ ...newProvider, phone: e.target.value })} />
+                    <input style={inputStyle} maxLength={20} value={newProvider.phone} onChange={e => setNewProvider({ ...newProvider, phone: e.target.value })} />
                   </div>
                   <div>
                     <label style={labelStyle}>Email Address</label>
@@ -697,11 +740,11 @@ export default function ProviderManagement() {
                 <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12 }}>
                   <div>
                     <label style={labelStyle}>PR Number</label>
-                    <input style={inputStyle} value={newProvider.prNumber} onChange={e => setNewProvider({ ...newProvider, prNumber: e.target.value })} />
+                    <input style={inputStyle} maxLength={50} value={newProvider.prNumber} onChange={e => setNewProvider({ ...newProvider, prNumber: e.target.value })} />
                   </div>
                   <div>
                     <label style={labelStyle}>PTY Reg Number</label>
-                    <input style={inputStyle} value={newProvider.ptyRegNumber} onChange={e => setNewProvider({ ...newProvider, ptyRegNumber: e.target.value })} />
+                    <input style={inputStyle} maxLength={50} value={newProvider.ptyRegNumber} onChange={e => setNewProvider({ ...newProvider, ptyRegNumber: e.target.value })} />
                   </div>
                 </div>
 
@@ -720,6 +763,7 @@ export default function ProviderManagement() {
                   <label style={labelStyle}>PRF Name</label>
                   <input
                     style={inputStyle}
+                    maxLength={100}
                     value={newProvider.prfName}
                     onChange={e => setNewProvider({ ...newProvider, prfName: e.target.value })}
                   />
@@ -732,7 +776,7 @@ export default function ProviderManagement() {
 
                 <div>
                   <label style={labelStyle}>Company Logo</label>
-                  <input type="file" style={{ ...inputStyle, padding: '8px' }} accept="image/*" onChange={e => setLogoFile(e.target.files?.[0] || null)} />
+                  <input type="file" style={{ ...inputStyle, padding: '8px' }} accept="image/png,image/jpeg,image/svg+xml,image/webp" onChange={e => setLogoFile(e.target.files?.[0] || null)} />
                 </div>
 
                 <div style={{ background: 'var(--surface-50)', padding: 16, borderRadius: 8, border: '1px solid var(--surface-100)' }}>
@@ -801,8 +845,12 @@ export default function ProviderManagement() {
               </div>
 
               <div style={{ display: 'flex', gap: 8, marginTop: 24, justifyContent: 'flex-end' }}>
-                <button style={{ ...btnPrimary, background: 'var(--surface-200)', color: 'var(--text)' }} onClick={() => setShowAddProvider(false)}>Cancel</button>
-                <button style={btnPrimary} onClick={handleAddProvider}>Create Client</button>
+                <button style={{ ...btnPrimary, background: 'var(--surface-200)', color: 'var(--text)' }} onClick={closeAddProvider}>Cancel</button>
+                <button
+                  style={{ ...btnPrimary, opacity: addingProvider ? 0.6 : 1, cursor: addingProvider ? 'wait' : 'pointer' }}
+                  disabled={addingProvider}
+                  onClick={handleAddProvider}
+                >{addingProvider ? 'Creating…' : 'Create Client'}</button>
               </div>
             </div>
           </div>

@@ -14,7 +14,7 @@ import io
 import shutil
 from PIL import Image
 from fastapi import APIRouter, Depends, HTTPException, Request, status, UploadFile, File, Response
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select, func, or_, cast, Text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -183,15 +183,19 @@ async def get_admin_or_crew_admin(
 # ── Schemas ──────────────────────────────────────────────────
 
 class ProviderCreate(BaseModel):
-    name: str
-    slug: str | None = None
-    pr_number: str | None = None
-    pty_reg_number: str | None = None
+    # Lengths mirror the columns in models/service_provider.py. Without them an
+    # ordinary control-room contact like "011 123 4567 / 082 555 1234" (27
+    # chars) overflows phone's VARCHAR(20) and the worker gets a bare 500 that
+    # names no field; a 422 at the boundary says which one is too long.
+    name: str = Field(min_length=1, max_length=255)
+    slug: str | None = Field(None, max_length=100)
+    pr_number: str | None = Field(None, max_length=50)
+    pty_reg_number: str | None = Field(None, max_length=50)
     # PRF file/display naming prefix — replaces the automatic provider-name
     # prefix in exported-PDF filenames when set; blank keeps automatic naming.
-    prf_name: str | None = None
-    phone: str | None = None
-    email: str | None = None
+    prf_name: str | None = Field(None, max_length=100)
+    phone: str | None = Field(None, max_length=20)
+    email: str | None = Field(None, max_length=255)
     address: str | None = None
     # PRF numbering baseline — the last PRF number already used; new PRFs for this
     # provider start after it. Same semantics as `current_prf_number` in settings.
@@ -210,14 +214,16 @@ class ProviderCreate(BaseModel):
     smtp_password: str | None = None
 
 class ProviderUpdate(BaseModel):
-    name: str | None = None
-    pr_number: str | None = None
-    pty_reg_number: str | None = None
+    # Same lengths as ProviderCreate — the edit dialog can overflow a column
+    # just as easily as the onboarding form.
+    name: str | None = Field(None, min_length=1, max_length=255)
+    pr_number: str | None = Field(None, max_length=50)
+    pty_reg_number: str | None = Field(None, max_length=50)
     # PRF naming prefix. Sent as an explicit null to clear back to automatic
     # provider-name naming (unlike credentials, which are omit-to-keep).
-    prf_name: str | None = None
-    phone: str | None = None
-    email: str | None = None
+    prf_name: str | None = Field(None, max_length=100)
+    phone: str | None = Field(None, max_length=20)
+    email: str | None = Field(None, max_length=255)
     address: str | None = None
     logo_url: str | None = None
     is_active: bool | None = None
@@ -331,7 +337,19 @@ def _coerce_prf_baseline(value: int | str | None) -> int | None:
         runs = re.findall(r"\d+", value)
         if not runs:
             raise HTTPException(400, "Latest PRF Number must contain a number, e.g. 690 or JEM0690.")
-        value = int(runs[-1])
+        # More than one run of digits is genuinely ambiguous and was resolved
+        # silently: "0690/26" seeded 26, "EL30/2026" seeded 2026, "2026-08-11"
+        # seeded 11. The wrong baseline is never echoed back anywhere, so the
+        # first the client would know of it is their PRF numbering restarting
+        # or jumping. Ask rather than guess.
+        if len(runs) > 1:
+            raise HTTPException(
+                400,
+                f"'{value}' has more than one number in it, so the starting point is "
+                f"unclear. Enter just the last PRF number used — for example "
+                f"{runs[0]} or {runs[-1]}.",
+            )
+        value = int(runs[0])
     if value < 0:
         raise HTTPException(400, "Current PRF number cannot be negative.")
     return value
@@ -905,7 +923,26 @@ async def update_provider(
 
     # EMSMCA Client Login (portal_login_email / portal_login_password_hash on ServiceProvider)
     if body.portal_login_username is not None:
-        provider.portal_login_email = body.portal_login_username.strip().lower() or None
+        new_portal_email = body.portal_login_username.strip().lower() or None
+        # create_provider pre-checks this; the edit path did not, so pasting one
+        # client's portal username onto another — an ordinary slip when working
+        # down a spreadsheet of 100 — hit the DB unique constraint and surfaced
+        # as a bare 500 "An internal error occurred", with no indication of which
+        # field was wrong or which client already owned it.
+        if new_portal_email and new_portal_email != (provider.portal_login_email or ""):
+            clash = (await db.execute(
+                select(ServiceProvider).where(
+                    ServiceProvider.portal_login_email == new_portal_email,
+                    ServiceProvider.id != uuid.UUID(provider_id),
+                )
+            )).scalar_one_or_none()
+            if clash:
+                raise HTTPException(
+                    400,
+                    f"The client login '{new_portal_email}' already belongs to {clash.name}. "
+                    f"Each client needs its own login.",
+                )
+        provider.portal_login_email = new_portal_email
     if body.portal_login_password is not None and body.portal_login_password.strip():
         _validate_portal_password(body.portal_login_password)
         provider.portal_login_password_hash = hash_password(body.portal_login_password)
@@ -925,6 +962,27 @@ async def update_provider(
             ).limit(1)
         )
         admin = admin_result.scalar_one_or_none()
+
+        # crew_members.email is DB-unique. create_provider pre-checks it; this
+        # path did not, so reusing an admin email across two clients — the same
+        # spreadsheet slip as the portal login above — raised an IntegrityError
+        # the admin saw as a bare 500.
+        if body.admin_email and body.admin_email.strip():
+            wanted = body.admin_email.strip().lower()
+            if not admin or wanted != (admin.email or "").lower():
+                taken = (await db.execute(
+                    select(CrewMember).where(CrewMember.email == wanted)
+                )).scalar_one_or_none()
+                if taken:
+                    owner = (await db.execute(
+                        select(ServiceProvider).where(ServiceProvider.id == taken.provider_id)
+                    )).scalar_one_or_none()
+                    raise HTTPException(
+                        400,
+                        f"The admin email '{wanted}' is already used by "
+                        f"{owner.name if owner else 'another client'}. "
+                        f"Each admin needs their own email address.",
+                    )
 
         if admin:
             # Update existing admin
