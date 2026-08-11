@@ -162,13 +162,38 @@ async def _next_prf_number(db: AsyncSession, provider: ServiceProvider) -> int:
     return max(provider_max, baseline) + 1
 
 
-def _generate_case_number(provider_slug: str, prf_number: int) -> str:
-    """Generate a case number like JEMS-2026-04-000001 (max 50 chars)."""
+def _generate_case_number(provider_slug: str, prf_number: int, provider_id=None) -> str:
+    """Generate a case number like JEMS-2026-04-000001 (max 50 chars).
+
+    `case_number` is GLOBALLY unique, but the readable part of it comes from the
+    provider slug — and the slug had to be truncated to fit. Two providers whose
+    slugs agree in the first 35 characters therefore generated the SAME case
+    number for the same PRF number in the same month. Regional branches of one
+    client are the ordinary way to get there:
+
+        gauteng-emergency-medical-services-north
+        gauteng-emergency-medical-services-south
+
+    Both onboard fine (their slugs differ), then the second client's crew hits
+    the unique constraint on their first PRF. The recovery path below only
+    handles a raced client_id, so it re-raises — and because _next_prf_number is
+    deterministic, every retry produces the same collision. The crew cannot
+    open a PRF at all, which means they cannot record a patient call.
+
+    A slug of 35 characters or fewer is not truncated, and slugs are unique, so
+    those case numbers were always unambiguous — they keep their existing shape.
+    Only a slug long enough to LOSE information gains a short discriminator
+    taken from the provider's id, which is stable for the life of the provider.
+    """
     now = datetime.now(timezone.utc)
-    # Suffix '-YYYY-MM-00000X' is exactly 15 chars. Max total is 50.
-    # Truncate slug to max 35 chars.
-    safe_slug = provider_slug[:35].upper().rstrip('-')
-    return f"{safe_slug}-{now.year}-{now.month:02d}-{prf_number:06d}"
+    # Suffix '-YYYY-MM-00000X' is exactly 15 chars, so the readable head has 35.
+    if len(provider_slug) <= 35 or provider_id is None:
+        head = provider_slug[:35].upper().rstrip('-')
+    else:
+        # 28 + '-' + 6 = 35, so the total is still exactly 50 at most.
+        disc = uuid.UUID(str(provider_id)).hex[:6].upper()
+        head = f"{provider_slug[:28].upper().rstrip('-')}-{disc}"
+    return f"{head}-{now.year}-{now.month:02d}-{prf_number:06d}"
 
 
 # ═══════════════════════════════════════════════════════════
@@ -294,7 +319,7 @@ async def create_prf(
     provider = provider.scalar_one()
 
     prf_number = await _next_prf_number(db, provider)
-    case_number = _generate_case_number(provider.slug, prf_number)
+    case_number = _generate_case_number(provider.slug, prf_number, provider.id)
 
     # Seed form_data with the supervising practitioner if the frontend sent
     # one — this is what the rules engine reads. Stored as plain keys (not

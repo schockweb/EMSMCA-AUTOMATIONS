@@ -206,3 +206,41 @@ async def test_a_client_can_still_edit_its_own_login(client, auth_headers, clean
         headers=auth_headers,
     )
     assert same.status_code == 200, f"a client could not re-save its own login: {same.text[:200]}"
+
+
+def test_branch_names_do_not_collide_on_case_number():
+    """Two regional branches of one client must not generate the same case number.
+
+    case_number is GLOBALLY unique but its readable part came from a 35-char
+    truncation of the slug, so these two — which onboard perfectly happily,
+    because their slugs differ — produced identical case numbers for the same
+    PRF number in the same month. The second client's crew then could not open
+    a PRF at all: _next_prf_number is deterministic, so every retry collided
+    again.
+    """
+    import uuid as _uuid
+    from app.api.digital_prf import _generate_case_number
+
+    north = "gauteng-emergency-medical-services-north"
+    south = "gauteng-emergency-medical-services-south"
+    assert north[:35] == south[:35], "fixture no longer exercises the truncation"
+
+    id_n, id_s = _uuid.uuid4(), _uuid.uuid4()
+    cn = _generate_case_number(north, 1, id_n)
+    cs = _generate_case_number(south, 1, id_s)
+
+    assert cn != cs, f"both branches generated {cn}"
+    assert len(cn) <= 50 and len(cs) <= 50, "case_number is a VARCHAR(50)"
+
+
+def test_short_slugs_keep_their_existing_case_number_shape():
+    """A slug of 35 chars or fewer cannot lose information to truncation, and
+    slugs are unique — so those case numbers were never ambiguous and must not
+    change appearance. JEMS-2026-08-000001 is what a scheme already sees."""
+    import uuid as _uuid
+    from datetime import datetime, timezone
+    from app.api.digital_prf import _generate_case_number
+
+    now = datetime.now(timezone.utc)
+    cn = _generate_case_number("jems", 1730, _uuid.uuid4())
+    assert cn == f"JEMS-{now.year}-{now.month:02d}-001730", cn

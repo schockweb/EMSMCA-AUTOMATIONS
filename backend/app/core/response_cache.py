@@ -36,7 +36,18 @@ logger = logging.getLogger(__name__)
 # Do not add them back without moving the audit into the middleware itself.
 CACHE_RULES: dict[str, int] = {
     "/api/claims":          30,
-    "/api/providers":       60,
+    # "/api/providers" is deliberately ABSENT. The store is per-process, and a
+    # write only invalidates the worker that handled it — so with N gunicorn
+    # workers a GET landing on any other worker served the pre-write list for
+    # up to the TTL. On the admin client screens that reads as "the save did
+    # not work": a client just created is missing from the refreshed list, a
+    # crew member just added does not appear. During onboarding — where staff
+    # enter ~100 clients and their crews by hand — the natural response is to
+    # enter it a second time, which is how duplicates get made.
+    #
+    # These are small, indexed, admin-scale queries (a list of ~100 clients and
+    # their crew/vehicles). Correctness is worth more here than the round trip.
+    # Do not re-add without a SHARED invalidation story across workers.
     "/api/rate-schemas":   300,
     "/api/users":           60,
     "/api/analytics":       60,
