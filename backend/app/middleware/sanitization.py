@@ -122,11 +122,17 @@ class XSSProtectionMiddleware(BaseHTTPMiddleware):
 
         response = await call_next(request)
 
-        # Security response headers
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
-        response.headers["X-XSS-Protection"] = "1; mode=block"
-        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        # Security response headers are set at the ONE ingress that fronts every
+        # deployment — nginx (nginx/security-headers.conf in prod, frontend/nginx.conf
+        # in dev). Setting them here as well put TWO copies on every /api/ response,
+        # and two of them CONFLICTED with the edge:
+        #   X-Frame-Options: DENY        here  vs  SAMEORIGIN   at nginx
+        #   Permissions-Policy: camera=() here  vs  camera=(self) at nginx
+        # The nginx values are the intended ones — SAMEORIGIN matches the CSP
+        # frame-ancestors 'self', and camera=(self) is what keeps crew dictation,
+        # card-photo capture and scene GPS working (an empty allowlist disables
+        # them). So nginx owns these headers; do not re-add them here. Uploaded
+        # files keep their own stricter policy from the StaticFiles subclass in
+        # app/main.py (default-src 'none'; sandbox + nosniff), which is unaffected.
 
         return response
