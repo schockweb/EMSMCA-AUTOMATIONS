@@ -168,6 +168,41 @@ interface LockedAccount {
   locked_until: string | null;
 }
 
+/**
+ * Exact port of _slugify in backend/app/api/providers.py.
+ *
+ * The slug is derived from the company name, is globally unique, routes a crew
+ * to their tenant AND names the logo file on disk — so a second client whose
+ * name reduces to the same slug is refused outright. That refusal is correct,
+ * but it used to arrive only after the worker had filled in the whole form and
+ * pressed Create. Predicting it as they type turns a lost entry into a rename.
+ *
+ * If this drifts from the backend the warning is simply wrong, so it is a
+ * character-for-character port, pinned in providerOnboardingModal.test.tsx.
+ */
+export function slugifyProviderName(name: string): string {
+  return name.toLowerCase().trim()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/[\s-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 100);
+}
+
+/** Inline warning shown under a field whose value would be refused on save. */
+function FieldWarning({ children }: { children: React.ReactNode }) {
+  return (
+    <div role="alert" style={{
+      display: 'flex', alignItems: 'flex-start', gap: 7,
+      margin: '6px 0 2px', padding: '8px 10px', borderRadius: 8,
+      background: '#fffbeb', border: '1px solid #f59e0b',
+      fontSize: '0.76rem', lineHeight: 1.45, color: '#78350f',
+    }}>
+      <span style={{ flexShrink: 0, marginTop: 1 }}><WarnIcon size={14} /></span>
+      <span>{children}</span>
+    </div>
+  );
+}
+
 export default function ProviderManagement() {
   const isMobile = useIsMobile();
   const [providers, setProviders] = useState<Provider[]>([]);
@@ -227,6 +262,23 @@ export default function ProviderManagement() {
 
   // Add forms
   const [newProvider, setNewProvider] = useState({ name: '', phone: '', email: '', prNumber: '', ptyRegNumber: '', prfName: '', address: '', prfNumber: '', clientEmail: '', clientPassword: '', adminEmail: '', adminPassword: '', smtpService: 'gmail', smtpEmail: '', smtpPassword: '' });
+
+  // Live clashes against the clients already loaded on this page. The server
+  // still enforces all three — this only moves the discovery earlier.
+  const typedSlug = slugifyProviderName(newProvider.name);
+  const slugClash = newProvider.name.trim() && typedSlug
+    ? providers.find(p => p.slug === typedSlug)
+    : undefined;
+  // A name of only punctuation reduces to nothing, and the server rejects an
+  // empty slug — with a message about slugs, which means nothing to a worker.
+  const nameHasNoUsableCharacters = !!newProvider.name.trim() && !typedSlug;
+  const norm = (v?: string | null) => (v || '').trim().toLowerCase();
+  const portalClash = norm(newProvider.clientEmail)
+    ? providers.find(p => norm(p.portal_login_username) === norm(newProvider.clientEmail))
+    : undefined;
+  const adminClash = norm(newProvider.adminEmail)
+    ? providers.find(p => norm(p.admin_email) === norm(newProvider.adminEmail))
+    : undefined;
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [newCrew, setNewCrew] = useState({ full_name: '', email: '', initials: '', hpcsa_number: '', qualification: 'AEA', phone: '' });
   const [newVehicle, setNewVehicle] = useState({ callsign: '', registration: '', vehicle_type: 'Ambulance' });
@@ -722,7 +774,21 @@ export default function ProviderManagement() {
               <div style={{ display: 'grid', gap: 16 }}>
                 <div>
                   <label style={labelStyle}>Company Name *</label>
-                  <input style={inputStyle} value={newProvider.name} onChange={e => setNewProvider({ ...newProvider, name: e.target.value })} />
+                  <input style={{ ...inputStyle, borderColor: (slugClash || nameHasNoUsableCharacters) ? '#f59e0b' : (inputStyle.borderColor as string) }} maxLength={255} value={newProvider.name} onChange={e => setNewProvider({ ...newProvider, name: e.target.value })} />
+                  {slugClash && (
+                    <FieldWarning>
+                      This name produces the web address <strong>/{typedSlug}</strong>, which
+                      <strong> {slugClash.name}</strong> already uses. Each company needs its own —
+                      it is how their crews reach the right PRFs. Change the name (add the branch or
+                      town, e.g. “{newProvider.name.trim()} Durban”) before creating this client.
+                    </FieldWarning>
+                  )}
+                  {nameHasNoUsableCharacters && (
+                    <FieldWarning>
+                      This name has no letters or numbers in it, so no web address can be made from
+                      it. Add at least one letter or number.
+                    </FieldWarning>
+                  )}
                 </div>
 
                 {/* Company details — auto-filled into the top-left corner of every PDF PRF (mirrors Company Settings). */}
@@ -787,6 +853,13 @@ export default function ProviderManagement() {
                       <input style={inputStyle} value={newProvider.clientEmail}
                         onChange={e => setNewProvider({ ...newProvider, clientEmail: e.target.value })}
                         autoComplete="off" data-lpignore="true" data-form-type="other" />
+                      {portalClash && (
+                        <FieldWarning>
+                          <strong>{portalClash.name}</strong> already signs in with this username.
+                          Give this client their own, or their staff would be sent to the wrong
+                          company's portal.
+                        </FieldWarning>
+                      )}
                     </div>
                     <div>
                       <label style={labelStyle}>Password *</label>
@@ -805,6 +878,12 @@ export default function ProviderManagement() {
                       <input style={inputStyle} type="email" value={newProvider.adminEmail}
                         onChange={e => setNewProvider({ ...newProvider, adminEmail: e.target.value })}
                         autoComplete="off" data-lpignore="true" data-form-type="other" />
+                      {adminClash && (
+                        <FieldWarning>
+                          This admin email already belongs to <strong>{adminClash.name}</strong>.
+                          One email can only administer one client.
+                        </FieldWarning>
+                      )}
                     </div>
                     <div>
                       <label style={labelStyle}>Admin Password</label>
