@@ -229,3 +229,49 @@ describe('Submit completeness gate', () => {
     expect(container.textContent).not.toMatch(/not filled in/i);
   });
 });
+
+describe('The final save must land before the PRF is locked', () => {
+  const completeDraft = () => seedDraft(
+    { ...COMPLETE_HANDOVER, handover_doctor_email: 'ops@hospital.co.za' },
+    COMPLETE_TIMES, COMPLETE_SIGS,
+  );
+
+  it('does not submit when the final save gets no response at all (timeout / offline)', async () => {
+    // The likeliest shape of the reported loss. The final save is the biggest
+    // request of the call — sticker photo plus every signature — so it is the
+    // one that times out on a phone, while the POST /submit that used to
+    // follow is tiny and goes through instantly, locking the row at whatever
+    // the last autosave left there.
+    completeDraft();
+    const netErr: any = new Error('timeout of 20000ms exceeded');
+    netErr.code = 'ECONNABORTED';
+    instance.patch.mockRejectedValue(netErr);
+
+    const { container } = mountForm();
+    await tapSubmit(container);
+    await new Promise(r => setTimeout(r, 600));
+
+    expect(
+      submitCalls(),
+      'the PRF was locked even though its final save never reached the server',
+    ).toHaveLength(0);
+  });
+
+  it('does not submit when the server answers and refuses the final save', async () => {
+    completeDraft();
+    const err: any = new Error('Request failed with status code 500');
+    err.response = { status: 500, data: {} };
+    instance.patch.mockRejectedValue(err);
+
+    const { container } = mountForm();
+    await tapSubmit(container);
+    await new Promise(r => setTimeout(r, 600));
+
+    expect(
+      submitCalls(),
+      'a 500 on the final save still locked the PRF at the last good autosave',
+    ).toHaveLength(0);
+    expect((window.alert as any).mock.calls.flat().join(' '))
+      .toMatch(/has NOT been submitted|too large/i);
+  });
+});

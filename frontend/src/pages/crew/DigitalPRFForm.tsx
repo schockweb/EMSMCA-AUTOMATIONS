@@ -6040,6 +6040,78 @@ export default function DigitalPRFForm() {
     return null;
   };
 
+  // Park the whole submission in the offline outbox and send the crew home.
+  //
+  // Extracted so BOTH callers use it: the submit's own network failure, and a
+  // final save that never landed. The queued entry carries the complete
+  // payload — every signature and every field captured on the last screen —
+  // and the sync engine saves it before it submits, so the record the server
+  // eventually locks is the one the crew actually finished.
+  const queueSubmitToOutbox = async () => {
+    try {
+      // ── Confirm the facility address BEFORE leaving the handover ──
+      //
+      // Online, a PRF carrying a handover email routes the crew to the
+      // viewer with ?send=1 where they confirm the address and it goes.
+      // Offline that step was skipped entirely: the submit was queued, the
+      // crew returned to the dashboard, and the receiving hospital never
+      // got the handover document — with nothing recording that it was
+      // supposed to.
+      //
+      // Asking HERE is deliberate. The crew is standing at the receiving
+      // facility and can actually check the address; an hour later on the
+      // way back to base they cannot. Confirming is one tap, and the send
+      // itself happens by itself once there is signal.
+      const rawEmail = (fd.handover_doctor_email || '').trim();
+      let confirmedEmail: string | null = null;
+
+      if (FACILITY_EMAIL_RE.test(rawEmail)) {
+        const ok = window.confirm(
+          'Send this PRF to the receiving facility as soon as you have signal?\n\n' +
+          `    ${rawEmail}\n\n` +
+          'OK = address is correct\n' +
+          'Cancel = let me change it',
+        );
+        if (ok) {
+          confirmedEmail = rawEmail;
+        } else {
+          const corrected = window.prompt('Facility email address:', rawEmail);
+          const trimmed = (corrected || '').trim();
+          if (FACILITY_EMAIL_RE.test(trimmed)) confirmedEmail = trimmed;
+        }
+      }
+
+      // A corrected address must ride along on the queued payload too, so
+      // the record the server eventually stores agrees with what was sent.
+      const payload = buildSavePayload();
+      if (confirmedEmail && confirmedEmail !== rawEmail) {
+        payload.form_data = { ...(payload.form_data || {}), handover_doctor_email: confirmedEmail };
+      }
+
+      const { queueSubmit } = await import('../../services/offlineDb');
+      await queueSubmit(prfId!, payload);
+
+      if (confirmedEmail) {
+        const { rememberPendingEmail } = await import('../../services/pendingFacilityEmail');
+        let providerId: string | undefined;
+        try { providerId = JSON.parse(localStorage.getItem('crew_profile') || '{}')?.provider_id; }
+        catch { /* profile unreadable — the entry still queues, just unstamped */ }
+        rememberPendingEmail(prfId!, confirmedEmail, providerId);
+      }
+
+      window.dispatchEvent(new CustomEvent('outbox-change'));
+      alert(
+        confirmedEmail
+          ? 'No connection right now.\n\nThe PRF is saved on this device and will submit automatically when connectivity returns, then be emailed to ' +
+            confirmedEmail + '.'
+          : 'No connection right now. The PRF has been saved on this device and will submit automatically when connectivity returns.',
+      );
+      navigate(`/${providerSlug}/crew/dashboard`);
+    } catch {
+      alert('Submission failed and offline save is unavailable. Please try again.');
+    }
+  };
+
   const handleSubmit = async () => {
     // Vitals-shortfall motivation gate. Three sets of vitals is the norm; in
     // rare cases (e.g. very short transport) the crew can record fewer — that's
@@ -6169,7 +6241,7 @@ export default function DigitalPRFForm() {
         }
       }
 
-      // THE SERVER ANSWERED AND REFUSED (413 / 422 / 429 / 5xx) — do not submit.
+      // THE FINAL SAVE DID NOT LAND — do not submit.
       //
       // The `break` above was documented as "falls through to the submit, which
       // routes to the offline outbox ... so nothing is lost". That is only true
@@ -6184,9 +6256,22 @@ export default function DigitalPRFForm() {
       //
       // A 413 is the concrete case: form_data carries every base64 attachment,
       // and the hospital sticker is captured on this same last screen.
-      if (!saved && lastCode !== undefined && lastCode !== 409) {
+      if (!saved && lastCode !== 409) {
         setSubmit(false);
         submitInFlightRef.current = false;
+        if (lastCode === undefined) {
+          // NO RESPONSE AT ALL — offline, or a PATCH that timed out.
+          //
+          // This is the likeliest shape of the reported loss: the final save
+          // is the biggest request of the call (it carries the sticker photo
+          // and every signature) and is the one most likely to time out on a
+          // phone, while the POST /submit that follows is tiny and goes
+          // through instantly — locking the row at the last good autosave.
+          // Route the whole submission through the outbox instead; the sync
+          // engine saves the full payload before it submits.
+          await queueSubmitToOutbox();
+          return;
+        }
         if (lastCode === 413) {
           // Terminal and not retryable — the request will be exactly this big
           // next time, so queueing it only parks a dead entry in the outbox.
@@ -6362,69 +6447,7 @@ export default function DigitalPRFForm() {
       }
       // Offline fallback: queue submission to outbox
       if (!navigator.onLine || e?.code === 'ECONNABORTED' || e?.code === 'ERR_NETWORK') {
-        try {
-          // ── Confirm the facility address BEFORE leaving the handover ──
-          //
-          // Online, a PRF carrying a handover email routes the crew to the
-          // viewer with ?send=1 where they confirm the address and it goes.
-          // Offline that step was skipped entirely: the submit was queued, the
-          // crew returned to the dashboard, and the receiving hospital never
-          // got the handover document — with nothing recording that it was
-          // supposed to.
-          //
-          // Asking HERE is deliberate. The crew is standing at the receiving
-          // facility and can actually check the address; an hour later on the
-          // way back to base they cannot. Confirming is one tap, and the send
-          // itself happens by itself once there is signal.
-          const rawEmail = (fd.handover_doctor_email || '').trim();
-          const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-          let confirmedEmail: string | null = null;
-
-          if (EMAIL_RE.test(rawEmail)) {
-            const ok = window.confirm(
-              'Send this PRF to the receiving facility as soon as you have signal?\n\n' +
-              `    ${rawEmail}\n\n` +
-              'OK = address is correct\n' +
-              'Cancel = let me change it',
-            );
-            if (ok) {
-              confirmedEmail = rawEmail;
-            } else {
-              const corrected = window.prompt('Facility email address:', rawEmail);
-              const trimmed = (corrected || '').trim();
-              if (EMAIL_RE.test(trimmed)) confirmedEmail = trimmed;
-            }
-          }
-
-          // A corrected address must ride along on the queued payload too, so
-          // the record the server eventually stores agrees with what was sent.
-          const payload = buildSavePayload();
-          if (confirmedEmail && confirmedEmail !== rawEmail) {
-            payload.form_data = { ...(payload.form_data || {}), handover_doctor_email: confirmedEmail };
-          }
-
-          const { queueSubmit } = await import('../../services/offlineDb');
-          await queueSubmit(prfId!, payload);
-
-          if (confirmedEmail) {
-            const { rememberPendingEmail } = await import('../../services/pendingFacilityEmail');
-            let providerId: string | undefined;
-            try { providerId = JSON.parse(localStorage.getItem('crew_profile') || '{}')?.provider_id; }
-            catch { /* profile unreadable — the entry still queues, just unstamped */ }
-            rememberPendingEmail(prfId!, confirmedEmail, providerId);
-          }
-
-          window.dispatchEvent(new CustomEvent('outbox-change'));
-          alert(
-            confirmedEmail
-              ? 'You are offline.\n\nThe PRF is saved on this device and will submit automatically when connectivity returns, then be emailed to ' +
-                confirmedEmail + '.'
-              : 'You are offline. PRF has been saved locally and will submit automatically when connectivity returns.',
-          );
-          navigate(`/${providerSlug}/crew/dashboard`);
-        } catch {
-          alert('Submission failed and offline save is unavailable. Please try again.');
-        }
+        await queueSubmitToOutbox();
       } else {
         // Surface server-side validation errors (422) clearly to the crew.
         const detail = e?.response?.data?.detail;
