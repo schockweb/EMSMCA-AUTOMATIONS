@@ -1782,7 +1782,7 @@ const HospitalPicker = ({ wardKey }: { wardKey?: string }) => {
   );
 };
 
-const AddrInp = ({ fk, suburbKey, codeKey, ph, containerStyle, inputStyle, label, manualOnly, upper }: { fk: string; ph?: string; req?: boolean; suburbKey?: string; codeKey?: string; containerStyle?: React.CSSProperties; inputStyle?: React.CSSProperties; label?: string; manualOnly?: boolean; upper?: boolean }) => {
+const AddrInp = ({ fk, suburbKey, codeKey, ph, containerStyle, inputStyle, label, manualOnly }: { fk: string; ph?: string; req?: boolean; suburbKey?: string; codeKey?: string; containerStyle?: React.CSSProperties; inputStyle?: React.CSSProperties; label?: string; manualOnly?: boolean }) => {
   const { fd, sf } = useContext(FormContext);
   const val: string = fd[fk] ?? '';
   const [modalOpen, setModalOpen] = useState(false);
@@ -1825,14 +1825,7 @@ const AddrInp = ({ fk, suburbKey, codeKey, ph, containerStyle, inputStyle, label
       });
   };
 
-  const upperStyle = upper ? { textTransform: 'uppercase' as const } : {};
-
-  const onTextChange = (raw: string) => {
-    // Both this field's inputs (inline and the modal's) route through here, so
-    // uppercasing once covers both. See the note on Inp's `upper`: the stored
-    // value is capitalised too, not just the display, or the PDF would not
-    // match what the crew typed.
-    const next = upper ? raw.toUpperCase() : raw;
+  const onTextChange = (next: string) => {
     sf(fk, next);
     if (debounceRef.current) window.clearTimeout(debounceRef.current);
     if (skipNextRef.current) { skipNextRef.current = false; return; }
@@ -1952,7 +1945,7 @@ const AddrInp = ({ fk, suburbKey, codeKey, ph, containerStyle, inputStyle, label
           onKeyDown={(e) => { if (e.key === 'Escape') { setOpen(false); (e.currentTarget as HTMLInputElement).blur(); } }}
           autoComplete="off"
           placeholder={ph || 'Type street address…'}
-          style={{ ...base, marginBottom: 0, borderColor: '#e2e8f0', ...containerStyle, ...inputStyle , ...upperStyle }}
+          style={{ ...base, marginBottom: 0, borderColor: '#e2e8f0', ...containerStyle, ...inputStyle }}
         />
         {suggestionDropdown}
       </div>
@@ -2004,7 +1997,7 @@ const AddrInp = ({ fk, suburbKey, codeKey, ph, containerStyle, inputStyle, label
                   onKeyDown={(e) => { if (e.key === 'Escape') { setOpen(false); (e.currentTarget as HTMLInputElement).blur(); } }}
                   autoComplete="off"
                   placeholder={ph || "Type street address manually..."}
-                  style={{ ...base, width: '100%', background: W, borderColor: '#cbd5e1', ...inputStyle , ...upperStyle }}
+                  style={{ ...base, width: '100%', background: W, borderColor: '#cbd5e1', ...inputStyle }}
                 />
                 {suggestionDropdown}
               </div>
@@ -7232,12 +7225,14 @@ export default function DigitalPRFForm() {
       {fd.call_type !== 'DOD' && (
       <>
       <SHdr t="Patient Information" />
-      {/* Block capitals throughout — handwritten PRFs are filled in caps for
-          legibility and this section is what gets read back off the printed
-          record. `upper` capitalises the stored value, not just the display,
-          so the PDF matches what the crew sees. Numeric fields (age, the
-          phones, the date) are left alone: digits have no case, and forcing a
-          transform on them would only risk the cursor behaviour. */}
+      {/* Block capitals on the name fields — handwritten PRFs are filled in
+          caps for legibility and this section is what gets read back off the
+          printed record. `upper` capitalises the stored value, not just the
+          display, so the PDF matches what the crew sees.
+          Deliberately NOT applied to:
+            - Residential Address — kept as typed, by request.
+            - Numeric fields (age, the phones, the date) — digits have no case,
+              and forcing a transform would only risk cursor behaviour. */}
       <Card>
         <Lbl t="Gender" />
         <Toggle fk="gender" opts={['Male', 'Female', 'Other']} />
@@ -7252,7 +7247,7 @@ export default function DigitalPRFForm() {
           <div><Lbl t="Tel (H)" /><Inp fk="patient_phone_home" ph="Home" type="tel" /></div>
         </G2>
         <Lbl t="Tel (W)" /><Inp fk="patient_phone_work" ph="Work number" type="tel" />
-        <Lbl t="Residential Address" /><AddrInp fk="patient_address" ph="Street address" suburbKey="patient_suburb" codeKey="patient_postal_code" manualOnly upper />
+        <Lbl t="Residential Address" /><AddrInp fk="patient_address" ph="Street address" suburbKey="patient_suburb" codeKey="patient_postal_code" manualOnly />
         <G2>
           <div><Lbl t="Suburb" /><Inp fk="patient_suburb" ph="Suburb" upper /></div>
           <div><Lbl t="Code" /><Inp fk="patient_postal_code" ph="Code" upper /></div>

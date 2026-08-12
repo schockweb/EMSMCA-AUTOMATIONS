@@ -189,6 +189,35 @@ describe('Patient Information is captured in block capitals', () => {
     ).toBe('MOKOENA'), { timeout: 4000 });
   });
 
+  it('leaves the residential address as typed', async () => {
+    // Deliberate: addresses are entered as written, not shouted. This sits
+    // INSIDE Patient Information, so it is the one field that must not follow
+    // the section's rule — easy to "fix" by mistake later.
+    seedDraft(2);
+    mountForm();
+
+    // AddrInp carries no prf-field-* id, and three address fields share this
+    // placeholder. Asserting across all of them is both simpler than picking one
+    // positionally and a stronger claim: NO address field shouts.
+    const addrs = await waitFor(
+      () => {
+        const found = screen.getAllByPlaceholderText('Street address') as HTMLInputElement[];
+        if (!found.length) throw new Error('no address field rendered');
+        return found;
+      },
+      { timeout: 4000 },
+    );
+
+    const typed = '12 Marine Drive, Umhlanga';
+    for (const el of addrs) {
+      fireEvent.change(el, { target: { value: typed } });
+      await waitFor(() => expect(
+        el.value,
+        'an address field is being uppercased — addresses stay as typed',
+      ).toBe(typed), { timeout: 4000 });
+    }
+  });
+
   it('leaves fields outside Patient Information alone', async () => {
     // `upper` is opt-in per field. If it ever became the default on Inp, every
     // free-text clinical note in the form would start shouting.
