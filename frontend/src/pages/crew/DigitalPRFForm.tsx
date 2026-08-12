@@ -9702,13 +9702,16 @@ export default function DigitalPRFForm() {
           // must go back and complete them instead of skipping to submission.
           // Skipped entirely when the patient refused treatment/transport or
           // for a Declaration of Death — those calls legitimately leave these
-          // sections empty, so they are never gated.
+          // sections empty, so they are never gated. med_aid_dec_death catches
+          // the Resus declared dead mid-call: the Undertaker handover replaces
+          // the normal one, so the practitioner-number / condition / sticker /
+          // signature fields below no longer exist on the form.
           // Each warning carries the field key it flags, so tapping the item
           // closes the popup and jumps the crew straight to that field
           // (scroll + amber flash via jumpToField, incl. cross-phase).
           const reviewWarnings: { text: string; field: string }[] = (() => {
             const warn: { text: string; field: string }[] = [];
-            if (fd.call_type === 'DOD' || fd.call_type === 'RHT' || fd.patient_refused_treatment) return warn;
+            if (fd.call_type === 'DOD' || fd.call_type === 'RHT' || fd.patient_refused_treatment || fd.med_aid_dec_death) return warn;
             const missing = (v: any) => v === undefined || v === null || String(v).trim() === '';
             const push = (text: string, field: string) => warn.push({ text, field });
 
@@ -9741,8 +9744,11 @@ export default function DigitalPRFForm() {
             const pvtCash = fd.billing_type === 'PVT' && fd.pvt_payment_method === 'Cash';
             if (!pvtCash && missing(fd.hospital_sticker)) push('Hospital sticker', 'hospital_sticker');
 
-            // Patient / representative signature.
-            if (missing(sigs.patient_signature) && missing(fd.tc_patient_signature)) {
+            // Patient / representative signature — never flagged for Resus:
+            // the T&C block holding the pad is skipped there (the Resus
+            // Handover page is the final screen), so no Resus PRF could
+            // ever satisfy this check.
+            if (fd.call_type !== 'RESUS' && missing(sigs.patient_signature) && missing(fd.tc_patient_signature)) {
               push('Patient / representative signature', 'tc_patient_signature');
             }
 
