@@ -3,7 +3,7 @@
  * Renders the submitted Digital PRF in a clean, print-ready paper-form layout
  * with the provider's branding (logo, PR number, address, phone) prominent.
  */
-import { useEffect, useRef, useState, useCallback, Fragment } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useCallback, Fragment } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router';
 import axios from '../api/client';
 import { getCrewToken, ensureProviderSession } from '../utils/crewSession';
@@ -667,11 +667,30 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
     const z = userZoomRef.current ?? applied;
     el.style.zoom = z < 1 ? String(z) : '';
   }, []);
-  useEffect(() => {
+  // useLayoutEffect, NOT useEffect — and this is the whole fix for the "the
+  // right border jumps out of place and then back" report.
+  //
+  // The sheet is a fixed 1220px design and the fit is a measured CSS `zoom`, so
+  // it cannot be known during render. With useEffect the browser PAINTS before
+  // the effect runs, so frame 1 always showed the sheet unfitted: measured in
+  // Chrome at a 1024px viewport, the page's right edge painted at 1220px —
+  // 211px outside its 1009px container, right border clipped — and then snapped
+  // to 997px on the next frame once zoom 0.807 landed. A 223px jump, every
+  // single time a PRF was opened.
+  //
+  // useLayoutEffect runs after the DOM is committed but BEFORE paint, so the
+  // zoom is part of the first frame and there is no unfitted frame to see.
+  //
+  // Do not "simplify" this back to useEffect. Nothing in the jsdom suite can
+  // catch it — jsdom has no layout and no paint, so both spellings pass every
+  // test identically. The only evidence is a real browser.
+  useLayoutEffect(() => {
     userZoomRef.current = userZoom;
     applyScreenFit();
     window.addEventListener('resize', applyScreenFit);
-    // Re-fit once fonts / logo settle and whenever the PRF data changes.
+    // Re-fit once fonts / logo settle and whenever the PRF data changes. This
+    // recomputes from the container width alone, so when nothing has moved it
+    // writes back the same value and is visually inert.
     const t = setTimeout(applyScreenFit, 150);
     return () => { window.removeEventListener('resize', applyScreenFit); clearTimeout(t); };
   }, [applyScreenFit, prf, userZoom]);
