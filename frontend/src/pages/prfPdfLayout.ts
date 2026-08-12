@@ -63,6 +63,40 @@ export const MIN_LEGIBLE_SCALE = 0.9;
 export const MAX_FIT_W = Math.floor(DESIGN_W_PX / MIN_LEGIBLE_SCALE);   // 1355
 
 /**
+ * The legibility target the floor above is a proxy for: the smallest LABEL must
+ * print at ~5.2pt. MIN_LEGIBLE_SCALE = 0.9 was chosen to achieve exactly that
+ * ("0.9 holds the smallest label at ~5.2pt"), so 5.2pt is the real constraint
+ * and 0.9 is one way of expressing it.
+ */
+export const LEGIBILITY_LABEL_REM = 0.56;
+export const LEGIBILITY_MIN_PT = 5.2;
+
+/**
+ * Escape hatch for a page that is only MARGINALLY too tall.
+ *
+ * "Overflow costs an extra SHEET instead of costing legibility" is the right
+ * policy when the overflow is large. It is the wrong one when the page is 2%
+ * over, because the slicer emits EVEN bands: a page a few percent too tall does
+ * not produce one full sheet plus a sliver, it produces TWO SHEETS EACH ABOUT
+ * 40% FULL, with the form cut mid-row and a hand-sized white gap on both. That
+ * is what a real IFT PRF (long residential address, both passports, work
+ * number) actually did — measured at 976px design height, 1355px at the cap,
+ * ratio 0.706 against a sheet ratio of 0.697.
+ *
+ * So the reflow may widen PAST MAX_FIT_W, but only far enough to avoid the
+ * slice and never past the point where the label drops below LEGIBILITY_MIN_PT.
+ * At this cap the label prints at 5.20pt — the very number MIN_LEGIBLE_SCALE
+ * was picked to hold. The escape therefore preserves the legibility GOAL while
+ * dropping the proxy that was costing a whole extra sheet.
+ *
+ * Pages that already fit are untouched: the reflow stops as soon as the aspect
+ * ratio is satisfied, which for them happens at or below MAX_FIT_W.
+ */
+export const SLICE_ESCAPE_W = Math.floor(
+  DESIGN_W_PX / (LEGIBILITY_MIN_PT / printedPt(LEGIBILITY_LABEL_REM, 1)),
+);   // 1401 — scale 0.871, label 5.20pt
+
+/**
  * Beyond this height we slice rather than shrink. NOTE: on its own this was
  * never a legibility guarantee — it is measured on a canvas the reflow has
  * already widened, so the two compounded silently. `planPlacement` applies the

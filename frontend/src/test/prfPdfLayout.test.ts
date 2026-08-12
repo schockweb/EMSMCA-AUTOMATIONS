@@ -23,6 +23,7 @@ import { describe, it, expect } from 'vitest';
 import {
   planPlacement, printedPt,
   MAX_W_MM, MAX_H_MM, DESIGN_W_PX, MAX_FIT_W, MIN_LEGIBLE_SCALE, SHEET_RATIO,
+  SLICE_ESCAPE_W, LEGIBILITY_MIN_PT,
   screenZoomFor, MIN_SCREEN_ZOOM,
   printScaleFor, PRINT_TEXT_SCALE_PER_S,
 } from '../pages/prfPdfLayout';
@@ -53,6 +54,50 @@ describe('geometry constants', () => {
 
   it('prints the smallest label around 5.8pt at the design width', () => {
     expect(ptFor(1)).toBeCloseTo(5.97, 1);
+  });
+
+  it('lets the reflow escape past the cap without dropping below 5.2pt', () => {
+    // SLICE_ESCAPE_W exists because the slicer emits EVEN bands: a page a few
+    // percent too tall becomes TWO sheets each ~40% full, cut mid-row — far
+    // worse than the same page rendered whole at slightly smaller text.
+    //
+    // Assert the INVARIANT the escape is defined by, not its numeric value:
+    // widening all the way to the escape must still hold the smallest label at
+    // the 5.2pt that MIN_LEGIBLE_SCALE was itself chosen to achieve.
+    expect(ptFor(DESIGN_W_PX / SLICE_ESCAPE_W)).toBeGreaterThanOrEqual(LEGIBILITY_MIN_PT);
+    // It is an ESCAPE, not a replacement — it must be wider than the preferred
+    // cap, or it buys nothing, and bounded, or it is the old 2400px bug again.
+    expect(SLICE_ESCAPE_W).toBeGreaterThan(MAX_FIT_W);
+    expect(SLICE_ESCAPE_W).toBeLessThan(1500);
+  });
+});
+
+describe('placement — the marginally-oversized page that used to slice', () => {
+  // Measured in Chrome from the reported PRF (IHT, long residential address,
+  // both passports, work number): 976px tall at the 1220px design width, which
+  // reflows to 957px at 1355 and 938px at 1401.
+  const REPORTED_H_AT_CAP = 957;
+  const REPORTED_H_AT_ESCAPE = 938;
+
+  it('slices at the preferred cap — this is the defect', () => {
+    const { cw, ch } = canvasFor(MAX_FIT_W, REPORTED_H_AT_CAP);
+    expect(planPlacement(cw, ch, MAX_FIT_W).kind).toBe('slice');
+  });
+
+  it('fits on one sheet at the escape width — this is the fix', () => {
+    const { cw, ch } = canvasFor(SLICE_ESCAPE_W, REPORTED_H_AT_ESCAPE);
+    const plan = planPlacement(cw, ch, SLICE_ESCAPE_W);
+    expect(plan.kind).toBe('fit');
+    expect(printedPt(SMALLEST_LABEL_REM, plan.textScale))
+      .toBeGreaterThanOrEqual(LEGIBILITY_MIN_PT);
+  });
+
+  it('still slices a page that is genuinely too long, so the escape is not a bypass', () => {
+    // The clinical sheet. It slices at either width, so production claws the
+    // width back to MAX_FIT_W and keeps the larger text — without that, every
+    // clinical page in every PRF would have been rasterised smaller for nothing.
+    const { cw, ch } = canvasFor(SLICE_ESCAPE_W, 1664);
+    expect(planPlacement(cw, ch, SLICE_ESCAPE_W).kind).toBe('slice');
   });
 });
 

@@ -29,7 +29,8 @@ import axios from 'axios';
 // height was taken from a box model the real app never uses.
 import './index.css';
 import {
-  DESIGN_W_PX, MAX_FIT_W as SHIPPED_MAX_FIT_W, MIN_LEGIBLE_SCALE,
+  DESIGN_W_PX, SLICE_ESCAPE_W as SHIPPED_MAX_FIT_W,
+  MAX_FIT_W as SHIPPED_PREFERRED_W, MIN_LEGIBLE_SCALE,
   SHRINK_LIMIT_MM, planPlacement, printedPt,
 } from './pages/prfPdfLayout';
 
@@ -72,6 +73,14 @@ const vitalsSets = Array.from({ length: VITALS }, (_, i) => ({
 // page 1 past one A4 sheet and made the export slice mid-signature-box; the
 // harness could never reproduce it while the fixture was hard-coded to Primary.
 const CALL_TYPE = qs.get('call') || 'Primary';
+// ?long=1 seeds the long wrapped addresses / notes a real crew types;
+// ?sig=N (1-3) captures that many Terms & Conditions signatures.
+const LONG = qs.get('long') === '1';
+const SIGS = Number(qs.get('sig') ?? 0);
+// A visible stand-in for captured ink — a short scribble path.
+const INK = 'data:image/svg+xml;base64,' + btoa(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="70">' +
+  '<path d="M8 52 C40 8, 70 62, 100 30 S160 8, 200 46" fill="none" stroke="#111" stroke-width="3"/></svg>');
 const IS_IFT = CALL_TYPE === 'IHT' || CALL_TYPE === 'IFT';
 
 // ?sticker=1 attaches a hospital sticker. A CAPTURED sticker is what changes
@@ -129,6 +138,39 @@ const FD: Record<string, any> = {
   pvt_cash_amount_paid: '1500',
   pvt_cash_payer_name: 'Nomsa Harness-Payer',
   pvt_cash_crew_received: '1500',
+
+  // ?long=1 — the realistic worst case for page 1, and the one that was
+  // missing here. Page 1's height is driven by its TALLEST BAND-B COLUMN, and
+  // the fixture above has short one-line addresses, so it could not reproduce a
+  // real PRF where the crew types a rambling residential address, a debtor
+  // address and a full page of motivation notes. Those wrap to many lines and
+  // are what actually pushes page 1 past the one-sheet ceiling into a slice.
+  ...(LONG ? {
+    patient_address: 'Sjakjsks on the side of some road to springbok and they’d wan aisndo sonwisne. Dis e mix me Kane widow s Kane die. Eid e eidoi i jekkwkdnd e enekieje eksoosnejd d jdjeneodjendnen d make s. E',
+    // Both passports and the work number are OPTIONAL rows — they only render
+    // when captured. They are in the long fixture because they are exactly what
+    // tips a marginal page over: each adds ~22px to the tallest Band B column,
+    // and the reported slice came from a PRF that had all three.
+    patient_passport_number: '123344556678990',
+    debtor_passport_number: '1234',
+    patient_suburb: 'pe', patient_postal_code: '1839',
+    patient_phone_home: '46618161918', patient_phone_work: '454546914',
+    patient_phone_cell: '80373438', accompanying_persons_count: '4',
+    debtor_name: 'Michael', debtor_surname: 'Sxhuttler', debtor_gender: 'Male',
+    debtor_id_number: '1234', debtor_age: '26',
+    debtor_address: '28 lemon woood is this was a good idea and a good one to start off the week off right',
+    debtor_suburb: 'centurion', debtor_postal_code: '0193',
+    debtor_phone_home: '848484', debtor_phone_cell: '2848454',
+    mechanism: ['MVA (MOTOR VEHICLE ACCIDENT)'],
+    mechanism_other: 'A car hit a motor vehicle',
+    motivation_notes: 'And and other notes Motivation and other notes motivation and other notes motivation and other notes motivation and other notes motivation and other notes motivation and other',
+  } : {}),
+
+  // ?sig=3 — all three Terms & Conditions marks captured. The default fixture
+  // has none, so it could not reproduce the fully-signed page either.
+  ...(SIGS >= 1 ? { tc_patient_signature: INK } : {}),
+  ...(SIGS >= 2 ? { tc_witness_signature: INK } : {}),
+  ...(SIGS >= 3 ? { next_of_kin_signature: INK } : {}),
 };
 
 const PRF_FIXTURE = {
@@ -218,6 +260,14 @@ function measure() {
       h = el.offsetHeight; w = el.offsetWidth || w;
       passes++;
       if (w >= MAX_FIT_W) break;
+    }
+    // Same claw-back as production: the wider reflow is kept only when it
+    // actually avoided a slice, so a page that slices either way keeps the
+    // larger text it had before.
+    if (w > SHIPPED_PREFERRED_W && h / w > SHEET_RATIO + 0.002) {
+      w = SHIPPED_PREFERRED_W;
+      el.style.width = `${w}px`; el.style.minWidth = `${w}px`;
+      h = el.offsetHeight; w = el.offsetWidth || w;
     }
     el.style.width = prevW; el.style.minWidth = prevMinW;
 

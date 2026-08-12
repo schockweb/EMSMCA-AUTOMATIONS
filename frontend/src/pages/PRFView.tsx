@@ -23,7 +23,7 @@ import { PrintableInjuryDiagram } from '../components/BodyDiagram';
 import PrfRecordView from './PrfRecordView';
 import {
   INSET_MM, MAX_W_MM, MAX_H_MM, SHEET_RATIO,
-  DESIGN_W_PX, MAX_FIT_W, planPlacement, screenZoomFor,
+  DESIGN_W_PX, MAX_FIT_W, SLICE_ESCAPE_W, planPlacement, screenZoomFor,
   PX_PER_MM, printScaleFor,
 } from './prfPdfLayout';
 const INK      = '#0b1020';      // body text
@@ -828,12 +828,31 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
             // and vitals stacks, whose height comes from ROW COUNT. Those never
             // shorten, so the loop used to run to the cap and simply shrink the
             // whole sheet. Overflow is now the slicer's job, not the reflow's.
-            w = Math.min(Math.ceil(h / SHEET_RATIO), MAX_FIT_W);
+            //
+            // The cap is SLICE_ESCAPE_W, not MAX_FIT_W. A page that already
+            // fits reaches its target at or below MAX_FIT_W and stops there, so
+            // this changes nothing for it. A page a FEW PERCENT over would
+            // otherwise be sliced into two ~40%-full sheets with the form cut
+            // mid-row; the extra ~46px of width avoids that and still holds the
+            // label at 5.20pt. See SLICE_ESCAPE_W.
+            w = Math.min(Math.ceil(h / SHEET_RATIO), SLICE_ESCAPE_W);
             el.style.width = `${w}px`;
             el.style.minWidth = `${w}px`;
             h = el.offsetHeight;                  // reflowed height
             w = el.offsetWidth || w;
-            if (w >= MAX_FIT_W) break;            // no further widening is allowed
+            if (w >= SLICE_ESCAPE_W) break;       // genuinely too much content: slice
+          }
+          // The escape width is only worth paying for if it actually BOUGHT a
+          // single sheet. A page that still slices at SLICE_ESCAPE_W would
+          // otherwise be rasterised smaller than before for no benefit at all —
+          // every clinical page in every PRF slices, so that would have been a
+          // silent across-the-board legibility regression. Give the width back.
+          if (w > MAX_FIT_W && h / w > SHEET_RATIO + 0.002) {
+            w = MAX_FIT_W;
+            el.style.width = `${w}px`;
+            el.style.minWidth = `${w}px`;
+            h = el.offsetHeight;
+            w = el.offsetWidth || w;
           }
           reflowW = w;
           canvas = await html2canvas(el, {
@@ -1010,12 +1029,23 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
           // vitals stacks are row-count-driven and never shorten, so an
           // uncapped reflow just made this path width-bound and shrank the
           // whole sheet at `s` below.
-          w = Math.min(Math.ceil(h / SHEET_RATIO), MAX_FIT_W);
+          // Same SLICE_ESCAPE_W cap as buildPrfPdf — the two paths must agree
+          // or a printed copy and an exported one paginate differently.
+          w = Math.min(Math.ceil(h / SHEET_RATIO), SLICE_ESCAPE_W);
           p.style.width = `${w}px`;
           p.style.minWidth = `${w}px`;
           h = p.offsetHeight;                 // reflowed height
           w = p.offsetWidth || w;
-          if (w >= MAX_FIT_W) break;
+          if (w >= SLICE_ESCAPE_W) break;
+        }
+        // Same claw-back as buildPrfPdf: keep the wider reflow only when it
+        // actually avoided a slice.
+        if (w > MAX_FIT_W && h / w > SHEET_RATIO + 0.002) {
+          w = MAX_FIT_W;
+          p.style.width = `${w}px`;
+          p.style.minWidth = `${w}px`;
+          h = p.offsetHeight;
+          w = p.offsetWidth || w;
         }
         // Scale with a legibility floor. A page too tall to fit one sheet at a
         // readable size is NOT shrunk into illegibility — it holds the floor
