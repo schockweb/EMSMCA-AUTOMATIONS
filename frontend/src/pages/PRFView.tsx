@@ -372,7 +372,16 @@ const CashVerification = ({ fd, wide = false }: { fd: any; wide?: boolean }) => 
 // receiving facility's own patient label in small print; scaling it down to fit
 // trades one legibility problem for a worse one on the part of the page that is
 // evidence rather than layout.
-const HospitalSticker = ({ fd, wide = false }: { fd: any; wide?: boolean }) => (
+// `capped` — drawn INSIDE a page-1 column, where the block must cost no more
+// height than the empty "affix here" slot it replaces (110px). Without it a
+// captured image is allowed 200px, and those extra ~90px are enough to make the
+// Billing column the TALLEST in Band B and push page 1 over the one-sheet
+// ceiling — which is exactly what happened when the sticker was first moved
+// onto page 1. It measured as free against a fixture whose Patient column was
+// taller and had slack to spare; on a PRF with short addresses it is not free
+// at all. The cap makes the block cost the same whether a sticker was captured
+// or not, so page 1's height no longer depends on it.
+const HospitalSticker = ({ fd, wide = false, capped = false }: { fd: any; wide?: boolean; capped?: boolean }) => (
   <>
     <SectionHead label="Hospital Sticker" />
     <div style={{
@@ -381,6 +390,7 @@ const HospitalSticker = ({ fd, wide = false }: { fd: any; wide?: boolean }) => (
     }}>
       <div style={{
         width: '96%', minHeight: wide ? 150 : 110,
+        ...(capped ? { maxHeight: 110 } : {}),
         border: `1.6px dashed ${MUT}`, borderRadius: 4,
         background: SOFT_BG,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -388,7 +398,7 @@ const HospitalSticker = ({ fd, wide = false }: { fd: any; wide?: boolean }) => (
       }}>
         {fd.hospital_sticker ? (
           <img src={fd.hospital_sticker} alt="hospital sticker"
-               style={{ maxWidth: '100%', maxHeight: wide ? 260 : 200, objectFit: 'contain' }} />
+               style={{ maxWidth: '100%', maxHeight: capped ? 96 : (wide ? 260 : 200), objectFit: 'contain' }} />
         ) : (
           <div style={{
             fontSize: '0.62rem', fontWeight: 700, color: DIM,
@@ -892,7 +902,10 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
         // The placement decision (fit / shrink / slice, and the legibility
         // floor that governs it) is pure arithmetic and lives in prfPdfLayout
         // so it can be unit-tested without a layout engine.
-        const plan = planPlacement(cw, ch, reflowW);
+        // Page 1 only: prefer a uniform shrink over a slice. Every other
+        // sheet is a list that continues cleanly; page 1 is one grid, and
+        // cutting it produces two ~40%-full sheets with a row severed.
+        const plan = planPlacement(cw, ch, reflowW, { neverSlice: i === 0 });
 
         if (plan.kind === 'fit') {
           newSheet();
@@ -2690,7 +2703,7 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
                 sticker captured the empty slot still prints, so it can be
                 affixed to the paper form by hand. Hidden entirely for RHT (no
                 hospital transport, so no sticker). */}
-            {stickerVisible && !stickerOnDocumentSheet && <HospitalSticker fd={fd} />}
+            {stickerVisible && !stickerOnDocumentSheet && <HospitalSticker fd={fd} capped />}
             {stickerOnDocumentSheet && (
               <div style={{ padding: '3px 6px', borderTop: `1px solid ${LN}`, fontSize: '0.5rem', color: MUT, fontStyle: 'italic' }}>
                 Hospital sticker — see the patient documents sheet.

@@ -90,11 +90,16 @@ const IS_IFT = CALL_TYPE === 'IHT' || CALL_TYPE === 'IFT';
 // Without a sticker in the fixture the harness cannot see either behaviour.
 const STICKER = qs.get('sticker') === '1'
   ? 'data:image/svg+xml;base64,' + btoa(
-      '<svg xmlns="http://www.w3.org/2000/svg" width="420" height="200">' +
-      '<rect width="420" height="200" fill="#e5e7eb"/>' +
-      '<text x="24" y="60" font-size="20" font-family="monospace">HOSPITAL LABEL</text>' +
-      '<text x="24" y="100" font-size="16" font-family="monospace">HARNESS PATIENT</text>' +
-      '<text x="24" y="140" font-size="16" font-family="monospace">MRN 0099887</text></svg>')
+      // SQUARE, not wide. A wide sticker is constrained by the column width and
+      // never reaches the height cap, so it cannot reproduce the case where the
+      // image drives the Billing column's height — which is the one that pushed
+      // page 1 past the sheet ceiling. Real hospital labels and logos are often
+      // roughly square.
+      '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300">' +
+      '<rect width="300" height="300" fill="#e5e7eb"/>' +
+      '<text x="20" y="60" font-size="20" font-family="monospace">HOSPITAL LABEL</text>' +
+      '<text x="20" y="140" font-size="16" font-family="monospace">HARNESS PATIENT</text>' +
+      '<text x="20" y="220" font-size="16" font-family="monospace">MRN 0099887</text></svg>')
   : '';
 
 const FD: Record<string, any> = {
@@ -273,7 +278,8 @@ function measure() {
 
     // Use the SHIPPED policy so the harness reports what production will do.
     const cw = w * 1.5, ch = h * 1.5;                    // html2canvas scale: 1.5
-    const plan = planPlacement(cw, ch, w);
+    // Page 1 never slices — mirror the production call exactly.
+    const plan = planPlacement(cw, ch, w, { neverSlice: i === 0 });
     const branch = plan.kind === 'slice' ? `slice x${plan.sheets}` : plan.kind;
     const labelPt = printedPt(LABEL_REM, plan.textScale, ROOT_PX);
     const smallestPt = printedPt(SMALLEST_REM, plan.textScale, ROOT_PX);

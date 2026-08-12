@@ -104,6 +104,25 @@ export const SLICE_ESCAPE_W = Math.floor(
  */
 export const SHRINK_LIMIT_MM = MAX_H_MM * 1.4;
 
+/**
+ * Page 1 must never be cut in half.
+ *
+ * Page 1 is a facsimile of the paper PRF: a single grid whose bands line up
+ * across the sheet. Slicing it does not produce "page 1 continued" — it
+ * produces two sheets each ~40% full with a row severed down the middle, which
+ * is what an adjudicator was sent and what nobody could read. Every other sheet
+ * is a LIST (vitals, drugs, attachments) that survives being continued, so this
+ * applies to page 1 alone.
+ *
+ * For page 1 the trade is therefore inverted: a whole page at slightly smaller
+ * text beats a bisected page at full size. `planPlacement` accepts
+ * `neverSlice` for it, which lowers the shrink floor from MIN_LEGIBLE_SCALE to
+ * this one. 4.75pt is below the 5pt guidance and deliberately so — it is the
+ * floor for the rare page that would otherwise be UNUSABLE, not a new default.
+ * Beyond it even page 1 slices, because at that point the text is the problem.
+ */
+export const PAGE1_MIN_PT = 4.75;
+
 export type Placement =
   | { kind: 'fit'; drawWmm: number; drawHmm: number; textScale: number }
   | { kind: 'shrink'; drawWmm: number; drawHmm: number; textScale: number }
@@ -119,7 +138,12 @@ export type Placement =
  * `textScale` is the printed size of text relative to its designed size — the
  * number the legibility floor governs. 1 means "as authored".
  */
-export function planPlacement(canvasW: number, canvasH: number, reflowW: number): Placement {
+export function planPlacement(
+  canvasW: number,
+  canvasH: number,
+  reflowW: number,
+  opts: { neverSlice?: boolean } = {},
+): Placement {
   const wScale = MAX_W_MM / canvasW;          // mm per source px at full width
   const fullH = canvasH * wScale;             // height in mm when drawn full-width
 
@@ -136,7 +160,11 @@ export function planPlacement(canvasW: number, canvasH: number, reflowW: number)
   const drawWmm = canvasW * scale;
   const shrinkTextScale = fullWidthTextScale * (drawWmm / MAX_W_MM);
 
-  if (fullH <= SHRINK_LIMIT_MM && shrinkTextScale >= MIN_LEGIBLE_SCALE) {
+  // Page 1 accepts a lower floor rather than be cut in half — see PAGE1_MIN_PT.
+  const shrinkFloor = opts.neverSlice
+    ? PAGE1_MIN_PT / printedPt(LEGIBILITY_LABEL_REM, 1)
+    : MIN_LEGIBLE_SCALE;
+  if (fullH <= SHRINK_LIMIT_MM && shrinkTextScale >= shrinkFloor) {
     return { kind: 'shrink', drawWmm, drawHmm: canvasH * scale, textScale: shrinkTextScale };
   }
 

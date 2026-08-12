@@ -23,7 +23,7 @@ import { describe, it, expect } from 'vitest';
 import {
   planPlacement, printedPt,
   MAX_W_MM, MAX_H_MM, DESIGN_W_PX, MAX_FIT_W, MIN_LEGIBLE_SCALE, SHEET_RATIO,
-  SLICE_ESCAPE_W, LEGIBILITY_MIN_PT,
+  SLICE_ESCAPE_W, LEGIBILITY_MIN_PT, PAGE1_MIN_PT,
   screenZoomFor, MIN_SCREEN_ZOOM,
   printScaleFor, PRINT_TEXT_SCALE_PER_S,
 } from '../pages/prfPdfLayout';
@@ -90,6 +90,29 @@ describe('placement — the marginally-oversized page that used to slice', () =>
     expect(plan.kind).toBe('fit');
     expect(printedPt(SMALLEST_LABEL_REM, plan.textScale))
       .toBeGreaterThanOrEqual(LEGIBILITY_MIN_PT);
+  });
+
+  it('shrinks page 1 rather than slicing it — a bisected page 1 is unusable', () => {
+    // The reported page, at the preferred cap, where it slices as an ordinary
+    // sheet. Page 1 is one grid whose bands line up across the sheet; cutting it
+    // emits two ~40%-full sheets with a row severed down the middle. Every other
+    // sheet is a list that continues cleanly, which is why this is page-1 only.
+    const { cw, ch } = canvasFor(MAX_FIT_W, REPORTED_H_AT_CAP);
+    expect(planPlacement(cw, ch, MAX_FIT_W).kind).toBe('slice');
+    const page1 = planPlacement(cw, ch, MAX_FIT_W, { neverSlice: true });
+    expect(page1.kind).toBe('shrink');
+    expect(printedPt(SMALLEST_LABEL_REM, page1.textScale))
+      .toBeGreaterThanOrEqual(PAGE1_MIN_PT);
+  });
+
+  it('still slices page 1 when shrinking it would make it unreadable', () => {
+    // The guarantee has a limit, and the limit is the point. Shrinking a page
+    // that is ~12% over drives the label under PAGE1_MIN_PT, and an unreadable
+    // whole page is not better than a split one — the text is the problem at
+    // that point, not the pagination. Without this the "never slice" rule would
+    // quietly reintroduce the ~3pt page the legibility floor exists to prevent.
+    const { cw, ch } = canvasFor(SLICE_ESCAPE_W, REPORTED_H_AT_CAP + 120);
+    expect(planPlacement(cw, ch, SLICE_ESCAPE_W, { neverSlice: true }).kind).toBe('slice');
   });
 
   it('still slices a page that is genuinely too long, so the escape is not a bypass', () => {
