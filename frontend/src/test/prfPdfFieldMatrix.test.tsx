@@ -601,18 +601,13 @@ describe('PRF PDF field coverage — every call-type × billing-type', () => {
       //   DOD       → the death-certificate layout replaces the T&C + handover
       //               stack with 2 crew sign-offs, the recipient signature and
       //               the 2 declaration signatures = 5
-      // RESUS is 3, not 6: the handover mark and the two crew sign-offs. The
-      // three Terms & Conditions marks (patient/rep, witness, next of kin) are
-      // gone because the T&C block no longer prints on a resuscitation — the
-      // crew form gates it behind `call_type !== 'RESUS'`
-      // (DigitalPRFForm.tsx:9089), so those three could never be genuinely
-      // captured on such a call. The fixture sets them synthetically, which is
-      // exactly how a PDF ended up showing a patient in cardiac arrest having
-      // "accepted full responsibility for all payments".
+      // RESUS carries the full six: a resuscitation the crew WINS is a live,
+      // conveyed, billable patient, so the terms and their signing lines belong
+      // on the record. They drop only once a Declaration of Death is made, which
+      // this fixture does not set — see the dedicated test below.
       const expectedSignatures =
         callType === 'RHT' ? 5 :
-        callType === 'DOD' ? 5 :
-        callType === 'RESUS' ? 3 : 6;
+        callType === 'DOD' ? 5 : 6;
 
       describe(label, () => {
         it('renders every captured field onto the PDF pages', async () => {
@@ -1085,6 +1080,53 @@ describe('RHT — the refusal reaches the printed record', () => {
     ).toBeGreaterThan(0);
   });
 
+  it('drops empty Patient / Debtor / Billing columns on a refusal, and keeps captured ones', async () => {
+    // The crew form no longer ASKS for these once the patient refuses, so a new
+    // refusal would print three columns of "—". Refusals captured BEFORE that
+    // change do carry the data and must keep printing it — so the test is
+    // CONTENT, not call type.
+    const PATIENT = ['gender', 'patient_name', 'patient_surname', 'patient_id_number',
+      'patient_passport_number', 'age', 'patient_dob', 'patient_address', 'patient_suburb',
+      'patient_postal_code', 'patient_postal_address', 'patient_phone_home',
+      'patient_phone_work', 'patient_phone_cell', 'accompanying_persons_count'];
+    const DEBTOR = ['debtor_gender', 'debtor_name', 'debtor_surname', 'debtor_id_number',
+      'debtor_passport_number', 'debtor_age', 'debtor_dob', 'debtor_address',
+      'debtor_suburb', 'debtor_postal_code', 'debtor_phone_home', 'debtor_phone_cell'];
+    const BILLING = ['billing_type', 'medical_scheme', 'medical_aid_number', 'main_member_id',
+      'scheme_option', 'dependent_number', 'preauth_number', 'raf_claim_number',
+      'wca_employer_name', 'pvt_payment_method'];
+
+    // A refusal captured under the NEW crew form: none of the three were asked.
+    const bare = buildPrf('RHT', 'MED AID');
+    for (const k of [...PATIENT, ...DEBTOR, ...BILLING]) delete bare.prf.form_data[k];
+    currentPrf = bare.prf;
+    renderPrfView();
+    await screen.findByText(/Refusal of Treatment \/ Transport/i);
+
+    for (const head of ['Patient Information', 'Debtor Information', 'Billing Information']) {
+      expect(
+        screen.queryAllByText(head, { exact: true }).length,
+        `an empty "${head}" column still prints on a refusal`,
+      ).toBe(0);
+    }
+    // The refusal itself must survive — otherwise this passes by rendering
+    // nothing at all.
+    expect(screen.queryAllByText(/Refusal of Treatment/i).length).toBeGreaterThan(0);
+
+    // A refusal captured BEFORE the change keeps every column it filled.
+    cleanup();
+    const legacy = buildPrf('RHT', 'MED AID');
+    currentPrf = legacy.prf;
+    renderPrfView();
+    await screen.findByText((c) => c.includes(legacy.anchor), { exact: false });
+    for (const head of ['Patient Information', 'Debtor Information', 'Billing Information']) {
+      expect(
+        screen.queryAllByText(head, { exact: true }).length,
+        `"${head}" was dropped from a refusal that DID capture it`,
+      ).toBeGreaterThan(0);
+    }
+  });
+
   it('drops the handover rows, duplicate signature and sticker once death is DECLARED', async () => {
     // A resuscitation releases the deceased to an UNDERTAKER. There is no
     // receiving clinician to name, no condition-on-handover to record, no
@@ -1125,10 +1167,12 @@ describe('RHT — the refusal reaches the printed record', () => {
     }
     expect(screen.queryAllByText(/Affix hospital sticker here/i)).toHaveLength(0);
 
-    // The rows that DO belong on a Resus must survive — otherwise this is
-    // satisfied by dropping the whole Call Information block.
-    expect(screen.queryAllByText('Dest Facility').length).toBeGreaterThan(0);
-    expect(screen.queryAllByText('Ward').length).toBeGreaterThan(0);
+    // Dest Facility and Ward go too: the deceased is released to an undertaker,
+    // not admitted to a ward. Incident Add stays — the call still happened
+    // somewhere, so this cannot be satisfied by dropping the whole block.
+    expect(screen.queryAllByText('Dest Facility')).toHaveLength(0);
+    expect(screen.queryAllByText('Ward')).toHaveLength(0);
+    expect(screen.queryAllByText('Incident Add').length).toBeGreaterThan(0);
 
     // Control 1: a resuscitation with NO declaration keeps everything — the
     // patient was brought back and taken to a hospital. This is the case the
@@ -1159,7 +1203,7 @@ describe('RHT — the refusal reaches the printed record', () => {
     }
   });
 
-  it('prints no Terms and Conditions on a Resus — nobody was ever shown them', async () => {
+  it('prints no Terms and Conditions once death is declared — nobody is left to agree', async () => {
     // The crew form gates its whole T&C block behind `call_type !== 'RESUS'`
     // (DigitalPRFForm.tsx:9089). So on a resuscitation the clauses are never
     // presented, nobody acknowledges them, and no signature can be captured
@@ -1170,6 +1214,7 @@ describe('RHT — the refusal reaches the printed record', () => {
     // The signature-count assertion alone would not pin this: it is satisfied
     // by any change that happens to drop three marks. This names the clauses.
     const built = buildPrf('RESUS', 'MED AID');
+    built.prf.form_data.med_aid_dec_death = true;
     currentPrf = built.prf;
     renderPrfView();
     await screen.findByText((c) => c.includes(built.anchor), { exact: false });
@@ -1185,8 +1230,16 @@ describe('RHT — the refusal reaches the printed record', () => {
         `a "${label}" signing line prints on a Resus, for terms never shown`,
       ).toBe(0);
     }
-    // Control: a call type that DOES present the terms must still print them,
-    // so this cannot be satisfied by removing the block outright.
+    // Control: a resuscitation the crew WON still prints them — the patient is
+    // alive and billable. This is what stops the rule collapsing back onto the
+    // call type.
+    cleanup();
+    const liveResus = buildPrf('RESUS', 'MED AID');
+    currentPrf = liveResus.prf;
+    renderPrfView();
+    await screen.findByText((c) => c.includes(liveResus.anchor), { exact: false });
+    expect(screen.queryAllByText('Terms and Conditions').length).toBeGreaterThan(0);
+
     cleanup();
     const primary = buildPrf('PRIMARY', 'MED AID');
     currentPrf = primary.prf;

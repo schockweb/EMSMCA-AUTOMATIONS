@@ -1389,6 +1389,41 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
   // page, which is the arrangement this change exists to remove.
   const refused = fd.call_type === 'RHT' || !!fd.patient_refused_treatment;
 
+  // ── Refusal layout: render Patient / Billing / Debtor only when captured ──
+  //
+  // The crew form no longer ASKS for these once the patient refuses — there is
+  // no triage priority, no payer, no debtor and nobody being conveyed — so on a
+  // new refusal all three would print as columns of "—". Refusals captured
+  // BEFORE that change do carry the data, and it must keep printing, so the
+  // test is content, not call type.
+  const refusalPatient = anyValue(fd, [
+    'gender', 'patient_name', 'patient_surname', 'patient_id_number',
+    'patient_passport_number', 'age', 'patient_dob', 'patient_address',
+    'patient_suburb', 'patient_postal_code', 'patient_postal_address',
+    'patient_phone_home', 'patient_phone_work', 'patient_phone_cell',
+    'accompanying_persons_count',
+  ]);
+  const refusalDebtor = anyValue(fd, [
+    'debtor_gender', 'debtor_name', 'debtor_surname', 'debtor_id_number',
+    'debtor_passport_number', 'debtor_age', 'debtor_dob', 'debtor_address',
+    'debtor_suburb', 'debtor_postal_code', 'debtor_phone_home', 'debtor_phone_cell',
+  ]);
+  const refusalBilling = anyValue(fd, [
+    'billing_type', 'medical_scheme', 'medical_aid_number', 'main_member_id',
+    'scheme_option', 'dependent_number', 'preauth_number',
+    'raf_claim_number', 'wca_employer_name', 'pvt_payment_method',
+  ]);
+  // Rows are COMPUTED, not fixed. The old layout pinned Patient to row 1,
+  // Billing to row 2 and Debtor to row 3; dropping any one of them would have
+  // left a hole in the column where that row used to be.
+  const refusalRows = [refusalPatient, refusalBilling, refusalDebtor];
+  const refusalBlockCount = refusalRows.filter(Boolean).length;
+  let _refusalRow = 0;
+  const nextRefusalRow = () => ++_refusalRow;
+  const refusalPatientRow = refusalPatient ? nextRefusalRow() : 0;
+  const refusalBillingRow = refusalBilling ? nextRefusalRow() : 0;
+  const refusalDebtorRow  = refusalDebtor  ? nextRefusalRow() : 0;
+
   // Must cover EVERY field the Return Trip rows render — a guard that misses one
   // silently drops captured times from the PDF that goes to the scheme.
   // `return_depart_time` was checked here but is never written by the crew form;
@@ -2191,8 +2226,12 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
                 DIFFERENT and these two rows are not interchangeable — do not
                 "restore" this by deleting the Ward row instead.
                 suburb_ward is still captured and stored; it is only unprinted. */}
-            {!noTransport && (
+            {!noTransport && !declaredDead && (
               <>
+                {/* Dest Facility and Ward go with the rest of the handover once
+                    death is declared: the deceased is released to an undertaker,
+                    not admitted to a ward, so naming a destination ward implies
+                    an admission that never happened. */}
                 <FieldRow label="Dest Facility" value={fd.receiving_facility} />
                 <FieldRow label="Ward"          value={fd.ward} />
                 {/* Receiving practitioner, their qualification, the patient's
@@ -2471,20 +2510,23 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
         <div style={{
           display: 'grid',
           gridTemplateColumns: refused
-            ? '1.5fr 2.7fr'
+            ? (refusalBlockCount === 0 ? '1fr' : '1.5fr 2.7fr')
             : (fd.call_type === 'DOD' && fd.med_aid_dec_death) ? '1fr 1fr' : '1.64fr 1.36fr 1.8fr 1.6fr',
-          // auto/auto/1fr: Patient and Billing take only the height they need,
-          // Debtor absorbs the remainder so the left column still reaches the
-          // bottom rule and the page does not end in a ragged edge.
-          ...(refused ? { gridTemplateRows: 'auto auto 1fr' } : {}),
+          // Every block but the last takes only the height it needs; the last
+          // absorbs the remainder so the column still reaches the bottom rule
+          // and the page does not end in a ragged edge.
+          ...(refused && refusalBlockCount > 0
+            ? { gridTemplateRows: Array.from({ length: refusalBlockCount },
+                  (_, i) => (i === refusalBlockCount - 1 ? '1fr' : 'auto')).join(' ') }
+            : {}),
           borderTop: `2px solid ${LN}`, flex: 1, minHeight: 0,
         }}>
           {/* Patient Information — only fields the crew actually captured are
               shown; blank rows are omitted (no column of "—"). DOB prints
               dd/mm/yyyy. */}
-          {!(fd.call_type === 'DOD' && fd.med_aid_dec_death) && (
+          {!(fd.call_type === 'DOD' && fd.med_aid_dec_death) && (!refused || refusalPatient) && (
           <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column',
-                        ...(refused ? { gridColumn: 1, gridRow: 1 } : {}) }}>
+                        ...(refused ? { gridColumn: 1, gridRow: refusalPatientRow } : {}) }}>
             <SectionHead label="Patient Information" />
             {(([
               ['Gender',        fd.gender],
@@ -2521,8 +2563,9 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
               On a refusal it sits at the bottom of the left column, below
               Billing: there is no debtor when nothing was provided, so it is
               the least useful block on the page and takes the leftover height. */}
+          {(!refused || refusalDebtor) && (
           <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column',
-                        ...(refused ? { gridColumn: 1, gridRow: 3, borderTop: `1px solid ${LN}` } : {}) }}>
+                        ...(refused ? { gridColumn: 1, gridRow: refusalDebtorRow, borderTop: `1px solid ${LN}` } : {}) }}>
             <SectionHead label="Debtor Information" />
             {debtorSameAsPatient ? (
               <div style={{
@@ -2609,6 +2652,7 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
               ? <div style={{ flex: 1, borderTop: `1px solid ${LN}` }} />
               : <FillLines />}
           </div>
+          )}
 
           {/* Billing Information — content follows the selected billing type so
               the section reflects the actual payer (Med Aid / WCA / IOD / RAF / PVT /
@@ -2617,8 +2661,9 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
               so no payer block is captured or shown. The Handover Signature +
               Hospital Sticker below still render — they are handover artefacts,
               not billing. */}
+          {(!refused || refusalBilling) && (
           <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column',
-                        ...(refused ? { gridColumn: 1, gridRow: 2, borderTop: `1px solid ${LN}` } : {}) }}>
+                        ...(refused ? { gridColumn: 1, gridRow: refusalBillingRow, borderTop: `1px solid ${LN}` } : {}) }}>
             {fd.call_type !== 'COURTESY' && (
               <>
             <SectionHead label="Billing Information" />
@@ -2749,6 +2794,7 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
             )}
             <FillLines />
           </div>
+          )}
 
           {/* Channel-specific + Return Trip (when present) + Terms & Conditions.
               The T&C live in this right-hand column next to Medical Aid
@@ -2861,16 +2907,19 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
                 content is that treatment was DECLINED. Unsigned or not, a
                 scheme or a court reads what is on the page.
 
-                RESUS is excluded for the same reason, and the omission was
-                simply never extended to it: the crew form gates its whole
-                Terms & Conditions block behind `call_type !== 'RESUS'`
-                (DigitalPRFForm.tsx:9089), so on a resuscitation the clauses are
-                never shown, nobody acknowledges them, and tc_patient_signature
-                cannot exist. Printing them anyway put "I accept full
-                responsibility for all payments" and a signing line onto the
-                record of a patient in cardiac arrest — who could not consent to
-                anything. Worse than the refusal case, not better. */}
-            {fd.call_type !== 'DOD' && fd.call_type !== 'RESUS' && (
+                A DECLARED DEATH is excluded for the same reason: there is
+                nobody left to accept financial responsibility, and the clauses
+                would sit above an undertaker's release.
+
+                A resuscitation the crew WINS keeps them — the patient is alive,
+                conveyed and billable, so the terms and a place to sign belong on
+                the record. Note the crew form does not currently present the
+                T&C block on a RESUS (it gates on `call_type !== 'RESUS'`,
+                DigitalPRFForm.tsx:9089), so tc_patient_signature will be empty
+                and the rules print as an unsigned place to sign by hand. If a
+                resuscitated patient should be signing digitally, that belongs in
+                the CREW FORM, not here. */}
+            {fd.call_type !== 'DOD' && !declaredDead && (
               <>
                 {!refused && (
                 <>

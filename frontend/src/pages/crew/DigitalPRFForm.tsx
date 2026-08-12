@@ -7187,8 +7187,9 @@ export default function DigitalPRFForm() {
         <>
           {/* Priority — large, colour-coded, dominant.
               Hidden for Resus calls: triage priority doesn't apply when the
-              crew is already running a resus. */}
-          {fd.call_type !== 'RESUS' && (
+              crew is already running a resus. Also hidden on a refusal — see
+              the note on Patient Information below. */}
+          {fd.call_type !== 'RESUS' && !fd.patient_refused_treatment && (
             <>
               <SHdr t="Patient Priority" />
               <div id="prf-field-priority" style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 8, marginBottom: 20 }}>
@@ -7206,7 +7207,15 @@ export default function DigitalPRFForm() {
           details are captured once in the DOD form's "Particulars of deceased"
           section, and a mirror effect copies them into the patient_* fields, so
           repeating the section here would be duplicate data entry. */}
-      {fd.call_type !== 'DOD' && (
+      {/* Hidden once the patient refuses. An RHT that is refused records WHO
+          declined and WHY — it is not a billing document, and none of the
+          sections below are captured for it: there is no triage priority to
+          assign, no payer, no debtor and nobody accompanying a patient who is
+          not being conveyed. Asking for them invites a crew to fill in a form
+          about a transport that never happened.
+          `patient_refused_treatment` is only offered on an RHT, so this reads
+          as "RHT, and the crew tapped Patient Refuses Treatment". */}
+      {fd.call_type !== 'DOD' && !fd.patient_refused_treatment && (
       <>
       <SHdr t="Patient Information" />
       {/* Block capitals on the name fields — handwritten PRFs are filled in
@@ -7249,7 +7258,7 @@ export default function DigitalPRFForm() {
           The Billing Type selector and all channel-specific detail cards
           live here on Phase 2 so the crew completes triage and patient
           info before being asked to fill billing details. */}
-      {fd.call_type !== 'COURTESY' && (
+      {fd.call_type !== 'COURTESY' && !fd.patient_refused_treatment && (
         <>
           {/* WCA_IOD call type implies billing — skip the picker */}
           {fd.call_type !== 'WCA_IOD' && (
@@ -7345,7 +7354,7 @@ export default function DigitalPRFForm() {
         </>
       )}
 
-      {fd.billing_type !== 'PVT' && (<>
+      {fd.billing_type !== 'PVT' && !fd.patient_refused_treatment && (<>
         <SHdr t="Debtor Information" />
 
         {/* Channel-specific billing detail cards. MedAidMore is omitted
@@ -7518,7 +7527,7 @@ export default function DigitalPRFForm() {
       </>)}
       </>)}
 
-      {fd.call_type !== 'DOD' && (
+      {fd.call_type !== 'DOD' && !fd.patient_refused_treatment && (
         <>
           <Lbl t="Persons Accompanying Patient in Ambulance" />
           <Inp fk="accompanying_persons_count" type="number" ph="0" />
