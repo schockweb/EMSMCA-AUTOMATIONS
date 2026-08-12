@@ -8323,8 +8323,16 @@ export default function DigitalPRFForm() {
     }
     return (
       <>
-        {CriticalBanner()}
-        {AllergyBanner()}
+        {/* Deliberately NOT on the Dispatch embed.
+            Both banners sit ABOVE the vitals inputs, and both appear the moment
+            a value crosses a threshold — so on a phone, typing an HR of 180
+            makes a two-line red banner materialise above the field being typed
+            in and shoves it down the screen mid-entry. The crew reads that as
+            the keyboard losing the field. Dispatch is where vitals are first
+            captured, so that is exactly where it must not happen.
+            They remain on the standalone Clinical screen and on Transport. */}
+        {!embedded && CriticalBanner()}
+        {!embedded && AllergyBanner()}
 
         {/* Treating practitioner — set by the gate modal on entry to Clinical.
           Determines which HPCSA scope governs procedure/medication entries
