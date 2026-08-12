@@ -799,6 +799,73 @@ def _duplicate_client_error(
     )
 
 
+async def _duplicate_client_edit_error(
+    db: AsyncSession,
+    exc: IntegrityError,
+    *,
+    portal_email: str | None,
+    admin_email: str | None,
+) -> HTTPException:
+    """update_provider's twin of `_duplicate_client_error`.
+
+    Same race, same indexes, different wording: this route's pre-checks name the
+    client that already owns the value, so the race message has to name it too —
+    otherwise the same mistake is explained two different ways depending on
+    timing, which is worse than either message alone.
+
+    The owner lookup runs AFTER the rollback, on a clean session, and can never
+    turn a 400 into a 500: if it fails for any reason the message degrades to
+    "another client" rather than propagating.
+
+    Slug is absent deliberately. It is not in this route's writable set — a
+    company rename cannot collide here, and cannot repair a wrong slug either.
+    """
+    reason = str(getattr(exc, "orig", exc)).lower()
+
+    async def _owner_name(stmt) -> str:
+        try:
+            row = (await db.execute(stmt)).scalars().first()
+            return row.name if row is not None else "another client"
+        except Exception:
+            logger.warning("Could not name the owning client for an edit clash", exc_info=True)
+            return "another client"
+
+    if "ix_service_providers_portal_login_email" in reason or "(portal_login_email)" in reason:
+        owner = await _owner_name(
+            select(ServiceProvider).where(
+                ServiceProvider.portal_login_email == portal_email
+            )
+        )
+        return HTTPException(
+            400,
+            f"The client login '{portal_email}' already belongs to {owner}. "
+            f"Each client needs its own login.",
+        )
+
+    if "ix_crew_members_email" in reason or "(email)" in reason:
+        owner = await _owner_name(
+            select(ServiceProvider)
+            .join(CrewMember, CrewMember.provider_id == ServiceProvider.id)
+            .where(CrewMember.email == admin_email)
+        )
+        return HTTPException(
+            400,
+            f"The admin email '{admin_email}' is already used by {owner}. "
+            f"Each admin needs their own email address.",
+        )
+
+    logger.warning(
+        "Unmapped integrity error editing a client (portal=%s admin=%s): %s",
+        portal_email, admin_email, reason[:400],
+    )
+    return HTTPException(
+        400,
+        "That change could not be saved because one of its details is already in "
+        "use by another client. Reload the Clients page and check the client "
+        "login and admin email before trying again.",
+    )
+
+
 @router.post("", status_code=201)
 async def create_provider(
     body: ProviderCreate,
@@ -1006,124 +1073,155 @@ async def update_provider(
     if not provider:
         raise HTTPException(404, "Provider not found")
 
-    # Standard fields — set directly on the model.
-    #
-    # `is_active` is deliberately NOT in this set. Flipping it is a lifecycle
-    # operation with a cascade and an audit entry attached (see
-    # _apply_provider_active); assigning it here would have produced a provider
-    # that is hidden from the portal while every one of its crew members can
-    # still start a shift and open patient records — the exact hole the cascade
-    # exists to close. The field is still accepted on this route so existing
-    # callers keep working; it is routed through the same helper below.
-    standard_fields = {"name", "pr_number", "pty_reg_number", "prf_name", "phone", "email", "address", "logo_url"}
-    for key, val in body.model_dump(exclude_unset=True).items():
-        if key in standard_fields:
-            if key == "prf_name":
-                val = (val or "").strip() or None
-            setattr(provider, key, val)
+    # Every write below can trip a unique index that the pre-checks just
+    # cleared, if a concurrent edit landed in between. The commit is NOT the
+    # only place it surfaces: the admin-crew SELECT further down triggers an
+    # autoflush, which emits the pending portal_login_email UPDATE — so the
+    # collision can be raised mid-function, exactly as it is in create_provider.
+    # Values are captured up front purely so the handler can name the field.
+    attempted_portal_email = (
+        (body.portal_login_username.strip().lower() or None)
+        if body.portal_login_username is not None
+        else None
+    )
+    attempted_admin_email = (
+        body.admin_email.strip().lower()
+        if body.admin_email and body.admin_email.strip()
+        else None
+    )
 
-    if body.is_active is not None and body.is_active != provider.is_active:
-        await _apply_provider_active(
-            db, provider, active=body.is_active,
-            actor_id=user.id, ip=get_trusted_client_ip(request),
-        )
+    try:
+        # Standard fields — set directly on the model.
+        #
+        # `is_active` is deliberately NOT in this set. Flipping it is a lifecycle
+        # operation with a cascade and an audit entry attached (see
+        # _apply_provider_active); assigning it here would have produced a provider
+        # that is hidden from the portal while every one of its crew members can
+        # still start a shift and open patient records — the exact hole the cascade
+        # exists to close. The field is still accepted on this route so existing
+        # callers keep working; it is routed through the same helper below.
+        standard_fields = {"name", "pr_number", "pty_reg_number", "prf_name", "phone", "email", "address", "logo_url"}
+        for key, val in body.model_dump(exclude_unset=True).items():
+            if key in standard_fields:
+                if key == "prf_name":
+                    val = (val or "").strip() or None
+                setattr(provider, key, val)
 
-    # PRF numbering baseline. Only touched when the admin entered a value — a
-    # blank field leaves the existing counter untouched. The next digital
-    # PRF continues from this value + 1 (see `_next_prf_number`).
-    baseline = _coerce_prf_baseline(body.current_prf_number)
-    if baseline is not None:
-        provider.prf_start_number = baseline
+        if body.is_active is not None and body.is_active != provider.is_active:
+            await _apply_provider_active(
+                db, provider, active=body.is_active,
+                actor_id=user.id, ip=get_trusted_client_ip(request),
+            )
 
-    # PRF outbound email account (Gmail/Outlook), validated + encrypted.
-    _apply_smtp_settings(provider, body.model_dump(exclude_unset=True))
-    await _verify_new_smtp_credential(body.model_dump(exclude_unset=True), provider)
+        # PRF numbering baseline. Only touched when the admin entered a value — a
+        # blank field leaves the existing counter untouched. The next digital
+        # PRF continues from this value + 1 (see `_next_prf_number`).
+        baseline = _coerce_prf_baseline(body.current_prf_number)
+        if baseline is not None:
+            provider.prf_start_number = baseline
 
-    # EMSMCA Client Login (portal_login_email / portal_login_password_hash on ServiceProvider)
-    if body.portal_login_username is not None:
-        new_portal_email = body.portal_login_username.strip().lower() or None
-        # create_provider pre-checks this; the edit path did not, so pasting one
-        # client's portal username onto another — an ordinary slip when working
-        # down a spreadsheet of 100 — hit the DB unique constraint and surfaced
-        # as a bare 500 "An internal error occurred", with no indication of which
-        # field was wrong or which client already owned it.
-        if new_portal_email and new_portal_email != (provider.portal_login_email or ""):
-            clash = (await db.execute(
-                select(ServiceProvider).where(
-                    ServiceProvider.portal_login_email == new_portal_email,
-                    ServiceProvider.id != uuid.UUID(provider_id),
-                )
-            )).scalar_one_or_none()
-            if clash:
-                raise HTTPException(
-                    400,
-                    f"The client login '{new_portal_email}' already belongs to {clash.name}. "
-                    f"Each client needs its own login.",
-                )
-        provider.portal_login_email = new_portal_email
-    if body.portal_login_password is not None and body.portal_login_password.strip():
-        _validate_portal_password(body.portal_login_password)
-        provider.portal_login_password_hash = hash_password(body.portal_login_password)
+        # PRF outbound email account (Gmail/Outlook), validated + encrypted.
+        _apply_smtp_settings(provider, body.model_dump(exclude_unset=True))
+        await _verify_new_smtp_credential(body.model_dump(exclude_unset=True), provider)
 
-    # Admin crew member credentials
-    if body.admin_email or body.admin_password:
-        admin_result = await db.execute(
-            # .limit(1) is load-bearing. Nothing stops a provider having two crew
-            # admins — add_crew_member takes `role` verbatim and update_crew_member
-            # promotes with a bare setattr — and without the limit a second admin
-            # makes scalar_one_or_none() raise MultipleResultsFound, which turns
-            # EVERY subsequent PATCH of that provider into a permanent 500. The
-            # equivalent query in update_provider_settings already limits.
-            select(CrewMember).where(
-                CrewMember.provider_id == uuid.UUID(provider_id),
-                CrewMember.role == "admin",
-            ).limit(1)
-        )
-        admin = admin_result.scalar_one_or_none()
-
-        # crew_members.email is DB-unique. create_provider pre-checks it; this
-        # path did not, so reusing an admin email across two clients — the same
-        # spreadsheet slip as the portal login above — raised an IntegrityError
-        # the admin saw as a bare 500.
-        if body.admin_email and body.admin_email.strip():
-            wanted = body.admin_email.strip().lower()
-            if not admin or wanted != (admin.email or "").lower():
-                taken = (await db.execute(
-                    select(CrewMember).where(CrewMember.email == wanted)
+        # EMSMCA Client Login (portal_login_email / portal_login_password_hash on ServiceProvider)
+        if body.portal_login_username is not None:
+            new_portal_email = body.portal_login_username.strip().lower() or None
+            # create_provider pre-checks this; the edit path did not, so pasting one
+            # client's portal username onto another — an ordinary slip when working
+            # down a spreadsheet of 100 — hit the DB unique constraint and surfaced
+            # as a bare 500 "An internal error occurred", with no indication of which
+            # field was wrong or which client already owned it.
+            if new_portal_email and new_portal_email != (provider.portal_login_email or ""):
+                clash = (await db.execute(
+                    select(ServiceProvider).where(
+                        ServiceProvider.portal_login_email == new_portal_email,
+                        ServiceProvider.id != uuid.UUID(provider_id),
+                    )
                 )).scalar_one_or_none()
-                if taken:
-                    owner = (await db.execute(
-                        select(ServiceProvider).where(ServiceProvider.id == taken.provider_id)
-                    )).scalar_one_or_none()
+                if clash:
                     raise HTTPException(
                         400,
-                        f"The admin email '{wanted}' is already used by "
-                        f"{owner.name if owner else 'another client'}. "
-                        f"Each admin needs their own email address.",
+                        f"The client login '{new_portal_email}' already belongs to {clash.name}. "
+                        f"Each client needs its own login.",
                     )
+            provider.portal_login_email = new_portal_email
+        if body.portal_login_password is not None and body.portal_login_password.strip():
+            _validate_portal_password(body.portal_login_password)
+            provider.portal_login_password_hash = hash_password(body.portal_login_password)
 
-        if admin:
-            # Update existing admin
-            if body.admin_email:
-                admin.email = body.admin_email.strip().lower()
-            if body.admin_password and body.admin_password.strip():
-                admin.hashed_password = hash_password(body.admin_password)
-        else:
-            # Create new admin crew member
-            if body.admin_email and body.admin_password:
-                admin = CrewMember(
-                    provider_id=uuid.UUID(provider_id),
-                    email=body.admin_email.strip().lower(),
-                    hashed_password=hash_password(body.admin_password),
-                    full_name=f"{provider.name} Admin",
-                    initials="AD",
-                    qualification=DEFAULT_CATEGORY,
-                    role="admin",
-                    is_active=True,
-                )
-                db.add(admin)
+        # Admin crew member credentials
+        if body.admin_email or body.admin_password:
+            admin_result = await db.execute(
+                # .limit(1) is load-bearing. Nothing stops a provider having two crew
+                # admins — add_crew_member takes `role` verbatim and update_crew_member
+                # promotes with a bare setattr — and without the limit a second admin
+                # makes scalar_one_or_none() raise MultipleResultsFound, which turns
+                # EVERY subsequent PATCH of that provider into a permanent 500. The
+                # equivalent query in update_provider_settings already limits.
+                select(CrewMember).where(
+                    CrewMember.provider_id == uuid.UUID(provider_id),
+                    CrewMember.role == "admin",
+                ).limit(1)
+            )
+            admin = admin_result.scalar_one_or_none()
 
-    await db.commit()
+            # crew_members.email is DB-unique. create_provider pre-checks it; this
+            # path did not, so reusing an admin email across two clients — the same
+            # spreadsheet slip as the portal login above — raised an IntegrityError
+            # the admin saw as a bare 500.
+            if body.admin_email and body.admin_email.strip():
+                wanted = body.admin_email.strip().lower()
+                if not admin or wanted != (admin.email or "").lower():
+                    taken = (await db.execute(
+                        select(CrewMember).where(CrewMember.email == wanted)
+                    )).scalar_one_or_none()
+                    if taken:
+                        owner = (await db.execute(
+                            select(ServiceProvider).where(ServiceProvider.id == taken.provider_id)
+                        )).scalar_one_or_none()
+                        raise HTTPException(
+                            400,
+                            f"The admin email '{wanted}' is already used by "
+                            f"{owner.name if owner else 'another client'}. "
+                            f"Each admin needs their own email address.",
+                        )
+
+            if admin:
+                # Update existing admin
+                if body.admin_email:
+                    admin.email = body.admin_email.strip().lower()
+                if body.admin_password and body.admin_password.strip():
+                    admin.hashed_password = hash_password(body.admin_password)
+            else:
+                # Create new admin crew member
+                if body.admin_email and body.admin_password:
+                    admin = CrewMember(
+                        provider_id=uuid.UUID(provider_id),
+                        email=body.admin_email.strip().lower(),
+                        hashed_password=hash_password(body.admin_password),
+                        full_name=f"{provider.name} Admin",
+                        initials="AD",
+                        qualification=DEFAULT_CATEGORY,
+                        role="admin",
+                        is_active=True,
+                    )
+                    db.add(admin)
+
+        await db.commit()
+    except IntegrityError as exc:
+        # A concurrent edit won the race. Roll back first — an IntegrityError
+        # poisons the session, and the owner lookup in the handler needs a
+        # usable one.
+        await db.rollback()
+        raise (
+            await _duplicate_client_edit_error(
+                db, exc,
+                portal_email=attempted_portal_email,
+                admin_email=attempted_admin_email,
+            )
+        ) from exc
+
     return {"message": "Provider updated", "id": str(provider.id)}
 
 
