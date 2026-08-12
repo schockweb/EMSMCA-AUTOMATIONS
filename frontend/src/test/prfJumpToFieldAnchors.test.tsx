@@ -16,7 +16,7 @@
  */
 import 'fake-indexeddb/auto';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, waitFor, cleanup } from '@testing-library/react';
+import { render, screen, waitFor, cleanup, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router';
 import axios from 'axios';
 
@@ -119,6 +119,65 @@ const expectAnchors = async (ids: string[]) => {
     );
   }
 };
+
+describe('"Patient Refuses Treatment" is an RHT-only control', () => {
+  // A refusal IS the call type. Offering the toggle on a Primary or a transfer
+  // invited a crew to blank the clinical record of a call they had treated —
+  // it hides the entire capture stack (history, surveys, vitals, IV, meds).
+  const TOGGLE = /Patient Refuses Treatment|Patient Refused Treatment/;
+
+  // The toggle lives in the CLINICAL body. Seeding phase 3 does not render it
+  // for a Primary — the form resumes on Transport — so an assertion there would
+  // pass because nothing rendered rather than because the gate works. Verified
+  // by probe, and it is exactly how the first version of this test was
+  // vacuously green. The clinical body is reached on Dispatch instead, by
+  // tapping Start Exam, which is what the crew actually does.
+  const openClinicalOnDispatch = async () => {
+    const btn = await waitFor(() => {
+      const el = document.getElementById('start-exam-button');
+      if (!el) throw new Error('Start Exam button never appeared');
+      return el;
+    }, { timeout: 4000 });
+    fireEvent.click(btn);
+    // Prove the clinical body really opened, or the assertions below are void.
+    await waitFor(() => expect(
+      document.body.textContent, 'the clinical body did not open',
+    ).toMatch(/Patient History|Overseeing Practitioner/i), { timeout: 4000 });
+  };
+
+  it('is hidden on a Primary call', async () => {
+    seed(0, { call_type: 'PRIMARY' });
+    mountForm();
+    await openClinicalOnDispatch();
+    expect(screen.queryByText(TOGGLE),
+      'the refusal toggle is offered on a Primary call'
+    ).toBeNull();
+  });
+
+  it('is shown on an RHT', async () => {
+    // The negative control: hiding it everywhere would satisfy the test above
+    // while removing the crew's only way to record a refusal.
+    seed(0, { call_type: 'RHT' });
+    mountForm();
+    await openClinicalOnDispatch();
+    expect(screen.queryByText(TOGGLE),
+      'the refusal toggle is missing on an RHT, where it is the whole point'
+    ).not.toBeNull();
+  });
+
+  // NOT TESTED, and the reason is worth recording. The gate keeps the toggle
+  // visible when `patient_refused_treatment` is already set, so a record where
+  // the flag was applied on a non-RHT call before this change can still clear
+  // it. That branch cannot be exercised by mounting at the Clinical phase: with
+  // the flag set the form RESUMES ON TRANSPORT — verified by probe, the mounted
+  // DOM is the Departure/Transport body — so the Clinical phase never renders.
+  //
+  // Which means the branch is only reachable via the vitals-chip jump into the
+  // standalone Clinical screen. It is kept as cheap insurance rather than
+  // removed, but nobody should assume it is covered. Separately: that resume
+  // behaviour means such a record is hard to repair from the crew UI at all,
+  // and it predates this change.
+});
 
 describe('tap-to-jump anchors exist for the fields the review flags', () => {
   it('Patient Info: gender, priority (the two that emit no id of their own)', async () => {

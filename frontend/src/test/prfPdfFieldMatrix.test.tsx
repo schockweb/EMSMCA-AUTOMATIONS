@@ -860,6 +860,40 @@ describe('page 1 height — the tall blocks moved, and did not go missing', () =
       { exact: false }).length).toBeGreaterThan(0);
   });
 
+  // ── The two compact payers carry it on page 1 instead ────────────────────
+  // Medical Aid bills a fixed short set of rows, and an Indigent PVT captures
+  // no amounts at all, so the Billing column has slack the image can use —
+  // measured in Chrome, page 1 does not grow at all, because the grid was
+  // already stretching that column to match the taller Patient column.
+  //
+  // Each of these asserts BOTH halves: on page 1, and still exactly once. The
+  // count alone would pass if it were restored to the attachments sheet too,
+  // which is the defect this placement rule exists to prevent.
+  for (const [label, extra] of [
+    ['MED AID', { ...withSticker }],
+    ['an Indigent PVT', { ...withSticker, pvt_payment_method: 'Indigent' }],
+  ] as Array<[string, Record<string, unknown>]>) {
+    const billing = label === 'MED AID' ? 'MED AID' : 'PVT';
+
+    it(`prints the sticker on page 1 under Billing Information for ${label}`, async () => {
+      await renderCall('IHT', billing, extra);
+      expect(stickerImgs().length,
+        `the sticker is rendered ${stickerImgs().length} times on ${label} — it must be exactly once`
+      ).toBe(1);
+      expect(sheets()[0].contains(stickerImgs()[0]),
+        `the sticker is not on page 1 for ${label}, where the billing column has room for it`
+      ).toBe(true);
+    });
+
+    it(`drops the "see the documents sheet" pointer for ${label}`, async () => {
+      await renderCall('IHT', billing, extra);
+      expect(screen.queryAllByText((c) => c.includes('see the patient documents sheet'),
+        { exact: false }).length,
+        `${label} still cross-references a sheet the sticker is no longer on`
+      ).toBe(0);
+    });
+  }
+
   it('still prints the cash receipt on a refusal, whose page 2 is watermark-only', async () => {
     // A refusal can take cash — "Refusal Of Treatment" is a selectable call-out
     // fee basis — and this is the only record of who handed money over. The

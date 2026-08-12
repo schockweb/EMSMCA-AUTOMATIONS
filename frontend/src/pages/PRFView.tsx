@@ -1483,7 +1483,26 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
   // Because the document sheet exists whenever a sticker was captured, no
   // extra page is created by deferring to it — so this applies to every call
   // type, not just transfers, and it removes the duplicate on all of them.
-  const stickerOnDocumentSheet = stickerVisible && !!fd.hospital_sticker;
+  // ...unless the Billing column is short enough to carry it.
+  //
+  // Medical Aid bills a fixed, compact set of rows (scheme, number, dependent,
+  // main member, plan, pre-auth) and an Indigent PVT captures no amounts at
+  // all — no quoted figure, no account holder, no cash-received block. On both
+  // the Billing column has room to spare, so the sticker prints where the
+  // adjudicator is already looking rather than sending them to a later sheet.
+  // Every other payer (RAF, Call Out Fee, and PVT on any paying method) fills
+  // that column, and the ~200px image would push page 1 past the sheet ceiling.
+  //
+  // `Indigent` is a PVT PAYMENT METHOD, not a billing type — BILLING_TYPE_OPTS
+  // has no such entry.
+  const billingBlockIsCompact =
+    fd.billing_type === 'MED AID' ||
+    (fd.billing_type === 'PVT' && fd.pvt_payment_method === 'Indigent');
+  const stickerOnPage1 = stickerVisible && !!fd.hospital_sticker && billingBlockIsCompact;
+  // Still exactly ONE call site per artefact — the rule this file follows, and
+  // the one whose breach printed the same sticker twice. Page 1 and the
+  // documents sheet are now mutually exclusive by construction.
+  const stickerOnDocumentSheet = stickerVisible && !!fd.hospital_sticker && !stickerOnPage1;
 
   // The sheet exists only when it has something to carry. The sticker is no
   // longer a reason to create it — the document sheet above covers that.
@@ -3764,7 +3783,11 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
 
       {/* ═══════════════════ PAGE 5+ — Attachments ═══════════════════ */}
       {[
-        { label: 'Hospital Sticker', val: fd.hospital_sticker },
+        // Suppressed when page 1 is carrying the sticker itself (Medical Aid /
+        // Indigent). Feeding one field into two page-producing lists is exactly
+        // what printed this artefact twice before — see the note below on
+        // raf_oar_report_pdf, which made the identical mistake.
+        { label: 'Hospital Sticker', val: stickerOnPage1 ? null : fd.hospital_sticker },
         { label: 'Admission Form', val: fd.admission_form_image },
         { label: 'ID Document', val: fd.id_document_image },
         { label: 'Medical Aid Card', val: fd.medical_aid_image },

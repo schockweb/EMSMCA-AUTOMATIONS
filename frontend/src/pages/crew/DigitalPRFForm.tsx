@@ -8451,9 +8451,19 @@ export default function DigitalPRFForm() {
             below (history, mechanism, surveys, injury diagram, vitals, oxygen,
             airway, circulation, immobilisation, equipment, IV/meds): there is
             nothing to record when the patient declines care. Tap again to undo
-            and restore the sections. Hidden for Resus — the patient is dead or
-            dying, so a treatment refusal doesn't apply. */}
-        {fd.call_type !== 'RESUS' && (
+            and restore the sections.
+
+            RHT only. A refusal IS the call type — that is what Refused Hospital
+            Transport means — so offering the toggle on a Primary or a transfer
+            invited a crew to blank the clinical record of a call they had in
+            fact treated.
+
+            The `|| fd.patient_refused_treatment` is not redundant: without it,
+            a record where the flag was already set on some other call type
+            would lose the only control that clears it, leaving the clinical
+            sections hidden with no way to get them back. The toggle stays
+            visible while the flag is on so it can always be undone. */}
+        {(fd.call_type === 'RHT' || fd.patient_refused_treatment) && (
         <button
           type="button"
           onClick={() => sf('patient_refused_treatment', !fd.patient_refused_treatment)}
