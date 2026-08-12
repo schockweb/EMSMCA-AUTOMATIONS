@@ -88,6 +88,18 @@ const INK = 'data:image/svg+xml;base64,' + btoa(
   '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="70">' +
   '<path d="M8 52 C40 8, 70 62, 100 30 S160 8, 200 46" fill="none" stroke="#111" stroke-width="3"/></svg>');
 const IS_IFT = CALL_TYPE === 'IHT' || CALL_TYPE === 'IFT';
+// ?max=1 — EVERY field the PDF can render, at a realistic worst-case LENGTH.
+// The per-flag fixtures above each reproduce one reported defect; this one
+// answers a different question: with this call type and payer, what is the
+// tallest the sheet can legitimately get? Field lists drift, so the values
+// below are keyed to the `fd.*` keys PRFView actually reads — add a field to
+// the PDF and it belongs here too, or the matrix silently stops covering it.
+const MAXFILL = qs.get('max') === '1';
+// ?refused=1 — RHT where the patient declined. Hides five blocks and prints
+// the waiver instead, so it is a different page-1 shape, not a smaller one.
+const REFUSED = qs.get('refused') === '1';
+const LOREM = (n: number) => Array.from({ length: n }, (_, i) =>
+  `Line ${i + 1}: documented in full by the attending practitioner at the scene, including all relevant observations and the clinical reasoning applied.`).join(' ');
 
 // ?sticker=1 attaches a hospital sticker. A CAPTURED sticker is what changes
 // pagination (the empty slot is ~110px, the image takes the block to ~230px)
@@ -185,6 +197,111 @@ const FD: Record<string, any> = {
   ...(SIGS >= 1 ? { tc_patient_signature: INK } : {}),
   ...(SIGS >= 2 ? { tc_witness_signature: INK } : {}),
   ...(SIGS >= 3 ? { next_of_kin_signature: INK } : {}),
+
+  // ── Maximum fill ────────────────────────────────────────────────────────
+  ...(MAXFILL ? {
+    // Patient + postal + debtor, every optional row present.
+    patient_name: 'Sipho Thembalethu', patient_surname: 'Ndlovu-Harrington',
+    patient_id_number: '9001015800083', patient_passport_number: 'A01234567',
+    patient_dob: '1990-01-01', age: '42', gender: 'Male',
+    patient_address: '1147 Emfuleni Drive, Extension 14, Sebokeng Unit 7, Vanderbijlpark',
+    patient_suburb: 'Sebokeng Unit 7', patient_postal_code: '1983',
+    patient_postal_address: 'PO Box 88214, Emfuleni Central Post Office',
+    patient_postal_suburb: 'Vanderbijlpark Central', patient_postal_address_code: '1900',
+    patient_phone_home: '016 555 0142', patient_phone_work: '011 555 0987',
+    patient_phone_cell: '082 555 0176',
+    accompanying_persons_count: '4',
+    debtor_name: 'Nomsa Precious', debtor_surname: 'Ndlovu-Harrington',
+    debtor_gender: 'Female', debtor_id_number: '9203026100085',
+    debtor_passport_number: 'B07654321', debtor_dob: '1992-03-02', debtor_age: '34',
+    debtor_address: '28 Lemonwood Crescent, Highveld Techno Park, Centurion',
+    debtor_suburb: 'Highveld Techno Park', debtor_postal_code: '0157',
+    debtor_phone_home: '012 555 0033', debtor_phone_cell: '083 555 0044',
+    // Payer blocks — all of them, so the widest one is always exercised.
+    medical_scheme: 'Government Employees Medical Scheme (GEMS)',
+    medical_aid_number: 'GEMS-1234567-01', dependent_number: '04',
+    main_member_id: '8801015800081', scheme_option: 'Emerald Value Option',
+    preauth_number: 'AUTH-99881-2026', post_auth_number: 'POST-99881-2026',
+    med_aid_quoted: true, med_aid_quoted_amount: '4750.00',
+    compensation_reference: 'REF-COMP-2026-000871',
+    raf_police_case_number: 'CAS 214/08/2026 Vanderbijlpark SAPS',
+    raf_accident_date: '2026-08-11',
+    raf_accident_location: 'N1 South, 2.4 km before the Grasmere Plaza off-ramp',
+    wca_employer: 'Emfuleni Industrial Fabrication (Pty) Ltd',
+    wca_employer_address: '14 Foundry Road, Vereeniging Industrial Sites, Gauteng',
+    wca_employer_contact: '016 555 0900', wca_employee_number: 'EMP-0099213',
+    wca_employer_responsible_person: 'Mr T. van der Westhuizen (Safety Officer)',
+    wca_oar_number: 'OAR-2026-114872', wca_injury_date: '2026-08-11',
+    wca_incident_description: LOREM(2),
+    pvt_payment_method: 'Cash', pvt_cash_amount_paid: '1500.00',
+    pvt_cash_payer_name: 'Nomsa Precious Ndlovu-Harrington',
+    pvt_cash_crew_received: '1500.00', pvt_cash_payer_signature: INK,
+    pvt_cash_crew_signature: INK,
+    pvt_account_holder: 'Ndlovu-Harrington Family Trust',
+    pvt_account_holder_id: '9203026100085',
+    pvt_account_holder_address: '28 Lemonwood Crescent, Highveld Techno Park',
+    pvt_account_holder_phone: '083 555 0044',
+    // Clinical narrative — the blocks that absorb leftover height.
+    primary_diagnosis: 'ST-elevation myocardial infarction, inferior wall, Killip class II',
+    findings_on_arrival: LOREM(3),
+    past_medical_history: 'Type 2 diabetes mellitus, hypertension, previous NSTEMI 2023, chronic kidney disease stage 2',
+    last_meal: 'Light breakfast — bread and tea', last_meal_time: '07:20',
+    survey_a: 'Patent, self-maintained', survey_b: 'Equal bilateral air entry, no adventitious sounds',
+    survey_c: 'Radial pulses present, capillary refill 3 seconds, skin cool and clammy',
+    survey_head_back: 'No external head injury, no Battle sign, no raccoon eyes',
+    survey_chest: 'No flail segment, no surgical emphysema, sternal tenderness on palpation',
+    survey_abdo: 'Soft, non-distended, mild epigastric tenderness, no guarding',
+    survey_limbs: 'No deformity, full range of movement, peripheral pulses intact',
+    survey_neuro: 'GCS 15/15, PEARL, no focal deficit, moving all four limbs',
+    survey_back: 'No step, no deformity, no midline tenderness on log roll',
+    management_notes: LOREM(4), motivation_notes: LOREM(3),
+    nursing_notes: LOREM(2),
+    // Interventions.
+    airway_interventions: ['OP Airway', 'Suction', 'Intubation'],
+    circulation_interventions: ['IV Access', 'Fluid Resuscitation', 'Cardiac Monitoring'],
+    o2_device: 'Non-rebreather mask', o2_flow_rate: '15', o2_percent: '95',
+    o2_start_time: '10:12', o2_stop_time: '10:52', o2_bvm: true,
+    op_airway_size: '4', ett_size: '7.5', ett_depth: '22', intubation_attempts: '2',
+    ng_tube_size: '16', iv_attempts: '2', defib_joules: '200',
+    immob_equipment: 'Cervical collar, scoop stretcher, head blocks',
+    other_equipment: 'Traction splint, pelvic binder, 12-lead monitor',
+    // Handover.
+    receiving_facility: 'Netcare Sunninghill Hospital — Cardiac Catheterisation Unit',
+    ward: 'Cath Lab 2', receiving_doctor: 'Dr M. van Rensburg',
+    handover_qualification: 'PR0123456', handover_doctor_email: 'cathlab@sunninghill.test',
+    handover_notes: LOREM(2),
+    valuables_handed_to: 'Sister P. Mahlangu (Casualty)',
+    valuables_description: 'One wallet with R240 cash, one Samsung cellular telephone, one wedding band, one set of house keys',
+    valuables_signature: INK,
+    // Every attachment slot — each one adds a full sheet to the export.
+    admission_form_image: STICKER || INK, id_document_image: INK,
+    medical_aid_image: INK, aod_document: INK, additional_document_image: INK,
+    // Crew.
+    assessed_by: 'A. Mokoena', assessor_qualifications: 'ECP',
+    managed_by: 'T. Dlamini', manager_qualifications: 'AEA',
+    extra_crew: [{ name: 'L. Sithole', qualification: 'BAA', hpcsa_number: 'BAA0011223' }],
+    crew_signoff_sigs: { c1: INK, c2: INK, c3: INK },
+    tc_patient_signature: INK, tc_witness_signature: INK, next_of_kin_signature: INK,
+    vitals_shortfall_motivation: LOREM(1),
+    // The submit waiver — new, and it prints on the clinical sheet, so the
+    // matrix has to see what it does to that page's height.
+    submit_override_reason: LOREM(1),
+    submit_override_items: [
+      { field: 'hospital_sticker', label: 'Hospital sticker' },
+      { field: 'handover_signature', label: 'Handover signature (receiving practitioner)' },
+    ],
+    submit_override_by: 'A. Mokoena · ECP0012345',
+    submit_override_at: '2026-08-12T11:05:00Z',
+  } : {}),
+
+  ...(REFUSED ? {
+    patient_refused_treatment: true,
+    rht_refusal_reason: LOREM(2),
+    rht_waiver_date: '2026-08-12',
+    rht_waiver_signatory_name: 'Sipho Thembalethu Ndlovu-Harrington',
+    rht_waiver_witness_name: 'Constable K. Mabaso, SAPS Vanderbijlpark',
+    rht_call_out_fee: 'Standby Cancellation',
+  } : {}),
 
   ...(DECLARED_DEAD ? {
     med_aid_dec_death: true,
@@ -317,6 +434,24 @@ function measure() {
 }
 
 (window as any).__measure = measure;
+// Structured form of the same numbers, for sweeping the call-type x payer
+// matrix programmatically. Same code path as measure() — the text report and
+// this must never be able to disagree.
+(window as any).__measureJson = () => {
+  const frames = Array.from(document.querySelectorAll<HTMLElement>('.prf-page'));
+  const text = measure();
+  const sheets = text.split('\n').filter(l => l.startsWith('sheet ')).map((l, i) => {
+    const branch = /branch=([a-z0-9 x]+)/i.exec(l)?.[1]?.trim() ?? '?';
+    const raw = /^sheet \d+: (\d+)x(\d+)px -> width (\d+)px/.exec(l);
+    return { sheet: i + 1, w0: Number(raw?.[1]), h0: Number(raw?.[2]), w: Number(raw?.[3]), branch };
+  });
+  const pts = [...text.matchAll(/T&C 0\.46rem: ([0-9.]+)pt/g)].map(m => Number(m[1]));
+  return {
+    call: CALL_TYPE, billing: qs.get('billing') || 'MED AID',
+    max: MAXFILL, refused: REFUSED, dod: DECLARED_DEAD,
+    pages: frames.length, sheets, smallestPt: pts.length ? Math.min(...pts) : null, text,
+  };
+};
 
 // ── Mount ──────────────────────────────────────────────────────────────────
 import('./pages/PRFView').then(({ default: PRFView }) => {
