@@ -5530,6 +5530,11 @@ export default function DigitalPRFForm() {
     receiving_facility: 5, handover_qualification: 5, handover_name: 5,
     ward: 5, handover_doctor_email: 5, handover_notes: 5, receiving_doctor: 5,
     hospital_sticker: 5, tc_patient_signature: 5, handover_signature: 5,
+    // Both leg-time rows live on the Handover screen: Arrival At Facility in
+    // its own table and Available in the Completion Times table, which P6()
+    // renders inline at the bottom of Handover for every call type. Home
+    // phase 5, not 6 — phase 6 is hidden from the stepper.
+    time_at_destination: 5, time_available: 5,
     gender: 2, patient_phone_cell: 2, dependent_number: 2, main_member_id: 2,
     debtor_gender: 2, debtor_name: 2, debtor_surname: 2, debtor_phone_cell: 2,
     patient_index_of_total: 6,
@@ -5889,6 +5894,136 @@ export default function DigitalPRFForm() {
     return getCrewSignList().every(c => !!(sigs[c.key] && String(sigs[c.key]).trim()));
   };
 
+  // ── Submit completeness gate ──────────────────────────────────────────────
+  // The items that must be captured before this PRF may be LOCKED.
+  //
+  // This list used to be built inside the summary-review modal's own render,
+  // which made it a drawing rather than a gate. handleSubmit never evaluated
+  // it; the modal was opened only while `allCrewSigned()` was false, so once
+  // the crew had signed off, a tap on Submit walked straight past every
+  // outstanding item. An IFT/IHT submitted on 2026-08-12 (PRF 125) went through
+  // with the entire handover block absent — receiving practitioner, practitioner
+  // number, condition on handover, facility email, hospital sticker — plus the
+  // return-trip times and all three T&C signatures. A submitted PRF is
+  // PROCESSED and permanently uneditable, so there was no way back: the crew
+  // "lost the last section just by clicking submit".
+  //
+  // Hoisted to component scope so the submit path and the modal evaluate the
+  // SAME list. Everything here is checked at submit time only — never mid-call
+  // (see validatePhase: no gating while the crew is working).
+  const FACILITY_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const collectReviewWarnings = (): { text: string; field: string }[] => {
+    const warn: { text: string; field: string }[] = [];
+    if (fd.call_type === 'DOD' || fd.call_type === 'RHT' || fd.patient_refused_treatment || fd.med_aid_dec_death) return warn;
+    const missing = (v: any) => v === undefined || v === null || String(v).trim() === '';
+    const push = (text: string, field: string) => warn.push({ text, field });
+
+    // Patient information (ID, passport, DOB, age, home/work phones,
+    // address, suburb and code are intentionally not flagged).
+    if (missing(fd.gender)) push('Patient gender', 'gender');
+    if (missing(fd.patient_name)) push('Patient first name', 'patient_name');
+    if (missing(fd.patient_surname)) push('Patient surname', 'patient_surname');
+    if (missing(fd.patient_phone_cell)) push('Patient cell number', 'patient_phone_cell');
+
+    // Priority — Resus never captures one, so skip there.
+    if (fd.call_type !== 'RESUS' && missing(fd.priority)) push('Patient priority', 'priority');
+
+    // Handover details — every field; the destination→email pairing
+    // gets its own message because the auto-email depends on it.
+    if (missing(fd.receiving_facility)) {
+      push('Destination (handover details)', 'receiving_facility');
+    } else if (missing(fd.handover_doctor_email)) {
+      push('Receiving facility email — the destination is filled in but no email was captured, so the PRF cannot be emailed to the facility', 'handover_doctor_email');
+    } else if (!FACILITY_EMAIL_RE.test(String(fd.handover_doctor_email).trim())) {
+      // A typo here used to be silent and terminal. The submit path tests the
+      // captured address against this exact regex before offering to send, so
+      // `schockweb.gmail.com` (no @, PRF 126) simply skipped the send step:
+      // the crew got "PRF submitted successfully", the receiving facility got
+      // nothing, and the PRF was already locked so the address could not be
+      // corrected. Same regex on both sides, checked while it is still fixable.
+      push('Receiving facility email does not look like an email address — check for a missing @ or a typo', 'handover_doctor_email');
+    }
+    if (missing(fd.ward)) push('Ward (handover details)', 'ward');
+    // The handover card's "Receiving Practitioner" input saves to
+    // receiving_doctor (handover_name is only the DOD/undertaker
+    // variant) — accept either, or a filled field stays falsely flagged.
+    if (missing(fd.receiving_doctor) && missing(fd.handover_name)) push('Receiving practitioner (handover details)', 'receiving_doctor');
+    if (missing(fd.handover_qualification)) push('Practitioner number (handover details)', 'handover_qualification');
+    if (missing(fd.handover_notes)) push('Condition on handover', 'handover_notes');
+
+    // Leg times. These are the last two captures on the call and both live on
+    // the final screen, so nothing downstream ever asks for them again: the
+    // crew leaves the phase-advance gates behind at Handover and submits from
+    // there. Every PRF captured on 2026-08-12 reached the billing pipeline with
+    // no Arrival At Facility time, and two of them with no Available time
+    // either — the mileage and response-time calculations have nothing to work
+    // from, and the times cannot be reconstructed after the fact.
+    if (!timestamps.time_at_destination) push('Arrival At Facility time', 'time_at_destination');
+    if (!timestamps.time_available) push('Available time', 'time_available');
+
+    // Hospital sticker — not expected for private cash patients.
+    const pvtCash = fd.billing_type === 'PVT' && fd.pvt_payment_method === 'Cash';
+    if (!pvtCash && missing(fd.hospital_sticker)) push('Hospital sticker', 'hospital_sticker');
+
+    // Patient / representative signature. The RESUS exemption is gone:
+    // it existed only because the T&C block holding the pad was skipped
+    // on a Resus, so no Resus PRF could ever satisfy the check. The
+    // block now renders for every call type, so the signature is
+    // obtainable and worth asking for.
+    if (missing(sigs.patient_signature) && missing(fd.tc_patient_signature)) {
+      push('Patient / representative signature', 'tc_patient_signature');
+    }
+
+    // Handover signature — the receiving practitioner's confirmation
+    // that the patient was actually handed over. It was missing from
+    // this list, and it is the easiest signature on the form to skip:
+    // it sits inline beside the practitioner's name rather than in a
+    // signature block of its own, and nothing downstream asks for it
+    // again. Once the crew has left the facility it cannot be obtained
+    // at all, so the submit review is the last useful moment to ask.
+    // The early return above already exempts DOD / RHT / refused-
+    // treatment calls, where there is no handover to sign for.
+    if (missing(sigs.handover_signature)) {
+      push('Handover signature (receiving practitioner)', 'handover_signature');
+    }
+
+    // Courtesy calls are non-billable transfers: the crew form never
+    // asks for a billing type or a debtor, and the PDF omits the
+    // Billing Information block for them entirely. So neither can be
+    // "missing" — flagging them made the review demand fields that do
+    // not exist on the call, with no way to satisfy it.
+    //
+    // Everything above this line still applies to a courtesy call: it
+    // is a real transfer with a real handover, so the ward, receiving
+    // practitioner, condition, sticker and signatures are all still
+    // checked.
+    const billableCall = fd.call_type !== 'COURTESY';
+
+    // Medical aid billing — every field on the card.
+    if (billableCall && fd.billing_type === 'MED AID') {
+      if (missing(fd.medical_scheme)) push('Medical scheme', 'medical_scheme');
+      if (missing(fd.medical_aid_number)) push('Membership number (med aid)', 'medical_aid_number');
+      if (missing(fd.dependent_number)) push('Dependent code (med aid)', 'dependent_number');
+      if (missing(fd.scheme_option)) push('Plan / option (med aid)', 'scheme_option');
+      if (missing(fd.main_member_id)) push('Main member ID (med aid)', 'main_member_id');
+    }
+
+    // Debtor — same rules as the patient, unless marked same-as-patient
+    // (PVT billing has no debtor section at all).
+    const debtorSame = Array.isArray(fd.flags) && fd.flags.includes('debtor_same_as_patient');
+    // `billing_type !== 'PVT'` alone was true on a courtesy call, where
+    // billing_type is never set at all — which is exactly how a call
+    // with no debtor section ended up being told its debtor was
+    // incomplete.
+    if (billableCall && fd.billing_type !== 'PVT' && !debtorSame) {
+      if (missing(fd.debtor_gender)) push('Debtor gender', 'debtor_gender');
+      if (missing(fd.debtor_name)) push('Debtor first name', 'debtor_name');
+      if (missing(fd.debtor_surname)) push('Debtor surname', 'debtor_surname');
+      if (missing(fd.debtor_phone_cell)) push('Debtor cell number', 'debtor_phone_cell');
+    }
+    return warn;
+  };
+
   // The billing pipeline creates the Case asynchronously after submit, so a
   // fresh 202 carries no case_id. When a facility email was captured we need
   // that id to route to the PRF view (where the email auto-sends), so poll
@@ -5945,6 +6080,26 @@ export default function DigitalPRFForm() {
       submitInFlightRef.current = false;
       return;
     }
+    // ── Completeness gate — THE hard stop before this PRF is locked ──────────
+    //
+    // Evaluated here, in the submit path, and unconditionally. It used to be
+    // implicit in the summary-review gate below, which only opened while
+    // `!allCrewSigned()`: after the crew had signed off once, every later tap
+    // on Submit skipped the review entirely and locked the PRF with whatever
+    // was — or wasn't — captured. That is how an IFT/IHT reached the billing
+    // pipeline with its whole handover block, both leg times and all three
+    // T&C signatures missing, and a submitted PRF cannot be edited afterwards.
+    //
+    // Deliberately BEFORE the crew sign-off gate: there is no point collecting
+    // signatures for a record that is not finished, and a signature captured
+    // against an incomplete record is the wrong thing to have on file.
+    const outstanding = collectReviewWarnings();
+    if (outstanding.length > 0) {
+      submitInFlightRef.current = false;
+      setSummaryReviewOpen(true);   // renders the same list, tappable
+      return;
+    }
+
     // Summary review gate — show the crew a read-only summary of everything
     // they entered so they can spot typos before signing. The "Looks Good"
     // button in the modal closes it and calls handleSubmit again.
@@ -6006,11 +6161,50 @@ export default function DigitalPRFForm() {
             handleSessionExpired();
             return;
           }
-          // Offline / 500: fall through to the submit below, which routes to the
+          // Offline: fall through to the submit below, which routes to the
           // offline outbox (buildSavePayload carries the signatures) so nothing
-          // is lost.
+          // is lost. A server that ANSWERED and refused is handled after the
+          // loop — see the terminal-refusal branch below.
           break;
         }
+      }
+
+      // THE SERVER ANSWERED AND REFUSED (413 / 422 / 429 / 5xx) — do not submit.
+      //
+      // The `break` above was documented as "falls through to the submit, which
+      // routes to the offline outbox ... so nothing is lost". That is only true
+      // when the network is DOWN. With the network up and the server refusing
+      // this one request, POST /submit succeeds: the row is locked at whatever
+      // the last good autosave left there, clearLocalDraft() deletes the only
+      // other copy, and the crew is told "PRF submitted successfully". On the
+      // final screen — where the handover block, the leg times, the T&C
+      // signatures and the crew sign-off are all captured, and where no phase
+      // change ever fires another save — the last good autosave can be the
+      // whole rest of the call ago.
+      //
+      // A 413 is the concrete case: form_data carries every base64 attachment,
+      // and the hospital sticker is captured on this same last screen.
+      if (!saved && lastCode !== undefined && lastCode !== 409) {
+        setSubmit(false);
+        submitInFlightRef.current = false;
+        if (lastCode === 413) {
+          // Terminal and not retryable — the request will be exactly this big
+          // next time, so queueing it only parks a dead entry in the outbox.
+          // Only the crew can fix it, and the local draft still holds
+          // everything, so say so plainly rather than pretend it will send.
+          alert(
+            saveErrorMessage('too-large') ||
+            'This PRF is too large to send. Remove or retake the largest attachment, then submit again.',
+          );
+        } else {
+          await queueToOutbox(buildSavePayload());
+          alert(
+            'Could not save the last part of this PRF to the server, so it has NOT ' +
+            'been submitted.\n\nYour work is kept on this device and will send by ' +
+            'itself. Please keep the app open, then submit again in a minute.',
+          );
+        }
+        return;
       }
 
       // BOTH ATTEMPTS LOST THE VERSION RACE — do not submit anyway.
@@ -6358,7 +6552,9 @@ export default function DigitalPRFForm() {
       />
     );
     return (
-      <div style={{ borderTop: `1px solid ${S200}`, background: W }}>
+      // Anchored so the submit review can jump the crew to an uncaptured leg
+      // time. Each timeKey appears in exactly one row, so the id is unique.
+      <div id={`prf-field-${row.timeKey}`} style={{ borderTop: `1px solid ${S200}`, background: W }}>
         <div style={{ display: 'grid', gridTemplateColumns: TIME_ROW_COLS, alignItems: 'center' }}>
           <div style={{ padding: '10px 14px', fontSize: '0.78rem', fontWeight: 700, color: S600, borderRight: `1px solid ${S200}`, minWidth: 0, overflow: 'hidden' }}>
             {row.label}
@@ -9716,108 +9912,15 @@ export default function DigitalPRFForm() {
           // When any of these are empty the review modal shows ONLY this list
           // (full page) and hides the phase carousel + submit path, so the crew
           // must go back and complete them instead of skipping to submission.
-          // Skipped entirely when the patient refused treatment/transport or
-          // for a Declaration of Death — those calls legitimately leave these
-          // sections empty, so they are never gated. med_aid_dec_death catches
-          // the Resus declared dead mid-call: the Undertaker handover replaces
-          // the normal one, so the practitioner-number / condition / sticker /
-          // signature fields below no longer exist on the form.
           // Each warning carries the field key it flags, so tapping the item
           // closes the popup and jumps the crew straight to that field
           // (scroll + amber flash via jumpToField, incl. cross-phase).
-          const reviewWarnings: { text: string; field: string }[] = (() => {
-            const warn: { text: string; field: string }[] = [];
-            if (fd.call_type === 'DOD' || fd.call_type === 'RHT' || fd.patient_refused_treatment || fd.med_aid_dec_death) return warn;
-            const missing = (v: any) => v === undefined || v === null || String(v).trim() === '';
-            const push = (text: string, field: string) => warn.push({ text, field });
-
-            // Patient information (ID, passport, DOB, age, home/work phones,
-            // address, suburb and code are intentionally not flagged).
-            if (missing(fd.gender)) push('Patient gender', 'gender');
-            if (missing(fd.patient_name)) push('Patient first name', 'patient_name');
-            if (missing(fd.patient_surname)) push('Patient surname', 'patient_surname');
-            if (missing(fd.patient_phone_cell)) push('Patient cell number', 'patient_phone_cell');
-
-            // Priority — Resus never captures one, so skip there.
-            if (fd.call_type !== 'RESUS' && missing(fd.priority)) push('Patient priority', 'priority');
-
-            // Handover details — every field; the destination→email pairing
-            // gets its own message because the auto-email depends on it.
-            if (missing(fd.receiving_facility)) {
-              push('Destination (handover details)', 'receiving_facility');
-            } else if (missing(fd.handover_doctor_email)) {
-              push('Receiving facility email — the destination is filled in but no email was captured, so the PRF cannot be emailed to the facility', 'handover_doctor_email');
-            }
-            if (missing(fd.ward)) push('Ward (handover details)', 'ward');
-            // The handover card's "Receiving Practitioner" input saves to
-            // receiving_doctor (handover_name is only the DOD/undertaker
-            // variant) — accept either, or a filled field stays falsely flagged.
-            if (missing(fd.receiving_doctor) && missing(fd.handover_name)) push('Receiving practitioner (handover details)', 'receiving_doctor');
-            if (missing(fd.handover_qualification)) push('Practitioner number (handover details)', 'handover_qualification');
-            if (missing(fd.handover_notes)) push('Condition on handover', 'handover_notes');
-
-            // Hospital sticker — not expected for private cash patients.
-            const pvtCash = fd.billing_type === 'PVT' && fd.pvt_payment_method === 'Cash';
-            if (!pvtCash && missing(fd.hospital_sticker)) push('Hospital sticker', 'hospital_sticker');
-
-            // Patient / representative signature. The RESUS exemption is gone:
-            // it existed only because the T&C block holding the pad was skipped
-            // on a Resus, so no Resus PRF could ever satisfy the check. The
-            // block now renders for every call type, so the signature is
-            // obtainable and worth asking for.
-            if (missing(sigs.patient_signature) && missing(fd.tc_patient_signature)) {
-              push('Patient / representative signature', 'tc_patient_signature');
-            }
-
-            // Handover signature — the receiving practitioner's confirmation
-            // that the patient was actually handed over. It was missing from
-            // this list, and it is the easiest signature on the form to skip:
-            // it sits inline beside the practitioner's name rather than in a
-            // signature block of its own, and nothing downstream asks for it
-            // again. Once the crew has left the facility it cannot be obtained
-            // at all, so the submit review is the last useful moment to ask.
-            // The early return above already exempts DOD / RHT / refused-
-            // treatment calls, where there is no handover to sign for.
-            if (missing(sigs.handover_signature)) {
-              push('Handover signature (receiving practitioner)', 'handover_signature');
-            }
-
-            // Courtesy calls are non-billable transfers: the crew form never
-            // asks for a billing type or a debtor, and the PDF omits the
-            // Billing Information block for them entirely. So neither can be
-            // "missing" — flagging them made the review demand fields that do
-            // not exist on the call, with no way to satisfy it.
-            //
-            // Everything above this line still applies to a courtesy call: it
-            // is a real transfer with a real handover, so the ward, receiving
-            // practitioner, condition, sticker and signatures are all still
-            // checked.
-            const billableCall = fd.call_type !== 'COURTESY';
-
-            // Medical aid billing — every field on the card.
-            if (billableCall && fd.billing_type === 'MED AID') {
-              if (missing(fd.medical_scheme)) push('Medical scheme', 'medical_scheme');
-              if (missing(fd.medical_aid_number)) push('Membership number (med aid)', 'medical_aid_number');
-              if (missing(fd.dependent_number)) push('Dependent code (med aid)', 'dependent_number');
-              if (missing(fd.scheme_option)) push('Plan / option (med aid)', 'scheme_option');
-              if (missing(fd.main_member_id)) push('Main member ID (med aid)', 'main_member_id');
-            }
-
-            // Debtor — same rules as the patient, unless marked same-as-patient
-            // (PVT billing has no debtor section at all).
-            const debtorSame = Array.isArray(fd.flags) && fd.flags.includes('debtor_same_as_patient');
-            // `billing_type !== 'PVT'` alone was true on a courtesy call, where
-            // billing_type is never set at all — which is exactly how a call
-            // with no debtor section ended up being told its debtor was
-            // incomplete.
-            if (billableCall && fd.billing_type !== 'PVT' && !debtorSame) {
-              if (missing(fd.debtor_gender)) push('Debtor gender', 'debtor_gender');
-              if (missing(fd.debtor_name)) push('Debtor first name', 'debtor_name');
-              if (missing(fd.debtor_surname)) push('Debtor surname', 'debtor_surname');
-              if (missing(fd.debtor_phone_cell)) push('Debtor cell number', 'debtor_phone_cell');
-            }
-            return warn;
-          })();
+          //
+          // The list itself is built by collectReviewWarnings() at component
+          // scope — handleSubmit REFUSES to submit while it is non-empty, so
+          // this is the drawing of a gate that is actually enforced, not the
+          // gate itself. Both read the same function; they cannot disagree.
+          const reviewWarnings = collectReviewWarnings();
 
           // ── Card 1: Patient Information + Billing ──
           const card1Sections: SummarySection[] = [];
