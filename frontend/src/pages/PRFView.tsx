@@ -3498,6 +3498,47 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
               </>
             )}
 
+            {/* Items the crew could not capture, and why.
+                The submit gate blocks an incomplete PRF; a crew standing in a
+                casualty that will not print a sticker, or in front of a sister
+                who will not sign, can waive those specific items by writing a
+                reason. This is where that reason surfaces — without it the
+                waiver would be a silent bypass and the back office would see
+                only an incomplete record with no explanation.
+                Only ever populated for call types the gate applies to, all of
+                which render this clinical sheet. */}
+            {!isBlank(fd.submit_override_reason) && (
+              <>
+                <SectionHead label="Not Captured — Crew Motivation" />
+                <div style={{
+                  padding: '6px 9px', fontSize: '0.72rem', color: INK,
+                  whiteSpace: 'pre-wrap', lineHeight: 1.4,
+                  borderTop: `1px solid ${LN}`, background: SOFT_BG,
+                }}>
+                  {Array.isArray(fd.submit_override_items) && fd.submit_override_items.length > 0 && (
+                    <div style={{ fontWeight: 700, marginBottom: 2 }}>
+                      {(fd.submit_override_items as Array<string | { label?: string }>)
+                        .map(i => (typeof i === 'string' ? i : i?.label))
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </div>
+                  )}
+                  <div>{fd.submit_override_reason}</div>
+                  {(fd.submit_override_by || fd.submit_override_at) && (
+                    <div style={{ marginTop: 2, fontSize: '0.66rem', color: MUT }}>
+                      {[
+                        fd.submit_override_by,
+                        (() => {
+                          const t = new Date(fd.submit_override_at);
+                          return Number.isNaN(t.getTime()) ? null : t.toLocaleString('en-ZA');
+                        })(),
+                      ].filter(Boolean).join(' — ')}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+
             {/* IV Therapy + Medication / Infusion moved to column 2 (below
                 History) so this column can host the full vitals time-series
                 and let Management absorb any leftover height. */}

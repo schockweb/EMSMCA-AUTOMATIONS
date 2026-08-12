@@ -275,3 +275,106 @@ describe('The final save must land before the PRF is locked', () => {
       .toMatch(/has NOT been submitted|too large/i);
   });
 });
+
+/**
+ * The waiver: a crew standing in a casualty that will not print a sticker, or
+ * in front of a sister who will not sign, must still be able to submit. What
+ * they may NOT do is waive something only they control — their own clock,
+ * their own destination, their own typing. That split is the whole design, so
+ * it is what these tests pin.
+ */
+describe('Submit with a reason (override)', () => {
+  const OVERRIDE_BTN = /Can't get these/i;
+
+  /** Only the hospital sticker outstanding — a third party would not supply it. */
+  const softOnly = () => {
+    const { hospital_sticker: _drop, ...rest } = COMPLETE_HANDOVER as any;
+    seedDraft(
+      { ...rest, handover_doctor_email: 'ops@hospital.co.za' },
+      COMPLETE_TIMES, COMPLETE_SIGS,
+    );
+  };
+
+  it('offers the waiver when every outstanding item depends on someone else', async () => {
+    softOnly();
+    const { container } = mountForm();
+    await tapSubmit(container);
+
+    expect(screen.queryByRole('button', { name: OVERRIDE_BTN })).not.toBeNull();
+    expect(container.textContent).toMatch(/Hospital sticker/i);
+  });
+
+  it('does NOT offer the waiver while an item only the crew controls is missing', async () => {
+    // Available time is the crew's own clock. Nothing external can withhold it,
+    // so "we could not get it" is never true and there must be no way past it.
+    const { hospital_sticker: _drop, ...rest } = COMPLETE_HANDOVER as any;
+    seedDraft(
+      { ...rest, handover_doctor_email: 'ops@hospital.co.za' },
+      { time_at_destination: COMPLETE_TIMES.time_at_destination },  // no Available
+      COMPLETE_SIGS,
+    );
+    const { container } = mountForm();
+    await tapSubmit(container);
+
+    expect(
+      screen.queryByRole('button', { name: OVERRIDE_BTN }),
+      'a crew was offered a way to waive their own Available time',
+    ).toBeNull();
+    expect(container.textContent).toMatch(/Must be completed/i);
+    expect(submitCalls()).toHaveLength(0);
+  });
+
+  it('submits once a reason is written, and stores what was waived, by whom and when', async () => {
+    softOnly();
+    const { container } = mountForm();
+    await tapSubmit(container);
+
+    fireEvent.click(screen.getByRole('button', { name: OVERRIDE_BTN }));
+    await new Promise(r => setTimeout(r, 150));
+
+    // The waiver names the specific item, not a blanket "some fields".
+    expect(container.textContent).toMatch(/Submit without these\?/i);
+    expect(container.textContent).toMatch(/Hospital sticker/i);
+
+    const box = container.querySelector('#prf-field-submit_override_reason') as HTMLTextAreaElement;
+    expect(box, 'the reason field is missing from the waiver popup').toBeTruthy();
+    fireEvent.change(box, { target: { value: 'Casualty sticker printer was offline; sister on duty confirmed none available.' } });
+    await new Promise(r => setTimeout(r, 150));
+
+    fireEvent.click(screen.getByRole('button', { name: /Record & Submit/i }));
+    await waitFor(() => expect(submitCalls().length).toBe(1), { timeout: 4000 });
+
+    const lastPatch = instance.patch.mock.calls.at(-1)?.[1];
+    expect(lastPatch?.form_data?.submit_override_reason).toMatch(/printer was offline/i);
+    expect(lastPatch?.form_data?.submit_override_items?.map((i: any) => i.field))
+      .toContain('hospital_sticker');
+    expect(lastPatch?.form_data?.submit_override_by, 'the waiver is not attributable')
+      .toMatch(/Mokoena/);
+    expect(lastPatch?.form_data?.submit_override_at).toBeTruthy();
+  });
+
+  it('will not let one waiver cover an item it never named', async () => {
+    // A waiver recorded earlier for the sticker must not carry a later gap
+    // through with it — otherwise it becomes a permanent dismiss button.
+    const { hospital_sticker: _s, handover_qualification: _q, ...rest } = COMPLETE_HANDOVER as any;
+    seedDraft(
+      {
+        ...rest,
+        handover_doctor_email: 'ops@hospital.co.za',
+        submit_override_reason: 'Casualty had no sticker printer.',
+        submit_override_items: [{ field: 'hospital_sticker', label: 'Hospital sticker' }],
+        submit_override_at: '2026-08-12T11:00:00Z',
+        submit_override_by: 'A. Mokoena · ECP0012345',
+      },
+      COMPLETE_TIMES, COMPLETE_SIGS,
+    );
+    const { container } = mountForm();
+    await tapSubmit(container);
+
+    expect(
+      submitCalls(),
+      'a stale waiver carried an item it never named past the gate',
+    ).toHaveLength(0);
+    expect(container.textContent).toMatch(/Practitioner number/i);
+  });
+});

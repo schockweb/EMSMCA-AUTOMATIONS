@@ -4318,6 +4318,8 @@ const PRF_TEXT_FIELDS = [
 const PRF_ARRAY_FIELDS = [
   'airway_interventions', 'circulation_interventions',
   'km_review_flags', 'med_aid_dec_death_documents',
+  // The submit-override record. The crew form and the PDF both .map() over it.
+  'submit_override_items',
 ];
 
 function normalizeFormData(data: Record<string, any>): Record<string, any> {
@@ -4434,6 +4436,7 @@ export default function DigitalPRFForm() {
   // Shown when the crew submits with fewer than 3 vital sets — they must record
   // a motivation before the PRF can go through.
   const [vitalsMotivationOpen, setVitalsMotivationOpen] = useState(false);
+  const [overrideOpen, setOverrideOpen] = useState(false);
   // Crew sign-off gate — on Submit, every crew member must sign before the PRF
   // can go through. Signatures are stored in fd.crew_signoff_sigs keyed by crew.
   const [crewSignOffOpen, setCrewSignOffOpen] = useState(false);
@@ -5911,12 +5914,24 @@ export default function DigitalPRFForm() {
   // Hoisted to component scope so the submit path and the modal evaluate the
   // SAME list. Everything here is checked at submit time only — never mid-call
   // (see validatePhase: no gating while the crew is working).
+  //
+  // ── Which items may be overridden ────────────────────────────────────────
+  // `hard: true` means the item can NEVER be waived. The line is drawn on one
+  // question: does obtaining it depend on anyone but this crew?
+  //   HARD  — the crew's own clock, their own destination, their own words,
+  //           their own triage call, their own typing. Nothing external can
+  //           stop them, so "we could not get it" is never true.
+  //   SOFT  — a third party or the patient has to supply it: a hospital
+  //           sticker the facility will not print, a nurse who will not sign,
+  //           a medical-aid card an unconscious patient does not have. Those
+  //           are real at 03:00 and the crew must still be able to submit —
+  //           with a written reason attached to the record (see the override).
   const FACILITY_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  const collectReviewWarnings = (): { text: string; field: string }[] => {
-    const warn: { text: string; field: string }[] = [];
+  const collectReviewWarnings = (): { text: string; field: string; hard: boolean }[] => {
+    const warn: { text: string; field: string; hard: boolean }[] = [];
     if (fd.call_type === 'DOD' || fd.call_type === 'RHT' || fd.patient_refused_treatment || fd.med_aid_dec_death) return warn;
     const missing = (v: any) => v === undefined || v === null || String(v).trim() === '';
-    const push = (text: string, field: string) => warn.push({ text, field });
+    const push = (text: string, field: string, hard = false) => warn.push({ text, field, hard });
 
     // Patient information (ID, passport, DOB, age, home/work phones,
     // address, suburb and code are intentionally not flagged).
@@ -5926,12 +5941,12 @@ export default function DigitalPRFForm() {
     if (missing(fd.patient_phone_cell)) push('Patient cell number', 'patient_phone_cell');
 
     // Priority — Resus never captures one, so skip there.
-    if (fd.call_type !== 'RESUS' && missing(fd.priority)) push('Patient priority', 'priority');
+    if (fd.call_type !== 'RESUS' && missing(fd.priority)) push('Patient priority', 'priority', true);
 
     // Handover details — every field; the destination→email pairing
     // gets its own message because the auto-email depends on it.
     if (missing(fd.receiving_facility)) {
-      push('Destination (handover details)', 'receiving_facility');
+      push('Destination (handover details)', 'receiving_facility', true);
     } else if (missing(fd.handover_doctor_email)) {
       push('Receiving facility email — the destination is filled in but no email was captured, so the PRF cannot be emailed to the facility', 'handover_doctor_email');
     } else if (!FACILITY_EMAIL_RE.test(String(fd.handover_doctor_email).trim())) {
@@ -5941,15 +5956,18 @@ export default function DigitalPRFForm() {
       // the crew got "PRF submitted successfully", the receiving facility got
       // nothing, and the PRF was already locked so the address could not be
       // corrected. Same regex on both sides, checked while it is still fixable.
-      push('Receiving facility email does not look like an email address — check for a missing @ or a typo', 'handover_doctor_email');
+      // HARD, unlike a MISSING address: a facility that has no email is a
+      // fact about the facility, but a typo is a fact about the typing, and
+      // the crew can always fix their own typing.
+      push('Receiving facility email does not look like an email address — check for a missing @ or a typo', 'handover_doctor_email', true);
     }
-    if (missing(fd.ward)) push('Ward (handover details)', 'ward');
+    if (missing(fd.ward)) push('Ward (handover details)', 'ward', true);
     // The handover card's "Receiving Practitioner" input saves to
     // receiving_doctor (handover_name is only the DOD/undertaker
     // variant) — accept either, or a filled field stays falsely flagged.
     if (missing(fd.receiving_doctor) && missing(fd.handover_name)) push('Receiving practitioner (handover details)', 'receiving_doctor');
     if (missing(fd.handover_qualification)) push('Practitioner number (handover details)', 'handover_qualification');
-    if (missing(fd.handover_notes)) push('Condition on handover', 'handover_notes');
+    if (missing(fd.handover_notes)) push('Condition on handover', 'handover_notes', true);
 
     // Leg times. These are the last two captures on the call and both live on
     // the final screen, so nothing downstream ever asks for them again: the
@@ -5958,8 +5976,8 @@ export default function DigitalPRFForm() {
     // no Arrival At Facility time, and two of them with no Available time
     // either — the mileage and response-time calculations have nothing to work
     // from, and the times cannot be reconstructed after the fact.
-    if (!timestamps.time_at_destination) push('Arrival At Facility time', 'time_at_destination');
-    if (!timestamps.time_available) push('Available time', 'time_available');
+    if (!timestamps.time_at_destination) push('Arrival At Facility time', 'time_at_destination', true);
+    if (!timestamps.time_available) push('Available time', 'time_available', true);
 
     // Hospital sticker — not expected for private cash patients.
     const pvtCash = fd.billing_type === 'PVT' && fd.pvt_payment_method === 'Cash';
@@ -6023,6 +6041,35 @@ export default function DigitalPRFForm() {
     }
     return warn;
   };
+
+  // ── Override: submit with a written reason ───────────────────────────────
+  //
+  // Some items genuinely cannot be obtained — the facility will not print a
+  // sticker, the receiving nurse will not sign, the patient is unidentified.
+  // Before this existed the crew's only options were to invent a value or to
+  // stand in a corridor unable to submit, so the gate had to be waivable. It
+  // is deliberately NOT a dismiss button:
+  //   • only SOFT items can be waived (see the hard/soft split above);
+  //   • a written reason is required, and it is stored ON the PRF;
+  //   • the exact items waived, the crew member and the timestamp are stored
+  //     with it, and all of it prints on the PDF for the back office;
+  //   • the recorded waiver must still COVER everything outstanding, so it
+  //     cannot be recorded once and then reused after something else is
+  //     cleared.
+  const overrideItems = (): Array<{ field: string; label: string }> =>
+    Array.isArray(fd.submit_override_items) ? fd.submit_override_items : [];
+  const overrideCovers = (soft: Array<{ field: string }>): boolean => {
+    if (!(fd.submit_override_reason ?? '').trim()) return false;
+    const covered = new Set(overrideItems().map(i => i.field));
+    return soft.every(w => covered.has(w.field));
+  };
+  // Short label for the record: the message up to the explanatory em-dash.
+  const overrideLabel = (text: string) => text.split(' — ')[0].trim();
+  const clearOverride = () => setFd(p => ({
+    ...p,
+    submit_override_reason: '', submit_override_items: [],
+    submit_override_at: null, submit_override_by: null,
+  }));
 
   // The billing pipeline creates the Case asynchronously after submit, so a
   // fresh 202 carries no case_id. When a facility email was captured we need
@@ -6165,8 +6212,13 @@ export default function DigitalPRFForm() {
     // Deliberately BEFORE the crew sign-off gate: there is no point collecting
     // signatures for a record that is not finished, and a signature captured
     // against an incomplete record is the wrong thing to have on file.
+    // Items only this crew controls are never waivable; the rest can be
+    // waived with a written reason (see collectReviewWarnings and the override
+    // modal). A recorded waiver must still cover everything outstanding.
     const outstanding = collectReviewWarnings();
-    if (outstanding.length > 0) {
+    const hardOutstanding = outstanding.filter(w => w.hard);
+    const softOutstanding = outstanding.filter(w => !w.hard);
+    if (hardOutstanding.length > 0 || (softOutstanding.length > 0 && !overrideCovers(softOutstanding))) {
       submitInFlightRef.current = false;
       setSummaryReviewOpen(true);   // renders the same list, tappable
       return;
@@ -9817,6 +9869,79 @@ export default function DigitalPRFForm() {
           </div>
         )}
 
+        {/* ── Submit with a reason ──────────────────────────────────────────
+             The waiver for items a third party would not supply. Reached only
+             from the review gate, and only when every outstanding item is
+             waivable. The reason is stored on the PRF and prints on the PDF,
+             so the back office sees WHAT was not captured, WHY, by WHOM and
+             WHEN rather than a silently incomplete record. */}
+        {overrideOpen && (() => {
+          const items = overrideItems();
+          const reason = (fd.submit_override_reason ?? '').trim();
+          const ready = reason.length >= 10;
+          return (
+            <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(15,23,42,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+              <div style={{ background: W, borderRadius: 16, padding: '22px 20px', maxWidth: 440, width: '100%', maxHeight: '88vh', overflowY: 'auto', boxShadow: '0 12px 40px rgba(0,0,0,0.25)' }}>
+                <div style={{ fontSize: '1rem', fontWeight: 800, color: S900, marginBottom: 8 }}>
+                  Submit without these?
+                </div>
+                <div style={{ fontSize: '0.84rem', color: S600, lineHeight: 1.5, marginBottom: 12 }}>
+                  These will be recorded as not captured, with your reason, on the PRF:
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14 }}>
+                  {items.map((it, i) => (
+                    <div key={i} style={{
+                      padding: '8px 11px', borderRadius: 9, background: '#fffbeb',
+                      border: '1px solid #fde68a', fontSize: '0.8rem',
+                      fontWeight: 700, color: '#92400e', lineHeight: 1.35,
+                    }}>
+                      {it.label}
+                    </div>
+                  ))}
+                </div>
+                <div style={{ fontSize: '0.8rem', fontWeight: 700, color: S700, marginBottom: 6 }}>
+                  Why could these not be captured?
+                </div>
+                {/* Voice-to-text, like the vitals motivation — gloves-on. */}
+                <VoiceTxt fk="submit_override_reason" ph="e.g. Casualty had no sticker printer; sister on duty refused to sign." rows={4} />
+                <div style={{ fontSize: '0.74rem', color: S400, lineHeight: 1.45, marginBottom: 14 }}>
+                  Recorded against your name and the time. The receiving facility
+                  and the billing office will see this on the PRF.
+                </div>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // Backing out must leave NO trace: a half-recorded waiver
+                      // with no reason would print on the PDF as if the crew
+                      // had declared something unobtainable.
+                      clearOverride();
+                      setOverrideOpen(false);
+                      submitInFlightRef.current = false;
+                      setSummaryReviewOpen(true);
+                    }}
+                    style={{ flex: 1, padding: '12px 0', borderRadius: 10, fontWeight: 700, border: `2px solid ${S200}`, background: W, color: S600, cursor: 'pointer' }}
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!ready}
+                    onClick={() => { setOverrideOpen(false); submitInFlightRef.current = false; void handleSubmit(); }}
+                    style={{
+                      flex: 2, padding: '12px 0', borderRadius: 10, fontWeight: 800, border: 'none', color: W,
+                      background: ready ? `linear-gradient(135deg,${ROSE},#be123c)` : S400,
+                      cursor: ready ? 'pointer' : 'not-allowed',
+                    }}
+                  >
+                    Record &amp; Submit
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
         {/* Crew sign-off — every crew member signs before the PRF is submitted. */}
         {crewSignOffOpen && (() => {
           const signList = getCrewSignList();
@@ -9944,6 +10069,12 @@ export default function DigitalPRFForm() {
           // this is the drawing of a gate that is actually enforced, not the
           // gate itself. Both read the same function; they cannot disagree.
           const reviewWarnings = collectReviewWarnings();
+          // Split for display exactly as handleSubmit splits for the gate.
+          const hardWarnings = reviewWarnings.filter(w => w.hard);
+          const softWarnings = reviewWarnings.filter(w => !w.hard);
+          // The waiver is offered only when everything left is waivable — a
+          // crew cannot reason their way past their own clock.
+          const canOverride = hardWarnings.length === 0 && softWarnings.length > 0;
 
           // ── Card 1: Patient Information + Billing ──
           const card1Sections: SummarySection[] = [];
@@ -10247,34 +10378,55 @@ export default function DigitalPRFForm() {
                         ⚠ {reviewWarnings.length} item{reviewWarnings.length > 1 ? 's' : ''} not filled in
                       </div>
                       <div style={{ fontSize: '0.78rem', color: '#92400e', lineHeight: 1.5, marginBottom: 12 }}>
-                        These fields still need to be completed before you can submit. Tap an item to go straight to that field.
+                        Tap an item to go straight to that field.
                       </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-                        {reviewWarnings.map((w, wi) => (
-                          <button
-                            key={wi}
-                            type="button"
-                            onClick={() => {
-                              setSummaryReviewOpen(false);
-                              submitInFlightRef.current = false;
-                              // Let the popup unmount before scrolling/sweeping
-                              // so the flashed field isn't behind the overlay.
-                              window.setTimeout(() => jumpToField(w.field), 60);
-                            }}
-                            style={{
-                              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                              gap: 10, width: '100%', textAlign: 'left',
-                              padding: '10px 12px', borderRadius: 10,
-                              border: '1.5px solid #fecaca', background: W,
-                              fontSize: '0.82rem', fontWeight: 700, color: '#7f1d1d',
-                              lineHeight: 1.45, cursor: 'pointer',
-                            }}
-                          >
-                            <span>{w.text}</span>
-                            <span style={{ flexShrink: 0, fontWeight: 900, color: '#b91c1c' }}>›</span>
-                          </button>
-                        ))}
-                      </div>
+                      {/* Two groups, because they are not the same kind of
+                          problem. The first can only be completed; the second
+                          can be submitted with a written reason when a
+                          facility or a patient cannot supply it. */}
+                      {([
+                        ['Must be completed', hardWarnings],
+                        [hardWarnings.length ? 'Can be submitted with a reason' : '', softWarnings],
+                      ] as Array<[string, typeof reviewWarnings]>).map(([heading, group], gi) => (
+                        group.length === 0 ? null : (
+                          <div key={gi} style={{ marginBottom: gi === 0 && softWarnings.length ? 12 : 0 }}>
+                            {heading && (
+                              <div style={{
+                                fontSize: '0.72rem', fontWeight: 900, color: '#92400e',
+                                textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6,
+                              }}>
+                                {heading}
+                              </div>
+                            )}
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                              {group.map((w, wi) => (
+                                <button
+                                  key={wi}
+                                  type="button"
+                                  onClick={() => {
+                                    setSummaryReviewOpen(false);
+                                    submitInFlightRef.current = false;
+                                    // Let the popup unmount before scrolling
+                                    // so the flashed field isn't behind it.
+                                    window.setTimeout(() => jumpToField(w.field), 60);
+                                  }}
+                                  style={{
+                                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                    gap: 10, width: '100%', textAlign: 'left',
+                                    padding: '10px 12px', borderRadius: 10,
+                                    border: '1.5px solid #fecaca', background: W,
+                                    fontSize: '0.82rem', fontWeight: 700, color: '#7f1d1d',
+                                    lineHeight: 1.45, cursor: 'pointer',
+                                  }}
+                                >
+                                  <span>{w.text}</span>
+                                  <span style={{ flexShrink: 0, fontWeight: 900, color: '#b91c1c' }}>›</span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )
+                      ))}
                     </div>
                   </div>
                 ) : (
@@ -10290,20 +10442,54 @@ export default function DigitalPRFForm() {
                   display: 'flex', gap: 10, background: S50, flexShrink: 0,
                 }}>
                   {reviewWarnings.length > 0 ? (
-                    /* No submit path while items are outstanding — the only way
-                       forward is back to the form to complete them. */
-                    <button
-                      type="button"
-                      onClick={() => { setSummaryReviewOpen(false); submitInFlightRef.current = false; }}
-                      style={{
-                        flex: 1, padding: '14px 0', borderRadius: 12, fontWeight: 800,
-                        border: 'none', color: W, fontSize: '0.9rem',
-                        background: `linear-gradient(135deg, ${ROSE}, #be123c)`,
-                        cursor: 'pointer', boxShadow: '0 4px 16px rgba(225,29,72,0.3)',
-                      }}
-                    >
-                      Go Back &amp; Complete
-                    </button>
+                    /* Completing them stays the primary path and the loud
+                       button. The waiver is deliberately quiet, and only
+                       appears when every remaining item is actually waivable. */
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => { setSummaryReviewOpen(false); submitInFlightRef.current = false; }}
+                        style={{
+                          flex: canOverride ? 2 : 1, padding: '14px 0', borderRadius: 12, fontWeight: 800,
+                          border: 'none', color: W, fontSize: '0.9rem',
+                          background: `linear-gradient(135deg, ${ROSE}, #be123c)`,
+                          cursor: 'pointer', boxShadow: '0 4px 16px rgba(225,29,72,0.3)',
+                        }}
+                      >
+                        Go Back &amp; Complete
+                      </button>
+                      {canOverride && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            // Stamp WHAT is being waived, by WHOM and WHEN as
+                            // the modal opens, so that the reason the crew
+                            // then types is already sitting beside them in
+                            // `fd` when Record & Submit re-enters
+                            // handleSubmit — the same ordering the vitals
+                            // motivation popup relies on.
+                            setFd(p => ({
+                              ...p,
+                              submit_override_items: softWarnings.map(w => ({
+                                field: w.field, label: overrideLabel(w.text),
+                              })),
+                              submit_override_at: new Date().toISOString(),
+                              submit_override_by: [profile?.name, profile?.hpcsa_number]
+                                .filter(Boolean).join(' \u00b7 ') || 'Crew',
+                            }));
+                            setSummaryReviewOpen(false);
+                            setOverrideOpen(true);
+                          }}
+                          style={{
+                            flex: 1, padding: '14px 0', borderRadius: 12, fontWeight: 700,
+                            border: `2px solid ${S200}`, background: W, color: S600,
+                            fontSize: '0.8rem', lineHeight: 1.25, cursor: 'pointer',
+                          }}
+                        >
+                          Can&apos;t get these
+                        </button>
+                      )}
+                    </>
                   ) : (
                     <>
                       <button

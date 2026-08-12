@@ -568,3 +568,45 @@ describe('PRF PDF render — blank passport rows', () => {
     expect(screen.queryAllByText('Signatures', { exact: true })).toHaveLength(0);
   });
 });
+
+// ── The submit waiver must be visible to the back office ──────────────────
+// A crew can submit with specific items uncaptured by writing a reason (see
+// the submit completeness gate). If that reason did not print, the waiver
+// would be a silent bypass: the billing office would see an incomplete PRF
+// with no explanation and no way to tell a refusal apart from an omission.
+describe('PRF PDF render — items not captured', () => {
+  const withOverride = (extra: Record<string, unknown>) => ({
+    ...PRF_FIXTURE,
+    form_data: { ...FD, ...extra },
+  });
+
+  it('prints the waived items, the reason and who recorded it', async () => {
+    vi.mocked(axios.get).mockResolvedValue({
+      data: withOverride({
+        submit_override_reason: 'Sentinel-casualty sticker printer offline all night.',
+        submit_override_items: [
+          { field: 'hospital_sticker', label: 'Sentinel-Waived-Sticker' },
+          { field: 'handover_signature', label: 'Sentinel-Waived-Signature' },
+        ],
+        submit_override_by: 'Sentinel-Waiver-Crew',
+        submit_override_at: '2026-06-11T10:05:00Z',
+      }),
+    });
+    renderPrfView();
+    await screen.findByText(/Sipho-Sentinel/);
+
+    expect(screen.queryAllByText(/Not Captured/i).length,
+      'the waiver has no heading on the PDF').toBeGreaterThan(0);
+    expectVisible('Sentinel-Waived-Sticker');
+    expectVisible('Sentinel-Waived-Signature');
+    expectVisible('sticker printer offline all night');
+    expectVisible('Sentinel-Waiver-Crew');
+  });
+
+  it('prints nothing at all on the ordinary PRF that has no waiver', async () => {
+    vi.mocked(axios.get).mockResolvedValue({ data: PRF_FIXTURE });
+    renderPrfView();
+    await screen.findByText(/Sipho-Sentinel/);
+    expect(screen.queryAllByText(/Not Captured/i)).toHaveLength(0);
+  });
+});
