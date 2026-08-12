@@ -106,6 +106,32 @@ async def test_creating_a_client_records_who_did_it(client, auth_headers, create
 
 
 @pytest.mark.asyncio
+async def test_the_new_audit_row_does_not_make_a_fresh_client_undeletable(client, auth_headers):
+    """A client onboarded by mistake must still be removable.
+
+    `delete_provider` refuses once clinical history exists, counting audit rows
+    — so writing an audit row at CREATE time is one edit away from making every
+    brand-new client permanently undeletable, and the company name is a field no
+    screen can repair. It does not, because that count is scoped to
+    `crew_member_id` (the POPIA patient-access trail) while PROVIDER_CREATED
+    carries only `user_id` and `entity_id`. Asserted rather than assumed:
+    correcting a mistyped company name is the documented recovery.
+    """
+    res = await client.post("/api/providers", json=_company("deletable"), headers=auth_headers)
+    assert res.status_code in (200, 201), res.text
+    pid = res.json()["id"]
+
+    gone = await client.delete(f"/api/providers/{pid}", headers=auth_headers)
+    assert gone.status_code in (200, 204), (
+        f"a client created minutes ago can no longer be deleted: "
+        f"{gone.status_code} {gone.text}"
+    )
+    # 409 is the specific regression this guards against — the "has clinical
+    # history" refusal firing on a client that has none.
+    assert gone.status_code != 409, "the create-time audit row is being read as clinical history"
+
+
+@pytest.mark.asyncio
 async def test_a_refused_create_leaves_no_audit_row_claiming_success(client, auth_headers):
     """The audit row is added before the commit, so a failed create must not
     leave one behind asserting a client was made."""
