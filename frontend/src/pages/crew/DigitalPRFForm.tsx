@@ -1683,7 +1683,7 @@ const HospitalPicker = ({ wardKey }: { wardKey?: string }) => {
   const wardOptions = selectedHospital?.wards?.length ? selectedHospital.wards : COMMON_WARDS;
 
   return (
-    <div ref={wrapRef} style={{ position: 'relative', marginBottom: 14 }}>
+    <div id={`prf-field-${fk}`} ref={wrapRef} style={{ position: 'relative', marginBottom: 14 }}>
       {/* Text input */}
       <input
         type="text"
@@ -2727,7 +2727,7 @@ const DepCodePicker = () => {
   const btn = (label: string, on: boolean, onClick: () => void) => (
     <button key={label} type="button" onClick={onClick} style={{ flex: '0 0 auto', minWidth: 40, padding: '7px 10px', borderRadius: 7, fontSize: '0.74rem', fontWeight: 700, border: `1.5px solid ${on ? c : '#e2e8f0'}`, background: on ? `${c}18` : '#ffffff', color: on ? c : '#475569', cursor: 'pointer', transition: 'all 0.15s', boxShadow: on ? `0 0 0 2px ${c}22` : '0 1px 2px rgba(0,0,0,0.03)' }}>{label}</button>
   );
-  return <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14, alignItems: 'center' }}>
+  return <div id="prf-field-dependent_number" style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14, alignItems: 'center' }}>
     {PRESETS.map(o => btn(o, !editing && cur === o, () => { setEditing(false); sf('dependent_number', o); }))}
     {btn('…', editing || isCustom, () => { setEditing(true); if (PRESETS.includes(cur)) sf('dependent_number', ''); })}
     {(editing || isCustom) && (
@@ -5538,7 +5538,30 @@ export default function DigitalPRFForm() {
     patient_refused_transport: 6, vehicle_tracking_report: 6, is_multi_patient: 6,
     supervising_practitioner_pr: 6, signature_refused_reason: 6,
   };
-  const jumpSweepRef = useRef<{ field: string; queue: number[] } | null>(null);
+  // Tapping a review item navigates AT MOST ONCE, to that field's home phase,
+  // and then stops.
+  //
+  // It used to sweep: on a miss it walked a candidate queue [home, 0, 2, 1, 4, 5]
+  // calling setPhase on each, hoping the element would turn up. Every hop is a
+  // visible phase change, so a crew tapping "Patient gender" watched the form
+  // march through Dispatch, Patient Info, Transport and Handover on its own —
+  // the reported "it redirects me through phase 1, 2, 3 and 4".
+  //
+  // The sweep fired far more often than a missing map entry would suggest,
+  // because flashFieldEl looks up `prf-field-<key>` and only Inp/VoiceTxt/
+  // ComboInp emit that id automatically. Five of the twenty-three fields the
+  // review can flag are Toggles, pickers or button grids — gender,
+  // debtor_gender, priority, dependent_number, receiving_facility — so they
+  // could NEVER be found and always swept the whole form. They now carry
+  // explicit anchors. (The signature pads and the hospital sticker were already
+  // anchored by hand, which is why they behaved.)
+  //
+  // The sweep is gone regardless: landing on the right phase and stopping is
+  // the useful outcome, and a wrong guess must not drag the crew around the
+  // form. Any field added to the review list needs a FIELD_HOME_PHASE entry and
+  // an anchor, or tapping it will simply do nothing — which is the correct
+  // failure mode here.
+  const jumpTargetRef = useRef<string | null>(null);
   const flashFieldEl = (field: string): boolean => {
     const id = FIELD_ANCHOR[field] || `prf-field-${field}`;
     const el = document.getElementById(id);
@@ -5548,33 +5571,32 @@ export default function DigitalPRFForm() {
     window.setTimeout(() => el.classList.remove('prf-jump-flash'), 1700);
     return true;
   };
-  const advanceJumpSweep = () => {
-    const st = jumpSweepRef.current;
-    if (!st) return;
-    const next = st.queue.shift();
-    if (next === undefined) { jumpSweepRef.current = null; return; }
-    setPhase(next);
-  };
   const jumpToField = (field?: string) => {
     if (!field) return;
-    if (flashFieldEl(field)) return;
+    if (flashFieldEl(field)) return;          // already on screen — no navigation
     const home = FIELD_HOME_PHASE[field];
-    const order = [home, 0, 2, 1, 4, 5].filter((p): p is number => typeof p === 'number');
-    jumpSweepRef.current = { field, queue: Array.from(new Set(order)) };
-    advanceJumpSweep();
+    if (typeof home !== 'number') return;     // unknown field: stay put, never guess
+    jumpTargetRef.current = field;
+    setPhase(home);                           // exactly one navigation
   };
+  // After that single navigation, poll briefly for the element and flash it.
+  // Bounded and self-cancelling: the pending timer is tracked so a phase change
+  // mid-poll cannot leave an orphaned chain running, and the target is cleared
+  // on the first attempt regardless of outcome so it can never re-fire later.
   useEffect(() => {
-    const st = jumpSweepRef.current;
-    if (!st) return;
+    const field = jumpTargetRef.current;
+    if (!field) return;
+    jumpTargetRef.current = null;
     let tries = 0;
+    let timer = 0;
     const tick = () => {
-      if (!jumpSweepRef.current) return;
-      if (flashFieldEl(st.field)) { jumpSweepRef.current = null; return; }
-      if (tries++ < 5) { window.setTimeout(tick, 80); return; }
-      advanceJumpSweep();
+      if (flashFieldEl(field)) return;
+      if (tries++ < 6) timer = window.setTimeout(tick, 80);
+      // Out of attempts: the crew is on the right phase, which is what matters.
+      // Deliberately does NOT try another phase.
     };
-    const t = window.setTimeout(tick, 110);
-    return () => window.clearTimeout(t);
+    timer = window.setTimeout(tick, 110);
+    return () => window.clearTimeout(timer);
   }, [phase]);
   useEffect(() => {
     if (document.getElementById('prf-jump-flash-style')) return;
@@ -7169,7 +7191,7 @@ export default function DigitalPRFForm() {
           {fd.call_type !== 'RESUS' && (
             <>
               <SHdr t="Patient Priority" />
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 8, marginBottom: 20 }}>
+              <div id="prf-field-priority" style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 8, marginBottom: 20 }}>
                 {[{ v: 'RED', c: '#ef4444' }, { v: 'ORANGE', c: '#f97316' }, { v: 'YELLOW', c: '#eab308' }, { v: 'GREEN', c: '#22c55e' }, { v: 'BLUE', c: '#3b82f6' }].map(({ v, c }) => {
                   const on = fd.priority === v;
                   return <button key={v} type="button" onClick={() => sf('priority', v)} style={{ padding: '18px 4px', borderRadius: 12, fontSize: '0.68rem', fontWeight: 900, border: `3px solid ${on ? c : S200}`, background: on ? c : W, color: on ? W : S600, cursor: 'pointer', boxShadow: on ? `0 4px 14px ${c}55` : '0 1px 3px rgba(0,0,0,0.03)', transition: 'all 0.15s', letterSpacing: '0.04em' }}>{v}</button>;
@@ -7196,8 +7218,13 @@ export default function DigitalPRFForm() {
             - Numeric fields (age, the phones, the date) — digits have no case,
               and forcing a transform would only risk cursor behaviour. */}
       <Card>
-        <Lbl t="Gender" />
-        <Toggle fk="gender" opts={['Male', 'Female', 'Other']} />
+        {/* Anchored for the review popup's tap-to-jump: flashFieldEl looks up
+            `prf-field-<key>`, and a Toggle emits no id of its own. Without it
+            the jump could not find this field. */}
+        <div id="prf-field-gender">
+          <Lbl t="Gender" />
+          <Toggle fk="gender" opts={['Male', 'Female', 'Other']} />
+        </div>
         <G2>
           <div><Lbl t="First Name" req /><Inp fk="patient_name" ph="First name" req upper /></div>
           <div><Lbl t="Surname" req /><Inp fk="patient_surname" ph="Surname" req upper /></div>
@@ -7467,7 +7494,9 @@ export default function DigitalPRFForm() {
         <div style={{ marginBottom: 12 }}><Chk fk="flags" val="debtor_same_as_patient" label="Debtor is same as patient" /></div>
         {!inArr('flags', 'debtor_same_as_patient') && (
           <Card>
-            <Lbl t="Gender" /><Toggle fk="debtor_gender" opts={['Male', 'Female', 'Other']} />
+            <div id="prf-field-debtor_gender">
+              <Lbl t="Gender" /><Toggle fk="debtor_gender" opts={['Male', 'Female', 'Other']} />
+            </div>
             <G2>
               <div><Lbl t="First Name" /><Inp fk="debtor_name" ph="First name" /></div>
               <div><Lbl t="Surname" /><Inp fk="debtor_surname" ph="Surname" /></div>
