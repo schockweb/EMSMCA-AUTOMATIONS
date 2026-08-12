@@ -1476,7 +1476,11 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
   // renders it, so it can neither vanish nor print twice. It stays on page 1
   // wherever page 2 cannot carry it — a Declaration of Death has no page 2, and
   // on a refusal page 2 is the watermark alone.
-  const stickerVisible = !(fd.call_type === 'DOD' && fd.med_aid_dec_death) && fd.call_type !== 'RHT';
+  // RESUS joins DOD and RHT: a hospital sticker is the receiving facility's
+  // patient label, and a resuscitation has no receiving facility to issue one.
+  // The empty "affix here" slot was simply an invitation to stick nothing.
+  const stickerVisible = !(fd.call_type === 'DOD' && fd.med_aid_dec_death)
+    && fd.call_type !== 'RHT' && fd.call_type !== 'RESUS';
   // Only a CAPTURED sticker moves. The empty "affix here" slot is ~110px and
   // sits on page 1 quite happily; it is the 200px image that takes the block to
   // ~230px and pushes the sheet past the ceiling.
@@ -2178,10 +2182,22 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
               <>
                 <FieldRow label="Dest Facility" value={fd.receiving_facility} />
                 <FieldRow label="Ward"          value={fd.ward} />
-                <FieldRow label={fd.call_type === 'COURTESY' ? "Receiving Dr/Person" : "Receiving Dr"}  value={fd.receiving_doctor} />
-                <FieldRow label="Qualification" value={fd.handover_qualification} />
-                <FieldRow label="Condition" value={fd.handover_notes} valueMin={24} />
-                <FieldRow label="Receiving Facility Email" value={fd.handover_doctor_email} />
+                {/* Receiving practitioner, their qualification, the patient's
+                    condition on handover and the facility email describe a
+                    handover to a RECEIVING CLINICIAN. On a resuscitation there
+                    is no such handover to record — the deceased is released to
+                    an undertaker, whose details and signature are captured in
+                    the Declaration of Death block — so these four printed a row
+                    of "—" apiece and invited the question of who signed for a
+                    patient nobody received. */}
+                {fd.call_type !== 'RESUS' && (
+                  <>
+                    <FieldRow label={fd.call_type === 'COURTESY' ? "Receiving Dr/Person" : "Receiving Dr"}  value={fd.receiving_doctor} />
+                    <FieldRow label="Qualification" value={fd.handover_qualification} />
+                    <FieldRow label="Condition" value={fd.handover_notes} valueMin={24} />
+                    <FieldRow label="Receiving Facility Email" value={fd.handover_doctor_email} />
+                  </>
+                )}
               </>
             )}
             {fd.call_type === 'DOD'
@@ -2686,8 +2702,15 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
               </>
             )}
             {/* Handover Signature — hidden for DOD (shown in the DOD block) and
-                for RHT (patient refused transport — there's no facility handover). */}
-            {!(fd.call_type === 'DOD' && fd.med_aid_dec_death) && fd.call_type !== 'RHT' && (
+                for RHT (patient refused transport — there's no facility handover).
+                Also hidden for RESUS: the mark that gets captured there is the
+                UNDERTAKER's, and it already prints beside the Undertaker Details
+                in the Declaration of Death block, where it belongs — a signature
+                is evidence of what sits above it, and under a bare "Handover
+                Signature" heading it reads as a facility receiving a live
+                patient. Printing it in both places made it a duplicate. */}
+            {!(fd.call_type === 'DOD' && fd.med_aid_dec_death) && fd.call_type !== 'RHT'
+              && fd.call_type !== 'RESUS' && (
               <>
                 <SectionHead label="Handover Signature" />
                 <div style={{ padding: '6px 8px', borderTop: `1px solid ${LN}`, flexShrink: 0 }}>

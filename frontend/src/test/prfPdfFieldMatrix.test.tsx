@@ -220,9 +220,19 @@ function commonGroup(tag: string) {
     // so it duplicated fd.ward below. The value is still captured — the fixture
     // at :77 keeps it — so the negative test can prove the ROW is gone rather
     // than prove the fixture is empty.
-    fd.receiving_facility, fd.ward, fd.receiving_doctor,
-    fd.handover_qualification, fd.handover_notes, fd.handover_doctor_email,
+    fd.receiving_facility, fd.ward,
     fd.valuables_handed_to, fd.valuables_description,
+  ];
+
+  /**
+   * The four rows that describe a handover to a RECEIVING CLINICIAN. Dropped
+   * for RESUS as well as for noTransport: a resuscitation releases the deceased
+   * to an undertaker, whose details and signature live in the Declaration of
+   * Death block, so there is no receiving practitioner to name.
+   */
+  const facilityHandover = [
+    fd.receiving_doctor, fd.handover_qualification,
+    fd.handover_notes, fd.handover_doctor_email,
   ];
 
   /** Page 2 (clinical sheet) — omitted entirely for a Declaration of Death. */
@@ -241,7 +251,7 @@ function commonGroup(tag: string) {
     ...fd.vitals_sets.flatMap((v: any) => [v.resp_rate, v.spo2, v.hr, v.bp, v.gcs_total, v.temp, v.pain]),
   ];
 
-  return { fd, always, patient, transport, clinical };
+  return { fd, always, patient, transport, facilityHandover, clinical };
 }
 
 /** Call-type-specific fields + the rendered call-type chip text. */
@@ -449,6 +459,7 @@ function buildPrf(callType: string, billingType: string) {
     ...common.always,
     ...(isDoD ? [] : common.patient),
     ...(noTransport ? [] : common.transport),
+    ...(noTransport || callType === 'RESUS' ? [] : common.facilityHandover),
     // The clinical sheet is omitted for a Declaration of Death AND for a
     // refusal. On a refusal nothing clinical exists — the patient declined
     // before any observation or intervention was made — so page 2 is the
@@ -587,7 +598,7 @@ describe('PRF PDF field coverage — every call-type × billing-type', () => {
       //   DOD       → the death-certificate layout replaces the T&C + handover
       //               stack with 2 crew sign-offs, the recipient signature and
       //               the 2 declaration signatures = 5
-      // RESUS is 3, not 6: the handover mark and the two crew sign-offs. The
+      // RESUS is 2, not 6: the two crew sign-offs, and nothing else. The
       // three Terms & Conditions marks (patient/rep, witness, next of kin) are
       // gone because the T&C block no longer prints on a resuscitation — the
       // crew form gates it behind `call_type !== 'RESUS'`
@@ -598,7 +609,7 @@ describe('PRF PDF field coverage — every call-type × billing-type', () => {
       const expectedSignatures =
         callType === 'RHT' ? 5 :
         callType === 'DOD' ? 5 :
-        callType === 'RESUS' ? 3 : 6;
+        callType === 'RESUS' ? 2 : 6;
 
       describe(label, () => {
         it('renders every captured field onto the PDF pages', async () => {
@@ -1069,6 +1080,51 @@ describe('RHT — the refusal reaches the printed record', () => {
     expect(screen.queryAllByText('Next of Kin').length,
       'a captured next-of-kin signature vanished with the T&C clauses'
     ).toBeGreaterThan(0);
+  });
+
+  it('drops the facility-handover rows, the duplicate handover signature and the sticker on a Resus', async () => {
+    // A resuscitation releases the deceased to an UNDERTAKER. There is no
+    // receiving clinician to name, no condition-on-handover to record, no
+    // facility to email, and no facility patient label to affix — so all of
+    // those printed either a row of "—" or an empty slot.
+    //
+    // The handover signature is the sharper one: the mark captured on a Resus
+    // is the undertaker's, and it already prints beside the Undertaker Details
+    // in the Declaration of Death block. Under a bare "Handover Signature"
+    // heading on page 1 it read as a facility receiving a live patient, and it
+    // was the same mark twice.
+    const built = buildPrf('RESUS', 'MED AID');
+    currentPrf = built.prf;
+    renderPrfView();
+    await screen.findByText((c) => c.includes(built.anchor), { exact: false });
+
+    for (const label of ['Receiving Dr', 'Qualification', 'Condition',
+                         'Receiving Facility Email', 'Handover Signature',
+                         'Hospital Sticker']) {
+      expect(
+        screen.queryAllByText(label, { exact: true }).length,
+        `"${label}" still prints on a Resus`,
+      ).toBe(0);
+    }
+    expect(screen.queryAllByText(/Affix hospital sticker here/i)).toHaveLength(0);
+
+    // The rows that DO belong on a Resus must survive — otherwise this is
+    // satisfied by dropping the whole Call Information block.
+    expect(screen.queryAllByText('Dest Facility').length).toBeGreaterThan(0);
+    expect(screen.queryAllByText('Ward').length).toBeGreaterThan(0);
+
+    // Control: an ordinary call still carries all six.
+    cleanup();
+    const primary = buildPrf('PRIMARY', 'MED AID');
+    currentPrf = primary.prf;
+    renderPrfView();
+    await screen.findByText((c) => c.includes(primary.anchor), { exact: false });
+    for (const label of ['Receiving Dr', 'Condition', 'Handover Signature', 'Hospital Sticker']) {
+      expect(
+        screen.queryAllByText(label, { exact: true }).length,
+        `"${label}" was removed from ordinary calls too`,
+      ).toBeGreaterThan(0);
+    }
   });
 
   it('prints no Terms and Conditions on a Resus — nobody was ever shown them', async () => {
