@@ -30,7 +30,9 @@ import {
   validatePhase as validatePhaseRules,
   buildContext as buildValidationContext,
   blockers as validationBlockers,
-  warnings as validationWarnings,
+  // `warnings` is deliberately not imported: the crew banner shows blockers
+  // only. Warnings belong in the Review Before Submitting popup, which builds
+  // its own list. The helper still exists in prfValidation.ts for that use.
   type Phase as ValidationPhase,
   type ValidationFinding,
 } from './prfValidation';
@@ -5693,30 +5695,21 @@ export default function DigitalPRFForm() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kms, fd.preauth_number, fd.call_type, phase, vitals.length]);
 
-  // ── Live (debounced) scheme-rule validation ──────────────────────────────
-  // Re-checks the active scheme's billing rules ~600ms after the crew stops
-  // acting, so the gentle amber nudge appears in the banner near the moment of
-  // the action - not only when they leave the phase. Warn-only (never blocks).
-  // CPU-trivial: a handful of predicate checks, debounced so it never runs on
-  // every keystroke (each keystroke only resets a timer). Preserves any
-  // INLINE-* advance-gate blockers; only the scheme findings are refreshed, and
-  // findings are left untouched when nothing changed (no needless re-render).
-  useEffect(() => {
-    const handle = window.setTimeout(() => {
-      const liveCtx = buildValidationContext({ vitals, ivRows, medRows, sigs, crew2Id, prfMeta, timestamps, kms });
-      const live = validatePhaseRules(phase as ValidationPhase, fd, liveCtx, fd.medical_scheme);
-      setFindings(prev => {
-        const inline = prev.filter(f => f.id.startsWith('INLINE-'));
-        const next = [...inline, ...live];
-        const unchanged =
-          next.length === prev.length &&
-          next.every((f, i) => f.id === prev[i].id && f.message === prev[i].message);
-        return unchanged ? prev : next;
-      });
-    }, 600);
-    return () => window.clearTimeout(handle);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fd, vitals, ivRows, medRows, sigs, timestamps, kms, phase]);
+  // ── Live (debounced) scheme-rule validation — REMOVED ────────────────────
+  // This re-ran every scheme billing rule ~600ms after the crew stopped acting,
+  // for one purpose: to make the amber nudge appear in the banner near the
+  // moment of the action. That banner no longer shows warnings, and
+  // `validatePhaseRules` hardcodes severity 'warn' for every rule it emits
+  // ("block nothing, ever", prfValidation.ts), so this effect's entire output
+  // was invisible — a rules pass plus a setState, on the crew's phone, mid-call,
+  // rendering nothing.
+  //
+  // Warnings are not lost: the Review Before Submitting popup builds its own
+  // list (`reviewWarnings`) from the form data at the moment of submit.
+  //
+  // The INLINE-* advance gates are untouched — they come from
+  // collectLeavePhaseBlockers via the effect above, are the only findings that
+  // can be severity 'block', and are what the banner still shows.
 
   // Show en-route overlay when dispatch time is first marked
   useEffect(() => {
@@ -9476,8 +9469,15 @@ export default function DigitalPRFForm() {
         )}
 
         <div style={{ paddingTop: isMobileView ? 72 : 110 }}>
-          {/* ── Validation banner (rule findings from prfValidation.ts) ── */}
-          {findings.length > 0 && (
+          {/* ── Validation banner (rule findings from prfValidation.ts) ──
+              BLOCKERS ONLY. Warnings are not shown to the crew mid-call; they
+              belong in the Review Before Submitting popup, which computes its
+              own list (`reviewWarnings`) and is unaffected by this.
+              A crew member on scene should be looking at the patient, not at an
+              amber box telling them a claim "may be rejected". Gated on blockers
+              rather than on findings.length so a warnings-only result renders
+              nothing at all, instead of an empty banner with a dismiss link. */}
+          {validationBlockers(findings).length > 0 && (
             <div id="prf-validation-banner" style={{ padding: '0 18px 16px', maxWidth: 640, margin: '0 auto' }}>
               {validationBlockers(findings).length > 0 && (
                 <div style={{
@@ -9501,27 +9501,11 @@ export default function DigitalPRFForm() {
                   </ul>
                 </div>
               )}
-              {validationWarnings(findings).length > 0 && (
-                <div style={{
-                  background: '#fffbeb', border: `1px solid #fde68a`, borderRadius: 12,
-                  padding: '12px 14px', marginBottom: 8,
-                }}>
-                  <div style={{ fontSize: '0.78rem', fontWeight: 800, color: '#92400e', marginBottom: 6, letterSpacing: '0.02em' }}>
-                    {validationWarnings(findings).length} warning{validationWarnings(findings).length === 1 ? '' : 's'} — claim may be rejected if not addressed
-                  </div>
-                  <ul style={{ margin: 0, paddingLeft: 18, fontSize: '0.78rem', color: '#78350f', lineHeight: 1.5 }}>
-                    {validationWarnings(findings).map(f => (
-                      <li
-                        key={f.id}
-                        onClick={() => jumpToField(f.field)}
-                        style={{ marginBottom: 4, cursor: f.field ? 'pointer' : 'default', textDecoration: f.field ? 'underline dotted' : 'none' }}
-                      >
-                        {f.message}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
+              {/* The amber "N warnings — claim may be rejected if not addressed"
+                  block used to render here. Removed: warnings are review-time
+                  information, not something to interrupt a crew with on scene.
+                  They still reach the crew, in the Review Before Submitting
+                  popup. Do not reinstate it here. */}
               <button
                 type="button"
                 onClick={() => setFindings([])}
