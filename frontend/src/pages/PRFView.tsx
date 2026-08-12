@@ -2879,18 +2879,77 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
           )}
         </div>
 
-        {/* ── BAND C — Closeout: Valuables + Handover sig │ Crew sign-off (×2) │
-              Motivation, all grouped in one band so nothing stretches across a
-              sparse full-width row. ──
-              Valuables is 1.54fr so the Crew · Assessed By left border lines up
-              vertically with Band B's Patient/Debtor border (1.64/6.4). The
-              freed width goes to Motivation, widening it. */}
+        {/* ── BAND C — Closeout: Motivation │ Crew sign-off (×2) │ Valuables,
+              all grouped in one band so nothing stretches across a sparse
+              full-width row. ──
+              Motivation sits FIRST so it falls directly under Patient Priority
+              in the column above, which is where the crew reads it; Valuables
+              moved to the far right in the same swap.
+              The first column stays 1.54fr — that width is what makes the
+              Crew · Assessed By left border line up vertically with Band B's
+              Patient/Debtor border (1.64/6.4), so it is a property of the SLOT,
+              not of whatever section occupies it. Do not retune it to suit the
+              content.
+              The LAST column must carry no right border or a line is drawn down
+              the sheet edge; on an RHT there is no Valuables column, so the
+              second crew column becomes last and drops its border instead. */}
         {fd.call_type !== 'DOD' && (
           <div style={{ display: 'grid', gridTemplateColumns: fd.call_type === 'RHT' ? '1.5fr 1.5fr 1.46fr' : '1.54fr 1.5fr 1.5fr 1.46fr', borderTop: `2px solid ${LN}` }}>
+          {/* Motivation / Other Notes — the captured text sits at natural
+              height and the remaining space renders as ruled note lines (an
+              empty section is ALL ruling — a proper blank notes area, not an
+              italic apology in a void). */}
+          <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
+            <SectionHead label="Motivation / Other Notes" />
+            {motivationNotes && (
+              <div style={{
+                borderTop: `1px solid ${LN}`,
+                padding: '6px 9px',
+                background: '#fff',
+                color: INK,
+                fontSize: '0.74rem', lineHeight: 1.45,
+                whiteSpace: 'pre-wrap',
+              }}>
+                {motivationNotes}
+              </div>
+            )}
+            <FillLines />
+            {fd.extra_crew && fd.extra_crew.length > 0 && (
+              <>
+                <SectionHead label="Additional Crew" />
+                <div style={{ padding: '4px 0', borderTop: `1px solid ${LN}`, flex: 1 }}>
+                  {fd.extra_crew.map((c: any, idx: number) => (
+                    <div key={idx} style={{ padding: '4px 8px', borderBottom: idx === fd.extra_crew.length - 1 ? 'none' : `1px solid ${LN}` }}>
+                      <FieldRow label="Name" value={c.name || c.full_name} />
+                      <FieldRow label="Qual." value={c.qualification} />
+                      <FieldRow label="HPCSA" value={c.hpcsa_number} />
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+          {/* Crew sign-off — one tidy column per crew member: details stacked
+              above a properly-sized signature box (no full-width stretch). */}
+          {([
+            { c: prf.crew_1, sig: fd.crew_signoff_sigs?.c1 || prf.signatures?.crew_signature,   fbName: fd.assessed_by, fbQual: fd.assessor_qualifications, role: 'Assessed By' },
+            { c: prf.crew_2, sig: fd.crew_signoff_sigs?.c2 || prf.signatures?.crew_2_signature, fbName: fd.managed_by,  fbQual: fd.manager_qualifications,  role: 'Managed By'  },
+          ]).map(({ c, sig, fbName, fbQual, role }, i) => (
+            <div key={i} style={{ borderRight: (fd.call_type === 'RHT' && i === 1) ? 'none' : `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
+              <SectionHead label={`Crew · ${role}`} />
+              <FieldRow label="Name"  value={c?.full_name || fbName} />
+              <FieldRow label="Qual"  value={c?.qualification || fbQual} />
+              <FieldRow label="HPCSA" value={c?.hpcsa_number} />
+              <div style={{ padding: '6px 8px', borderTop: `1px solid ${LN}`, flex: 1, display: 'flex', alignItems: 'center' }}>
+                <SignatureBox src={sig} minHeight={80} />
+              </div>
+            </div>
+          ))}
+
           {/* Valuables + Handover Signature (+ RAF sketch if any) — dropped for
               RHT (no hospital transport, so no valuables handover). */}
           {fd.call_type !== 'RHT' && (
-          <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
             <SectionHead label="Valuables" />
             {valuablesEmpty ? (
               <div style={{
@@ -2928,57 +2987,6 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
           </div>
           )}
 
-          {/* Crew sign-off — one tidy column per crew member: details stacked
-              above a properly-sized signature box (no full-width stretch). */}
-          {([
-            { c: prf.crew_1, sig: fd.crew_signoff_sigs?.c1 || prf.signatures?.crew_signature,   fbName: fd.assessed_by, fbQual: fd.assessor_qualifications, role: 'Assessed By' },
-            { c: prf.crew_2, sig: fd.crew_signoff_sigs?.c2 || prf.signatures?.crew_2_signature, fbName: fd.managed_by,  fbQual: fd.manager_qualifications,  role: 'Managed By'  },
-          ]).map(({ c, sig, fbName, fbQual, role }, i) => (
-            <div key={i} style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
-              <SectionHead label={`Crew · ${role}`} />
-              <FieldRow label="Name"  value={c?.full_name || fbName} />
-              <FieldRow label="Qual"  value={c?.qualification || fbQual} />
-              <FieldRow label="HPCSA" value={c?.hpcsa_number} />
-              <div style={{ padding: '6px 8px', borderTop: `1px solid ${LN}`, flex: 1, display: 'flex', alignItems: 'center' }}>
-                <SignatureBox src={sig} minHeight={80} />
-              </div>
-            </div>
-          ))}
-
-          {/* Motivation / Other Notes — the captured text sits at natural
-              height and the remaining space renders as ruled note lines (an
-              empty section is ALL ruling — a proper blank notes area, not an
-              italic apology in a void). */}
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            <SectionHead label="Motivation / Other Notes" />
-            {motivationNotes && (
-              <div style={{
-                borderTop: `1px solid ${LN}`,
-                padding: '6px 9px',
-                background: '#fff',
-                color: INK,
-                fontSize: '0.74rem', lineHeight: 1.45,
-                whiteSpace: 'pre-wrap',
-              }}>
-                {motivationNotes}
-              </div>
-            )}
-            <FillLines />
-            {fd.extra_crew && fd.extra_crew.length > 0 && (
-              <>
-                <SectionHead label="Additional Crew" />
-                <div style={{ padding: '4px 0', borderTop: `1px solid ${LN}`, flex: 1 }}>
-                  {fd.extra_crew.map((c: any, idx: number) => (
-                    <div key={idx} style={{ padding: '4px 8px', borderBottom: idx === fd.extra_crew.length - 1 ? 'none' : `1px solid ${LN}` }}>
-                      <FieldRow label="Name" value={c.name || c.full_name} />
-                      <FieldRow label="Qual." value={c.qualification} />
-                      <FieldRow label="HPCSA" value={c.hpcsa_number} />
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
 
           </div>
         )}

@@ -451,6 +451,33 @@ describe('PRF PDF render — blank passport rows', () => {
     expect(screen.queryAllByText('Dest Facility').length).toBeGreaterThan(0);
   });
 
+  it('puts Motivation first in the closeout band and Valuables last', async () => {
+    // Motivation sits in the first column so it falls directly under Patient
+    // Priority in the band above, which is where the crew reads it; Valuables
+    // moved to the far right in the same swap.
+    //
+    // Geometry is not assertable here — jsdom has no layout — but DOM ORDER is,
+    // and for a CSS grid with no explicit order/grid-area the two are the same
+    // thing. That makes this a real guard rather than a restatement of the JSX.
+    const { container } = renderPrfView();
+    await screen.findByText(/Sipho-Sentinel/);
+
+    const wanted = ['Motivation / Other Notes', 'Crew · Assessed By', 'Crew · Managed By', 'Valuables'];
+    const heads = [...container.querySelectorAll('*')]
+      .filter(e => e.children.length === 0 && wanted.includes((e.textContent || '').trim()))
+      .map(e => (e.textContent || '').trim());
+
+    for (const w of wanted) {
+      expect(heads, `the closeout band is missing "${w}"`).toContain(w);
+    }
+    expect(
+      wanted.map(w => heads.indexOf(w)),
+      `closeout band order is ${JSON.stringify(heads)} — Motivation must lead so it ` +
+      'lands under Patient Priority, and Valuables must trail',
+    ).toEqual([...wanted.map(w => heads.indexOf(w))].sort((a, b) => a - b));
+    expect(heads.indexOf('Motivation / Other Notes')).toBeLessThan(heads.indexOf('Valuables'));
+  });
+
   it('signs on a dotted rule inside the terms panel, without losing the captured ink', async () => {
     // What the rest of the suite can and cannot see, measured rather than
     // assumed by injecting the defect:
