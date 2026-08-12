@@ -1389,6 +1389,52 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
   // page, which is the arrangement this change exists to remove.
   const refused = fd.call_type === 'RHT' || !!fd.patient_refused_treatment;
 
+  // Mechanism + Patient Priority. Rendered under the Secondary Survey on the
+  // clinical sheet, where they read with the clinical picture rather than
+  // beside the debtor's postal code.
+  //
+  // But the clinical sheet does not always exist: it is omitted entirely for
+  // a Declaration of Death, and on a refusal page 2 is the watermark alone
+  // (`refused ? null :` on the clinical grid). Moving these there without a
+  // fallback dropped the mechanism off every RHT — a refusal still records
+  // HOW the patient came to be injured, and that is exactly the sort of
+  // thing a refusal record is later read for. So they fall back to page 1
+  // when there is no clinical sheet to carry them.
+  const hasClinicalSheet = fd.call_type !== 'DOD' && !refused;
+  const mechanismAndPriority = () => (
+    <>{fd.call_type !== 'DOD' && (() => {
+              const selected = Array.isArray(fd.mechanism)
+                ? fd.mechanism.filter(Boolean)
+                : (fd.mechanism ? [fd.mechanism] : []);
+              const hasMechanism = selected.length > 0 || !isBlank(fd.mechanism_other);
+              // Resus never captures a triage priority (the form hides the
+              // picker), so it's always omitted there; otherwise show only when
+              // a priority was actually captured.
+              const hasPriority = fd.call_type !== 'RESUS' && !isBlank(fd.priority);
+              return (
+                <>
+                  {/* Mechanism — hidden entirely when nothing was captured. */}
+                  {hasMechanism && (
+                    <>
+                      <SectionHead label="Mechanism" />
+                      {selected.map((m: string) => <Chk key={m} label={m} checked />)}
+                      {fd.mechanism_other && (
+                        <FieldRow label="Detail" value={fd.mechanism_other} valueMin={24} />
+                      )}
+                    </>
+                  )}
+                  {/* Patient Priority — hidden when not captured. */}
+                  {hasPriority && (
+                    <>
+                      <SectionHead label="Patient Priority" />
+                      <FieldRow label="Priority" value={fd.priority} />
+                    </>
+                  )}
+                </>
+              );
+            })()}</>
+  );
+
   // ── Refusal layout: render Patient / Billing / Debtor only when captured ──
   //
   // The crew form no longer ASKS for these once the patient refuses — there is
@@ -2609,42 +2655,10 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
                 <FieldRow label="Cell"     value={fd.debtor_phone_cell} />
               </>
             )}
-            {/* Mechanism + Patient Priority — moved here from the Patient
-                Information column, so they read directly under Debtor
-                Information. Rendered OUTSIDE the same-as-patient / full-rows
-                ternary above because neither depends on the debtor: a
-                'Same as Patient' debtor must still show the mechanism. */}
-            {fd.call_type !== 'DOD' && (() => {
-              const selected = Array.isArray(fd.mechanism)
-                ? fd.mechanism.filter(Boolean)
-                : (fd.mechanism ? [fd.mechanism] : []);
-              const hasMechanism = selected.length > 0 || !isBlank(fd.mechanism_other);
-              // Resus never captures a triage priority (the form hides the
-              // picker), so it's always omitted there; otherwise show only when
-              // a priority was actually captured.
-              const hasPriority = fd.call_type !== 'RESUS' && !isBlank(fd.priority);
-              return (
-                <>
-                  {/* Mechanism — hidden entirely when nothing was captured. */}
-                  {hasMechanism && (
-                    <>
-                      <SectionHead label="Mechanism" />
-                      {selected.map((m: string) => <Chk key={m} label={m} checked />)}
-                      {fd.mechanism_other && (
-                        <FieldRow label="Detail" value={fd.mechanism_other} valueMin={24} />
-                      )}
-                    </>
-                  )}
-                  {/* Patient Priority — hidden when not captured. */}
-                  {hasPriority && (
-                    <>
-                      <SectionHead label="Patient Priority" />
-                      <FieldRow label="Priority" value={fd.priority} />
-                    </>
-                  )}
-                </>
-              );
-            })()}
+            {/* Fallback only: a DOD has no clinical sheet and a refusal's page 2
+                is the watermark alone, so without this the mechanism would not
+                print anywhere on those call types. */}
+            {!hasClinicalSheet && mechanismAndPriority()}
             {/* One fill for the whole column, below the moved sections — the
                 per-branch fills would otherwise have pushed Mechanism and
                 Patient Priority to the very bottom of the sheet. */}
@@ -2828,6 +2842,14 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
                 tablet those marks sit above a refusal; on the printed form they
                 sat above different words entirely. That gap is the whole case.
                 */}
+            {/* Second fallback site for Mechanism + Patient Priority.
+                The first sits in the Debtor column — but a refusal DROPS that
+                column when no debtor was captured, which is now the normal case,
+                and the mechanism went with it. This column always renders, so it
+                is the one place a refusal can be relied on to carry them.
+                Guarded so the two sites are mutually exclusive. */}
+            {refused && !refusalDebtor && !hasClinicalSheet && mechanismAndPriority()}
+
             {fd.call_type === 'RHT' && (
               <>
                 <SectionHead label="Refusal of Treatment / Transport" />
@@ -3304,6 +3326,12 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
             <FieldRow label="Abdomen"     value={fd.survey_abdo} />
             <FieldRow label="Limbs"       value={fd.survey_limbs} />
             <FieldRow label="Back"        value={fd.survey_back} />
+
+            {/* Mechanism + Patient Priority, directly under the Secondary Survey.
+                Both describe HOW the patient was hurt and how sick they are, so
+                they read with the clinical survey. They still hide when nothing
+                was captured, and Patient Priority is still omitted for Resus. */}
+            {mechanismAndPriority()}
             <FillLines />
           </div>
 
@@ -3893,11 +3921,22 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
 
       {/* ═══════════════════ PAGE 5+ — Attachments ═══════════════════ */}
       {[
-        // Suppressed when page 1 is carrying the sticker itself (Medical Aid /
-        // Indigent). Feeding one field into two page-producing lists is exactly
-        // what printed this artefact twice before — see the note below on
-        // raf_oar_report_pdf, which made the identical mistake.
-        { label: 'Hospital Sticker', val: stickerOnPage1 ? null : fd.hospital_sticker },
+        // ALWAYS listed, even when page 1 is already carrying the sticker.
+        //
+        // This is a deliberate exception to the one-call-site-per-artefact rule
+        // the rest of this file follows, and the reasoning is different from the
+        // duplicate it once had. That defect printed the same picture at two
+        // DIFFERENT sizes under two headings, neither of them full size. Here
+        // the two copies serve two purposes: the page-1 block is a compact
+        // in-context reference capped to the height of the slot it replaces
+        // (~110px, see HospitalSticker `capped`), which is far too small to read
+        // an MRN off, and this sheet is the full-size copy an administrator
+        // actually zooms into. Removing either one loses something real.
+        //
+        // raf_oar_report_pdf below is still excluded, for the original reason:
+        // it is served by attachedDocs and this loop would render it in an
+        // <iframe> that html2canvas cannot rasterise, producing a blank page.
+        { label: 'Hospital Sticker', val: fd.hospital_sticker },
         { label: 'Admission Form', val: fd.admission_form_image },
         { label: 'ID Document', val: fd.id_document_image },
         { label: 'Medical Aid Card', val: fd.medical_aid_image },

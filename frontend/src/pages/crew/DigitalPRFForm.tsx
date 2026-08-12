@@ -9146,13 +9146,20 @@ export default function DigitalPRFForm() {
             <SHdr t="Motivation / Other Notes" />
             <VoiceTxt fk="motivation_notes" ph="Billing motivation / other notes — e.g. times, A/B/C/D, IV, drugs, immobilisation." rows={3} />
 
-            {/* Terms & Conditions — patient/representative acknowledgment of
-                treatment, financial responsibility, data disclosure, assumption
-                of risk and indemnity. Company name is the crew's provider. */}
-
-            {renderTermsAndConditions()}
           </>
         )}
+
+        {/* Terms & Conditions — patient/representative acknowledgment of
+            treatment, financial responsibility, data disclosure, assumption of
+            risk and indemnity. Company name is the crew's provider.
+
+            OUTSIDE the `call_type !== 'RESUS'` block above, deliberately. A
+            resuscitation the crew wins is a live, conveyed, billable patient,
+            and until now the Resus form never offered the terms at all — so no
+            Resus PRF could carry a patient, witness or next-of-kin signature,
+            and the PDF had nothing to print. It sits last, immediately above
+            Submit, on every call type. */}
+        {renderTermsAndConditions()}
 
         <button type="button" onClick={handleSubmit} disabled={submitting} style={{ width: '100%', padding: 18, borderRadius: 14, fontSize: '1.05rem', fontWeight: 800, border: 'none', cursor: submitting ? 'wait' : 'pointer', background: submitting ? S400 : `linear-gradient(135deg,${ROSE},#be123c)`, color: W, boxShadow: submitting ? 'none' : `0 6px 24px rgba(225,29,72,0.3)` }}>
           {submitting ? 'Submitting PRF...' : 'Complete & Submit PRF'}
@@ -9753,11 +9760,12 @@ export default function DigitalPRFForm() {
             const pvtCash = fd.billing_type === 'PVT' && fd.pvt_payment_method === 'Cash';
             if (!pvtCash && missing(fd.hospital_sticker)) push('Hospital sticker', 'hospital_sticker');
 
-            // Patient / representative signature — never flagged for Resus:
-            // the T&C block holding the pad is skipped there (the Resus
-            // Handover page is the final screen), so no Resus PRF could
-            // ever satisfy this check.
-            if (fd.call_type !== 'RESUS' && missing(sigs.patient_signature) && missing(fd.tc_patient_signature)) {
+            // Patient / representative signature. The RESUS exemption is gone:
+            // it existed only because the T&C block holding the pad was skipped
+            // on a Resus, so no Resus PRF could ever satisfy the check. The
+            // block now renders for every call type, so the signature is
+            // obtainable and worth asking for.
+            if (missing(sigs.patient_signature) && missing(fd.tc_patient_signature)) {
               push('Patient / representative signature', 'tc_patient_signature');
             }
 

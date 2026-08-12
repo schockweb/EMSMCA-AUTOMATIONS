@@ -884,9 +884,13 @@ describe('page 1 height — the tall blocks moved, and did not go missing', () =
   // measured in Chrome, page 1 does not grow at all, because the grid was
   // already stretching that column to match the taller Patient column.
   //
-  // Each of these asserts BOTH halves: on page 1, and still exactly once. The
-  // count alone would pass if it were restored to the attachments sheet too,
-  // which is the defect this placement rule exists to prevent.
+  // Each asserts WHERE both copies land, not just how many there are.
+  //
+  // Two copies is deliberate here and is NOT the old duplicate defect. That one
+  // printed the same picture at two different sizes under two headings, neither
+  // full size. These serve different purposes: the page-1 block is a compact
+  // in-context reference capped to ~110px — too small to read an MRN off — and
+  // the attachments sheet is the full-size copy an administrator zooms into.
   for (const [label, extra] of [
     ['MED AID', { ...withSticker }],
     ['an Indigent PVT', { ...withSticker, pvt_payment_method: 'Indigent' }],
@@ -895,11 +899,17 @@ describe('page 1 height — the tall blocks moved, and did not go missing', () =
 
     it(`prints the sticker on page 1 under Billing Information for ${label}`, async () => {
       await renderCall('IHT', billing, extra);
-      expect(stickerImgs().length,
-        `the sticker is rendered ${stickerImgs().length} times on ${label} — it must be exactly once`
-      ).toBe(1);
-      expect(sheets()[0].contains(stickerImgs()[0]),
+      const imgs = stickerImgs();
+      expect(imgs.length,
+        `the sticker is rendered ${imgs.length} times on ${label} — expected one on `
+        + 'page 1 and one full-size attachment sheet'
+      ).toBe(2);
+      expect(sheets()[0].contains(imgs[0]),
         `the sticker is not on page 1 for ${label}, where the billing column has room for it`
+      ).toBe(true);
+      // ...and the other is on a LATER sheet, at full size.
+      expect(imgs.some(im => !sheets()[0].contains(im)),
+        `${label} has no full-size sticker sheet — an administrator cannot read the label`
       ).toBe(true);
     });
 
@@ -907,7 +917,7 @@ describe('page 1 height — the tall blocks moved, and did not go missing', () =
       await renderCall('IHT', billing, extra);
       expect(screen.queryAllByText((c) => c.includes('see the patient documents sheet'),
         { exact: false }).length,
-        `${label} still cross-references a sheet the sticker is no longer on`
+        `${label} shows a pointer as well as the image — page 1 carries the sticker itself`
       ).toBe(0);
     });
   }
@@ -1078,6 +1088,40 @@ describe('RHT — the refusal reaches the printed record', () => {
     expect(screen.queryAllByText('Next of Kin').length,
       'a captured next-of-kin signature vanished with the T&C clauses'
     ).toBeGreaterThan(0);
+  });
+
+  it('prints Mechanism exactly once on every call type, wherever it has to live', async () => {
+    // Mechanism moved to page 2 under the Secondary Survey. But page 2 does not
+    // always exist — it is omitted for a DOD and is the watermark alone on a
+    // refusal — so there are TWO page-1 fallback sites: one in the Debtor
+    // column, and one in the always-rendered refusal column for refusals that
+    // dropped their Debtor column. Three sites means the real risk is now a
+    // DOUBLE render, not a missing one.
+    // DOD expects ZERO, and that is pre-existing product behaviour rather than
+    // an oversight: the block is gated `call_type !== 'DOD'`, because a
+    // declaration of death records the cause elsewhere. Included here so the
+    // exception is asserted rather than merely absent.
+    for (const [callType, expected, extra] of [
+      ['PRIMARY', 1, {}],
+      ['IHT', 1, {}],
+      ['RHT', 1, {}],
+      ['RHT (no debtor)', 1, { debtor_gender: '', debtor_name: '', debtor_surname: '',
+        debtor_id_number: '', debtor_passport_number: '', debtor_age: '', debtor_dob: '',
+        debtor_address: '', debtor_suburb: '', debtor_postal_code: '',
+        debtor_phone_home: '', debtor_phone_cell: '' }],
+      ['DOD', 0, {}],
+    ] as Array<[string, number, Record<string, unknown>]>) {
+      cleanup();
+      const built = buildPrf(callType.startsWith('RHT') ? 'RHT' : callType, 'MED AID');
+      Object.assign(built.prf.form_data, extra);
+      currentPrf = built.prf;
+      renderPrfView();
+      await screen.findByText((c) => c.includes(built.anchor), { exact: false });
+      expect(
+        screen.queryAllByText('Mechanism', { exact: true }).length,
+        `${callType}: Mechanism rendered the wrong number of times`,
+      ).toBe(expected);
+    }
   });
 
   it('drops empty Patient / Debtor / Billing columns on a refusal, and keeps captured ones', async () => {

@@ -138,6 +138,9 @@ const FD: Record<string, any> = {
   // Fields that were captured by the crew but never reached the PDF until
   // 2026-07-28. Present here so the harness proves they now render.
   ...(STICKER ? { hospital_sticker: STICKER } : {}),
+  // Mechanism + priority: needed to see the blocks that moved to page 2.
+  mechanism: ['MVA (MOTOR VEHICLE ACCIDENT)'],
+  mechanism_other: 'Car versus pedestrian at speed',
   assessment_level: 'BLS',
   monitoring_level: 'ALS',
   transfer_subtype: 'Hospital to Hospital',

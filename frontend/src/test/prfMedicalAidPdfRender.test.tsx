@@ -256,15 +256,13 @@ describe('PRF PDF render — PRIMARY call, MED AID billing', () => {
   it('renders the 2 form pages plus one page per attachment', async () => {
     const { container } = renderPrfView();
     await screen.findByText(/Sipho-Sentinel/);
-    // 2 PRF pages + 1 attachment (medical aid card).
+    // 2 PRF pages + 2 attachments (hospital sticker, medical aid card).
     //
-    // Was 4. On MED AID the hospital sticker now prints on page 1 under Billing
-    // Information — that column is compact enough to hold it — so it no longer
-    // takes a sheet of its own. One fewer page for the scheme to handle, and
-    // the artefact is where the adjudicator is already looking. See the pair of
-    // placement tests below, which assert it is on page 1 and NOT duplicated.
-    expect(container.querySelectorAll('.prf-page')).toHaveLength(3);
-    expect(container.querySelectorAll('.prf-print-frame')).toHaveLength(3);
+    // The sticker gets its own full-size sheet even though page 1 also carries
+    // a compact copy: the page-1 block is capped to ~110px, which is too small
+    // to read an MRN off, and this sheet is what an administrator zooms into.
+    expect(container.querySelectorAll('.prf-page')).toHaveLength(4);
+    expect(container.querySelectorAll('.prf-print-frame')).toHaveLength(4);
   });
 
   it('shows the PRIMARY call-type and MED AID billing checks', async () => {
@@ -353,10 +351,9 @@ describe('PRF PDF render — PRIMARY call, MED AID billing', () => {
         .forEach(expectVisible);
     });
     expect(screen.queryByText(/Vitals — Continuation/)).not.toBeInTheDocument();
-    // 3, not 4 — the sticker moved onto page 1 for MED AID. The point of this
-    // assertion is that vitals did NOT spill a continuation page, so the count
-    // tracks the sheet total rather than being the subject of the test.
-    expect(container.querySelectorAll('.prf-page')).toHaveLength(3);
+    // The point of this assertion is that vitals did NOT spill a continuation
+    // page; the count tracks the sheet total rather than being the subject.
+    expect(container.querySelectorAll('.prf-page')).toHaveLength(4);
   });
 
   it('renders every signature block as a visible captured signature', async () => {
@@ -392,11 +389,9 @@ describe('PRF PDF render — PRIMARY call, MED AID billing', () => {
     // "Patient Documents (Attachments) - <label>".
     expect(screen.getAllByText(/Patient Documents \(Attachments\)/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/Attachments\) - Medical Aid Card/)).toBeInTheDocument();
-    // The hospital sticker deliberately has NO attachment sheet on MED AID: it
-    // prints on page 1 instead. Asserting its ABSENCE here is what stops the
-    // artefact being restored to both places and printed twice — the defect
-    // this whole placement rule exists to prevent.
-    expect(screen.queryByText(/Attachments\) - Hospital Sticker/)).not.toBeInTheDocument();
+    // The sticker keeps its own full-size sheet even when page 1 carries a
+    // compact copy — an administrator needs to be able to read the label.
+    expect(screen.getByText(/Attachments\) - Hospital Sticker/)).toBeInTheDocument();
   });
 });
 
