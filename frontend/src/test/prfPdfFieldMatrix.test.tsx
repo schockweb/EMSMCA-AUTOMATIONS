@@ -215,7 +215,12 @@ function commonGroup(tag: string) {
    * receiving ward, a receiving doctor or the patient's valuables.
    */
   const transport = [
-    fd.suburb_ward, fd.receiving_facility, fd.ward, fd.receiving_doctor,
+    // fd.suburb_ward is deliberately NOT here: the row was removed from the PDF
+    // because the geocoder auto-fills it while the crew form prompts for a ward,
+    // so it duplicated fd.ward below. The value is still captured — the fixture
+    // at :77 keeps it — so the negative test can prove the ROW is gone rather
+    // than prove the fixture is empty.
+    fd.receiving_facility, fd.ward, fd.receiving_doctor,
     fd.handover_qualification, fd.handover_notes, fd.handover_doctor_email,
     fd.valuables_handed_to, fd.valuables_description,
   ];
@@ -1023,12 +1028,17 @@ describe('RHT — the refusal reaches the printed record', () => {
     ).toBeGreaterThan(0);
   });
 
-  it('does not print an empty Signatures heading', async () => {
+  it('prints no orphaned signing lines on a refusal with nothing to sign', async () => {
+    // This used to guard an empty "Signatures" section heading. That heading is
+    // gone — the signing lines now sit inside the Terms and Conditions panel —
+    // but the property it protected is unchanged and still matters: on a legal
+    // record, a labelled line with nothing under it does not read as "nothing to
+    // show", it reads as "something failed to print".
     const built = await renderRefusal();
     // The shared fixture carries a next-of-kin signature, which legitimately
-    // fills the Signatures band. A real refusal has none — the only marks are
-    // the patient's and the witness's, and both belong under the Refusal
-    // heading — so clear it to reproduce the case that actually printed empty.
+    // fills the block. A real refusal has none — the only marks are the
+    // patient's and the witness's, and both belong under the Refusal heading —
+    // so clear it to reproduce the case that actually printed empty.
     delete built.prf.form_data.next_of_kin_signature;
     delete (built.prf as any).signatures?.next_of_kin_signature;
     cleanup();
@@ -1036,23 +1046,31 @@ describe('RHT — the refusal reaches the printed record', () => {
     renderPrfView();
     await screen.findByText((c) => c.includes(built.anchor), { exact: false });
 
-    const heads = screen.queryAllByText('Signatures', { exact: true });
-    expect(heads.length,
-      'the Signatures band prints on an RHT with nothing under it — the refusal ' +
-      'signatures are in the Refusal block'
-    ).toBe(0);
+    // "Witness" is deliberately NOT checked here: the Refusal block above prints
+    // its own Witness label, and that one is correct — the refusal signatures
+    // live there. The other two labels are unique to the terms strip, and on an
+    // RHT the only one it could still emit is Next of Kin, so their absence is
+    // exactly the property under test.
+    for (const label of ['Patient / Rep.', 'Next of Kin']) {
+      expect(screen.queryAllByText(label, { exact: true }).length,
+        `an orphaned "${label}" signing line prints on an RHT — the refusal ` +
+        'signatures belong in the Refusal block, and nothing should be left ' +
+        'hanging under the terms'
+      ).toBe(0);
+    }
   });
 
-  it('still prints the Signatures heading on a call that has its own signatures', async () => {
-    // The negative control. Hiding the heading whenever it is empty must not
-    // hide it when it is not — otherwise the "fix" silently drops the patient
-    // signature off every ordinary PRF.
+  it('still prints the signing lines on a call that has its own signatures', async () => {
+    // The negative control, and the reason the test above cannot simply assert
+    // "nothing prints": suppressing the block when it is empty must not suppress
+    // it when it is not, or every ordinary PRF silently loses the patient
+    // signature — the one mark that is mandatory.
     const built = buildPrf('PRIMARY', 'PVT');
     currentPrf = built.prf;
     renderPrfView();
     await screen.findByText((c) => c.includes(built.anchor), { exact: false });
-    expect(screen.queryAllByText('Signatures', { exact: true }).length,
-      'a normal call lost its Signatures section'
+    expect(screen.queryAllByText('Patient / Rep.', { exact: true }).length,
+      'a normal call lost its patient signing line'
     ).toBeGreaterThan(0);
   });
 

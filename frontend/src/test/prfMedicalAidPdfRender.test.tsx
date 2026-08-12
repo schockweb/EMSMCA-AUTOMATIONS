@@ -301,7 +301,8 @@ describe('PRF PDF render — PRIMARY call, MED AID billing', () => {
     await screen.findByText(/Sipho-Sentinel/);
     [
       // referring_doctor removed from the rendered PRF (still captured).
-      FD.incident_location, FD.suburb_ward,
+      // FD.suburb_ward removed — see the dedicated negative test below.
+      FD.incident_location,
       FD.receiving_facility, FD.ward, FD.receiving_doctor,
       PRF_FIXTURE.case_number, PRF_FIXTURE.vehicle.callsign,
       PRF_FIXTURE.vehicle.registration,
@@ -421,5 +422,64 @@ describe('PRF PDF render — blank passport rows', () => {
     renderPrfView();
     await screen.findByText(/Sipho-Sentinel/);
     expect(screen.queryAllByText('Passport')).toHaveLength(0);
+  });
+
+  it('no longer prints the incident Suburb / Ward row, and keeps the crew Ward row', async () => {
+    // Removed because the geocoder auto-fills suburb_ward from the incident
+    // address while the crew form labels it as a ward and prompts "e.g. ICU"
+    // (DigitalPRFForm.tsx), so crews typed ward names into it and it duplicated
+    // the Ward row two lines below.
+    //
+    // The fixture still carries suburb_ward, deliberately: that is what makes
+    // this a real negative rather than a proof that the fixture is empty.
+    renderPrfView();
+    await screen.findByText(/Sipho-Sentinel/);
+
+    expect(screen.queryAllByText('Suburb / Ward')).toHaveLength(0);
+    expect(
+      screen.queryAllByText((c) => c.includes(FD.suburb_ward), { exact: false }),
+      'the suburb value still prints somewhere on the PDF',
+    ).toHaveLength(0);
+
+    // The rows it was being confused with must survive. In a diff these look
+    // like near-duplicates of the deleted line; they are different keys fed by
+    // different controls, and taking one of them with it would be the obvious
+    // way for a later tidy-up to go wrong.
+    expect(screen.queryAllByText('Ward').length).toBeGreaterThan(0);
+    expect(screen.queryAllByText((c) => c.includes(FD.ward), { exact: false }).length)
+      .toBeGreaterThan(0);
+    expect(screen.queryAllByText('Dest Facility').length).toBeGreaterThan(0);
+  });
+
+  it('signs on a dotted rule inside the terms panel, without losing the captured ink', async () => {
+    // What the rest of the suite can and cannot see, measured rather than
+    // assumed by injecting the defect:
+    //   - Losing the ink IS caught. The matrix suite counts <img alt="signature">
+    //     nodes, and dropping the image fails ~18 of its cases. Good.
+    //   - The RESTYLE is invisible. A grep for
+    //     border/minHeight/getComputedStyle/toHaveStyle across all three PDF
+    //     test files returns nothing, so replacing the bordered boxes with
+    //     dotted rules — the entire change — passed every existing test
+    //     unchanged. Nothing pinned the layout that was just rewritten.
+    // This test covers the second gap, and re-covers the first at the point of
+    // change, because these three marks are captured digitally and the
+    // patient's is a required field.
+    renderPrfView();
+    await screen.findByText(/Sipho-Sentinel/);
+
+    for (const label of ['Patient / Rep.', 'Witness', 'Next of Kin']) {
+      const row = screen.getByText(label).parentElement!;
+      const rule = row.querySelector('div[style*="dotted"]') as HTMLElement | null;
+      expect(rule, `${label} has no dotted signing rule`).not.toBeNull();
+      expect(rule!.style.border, `${label} is still drawn as a bordered box`).toBe('');
+      expect(
+        rule!.querySelector('img[alt="signature"]'),
+        `${label} lost its captured signature — the ink must survive the restyle`,
+      ).not.toBeNull();
+    }
+
+    // And the separate green "Signatures" band is gone: these lines now live
+    // under the terms, as on the paper form.
+    expect(screen.queryAllByText('Signatures', { exact: true })).toHaveLength(0);
   });
 });

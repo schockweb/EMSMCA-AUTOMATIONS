@@ -146,6 +146,33 @@ const SignatureBox = ({ src, minHeight = 56, label }: {
   ) : <EmptySignature label={label} minHeight={minHeight} />
 );
 
+// Borderless signing rule — the in-panel variant used beneath the Terms and
+// Conditions clauses. Same evidence, far less furniture: the dotted rule IS
+// the place to sign, and a captured mark is drawn ON it rather than inside a
+// bordered box.
+//
+// Deliberately NOT a `bare` variant of SignatureBox. That component has 22 call
+// sites across the handover, refusal waiver, valuables, crew sign-off, cash
+// receipt and DOD blocks; adding a flag to it would put the change one
+// mis-passed prop away from restyling every signature on the sheet.
+//
+// The <img alt="signature"> is load-bearing and must never be dropped: all
+// three of these marks are captured digitally on the tablet, tc_patient_signature
+// is a REQUIRED field, and two test suites count these nodes. A dotted line with
+// no image would silently delete a signature from a medical-legal record — and
+// because the PDF suite makes no style assertions at all, it would do so with
+// every test still green.
+const SignatureRule = ({ src, height = 34 }: { src?: string | null; height?: number }) => (
+  <div style={{
+    height, width: '100%', maxWidth: 300, boxSizing: 'border-box',
+    borderBottom: '2px dotted #475569',
+    display: 'flex', alignItems: 'flex-end', justifyContent: 'center', overflow: 'hidden',
+  }}>
+    {src && <img src={src} alt="signature"
+      style={{ maxWidth: '100%', maxHeight: height - 2, objectFit: 'contain' }} />}
+  </div>
+);
+
 // Provider logo — the client brand mark shown top-left on the PDF / print
 // pages. Resolution order:
 //   1. The provider's own uploaded logo (`logo_url`, returned by the
@@ -2056,13 +2083,21 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
           <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
             <SectionHead label="Call Information" />
             <FieldRow label="Incident Add"  value={fd.incident_location} />
-            {/* Suburb/Ward + Destination + handover rows don't apply when the
-                patient was never transported to a facility — a Declaration of
-                Death (deceased at scene) or an RHT (Refused Hospital Transport)
-                — so the whole block is omitted for both. */}
+            {/* Destination + handover rows don't apply when the patient was
+                never transported to a facility — a Declaration of Death
+                (deceased at scene) or an RHT (Refused Hospital Transport) — so
+                the whole block is omitted for both. */}
+            {/* "Suburb / Ward" (fd.suburb_ward) used to print here and was
+                removed: the geocoder auto-fills it from the incident address
+                while the crew form labels it as a ward and prompts "e.g. ICU",
+                so crews typed ward names into it and it duplicated the Ward row
+                two lines below. The Ward row (fd.ward) is the one the crew fills
+                deliberately, from the hospital ward picker. The keys are
+                DIFFERENT and these two rows are not interchangeable — do not
+                "restore" this by deleting the Ward row instead.
+                suburb_ward is still captured and stored; it is only unprinted. */}
             {!noTransport && (
               <>
-                <FieldRow label="Suburb / Ward" value={fd.suburb_ward} />
                 <FieldRow label="Dest Facility" value={fd.receiving_facility} />
                 <FieldRow label="Ward"          value={fd.ward} />
                 <FieldRow label={fd.call_type === 'COURTESY' ? "Receiving Dr/Person" : "Receiving Dr"}  value={fd.receiving_doctor} />
@@ -2772,30 +2807,50 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
                   const showNokSig     = nokSig || fd.call_type === 'DOD';
                   if (!showPatientSig && !showWitnessSig && !showNokSig) return null;
 
+                  // The signing lines now sit INSIDE the Terms and Conditions
+                  // panel, directly under the clauses, the way the paper form
+                  // reads: a label and a rule to sign on. The separate
+                  // "Signatures" band and its three bordered boxes are gone.
+                  //
+                  // This is a layout fix, not decoration. The three boxes were
+                  // 230px of fixed height in the column that binds page 1, and
+                  // a PRF carrying all three marks took page 1 to ~1075px —
+                  // past the one-sheet ceiling — so it SLICED. The dotted rules
+                  // bring the same PRF to ~912px, which fits.
+                  //
+                  // The block stays OUTSIDE the `!refused` gate above. The crew
+                  // form presents T&C on a refusal too, so a next-of-kin mark
+                  // can exist there; moving these lines in among the clauses to
+                  // satisfy "inside the panel" more literally would drop that
+                  // mark from every refusal.
+                  //
+                  // Labels carry sigLabel explicitly rather than inheriting:
+                  // the clause body is 0.46rem, already the smallest text on the
+                  // sheet, and a signature label must not be smaller still.
                   return (
-                    <>
-                    <SectionHead label="Signatures" />
-                    <div style={{ display: 'flex', flexDirection: 'column', borderTop: `1px solid ${LN}` }}>
-                      {fd.call_type !== 'DOD' && !refusalOwnsSignatures && (
-                        <div style={{ padding: '5px 7px', borderBottom: (witnessSig || nokSig || fd.call_type === 'DOD') ? `1px solid ${LN}` : 'none' }}>
+                    <div style={{
+                      display: 'flex', flexDirection: 'column',
+                      borderTop: `1px solid ${LN}`, padding: '6px 8px 8px', gap: 7,
+                    }}>
+                      {showPatientSig && (
+                        <div>
                           <div style={sigLabel}>Patient / Rep.</div>
-                          <SignatureBox src={fd.tc_patient_signature || prf.signatures?.patient_signature} minHeight={80} />
+                          <SignatureRule src={fd.tc_patient_signature || prf.signatures?.patient_signature} />
                         </div>
                       )}
-                      {(witnessSig || fd.call_type === 'DOD') && !refusalOwnsSignatures && (
-                        <div style={{ padding: '5px 7px', borderBottom: (nokSig || fd.call_type === 'DOD') ? `1px solid ${LN}` : 'none' }}>
+                      {showWitnessSig && (
+                        <div>
                           <div style={sigLabel}>Witness</div>
-                          <SignatureBox src={witnessSig} minHeight={80} />
+                          <SignatureRule src={witnessSig} />
                         </div>
                       )}
-                      {(nokSig || fd.call_type === 'DOD') && (
-                        <div style={{ padding: '5px 7px' }}>
+                      {showNokSig && (
+                        <div>
                           <div style={sigLabel}>Next of Kin</div>
-                          <SignatureBox src={nokSig} minHeight={70} />
+                          <SignatureRule src={nokSig} />
                         </div>
                       )}
                     </div>
-                    </>
                   );
                 })()}
               </>
