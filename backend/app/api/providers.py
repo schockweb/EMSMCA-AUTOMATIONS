@@ -16,6 +16,7 @@ from PIL import Image
 from fastapi import APIRouter, Depends, HTTPException, Path, Request, status, UploadFile, File, Response
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select, func, or_, cast, Text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.crew_auth import portal_grant_scheme, require_portal_grant
@@ -740,9 +741,68 @@ async def list_providers(
     return items
 
 
+def _duplicate_client_error(
+    exc: IntegrityError,
+    *,
+    slug: str,
+    portal_email: str | None,
+    admin_email: str | None,
+) -> HTTPException:
+    """Translate a unique-index violation back into the 400 the pre-check gives.
+
+    create_provider checks slug, portal login and admin email with SELECTs and
+    then INSERTs. Between those two steps another request can insert the same
+    value — and it is not a theoretical window: `_verify_new_smtp_credential`
+    performs a real SMTP login in the middle of it, so with the PRF sending
+    account filled in the gap is seconds wide, not microseconds. Two admin
+    workers onboarding from one spreadsheet is exactly the shape that hits it.
+
+    The DB unique indexes hold, so no duplicate is ever created. The problem was
+    purely what the loser saw: a bare 500 "An internal error occurred. Our team
+    has been notified." That reads as an outage rather than a name clash, and
+    the natural response to it — invent a different company name and create a
+    SECOND, wrong client — is the worst available outcome. Mapping it back to
+    the identical 400 makes "retry, it will tell you which field" obvious.
+
+    Index names verified against the live schema; create_all derives them from
+    `unique=True, index=True` on the model columns. Postgres also names the
+    offending column in the DETAIL line, so either form matches. Order matters:
+    the portal-login check must precede the crew-email one, since a DETAIL of
+    `Key (portal_login_email)=...` would otherwise need distinguishing from
+    `Key (email)=...` by luck rather than by design.
+    """
+    reason = str(getattr(exc, "orig", exc)).lower()
+
+    if "ix_service_providers_slug" in reason or "(slug)" in reason:
+        return HTTPException(400, f"Slug '{slug}' is already taken")
+    if "ix_service_providers_portal_login_email" in reason or "(portal_login_email)" in reason:
+        return HTTPException(
+            400,
+            f"Portal Login Email '{portal_email}' is already in use by another client.",
+        )
+    if "ix_crew_members_email" in reason or "(email)" in reason:
+        return HTTPException(
+            400,
+            f"Admin email '{admin_email}' is already registered as a crew member.",
+        )
+
+    # Some other constraint. Still a 400 — the request is what is wrong, and a
+    # 500 here would send the operator hunting for an outage that is not there.
+    # Logged in full so an unmapped constraint shows up as a fixable gap rather
+    # than as a mystery in a support call.
+    logger.warning("Unmapped integrity error creating client '%s': %s", slug, reason[:400])
+    return HTTPException(
+        400,
+        "That client could not be created because one of its details is already "
+        "in use by another client. Reload the Clients page to check whether it "
+        "was created, then try again.",
+    )
+
+
 @router.post("", status_code=201)
 async def create_provider(
     body: ProviderCreate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(_provider_admin),
 ):
@@ -785,30 +845,78 @@ async def create_provider(
     _apply_smtp_settings(provider, body.model_dump(exclude_unset=True))
     await _verify_new_smtp_credential(body.model_dump(exclude_unset=True), provider)
     db.add(provider)
-    await db.flush()  # To get provider.id for the crew member
 
-    # Optionally create an admin crew member
-    if body.admin_email and body.admin_password:
-        admin_email = body.admin_email.strip().lower()
-        existing_crew_email = await db.execute(select(CrewMember).where(CrewMember.email == admin_email))
-        if existing_crew_email.scalar_one_or_none():
-            raise HTTPException(400, f"Admin email '{admin_email}' is already registered as a crew member.")
-        
-        admin_crew = CrewMember(
-            provider_id=provider.id,
-            email=admin_email,
-            hashed_password=hash_password(body.admin_password),
-            full_name=f"{body.name} Admin",
-            initials="AD",
-            qualification=DEFAULT_CATEGORY,  # HPCSA category; ILS is a BILLING TIER and _validate_category rejects it
-            role="admin",
-            is_active=True,
-        )
-        db.add(admin_crew)
+    # Every write below can trip a unique index that the pre-checks above just
+    # cleared, if a concurrent create landed in between. Both statements matter,
+    # not just the commit: `flush()` is what emits the provider INSERT, so the
+    # slug collision surfaces there, while the admin crew member is not written
+    # until commit. Guarding only one leaves the other as a 500.
+    admin_email: str | None = None
+    try:
+        await db.flush()  # To get provider.id for the crew member
 
-    await db.commit()
+        # Optionally create an admin crew member
+        if body.admin_email and body.admin_password:
+            admin_email = body.admin_email.strip().lower()
+            existing_crew_email = await db.execute(select(CrewMember).where(CrewMember.email == admin_email))
+            if existing_crew_email.scalar_one_or_none():
+                raise HTTPException(400, f"Admin email '{admin_email}' is already registered as a crew member.")
+
+            admin_crew = CrewMember(
+                provider_id=provider.id,
+                email=admin_email,
+                hashed_password=hash_password(body.admin_password),
+                full_name=f"{body.name} Admin",
+                initials="AD",
+                qualification=DEFAULT_CATEGORY,  # HPCSA category; ILS is a BILLING TIER and _validate_category rejects it
+                role="admin",
+                is_active=True,
+            )
+            db.add(admin_crew)
+
+        # Who onboarded this client. Deactivation has always been audited;
+        # creation was not, so the only record was an actor-less log line — and
+        # with several admin workers onboarding in parallel, "who added this
+        # company, and when?" had no answer at all. Written inside the same
+        # transaction as the provider row, so a create that fails leaves no
+        # audit entry claiming it succeeded.
+        #
+        # Credentials are deliberately absent from the snapshot. This table is
+        # the append-only POPIA ledger and is read during support work; it
+        # records THAT a portal login was configured, never what it was.
+        db.add(AuditLog(
+            user_id=user.id,
+            action="PROVIDER_CREATED",
+            entity_type="service_provider",
+            entity_id=provider.id,
+            before_state=None,
+            after_state={
+                "name": provider.name,
+                "slug": provider.slug,
+                "pr_number": provider.pr_number,
+                "is_active": True,
+            },
+            details={
+                "provider_slug": provider.slug,
+                "portal_login_configured": bool(provider.portal_login_password_hash),
+                "admin_crew_created": admin_email is not None,
+                "prf_start_number": provider.prf_start_number,
+            },
+            ip_address=get_trusted_client_ip(request),
+        ))
+
+        await db.commit()
+    except IntegrityError as exc:
+        # A concurrent create won the race. The session is poisoned after an
+        # IntegrityError, so it has to be rolled back before anything else can
+        # use it — including the request-scoped session FastAPI will close.
+        await db.rollback()
+        raise _duplicate_client_error(
+            exc, slug=slug, portal_email=portal_email, admin_email=admin_email
+        ) from exc
+
     await db.refresh(provider)
-    logger.info("Created provider: %s (%s)", provider.name, provider.slug)
+    logger.info("Created provider: %s (%s) by user %s", provider.name, provider.slug, user.id)
     return {"id": str(provider.id), "name": provider.name, "slug": provider.slug}
 
 
