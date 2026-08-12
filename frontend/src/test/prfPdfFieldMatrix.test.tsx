@@ -459,7 +459,10 @@ function buildPrf(callType: string, billingType: string) {
     ...common.always,
     ...(isDoD ? [] : common.patient),
     ...(noTransport ? [] : common.transport),
-    ...(noTransport || callType === 'RESUS' ? [] : common.facilityHandover),
+    // NOT excluded for RESUS: a resuscitation the crew wins is conveyed and
+    // handed over like any other call. These rows drop only once a Declaration
+    // of Death is made (fd.med_aid_dec_death), which this fixture does not set.
+    ...(noTransport ? [] : common.facilityHandover),
     // The clinical sheet is omitted for a Declaration of Death AND for a
     // refusal. On a refusal nothing clinical exists — the patient declined
     // before any observation or intervention was made — so page 2 is the
@@ -598,7 +601,7 @@ describe('PRF PDF field coverage — every call-type × billing-type', () => {
       //   DOD       → the death-certificate layout replaces the T&C + handover
       //               stack with 2 crew sign-offs, the recipient signature and
       //               the 2 declaration signatures = 5
-      // RESUS is 2, not 6: the two crew sign-offs, and nothing else. The
+      // RESUS is 3, not 6: the handover mark and the two crew sign-offs. The
       // three Terms & Conditions marks (patient/rep, witness, next of kin) are
       // gone because the T&C block no longer prints on a resuscitation — the
       // crew form gates it behind `call_type !== 'RESUS'`
@@ -609,7 +612,7 @@ describe('PRF PDF field coverage — every call-type × billing-type', () => {
       const expectedSignatures =
         callType === 'RHT' ? 5 :
         callType === 'DOD' ? 5 :
-        callType === 'RESUS' ? 2 : 6;
+        callType === 'RESUS' ? 3 : 6;
 
       describe(label, () => {
         it('renders every captured field onto the PDF pages', async () => {
@@ -1082,7 +1085,7 @@ describe('RHT — the refusal reaches the printed record', () => {
     ).toBeGreaterThan(0);
   });
 
-  it('drops the facility-handover rows, the duplicate handover signature and the sticker on a Resus', async () => {
+  it('drops the handover rows, duplicate signature and sticker once death is DECLARED', async () => {
     // A resuscitation releases the deceased to an UNDERTAKER. There is no
     // receiving clinician to name, no condition-on-handover to record, no
     // facility to email, and no facility patient label to affix — so all of
@@ -1094,16 +1097,30 @@ describe('RHT — the refusal reaches the printed record', () => {
     // heading on page 1 it read as a facility receiving a live patient, and it
     // was the same mark twice.
     const built = buildPrf('RESUS', 'MED AID');
+    // The DECLARATION is the trigger, not the call type. Without this the fixture
+    // is a resuscitation the crew WON, which is conveyed and handed over
+    // normally — and every assertion below would be wrong.
+    built.prf.form_data.med_aid_dec_death = true;
     currentPrf = built.prf;
     renderPrfView();
     await screen.findByText((c) => c.includes(built.anchor), { exact: false });
 
-    for (const label of ['Receiving Dr', 'Qualification', 'Condition',
-                         'Receiving Facility Email', 'Handover Signature',
-                         'Hospital Sticker']) {
+    // Assert on the VALUES for the four Call Information rows, not their labels.
+    // "Qualification" is also the label of the certifying practitioner's row
+    // inside the Declaration of Death block, which legitimately prints — a
+    // global label count cannot tell the two apart. The sentinels can.
+    for (const value of [built.fd.receiving_doctor, built.fd.handover_qualification,
+                         built.fd.handover_notes, built.fd.handover_doctor_email]) {
+      expect(
+        screen.queryAllByText((c) => c.includes(value), { exact: false }).length,
+        `"${value}" still prints once death is declared`,
+      ).toBe(0);
+    }
+    // These two headings ARE unique to the blocks being removed.
+    for (const label of ['Handover Signature', 'Hospital Sticker']) {
       expect(
         screen.queryAllByText(label, { exact: true }).length,
-        `"${label}" still prints on a Resus`,
+        `"${label}" still prints once death is declared`,
       ).toBe(0);
     }
     expect(screen.queryAllByText(/Affix hospital sticker here/i)).toHaveLength(0);
@@ -1113,7 +1130,22 @@ describe('RHT — the refusal reaches the printed record', () => {
     expect(screen.queryAllByText('Dest Facility').length).toBeGreaterThan(0);
     expect(screen.queryAllByText('Ward').length).toBeGreaterThan(0);
 
-    // Control: an ordinary call still carries all six.
+    // Control 1: a resuscitation with NO declaration keeps everything — the
+    // patient was brought back and taken to a hospital. This is the case the
+    // first version of this change got wrong.
+    cleanup();
+    const liveResus = buildPrf('RESUS', 'MED AID');
+    currentPrf = liveResus.prf;
+    renderPrfView();
+    await screen.findByText((c) => c.includes(liveResus.anchor), { exact: false });
+    for (const label of ['Receiving Dr', 'Condition', 'Handover Signature', 'Hospital Sticker']) {
+      expect(
+        screen.queryAllByText(label, { exact: true }).length,
+        `"${label}" is missing from a resuscitation that did NOT declare death`,
+      ).toBeGreaterThan(0);
+    }
+
+    // Control 2: an ordinary call still carries all six.
     cleanup();
     const primary = buildPrf('PRIMARY', 'MED AID');
     currentPrf = primary.prf;

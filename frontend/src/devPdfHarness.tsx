@@ -76,6 +76,12 @@ const CALL_TYPE = qs.get('call') || 'Primary';
 // ?long=1 seeds the long wrapped addresses / notes a real crew types;
 // ?sig=N (1-3) captures that many Terms & Conditions signatures.
 const LONG = qs.get('long') === '1';
+// ?dod=1 — the crew ticked "Declaration of Death". On a RESUS this is the
+// difference between a resuscitation the crew WON (conveyed, handed over,
+// stickered) and one they lost (released to an undertaker). The harness could
+// not express it, which is how a change keyed on the call type rather than on
+// the declaration reached a real PDF.
+const DECLARED_DEAD = qs.get('dod') === '1';
 const SIGS = Number(qs.get('sig') ?? 0);
 // A visible stand-in for captured ink — a short scribble path.
 const INK = 'data:image/svg+xml;base64,' + btoa(
@@ -176,6 +182,19 @@ const FD: Record<string, any> = {
   ...(SIGS >= 1 ? { tc_patient_signature: INK } : {}),
   ...(SIGS >= 2 ? { tc_witness_signature: INK } : {}),
   ...(SIGS >= 3 ? { next_of_kin_signature: INK } : {}),
+
+  ...(DECLARED_DEAD ? {
+    med_aid_dec_death: true,
+    med_aid_dec_death_hcp_name: 'Dr N. Harness',
+    med_aid_dec_death_hcp_qualification: 'MBChB',
+    med_aid_dec_death_hcp_hpcsa: 'MP0123456',
+    med_aid_dec_death_med_carotid: 'Absent',
+    med_aid_dec_death_med_heart_sounds: 'Absent',
+    undertaker_name: 'Harness Funeral Services',
+    undertaker_phone: '011 555 0000',
+    undertaker_collector_name: 'S. Collector',
+    undertaker_collector_signature: INK,
+  } : {}),
 };
 
 const PRF_FIXTURE = {
