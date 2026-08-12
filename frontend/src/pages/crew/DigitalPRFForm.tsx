@@ -8658,7 +8658,15 @@ export default function DigitalPRFForm() {
   // ── Phase 4: TRANSPORT ────────────────────────────────────────────────────
   const P4 = () => (
     <>
-      {CriticalBanner()}
+      {/* The Critical Vitals Alert banner was removed from Transport (the
+          crew's phase 3), the last screen that still carried it. It sat above
+          the vitals inputs and appeared the moment a value crossed a threshold,
+          so it pushed the field being typed in down the screen mid-entry — the
+          same defect that took it off Dispatch. A crew re-checking vitals on
+          the road is watching the patient, not an amber box restating the
+          number they just keyed in.
+          The Allergy banner stays: it carries information the crew did NOT just
+          type and cannot see anywhere else on this screen. */}
       {AllergyBanner()}
 
       <SHdr t="Departure" />

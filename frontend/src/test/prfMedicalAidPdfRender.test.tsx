@@ -451,6 +451,27 @@ describe('PRF PDF render — blank passport rows', () => {
     expect(screen.queryAllByText('Dest Facility').length).toBeGreaterThan(0);
   });
 
+  it('offers Save as PDF and no Print button', async () => {
+    // Print was removed from the toolbar for the admin and provider views
+    // alike. Save as PDF renders through buildPrfPdf at the full design width,
+    // so it does not depend on the browser print dialog's margin,
+    // background-graphics and scale settings.
+    //
+    // Asserting Save as PDF is still there is the half that matters: "no Print
+    // button" alone would also be satisfied by a toolbar that failed to render.
+    renderPrfView();
+    await screen.findByText(/Sipho-Sentinel/);
+
+    expect(
+      screen.queryByLabelText('Print'),
+      'the Print button is back in the PRF toolbar',
+    ).toBeNull();
+    expect(
+      screen.queryByLabelText('Save as PDF'),
+      'Save as PDF is missing — the only supported export path is gone',
+    ).not.toBeNull();
+  });
+
   it('puts Motivation first in the closeout band and Valuables last', async () => {
     // Motivation sits in the first column so it falls directly under Patient
     // Priority in the band above, which is where the crew reads it; Valuables

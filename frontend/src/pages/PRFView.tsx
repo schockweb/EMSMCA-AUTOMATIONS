@@ -960,8 +960,8 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
     }
   };
 
-  // Hard-copy path (physical printer). Uses the @media print CSS below.
-  const handlePrint = () => window.print();
+  // The hard-copy button (handlePrint = window.print) was removed from the
+  // toolbar. window.print() survives only as handleSavePdf's fallback above.
 
   // Native browser print (Ctrl/Cmd-P). The on-screen pages now grow to their
   // natural height (≥ one A4 sheet) and are wider than a sheet (1220px), so
@@ -1792,20 +1792,17 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
               <path d="m22 7-10 5L2 7" />
             </svg>
           </button>
-        <button onClick={handlePrint} title="Print" aria-label="Print" style={{
-          width: 40, height: 40, padding: 0, border: `1px solid #cbd5e1`, marginRight: 10,
-          background: '#fff', color: INK,
-          cursor: 'pointer', borderRadius: 6,
-          boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
-          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-               strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="6 9 6 2 18 2 18 9" />
-            <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
-            <rect x="6" y="14" width="12" height="8" />
-          </svg>
-        </button>
+        {/* The Print button was removed from this toolbar, for the admin and
+            the provider views alike (this component serves both). Save as PDF
+            is the supported path: it renders through buildPrfPdf at the full
+            1220px design width, so it does not depend on the browser print
+            dialog's margin, background-graphics and scale settings — which is
+            what made printed copies come out inconsistently.
+            The native print pipeline itself is deliberately still here (the
+            beforeprint/afterprint page-fit effect and the @media print CSS),
+            because handleSavePdf falls back to window.print() when the canvas
+            snapshot fails, e.g. on a CORS-tainted logo. Removing that would
+            turn a recoverable export failure into a dead end. */}
         <button onClick={handleSavePdf} disabled={savingPdf} title={savingPdf ? 'Building PDF…' : 'Save as PDF'} aria-label="Save as PDF" style={{
           width: 40, height: 40, padding: 0, border: 'none',
           background: savingPdf ? '#94a3b8' : `linear-gradient(135deg, ${GREEN}, ${GREEN_DK})`, color: '#fff',

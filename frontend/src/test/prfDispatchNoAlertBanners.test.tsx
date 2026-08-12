@@ -148,8 +148,16 @@ describe('Dispatch — the capture screen must not shift under the crew', () => 
   });
 });
 
-describe('Transport — the banners still do their job', () => {
-  it('shows both banners, so the fix removed them from one screen and not from the app', async () => {
+describe('Transport — allergy stays, critical vitals goes', () => {
+  it('drops the critical vitals banner but keeps the allergy banner', async () => {
+    // The Critical Vitals banner is gone from Transport too (the crew's phase
+    // 3), for the same reason it left Dispatch: it sits above the vitals inputs
+    // and appears the moment a value crosses a threshold, so it shoves the field
+    // being typed in. It also only ever restates a number the crew just keyed.
+    //
+    // The Allergy banner stays, and asserting that here is what stops this from
+    // being satisfied by deleting both: allergies are information the crew did
+    // NOT just type and cannot see anywhere else on this screen.
     seedDraft(4);
     const { container } = mountForm();
 
@@ -161,15 +169,15 @@ describe('Transport — the banners still do their job', () => {
 
     await waitFor(() => {
       expect(
-        screen.queryByText(/Critical Vitals Alert/i),
-        'the critical vitals banner has been removed from Transport too — the crew '
-        + 'now gets no warning anywhere',
+        screen.queryByText(/Allergy Alert/i),
+        'the allergy banner has been removed from Transport too — that is not '
+        + 'what was asked for, and the crew has no other sight of allergies here',
       ).toBeTruthy();
     }, { timeout: 4000 });
     expect(
-      screen.queryByText(/Allergy Alert/i),
-      'the allergy banner has been removed from Transport too',
-    ).toBeTruthy();
+      screen.queryByText(/Critical Vitals Alert/i),
+      'the critical vitals banner is still on Transport',
+    ).toBeNull();
     expect(container.textContent).not.toMatch(/something went wrong/i);
   });
 });
