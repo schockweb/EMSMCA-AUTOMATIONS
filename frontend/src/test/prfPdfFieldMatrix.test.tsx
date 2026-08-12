@@ -587,9 +587,18 @@ describe('PRF PDF field coverage — every call-type × billing-type', () => {
       //   DOD       → the death-certificate layout replaces the T&C + handover
       //               stack with 2 crew sign-offs, the recipient signature and
       //               the 2 declaration signatures = 5
+      // RESUS is 3, not 6: the handover mark and the two crew sign-offs. The
+      // three Terms & Conditions marks (patient/rep, witness, next of kin) are
+      // gone because the T&C block no longer prints on a resuscitation — the
+      // crew form gates it behind `call_type !== 'RESUS'`
+      // (DigitalPRFForm.tsx:9089), so those three could never be genuinely
+      // captured on such a call. The fixture sets them synthetically, which is
+      // exactly how a PDF ended up showing a patient in cardiac arrest having
+      // "accepted full responsibility for all payments".
       const expectedSignatures =
         callType === 'RHT' ? 5 :
-        callType === 'DOD' ? 5 : 6;
+        callType === 'DOD' ? 5 :
+        callType === 'RESUS' ? 3 : 6;
 
       describe(label, () => {
         it('renders every captured field onto the PDF pages', async () => {
@@ -1060,6 +1069,42 @@ describe('RHT — the refusal reaches the printed record', () => {
     expect(screen.queryAllByText('Next of Kin').length,
       'a captured next-of-kin signature vanished with the T&C clauses'
     ).toBeGreaterThan(0);
+  });
+
+  it('prints no Terms and Conditions on a Resus — nobody was ever shown them', async () => {
+    // The crew form gates its whole T&C block behind `call_type !== 'RESUS'`
+    // (DigitalPRFForm.tsx:9089). So on a resuscitation the clauses are never
+    // presented, nobody acknowledges them, and no signature can be captured
+    // against them — yet the PDF printed the clauses AND a signing line, on the
+    // record of a patient in cardiac arrest. Same defect the RHT case fixed,
+    // simply never extended here.
+    //
+    // The signature-count assertion alone would not pin this: it is satisfied
+    // by any change that happens to drop three marks. This names the clauses.
+    const built = buildPrf('RESUS', 'MED AID');
+    currentPrf = built.prf;
+    renderPrfView();
+    await screen.findByText((c) => c.includes(built.anchor), { exact: false });
+
+    expect(screen.queryAllByText('Terms and Conditions')).toHaveLength(0);
+    expect(
+      document.body.textContent,
+      'the financial-responsibility clause is printing on a cardiac arrest',
+    ).not.toMatch(/accept full responsibility for all payments/i);
+    for (const label of ['Patient / Rep.', 'Witness', 'Next of Kin']) {
+      expect(
+        screen.queryAllByText(label, { exact: true }).length,
+        `a "${label}" signing line prints on a Resus, for terms never shown`,
+      ).toBe(0);
+    }
+    // Control: a call type that DOES present the terms must still print them,
+    // so this cannot be satisfied by removing the block outright.
+    cleanup();
+    const primary = buildPrf('PRIMARY', 'MED AID');
+    currentPrf = primary.prf;
+    renderPrfView();
+    await screen.findByText((c) => c.includes(primary.anchor), { exact: false });
+    expect(screen.queryAllByText('Terms and Conditions').length).toBeGreaterThan(0);
   });
 
   it('prints no orphaned signing lines on a refusal with nothing to sign', async () => {

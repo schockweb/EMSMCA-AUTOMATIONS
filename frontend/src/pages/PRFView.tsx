@@ -2821,8 +2821,18 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
                 this document was received by the patient" and "I accept full
                 responsibility for all payments" onto the one record whose whole
                 content is that treatment was DECLINED. Unsigned or not, a
-                scheme or a court reads what is on the page. */}
-            {fd.call_type !== 'DOD' && (
+                scheme or a court reads what is on the page.
+
+                RESUS is excluded for the same reason, and the omission was
+                simply never extended to it: the crew form gates its whole
+                Terms & Conditions block behind `call_type !== 'RESUS'`
+                (DigitalPRFForm.tsx:9089), so on a resuscitation the clauses are
+                never shown, nobody acknowledges them, and tc_patient_signature
+                cannot exist. Printing them anyway put "I accept full
+                responsibility for all payments" and a signing line onto the
+                record of a patient in cardiac arrest — who could not consent to
+                anything. Worse than the refusal case, not better. */}
+            {fd.call_type !== 'DOD' && fd.call_type !== 'RESUS' && (
               <>
                 {!refused && (
                 <>
