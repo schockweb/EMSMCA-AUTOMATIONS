@@ -1068,8 +1068,14 @@ const GrowTa = ({ value, style, ...rest }: React.TextareaHTMLAttributes<HTMLText
   );
 };
 
-const Inp = ({ fk, type = 'text', onBlur, noMic }: { fk: string; ph?: string; type?: string; req?: boolean; noMic?: boolean; onBlur?: (e: React.FocusEvent<any>) => void }) => {
+const Inp = ({ fk, type = 'text', onBlur, noMic, upper }: { fk: string; ph?: string; type?: string; req?: boolean; noMic?: boolean; upper?: boolean; onBlur?: (e: React.FocusEvent<any>) => void }) => {
   const { fd, sf } = useContext(FormContext);
+
+  // `upper`: block capitals, stored as well as displayed. CSS text-transform
+  // alone would show capitals to the crew and write mixed case to the record,
+  // so the PRF PDF — the legal document — would not match what was typed.
+  const commit = (v: string) => sf(fk, upper ? v.toUpperCase() : v);
+  const upperStyle = upper ? { textTransform: 'uppercase' as const } : {};
   // PRF data is unique per patient, so browser form-history suggestions (e.g.
   // re-offering the last value you typed) are never useful and are turned off.
   // The Ward field is deliberately left untouched per request.
@@ -1243,9 +1249,9 @@ const Inp = ({ fk, type = 'text', onBlur, noMic }: { fk: string; ph?: string; ty
 
   if (!showMic) {
     if (!growable) {
-      return <input id={`prf-field-${fk}`} type={type} value={fd[fk] ?? ''} onChange={e => sf(fk, e.target.value)} onFocus={onF} onBlur={e => { onB(e); if (onBlur) onBlur(e); }} placeholder="" {...nf} style={{ ...base, marginBottom: 14, borderColor: '#e2e8f0' }} />;
+      return <input id={`prf-field-${fk}`} type={type} value={fd[fk] ?? ''} onChange={e => commit(e.target.value)} onFocus={onF} onBlur={e => { onB(e); if (onBlur) onBlur(e); }} placeholder="" {...nf} style={{ ...base, marginBottom: 14, borderColor: '#e2e8f0', ...upperStyle }} />;
     }
-    return <textarea id={`prf-field-${fk}`} ref={taRef} rows={1} value={fd[fk] ?? ''} onChange={e => sf(fk, e.target.value)} onKeyDown={blockEnter} onFocus={onF} onBlur={e => { onB(e); if (onBlur) onBlur(e); }} placeholder="" {...nf} style={{ ...base, marginBottom: 14, borderColor: '#e2e8f0', resize: 'none', overflow: 'hidden' }} />;
+    return <textarea id={`prf-field-${fk}`} ref={taRef} rows={1} value={fd[fk] ?? ''} onChange={e => commit(e.target.value)} onKeyDown={blockEnter} onFocus={onF} onBlur={e => { onB(e); if (onBlur) onBlur(e); }} placeholder="" {...nf} style={{ ...base, marginBottom: 14, borderColor: '#e2e8f0', resize: 'none', overflow: 'hidden', ...upperStyle }} />;
   }
 
   return (
@@ -1255,13 +1261,13 @@ const Inp = ({ fk, type = 'text', onBlur, noMic }: { fk: string; ph?: string; ty
         ref={taRef}
         rows={1}
         value={fd[fk] ?? ''}
-        onChange={e => sf(fk, e.target.value)}
+        onChange={e => commit(e.target.value)}
         onKeyDown={blockEnter}
         onFocus={onF}
         onBlur={e => { onB(e); if (onBlur) onBlur(e); }}
         placeholder=""
         {...nf}
-        style={{ ...base, marginBottom: 0, borderColor: '#e2e8f0', paddingRight: 54, resize: 'none', overflow: 'hidden' }}
+        style={{ ...base, marginBottom: 0, borderColor: '#e2e8f0', paddingRight: 54, resize: 'none', overflow: 'hidden', ...upperStyle }}
       />
       <button
         type="button"
@@ -1776,7 +1782,7 @@ const HospitalPicker = ({ wardKey }: { wardKey?: string }) => {
   );
 };
 
-const AddrInp = ({ fk, suburbKey, codeKey, ph, containerStyle, inputStyle, label, manualOnly }: { fk: string; ph?: string; req?: boolean; suburbKey?: string; codeKey?: string; containerStyle?: React.CSSProperties; inputStyle?: React.CSSProperties; label?: string; manualOnly?: boolean }) => {
+const AddrInp = ({ fk, suburbKey, codeKey, ph, containerStyle, inputStyle, label, manualOnly, upper }: { fk: string; ph?: string; req?: boolean; suburbKey?: string; codeKey?: string; containerStyle?: React.CSSProperties; inputStyle?: React.CSSProperties; label?: string; manualOnly?: boolean; upper?: boolean }) => {
   const { fd, sf } = useContext(FormContext);
   const val: string = fd[fk] ?? '';
   const [modalOpen, setModalOpen] = useState(false);
@@ -1819,7 +1825,14 @@ const AddrInp = ({ fk, suburbKey, codeKey, ph, containerStyle, inputStyle, label
       });
   };
 
-  const onTextChange = (next: string) => {
+  const upperStyle = upper ? { textTransform: 'uppercase' as const } : {};
+
+  const onTextChange = (raw: string) => {
+    // Both this field's inputs (inline and the modal's) route through here, so
+    // uppercasing once covers both. See the note on Inp's `upper`: the stored
+    // value is capitalised too, not just the display, or the PDF would not
+    // match what the crew typed.
+    const next = upper ? raw.toUpperCase() : raw;
     sf(fk, next);
     if (debounceRef.current) window.clearTimeout(debounceRef.current);
     if (skipNextRef.current) { skipNextRef.current = false; return; }
@@ -1939,7 +1952,7 @@ const AddrInp = ({ fk, suburbKey, codeKey, ph, containerStyle, inputStyle, label
           onKeyDown={(e) => { if (e.key === 'Escape') { setOpen(false); (e.currentTarget as HTMLInputElement).blur(); } }}
           autoComplete="off"
           placeholder={ph || 'Type street address…'}
-          style={{ ...base, marginBottom: 0, borderColor: '#e2e8f0', ...containerStyle, ...inputStyle }}
+          style={{ ...base, marginBottom: 0, borderColor: '#e2e8f0', ...containerStyle, ...inputStyle , ...upperStyle }}
         />
         {suggestionDropdown}
       </div>
@@ -1991,7 +2004,7 @@ const AddrInp = ({ fk, suburbKey, codeKey, ph, containerStyle, inputStyle, label
                   onKeyDown={(e) => { if (e.key === 'Escape') { setOpen(false); (e.currentTarget as HTMLInputElement).blur(); } }}
                   autoComplete="off"
                   placeholder={ph || "Type street address manually..."}
-                  style={{ ...base, width: '100%', background: W, borderColor: '#cbd5e1', ...inputStyle }}
+                  style={{ ...base, width: '100%', background: W, borderColor: '#cbd5e1', ...inputStyle , ...upperStyle }}
                 />
                 {suggestionDropdown}
               </div>
@@ -7219,24 +7232,30 @@ export default function DigitalPRFForm() {
       {fd.call_type !== 'DOD' && (
       <>
       <SHdr t="Patient Information" />
+      {/* Block capitals throughout — handwritten PRFs are filled in caps for
+          legibility and this section is what gets read back off the printed
+          record. `upper` capitalises the stored value, not just the display,
+          so the PDF matches what the crew sees. Numeric fields (age, the
+          phones, the date) are left alone: digits have no case, and forcing a
+          transform on them would only risk the cursor behaviour. */}
       <Card>
         <Lbl t="Gender" />
         <Toggle fk="gender" opts={['Male', 'Female', 'Other']} />
         <G2>
-          <div><Lbl t="First Name" req /><Inp fk="patient_name" ph="First name" req /></div>
-          <div><Lbl t="Surname" req /><Inp fk="patient_surname" ph="Surname" req /></div>
+          <div><Lbl t="First Name" req /><Inp fk="patient_name" ph="First name" req upper /></div>
+          <div><Lbl t="Surname" req /><Inp fk="patient_surname" ph="Surname" req upper /></div>
           <div><Lbl t="ID Number" req /><Inp fk="patient_id_number" ph="13-digit SA ID" req /></div>
-          <div><Lbl t="Passport Number" /><Inp fk="patient_passport_number" ph="For foreign nationals" /></div>
+          <div><Lbl t="Passport Number" /><Inp fk="patient_passport_number" ph="For foreign nationals" upper /></div>
           <div><Lbl t="Date of Birth" /><DateInp fk="patient_dob" /></div>
           <div><Lbl t="Age" /><Inp fk="age" ph="Age" type="number" /></div>
           <div><Lbl t="Cell" /><Inp fk="patient_phone_cell" ph="Cell" type="tel" /></div>
           <div><Lbl t="Tel (H)" /><Inp fk="patient_phone_home" ph="Home" type="tel" /></div>
         </G2>
         <Lbl t="Tel (W)" /><Inp fk="patient_phone_work" ph="Work number" type="tel" />
-        <Lbl t="Residential Address" /><AddrInp fk="patient_address" ph="Street address" suburbKey="patient_suburb" codeKey="patient_postal_code" manualOnly />
+        <Lbl t="Residential Address" /><AddrInp fk="patient_address" ph="Street address" suburbKey="patient_suburb" codeKey="patient_postal_code" manualOnly upper />
         <G2>
-          <div><Lbl t="Suburb" /><Inp fk="patient_suburb" ph="Suburb" /></div>
-          <div><Lbl t="Code" /><Inp fk="patient_postal_code" ph="Code" /></div>
+          <div><Lbl t="Suburb" /><Inp fk="patient_suburb" ph="Suburb" upper /></div>
+          <div><Lbl t="Code" /><Inp fk="patient_postal_code" ph="Code" upper /></div>
         </G2>
       </Card>
       </>
@@ -9156,16 +9175,43 @@ export default function DigitalPRFForm() {
     return d.getTime();
   }, [vitals, editVital, timestamps.time_dispatched]);
 
-  // Tap-to-jump: route the crew straight to the Clinical phase (vitals live
-  // there) and scroll the vitals heading into view on the next paint.
+  // Tap-to-jump from the vitals reminder chip.
+  //
+  // This used to unconditionally setPhase(3) — the standalone Clinical screen.
+  // For a crew still on Dispatch or Patient Info that is a jump into a phase
+  // they have not reached, away from a part-filled screen, to reach a vitals
+  // set that on Dispatch is already right there on the same page.
   const jumpToVitals = useCallback(() => {
-    setPhase(3);
-    setTimeout(() => {
-      const el = document.getElementById('vitals-section-anchor');
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      else window.scrollTo({ top: 0, behavior: 'smooth' });
-    }, 60);
-  }, []);
+    // Poll for the anchor rather than guessing a delay. A fixed timeout races
+    // the phase's mount and scrolls to nothing — the same failure the Start
+    // Exam scroll hit, fixed here the same way.
+    const centreOnVitals = () => {
+      let tries = 0;
+      const tick = () => {
+        const el = document.getElementById('vitals-section-anchor');
+        if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
+        if (tries++ < 40) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    };
+
+    // Already on a screen carrying the vitals set — centre it and stay put.
+    if (document.getElementById('vitals-section-anchor')) { centreOnVitals(); return; }
+
+    // Not on screen. Until the crew has actually reached Transport, the vitals
+    // set lives inline on Dispatch, so send them there rather than into a phase
+    // they have never opened. setStartedExam is required, not incidental: the
+    // inline clinical body is gated on it and it does not survive a reload, so
+    // without it Dispatch would render the Start Exam button and the scroll
+    // would find nothing.
+    if (maxPhase < 4) {
+      setStartedExam(true);
+      setPhase(0);
+    } else {
+      setPhase(3);
+    }
+    centreOnVitals();
+  }, [maxPhase]);
 
   // ── Loading ───────────────────────────────────────────────────────────────
   if (loadError) {
