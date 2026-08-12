@@ -2415,37 +2415,6 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
             ] as Array<[string, any]>)
               .filter(([, v]) => !isBlank(v)))
               .map(([label, v]) => <FieldRow key={label} label={label} value={v} />)}
-            {fd.call_type !== 'DOD' && (() => {
-              const selected = Array.isArray(fd.mechanism)
-                ? fd.mechanism.filter(Boolean)
-                : (fd.mechanism ? [fd.mechanism] : []);
-              const hasMechanism = selected.length > 0 || !isBlank(fd.mechanism_other);
-              // Resus never captures a triage priority (the form hides the
-              // picker), so it's always omitted there; otherwise show only when
-              // a priority was actually captured.
-              const hasPriority = fd.call_type !== 'RESUS' && !isBlank(fd.priority);
-              return (
-                <>
-                  {/* Mechanism — hidden entirely when nothing was captured. */}
-                  {hasMechanism && (
-                    <>
-                      <SectionHead label="Mechanism" />
-                      {selected.map((m: string) => <Chk key={m} label={m} checked />)}
-                      {fd.mechanism_other && (
-                        <FieldRow label="Detail" value={fd.mechanism_other} valueMin={24} />
-                      )}
-                    </>
-                  )}
-                  {/* Patient Priority — hidden when not captured. */}
-                  {hasPriority && (
-                    <>
-                      <SectionHead label="Patient Priority" />
-                      <FieldRow label="Priority" value={fd.priority} />
-                    </>
-                  )}
-                </>
-              );
-            })()}
             {/* Stated on the face of the patient block, not only in the refusal
                 panel. Anyone scanning this form for "what happened to this
                 patient" reads the left column first, and until now it ended in
@@ -2465,7 +2434,7 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
             <SectionHead label="Debtor Information" />
             {debtorSameAsPatient ? (
               <div style={{
-                flex: 1, borderTop: `1px solid ${LN}`,
+                borderTop: `1px solid ${LN}`,
                 display: 'flex', flexDirection: 'column', alignItems: 'center',
                 justifyContent: 'center', gap: 6, padding: '14px 12px',
                 background: SOFT_BG, textAlign: 'center',
@@ -2503,11 +2472,50 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
                 <FieldRow label="Code"     value={fd.debtor_postal_code} />
                 <FieldRow label="Tel (H)"  value={fd.debtor_phone_home} />
                 <FieldRow label="Cell"     value={fd.debtor_phone_cell} />
-                {fd.call_type === 'DOD'
-                  ? <div style={{ flex: 1, borderTop: `1px solid ${LN}` }} />
-                  : <FillLines />}
               </>
             )}
+            {/* Mechanism + Patient Priority — moved here from the Patient
+                Information column, so they read directly under Debtor
+                Information. Rendered OUTSIDE the same-as-patient / full-rows
+                ternary above because neither depends on the debtor: a
+                'Same as Patient' debtor must still show the mechanism. */}
+            {fd.call_type !== 'DOD' && (() => {
+              const selected = Array.isArray(fd.mechanism)
+                ? fd.mechanism.filter(Boolean)
+                : (fd.mechanism ? [fd.mechanism] : []);
+              const hasMechanism = selected.length > 0 || !isBlank(fd.mechanism_other);
+              // Resus never captures a triage priority (the form hides the
+              // picker), so it's always omitted there; otherwise show only when
+              // a priority was actually captured.
+              const hasPriority = fd.call_type !== 'RESUS' && !isBlank(fd.priority);
+              return (
+                <>
+                  {/* Mechanism — hidden entirely when nothing was captured. */}
+                  {hasMechanism && (
+                    <>
+                      <SectionHead label="Mechanism" />
+                      {selected.map((m: string) => <Chk key={m} label={m} checked />)}
+                      {fd.mechanism_other && (
+                        <FieldRow label="Detail" value={fd.mechanism_other} valueMin={24} />
+                      )}
+                    </>
+                  )}
+                  {/* Patient Priority — hidden when not captured. */}
+                  {hasPriority && (
+                    <>
+                      <SectionHead label="Patient Priority" />
+                      <FieldRow label="Priority" value={fd.priority} />
+                    </>
+                  )}
+                </>
+              );
+            })()}
+            {/* One fill for the whole column, below the moved sections — the
+                per-branch fills would otherwise have pushed Mechanism and
+                Patient Priority to the very bottom of the sheet. */}
+            {fd.call_type === 'DOD'
+              ? <div style={{ flex: 1, borderTop: `1px solid ${LN}` }} />
+              : <FillLines />}
           </div>
 
           {/* Billing Information — content follows the selected billing type so

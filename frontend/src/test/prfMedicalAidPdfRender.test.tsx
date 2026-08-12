@@ -451,6 +451,35 @@ describe('PRF PDF render — blank passport rows', () => {
     expect(screen.queryAllByText('Dest Facility').length).toBeGreaterThan(0);
   });
 
+  it('puts Mechanism and Patient Priority under Debtor Information', async () => {
+    // Moved out of the Patient Information column. Geometry is not assertable
+    // in jsdom, but these sections are siblings inside one grid column with no
+    // explicit order, so DOM order is column order — the same reasoning as the
+    // closeout-band test above.
+    const { container } = renderPrfView();
+    await screen.findByText(/Sipho-Sentinel/);
+
+    const order = [...container.querySelectorAll('*')]
+      .filter(e => e.children.length === 0
+        && ['Patient Information', 'Debtor Information', 'Mechanism', 'Patient Priority', 'Billing Information']
+          .includes((e.textContent || '').trim()))
+      .map(e => (e.textContent || '').trim());
+
+    for (const s of ['Debtor Information', 'Mechanism', 'Patient Priority']) {
+      expect(order, `the PDF is missing the "${s}" section`).toContain(s);
+    }
+    expect(
+      order.indexOf('Mechanism'),
+      `Mechanism must follow Debtor Information — order was ${JSON.stringify(order)}`,
+    ).toBeGreaterThan(order.indexOf('Debtor Information'));
+    expect(
+      order.indexOf('Patient Priority'),
+      `Patient Priority must follow Debtor Information — order was ${JSON.stringify(order)}`,
+    ).toBeGreaterThan(order.indexOf('Debtor Information'));
+    // And they are no longer sitting under Patient Information.
+    expect(order.indexOf('Mechanism')).toBeGreaterThan(order.indexOf('Patient Information'));
+  });
+
   it('offers Save as PDF and no Print button', async () => {
     // Print was removed from the toolbar for the admin and provider views
     // alike. Save as PDF renders through buildPrfPdf at the full design width,

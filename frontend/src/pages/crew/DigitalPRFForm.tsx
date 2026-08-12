@@ -6225,32 +6225,11 @@ export default function DigitalPRFForm() {
   };
 
   // ── Computed smart values ─────────────────────────────────────────────────
-  // Debounced copy of `vitals` used ONLY for the critical-vitals banner.
-  // Evaluating on every keystroke made the banner flap: a half-typed HR ("1",
-  // then "12" on the way to "120") reads as severe bradycardia (<40), so the
-  // banner appeared then vanished per digit, shifting the whole phase layout
-  // under the crew's finger — the reported "HR field page jump". Lagging it
-  // ~700ms means the banner only re-evaluates once typing settles, so partial
-  // values never trigger a transient alert or a layout shift.
-  const [debouncedVitals, setDebouncedVitals] = useState(vitals);
-  useEffect(() => {
-    const h = window.setTimeout(() => setDebouncedVitals(vitals), 700);
-    return () => window.clearTimeout(h);
-  }, [vitals]);
-
-  const criticalAlerts = useMemo(() => {
-    const alerts: string[] = [];
-    if (!debouncedVitals.length) return alerts;
-    const v = debouncedVitals[debouncedVitals.length - 1];
-    const spo2 = parseFloat(v.spo2), hr = parseFloat(v.hr);
-    if (!isNaN(spo2) && spo2 < 90) alerts.push(`SpO₂ ${spo2}% — critical hypoxia`);
-    if (!isNaN(hr) && hr > 180) alerts.push(`HR ${hr} bpm — severe tachycardia`);
-    if (!isNaN(hr) && hr < 40) alerts.push(`HR ${hr} bpm — severe bradycardia`);
-    if (v.bp) { const sys = parseInt(v.bp); if (!isNaN(sys) && sys < 90) alerts.push(`BP ${v.bp} — hypotension`); }
-    const gcs = (+v.gcs_e || 0) + (+v.gcs_v || 0) + (+v.gcs_m || 0);
-    if (gcs > 0 && gcs < 9) alerts.push(`GCS ${gcs}/15 — severe neurological compromise`);
-    return alerts;
-  }, [debouncedVitals]);
+  // The debounced `vitals` copy and the `criticalAlerts` memo were removed with
+  // the Critical Vitals banner, which was their only consumer. The debounce
+  // existed solely to stop that banner flapping while an HR was half-typed
+  // ("1" then "12" on the way to "120" reads as severe bradycardia), which is
+  // moot once nothing renders from it. Vitals themselves are untouched.
 
   // Debounce the allergies value the same way as vitals: the Allergy banner
   // sits directly above the Allergies input, so re-evaluating it on every
@@ -6433,16 +6412,6 @@ export default function DigitalPRFForm() {
         ))}
       </div>
       {rows.map(r => <div key={r.timeKey}>{TimeRow({ row: r })}</div>)}
-    </div>
-  );
-
-  // ── Critical alerts banner ────────────────────────────────────────────────
-  const CriticalBanner = () => criticalAlerts.length === 0 ? null : (
-    <div style={{ background: `${REDC}12`, border: `2px solid ${REDC}`, borderRadius: 12, padding: '12px 16px', marginBottom: 16 }}>
-      <div style={{ fontSize: '0.72rem', fontWeight: 800, color: REDC, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>Critical Vitals Alert</div>
-      {criticalAlerts.map((a, i) => (
-        <div key={i} style={{ fontSize: '0.85rem', fontWeight: 600, color: '#7f1d1d', marginTop: 3 }}>• {a}</div>
-      ))}
     </div>
   );
 
@@ -8333,12 +8302,15 @@ export default function DigitalPRFForm() {
         {/* Deliberately NOT on the Dispatch embed.
             Both banners sit ABOVE the vitals inputs, and both appear the moment
             a value crosses a threshold — so on a phone, typing an HR of 180
-            makes a two-line red banner materialise above the field being typed
-            in and shoves it down the screen mid-entry. The crew reads that as
-            the keyboard losing the field. Dispatch is where vitals are first
+            makes a two-line banner materialise above the field being typed in
+            and shoves it down the screen mid-entry. The crew reads that as the
+            keyboard losing the field. Dispatch is where vitals are first
             captured, so that is exactly where it must not happen.
-            They remain on the standalone Clinical screen and on Transport. */}
-        {!embedded && CriticalBanner()}
+            The Critical Vitals banner is gone from the app entirely — it only
+            ever restated a number the crew had just keyed in, and it sat above
+            the field they keyed it into. The Allergy banner stays here and on
+            Transport: allergies are history the crew did NOT type and cannot
+            otherwise see on this screen. */}
         {!embedded && AllergyBanner()}
 
         {/* Treating practitioner — set by the gate modal on entry to Clinical.
@@ -9748,8 +9720,20 @@ export default function DigitalPRFForm() {
               push('Handover signature (receiving practitioner)', 'handover_signature');
             }
 
+            // Courtesy calls are non-billable transfers: the crew form never
+            // asks for a billing type or a debtor, and the PDF omits the
+            // Billing Information block for them entirely. So neither can be
+            // "missing" — flagging them made the review demand fields that do
+            // not exist on the call, with no way to satisfy it.
+            //
+            // Everything above this line still applies to a courtesy call: it
+            // is a real transfer with a real handover, so the ward, receiving
+            // practitioner, condition, sticker and signatures are all still
+            // checked.
+            const billableCall = fd.call_type !== 'COURTESY';
+
             // Medical aid billing — every field on the card.
-            if (fd.billing_type === 'MED AID') {
+            if (billableCall && fd.billing_type === 'MED AID') {
               if (missing(fd.medical_scheme)) push('Medical scheme', 'medical_scheme');
               if (missing(fd.medical_aid_number)) push('Membership number (med aid)', 'medical_aid_number');
               if (missing(fd.dependent_number)) push('Dependent code (med aid)', 'dependent_number');
@@ -9760,7 +9744,11 @@ export default function DigitalPRFForm() {
             // Debtor — same rules as the patient, unless marked same-as-patient
             // (PVT billing has no debtor section at all).
             const debtorSame = Array.isArray(fd.flags) && fd.flags.includes('debtor_same_as_patient');
-            if (fd.billing_type !== 'PVT' && !debtorSame) {
+            // `billing_type !== 'PVT'` alone was true on a courtesy call, where
+            // billing_type is never set at all — which is exactly how a call
+            // with no debtor section ended up being told its debtor was
+            // incomplete.
+            if (billableCall && fd.billing_type !== 'PVT' && !debtorSame) {
               if (missing(fd.debtor_gender)) push('Debtor gender', 'debtor_gender');
               if (missing(fd.debtor_name)) push('Debtor first name', 'debtor_name');
               if (missing(fd.debtor_surname)) push('Debtor surname', 'debtor_surname');
