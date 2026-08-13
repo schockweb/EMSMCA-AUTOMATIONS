@@ -162,6 +162,12 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile.prod
+      args:
+        # Baked into the bundle at build time (same as docker-compose.prod.yml).
+        # frontend/.env is dockerignored, so WITHOUT this arg the local build
+        # ships no key at all and every Google Places lookup silently no-ops.
+        # Value comes from the root .env.
+        VITE_GOOGLE_MAPS_KEY: ${VITE_GOOGLE_MAPS_KEY:-}
     container_name: ems_frontend
     restart: unless-stopped
     ports:

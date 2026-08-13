@@ -1332,6 +1332,9 @@ type AddrSuggestion = {
   display: string;
   suburb: string | null;
   postcode: string | null;
+  /** Google Places prediction id — present only on googleLookup suggestions;
+      resolved to address components (suburb / postal code) on pick. */
+  placeId?: string;
 };
 
 // Builds a complete, comma-separated South African street address from a
@@ -1784,7 +1787,7 @@ const HospitalPicker = ({ wardKey }: { wardKey?: string }) => {
   );
 };
 
-const AddrInp = ({ fk, suburbKey, codeKey, ph, containerStyle, inputStyle, label, manualOnly }: { fk: string; ph?: string; req?: boolean; suburbKey?: string; codeKey?: string; containerStyle?: React.CSSProperties; inputStyle?: React.CSSProperties; label?: string; manualOnly?: boolean }) => {
+const AddrInp = ({ fk, suburbKey, codeKey, ph, containerStyle, inputStyle, label, manualOnly, googleLookup }: { fk: string; ph?: string; req?: boolean; suburbKey?: string; codeKey?: string; containerStyle?: React.CSSProperties; inputStyle?: React.CSSProperties; label?: string; manualOnly?: boolean; googleLookup?: boolean }) => {
   const { fd, sf } = useContext(FormContext);
   const val: string = fd[fk] ?? '';
   const [modalOpen, setModalOpen] = useState(false);
@@ -1827,6 +1830,35 @@ const AddrInp = ({ fk, suburbKey, codeKey, ph, containerStyle, inputStyle, label
       });
   };
 
+  // ── Google Places lookup (googleLookup fields) ─────────────────────────
+  // Uses the Places library main.tsx already loads app-wide. Session-tokened
+  // (one token per typing session, spent by the details call on pick) so the
+  // autocomplete bills as a session rather than per keystroke. When the
+  // library is unavailable — no key at build time, or the device is offline —
+  // the field silently degrades to plain manual typing.
+  const gSessionRef = useRef<any>(null);
+  const runGoogleSearch = (q: string) => {
+    const g = (window as any).google;
+    if (q.trim().length < 3 || !g?.maps?.places) { setSuggestions([]); setLoading(false); return; }
+    if (!gSessionRef.current) gSessionRef.current = new g.maps.places.AutocompleteSessionToken();
+    setLoading(true);
+    new g.maps.places.AutocompleteService().getPlacePredictions(
+      { input: q, sessionToken: gSessionRef.current, componentRestrictions: { country: 'za' }, types: ['geocode'] },
+      (preds: any[] | null) => {
+        setLoading(false);
+        setSuggestions((preds || []).map((p: any) => ({
+          // ", South Africa" on every row is noise in an SA-only app — same
+          // rule buildFullAddress applies to the Nominatim results.
+          formatted: (p.description || '').replace(/,\s*South Africa$/i, ''),
+          display: '',
+          suburb: null,
+          postcode: null,
+          placeId: p.place_id,
+        })).filter((x: AddrSuggestion) => x.formatted));
+      },
+    );
+  };
+
   const onTextChange = (next: string) => {
     sf(fk, next);
     if (debounceRef.current) window.clearTimeout(debounceRef.current);
@@ -1845,12 +1877,44 @@ const AddrInp = ({ fk, suburbKey, codeKey, ph, containerStyle, inputStyle, label
     // suburb/postal-code autofill on personal addresses, which is the correct
     // trade. Operational scene lookups (incident_location, accident location)
     // are unaffected.
-    if (manualOnly) { setOpen(false); setSuggestions([]); return; }
+    //
+    // EXCEPTION (operator decision, 2026-08-13): `googleLookup` re-enables
+    // lookup on a named field through Google Places instead of Nominatim —
+    // requested for the patient's residential address so the crew captures a
+    // complete, correctly-spelled address. This is a deliberate disclosure of
+    // typed address text to Google Maps Platform; record it in the processing
+    // register. It does not re-open the Nominatim path.
+    if (manualOnly && !googleLookup) { setOpen(false); setSuggestions([]); return; }
     setOpen(true);
-    debounceRef.current = window.setTimeout(() => runSearch(next), 400);
+    debounceRef.current = window.setTimeout(() => (googleLookup ? runGoogleSearch(next) : runSearch(next)), 400);
   };
 
   const pick = (s: AddrSuggestion) => {
+    // A Google prediction carries only display text — resolve the place to
+    // address components so the suburb and postal code autofill like the
+    // Nominatim path. The details call spends (and ends) the session token.
+    if (s.placeId && (window as any).google?.maps?.places) {
+      const g = (window as any).google;
+      const token = gSessionRef.current;
+      gSessionRef.current = null;
+      new g.maps.places.PlacesService(document.createElement('div')).getDetails(
+        { placeId: s.placeId, fields: ['address_components', 'formatted_address'], ...(token ? { sessionToken: token } : {}) },
+        (place: any) => {
+          const comp = (type: string) =>
+            place?.address_components?.find((c: any) => Array.isArray(c.types) && c.types.includes(type))?.long_name || '';
+          const suburb = comp('sublocality_level_1') || comp('sublocality') || comp('neighborhood');
+          const postcode = comp('postal_code');
+          const formatted = (place?.formatted_address || '').replace(/,\s*South Africa$/i, '') || s.formatted;
+          skipNextRef.current = true;
+          sf(fk, formatted);
+          if (suburbKey && suburb && !fd[suburbKey]) sf(suburbKey, suburb);
+          if (codeKey && postcode && !fd[codeKey]) sf(codeKey, postcode);
+          setSuggestions([]);
+          setOpen(false);
+        },
+      );
+      return;
+    }
     skipNextRef.current = true;
     sf(fk, s.formatted);
     if (suburbKey && s.suburb && !fd[suburbKey]) sf(suburbKey, s.suburb);
@@ -7436,7 +7500,7 @@ export default function DigitalPRFForm() {
           <div><Lbl t="Tel (H)" /><Inp fk="patient_phone_home" ph="Home" type="tel" /></div>
         </G2>
         <Lbl t="Tel (W)" /><Inp fk="patient_phone_work" ph="Work number" type="tel" />
-        <Lbl t="Residential Address" /><AddrInp fk="patient_address" ph="Street address" suburbKey="patient_suburb" codeKey="patient_postal_code" manualOnly />
+        <Lbl t="Residential Address" /><AddrInp fk="patient_address" ph="Street address" suburbKey="patient_suburb" codeKey="patient_postal_code" manualOnly googleLookup />
         <G2>
           <div><Lbl t="Suburb" /><Inp fk="patient_suburb" ph="Suburb" upper /></div>
           <div><Lbl t="Code" /><Inp fk="patient_postal_code" ph="Code" upper /></div>
