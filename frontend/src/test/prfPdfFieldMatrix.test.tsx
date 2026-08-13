@@ -1683,3 +1683,47 @@ describe('PRF PDF — COURTESY is non-billable, so it says so and reclaims the s
       .toBeGreaterThan(0);
   });
 });
+
+describe('PRF PDF — vitals fill the clinical page before spilling to a continuation sheet', () => {
+  const pages = () => Array.from(document.querySelectorAll('.prf-page'));
+  const continuation = () =>
+    screen.queryAllByText((c) => /vitals\s*—\s*continuation/i.test(c), { exact: false });
+
+  /** n vital sets, each with a distinct recognisable time. */
+  const vitalsSets = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      time: `1${i}:00`, resp_rate: `${10 + i}`, hr: `${60 + i}`, gcs_total: '15',
+    }));
+
+  async function renderVitals(n: number) {
+    const built = buildPrf('PRIMARY', 'MED AID');
+    currentPrf = { ...built.prf, form_data: { ...built.fd, vitals_sets: vitalsSets(n) } };
+    renderPrfView();
+    await screen.findAllByText((c) => c.includes(built.anchor));
+  }
+
+  // The grid draws Math.max(count, 5) columns, so a 4th set was being pushed to
+  // its own sheet while two drawn, empty columns sat waiting for it.
+  for (const n of [4, 5]) {
+    it(`keeps all ${n} vital sets on the clinical page, with no continuation sheet`, async () => {
+      await renderVitals(n);
+      expect(continuation().length, `${n} sets should not need a continuation sheet`).toBe(0);
+      // Every set's time must actually be on the page — "no continuation sheet"
+      // would also be true if the later sets had simply been dropped.
+      for (let i = 0; i < n; i++) {
+        expect(
+          screen.queryAllByText((c) => c.includes(`1${i}:00`), { exact: false }).length,
+          `vital set ${i + 1} (1${i}:00) is missing from the PDF entirely`,
+        ).toBeGreaterThan(0);
+      }
+    });
+  }
+
+  it('still spills to a continuation sheet past the fifth set', async () => {
+    await renderVitals(6);
+    expect(continuation().length, 'a 6th set must still get a continuation sheet').toBeGreaterThan(0);
+    // ...and the 6th set's reading is on it, not lost.
+    expect(screen.queryAllByText((c) => c.includes('15:00'), { exact: false }).length).toBeGreaterThan(0);
+    expect(pages().length).toBeGreaterThan(2);
+  });
+});

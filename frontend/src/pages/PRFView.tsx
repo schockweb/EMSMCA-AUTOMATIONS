@@ -1402,11 +1402,20 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
   const vehicle = prf.vehicle || {};
 
   const vitals: any[] = Array.isArray(fd.vitals_sets) ? fd.vitals_sets : [];
-  // The clinical page (page 2) is sized for at most 3 vital-sets columns
-  // before the per-cell width gets squeezed and rows visually clip. Anything
-  // captured beyond the third set spills onto a continuation page below so
-  // long codes / resuscitations don't lose their later readings.
-  const VITALS_PER_PAGE = 3;
+  // Must equal the number of columns the vitals grid actually draws, which is
+  // `Math.max(count, 5)` — see vitalsCols below. It was 3 while the grid was
+  // already laying out 5, so a 4th set was pushed to a continuation page while
+  // TWO drawn, empty columns sat waiting for it on the clinical page.
+  //
+  // The old comment justified 3 by saying more columns squeeze the cells until
+  // rows clip. That reasoning does not apply: the grid is 5 columns wide on
+  // every PRF regardless of how many sets exist, so the cells are already at
+  // one-fifth width and filling them changes no geometry. Nor does it change
+  // the page height — the row set is fixed (resp. rate, rhythm, GCS, …), so a
+  // further set adds content to existing cells rather than new rows.
+  //
+  // Keep this and the `5` in vitalsCols in step; they are one decision.
+  const VITALS_PER_PAGE = 5;
   const vitalsPage1: any[] = vitals.slice(0, VITALS_PER_PAGE);
   const vitalsOverflow: any[] = vitals.slice(VITALS_PER_PAGE);
   // Only rows with actual content count — the form can save a blank row shell
