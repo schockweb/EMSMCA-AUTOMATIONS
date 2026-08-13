@@ -2720,7 +2720,10 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
               <FieldRow label="Surname"        value={fd.med_aid_dec_death_hcp_surname} />
               <FieldRow label="First Name"     value={fd.med_aid_dec_death_hcp_first_name} />
               <FieldRow label="Station"        value={fd.med_aid_dec_death_hcp_station} />
-              <FieldRow label="Qualification"  value={fd.med_aid_dec_death_hcp_qualification} />
+              {/* Qualification row removed per user request (2026-08-13) —
+                  the Practitioner No below already identifies the HCP's
+                  registration. The form still captures the value; it is
+                  only unprinted. Mirrored on the dedicated DOD sheet. */}
               <FieldRow label="ID No"          value={fd.med_aid_dec_death_hcp_id} />
               <FieldRow label="Practitioner No" value={fd.med_aid_dec_death_hcp_hpcsa} />
 
@@ -4141,7 +4144,8 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
                 <FieldRow label="Surname"        value={fd.med_aid_dec_death_hcp_surname} />
                 <FieldRow label="First Name"     value={fd.med_aid_dec_death_hcp_first_name} />
                 <FieldRow label="Station"        value={fd.med_aid_dec_death_hcp_station} />
-                <FieldRow label="Qualification"  value={fd.med_aid_dec_death_hcp_qualification} />
+                {/* Qualification row removed — kept in sync with the DOD
+                    page-1 certificate above. */}
                 <FieldRow label="ID No"          value={fd.med_aid_dec_death_hcp_id} />
                 <FieldRow label="Practitioner No" value={fd.med_aid_dec_death_hcp_hpcsa} />
 
