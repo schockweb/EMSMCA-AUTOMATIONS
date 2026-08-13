@@ -1668,7 +1668,14 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
   //
   // `Indigent` is a PVT PAYMENT METHOD, not a billing type — BILLING_TYPE_OPTS
   // has no such entry.
+  // A COURTESY call is the most compact case of all: it is non-billable, so the
+  // Billing block is not rendered at all and the Debtor block collapses to a
+  // one-line banner. That leaves this column emptier than either payer below —
+  // it holds only the Handover Signature — so the sticker prints directly under
+  // that signature, where the adjudicator is already looking, instead of
+  // sending them to a later sheet for a call that has almost nothing on it.
   const billingBlockIsCompact =
+    fd.call_type === 'COURTESY' ||
     fd.billing_type === 'MED AID' ||
     (fd.billing_type === 'PVT' && fd.pvt_payment_method === 'Indigent');
   const stickerOnPage1 = stickerVisible && !!fd.hospital_sticker && billingBlockIsCompact;
@@ -1693,6 +1700,18 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
   const debtorSameAsPatient =
     (Array.isArray(fd.flags) && fd.flags.includes('debtor_same_as_patient')) ||
     (!anyValue(fd, debtorKeys) && patientHasData);
+  // A courtesy transfer is non-billable, so the Debtor column states that
+  // instead of printing a set of dashes for a payer that never existed.
+  //
+  // Gated on there being no captured debtor data, NOT on the call type alone.
+  // The form still lets a crew record a debtor on a courtesy call, and the
+  // first version of this banner replaced those captured details with the
+  // words "no biller" — suppressing real data on the legal record, which is
+  // far worse than the empty rows it set out to fix. Caught by the existing
+  // "renders every captured field" coverage test. If anything was captured,
+  // print it; the banner is for the ordinary case where nothing was.
+  const courtesyNoBiller =
+    fd.call_type === 'COURTESY' && !anyValue(fd, debtorKeys);
   const valuablesEmpty = isBlank(fd.valuables_handed_to) && isBlank(fd.valuables_description) && isBlank(fd.valuables_signature) && isBlank(prf.signatures?.valuables_signature);
   // The Valuables column is dropped from Band C entirely when nothing was
   // recorded, the same treatment showMotivationCol gives an empty Motivation
@@ -2687,7 +2706,34 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
           <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column',
                         ...(refused ? { gridColumn: 1, gridRow: refusalDebtorRow, borderTop: `1px solid ${LN}` } : {}) }}>
             <SectionHead label="Debtor Information" />
-            {debtorSameAsPatient ? (
+            {/* A courtesy transfer is non-billable, so no debtor is captured and
+                the Billing block is omitted outright (see below). Without this
+                the column printed a full set of "—" rows, which reads as a crew
+                that forgot to take the payer's details rather than a call that
+                never had one. Same treatment, and the same visual language, as
+                the Same-as-Patient banner underneath. Takes precedence over that
+                banner: on a courtesy call "no biller" is the more specific and
+                more useful statement. See courtesyNoBiller — it defers to any
+                debtor detail the crew actually captured. */}
+            {courtesyNoBiller ? (
+              <div style={{
+                borderTop: `1px solid ${LN}`, flex: 1,
+                display: 'flex', flexDirection: 'column', alignItems: 'center',
+                justifyContent: 'center', gap: 6, padding: '14px 12px',
+                background: SOFT_BG, textAlign: 'center',
+              }}>
+                <div style={{
+                  width: 26, height: 26, borderRadius: 999,
+                  background: GREEN_DK, color: '#fff',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: '0.85rem', fontWeight: 900,
+                }}>i</div>
+                <div style={{ fontSize: '0.66rem', fontWeight: 800, color: GREEN_DK, letterSpacing: '0.04em', textTransform: 'uppercase' }}>Courtesy Call — No Biller</div>
+                <div style={{ fontSize: '0.58rem', color: MUT, lineHeight: 1.45 }}>
+                  This transfer was provided as a courtesy and is not billable, so no debtor or payer details were captured.
+                </div>
+              </div>
+            ) : debtorSameAsPatient ? (
               <div style={{
                 borderTop: `1px solid ${LN}`,
                 display: 'flex', flexDirection: 'column', alignItems: 'center',

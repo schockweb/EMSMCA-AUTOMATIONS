@@ -1544,3 +1544,72 @@ describe('PRF PDF — unrecorded closeout rows and columns drop out', () => {
     expect(screen.queryAllByText((c) => c.includes('Ward Sister')).length).toBeGreaterThan(0);
   });
 });
+
+describe('PRF PDF — COURTESY is non-billable, so it says so and reclaims the space', () => {
+  const STICKER = 'data:image/png;base64,iVBORw0KGgo=';
+  const pages = () => Array.from(document.querySelectorAll('.prf-page'));
+  const stickerImgs = () => Array.from(document.querySelectorAll('img'))
+    .filter(im => im.getAttribute('src') === STICKER);
+
+  async function renderCourtesy(extra: Record<string, any> = {}) {
+    const built = buildPrf('COURTESY', '');
+    currentPrf = { ...built.prf, form_data: { ...built.fd, ...extra } };
+    renderPrfView();
+    await screen.findAllByText((c) => c.includes(built.anchor));
+  }
+
+  // The shared fixture fills every field it can, so the no-debtor case — which
+  // is what an actual courtesy call looks like — has to be asked for.
+  const NO_DEBTOR = {
+    debtor_gender: '', debtor_name: '', debtor_surname: '', debtor_id_number: '',
+    debtor_age: '', debtor_address: '', debtor_phone_home: '', debtor_phone_cell: '',
+  };
+
+  it('replaces the debtor rows with a no-biller banner instead of a column of dashes', async () => {
+    await renderCourtesy(NO_DEBTOR);
+    expect(screen.queryByText('Debtor Information')).not.toBeNull();
+    expect(screen.queryAllByText((c) => c.includes('Courtesy Call'), { exact: false }).length)
+      .toBeGreaterThan(0);
+    expect(screen.queryAllByText((c) => c.includes('not billable'), { exact: false }).length)
+      .toBeGreaterThan(0);
+    // The debtor detail rows must be gone, not merely blank.
+    expect(screen.queryByText('Debtor Information')).not.toBeNull();
+    expect(screen.queryByText('Billing Information')).toBeNull();
+  });
+
+  // Page 1 carries a ~944px ceiling and the sticker image is the tallest thing
+  // this column can hold, so it is normally deferred to the documents sheet.
+  // A courtesy call renders no Billing block at all and collapses Debtor to one
+  // banner, so the column has the slack — measured at 862px in the real-layout
+  // harness, i.e. page 1 does not grow at all.
+  // Two copies is the DELIBERATE compact-payer behaviour documented above for
+  // MED AID and Indigent PVT — a ~110px in-context reference on page 1 plus the
+  // full-size sheet an administrator zooms into. It is not the old duplicate
+  // defect (that one printed two undersized copies under different headings).
+  it('carries the hospital sticker on page 1, under the handover signature, plus its full-size sheet', async () => {
+    await renderCourtesy({ hospital_sticker: STICKER });
+    const imgs = stickerImgs();
+    expect(imgs.length, 'expected one compact copy on page 1 and one full-size sheet').toBe(2);
+    expect(pages()[0].contains(imgs[0]), 'sticker should be on page 1 for a courtesy call').toBe(true);
+    expect(imgs.some(im => !pages()[0].contains(im)), 'no full-size sticker sheet').toBe(true);
+    // Page 1 carries the image itself, so it must NOT also show the pointer.
+    expect(screen.queryAllByText((c) => c.includes('see the patient documents sheet'), { exact: false }).length).toBe(0);
+  });
+
+  it('defers to captured debtor details rather than hiding them behind the banner', async () => {
+    await renderCourtesy({ debtor_name: 'Captured Debtor', debtor_surname: 'Onacourtesy' });
+    expect(screen.queryAllByText((c) => c.includes('Captured Debtor'), { exact: false }).length)
+      .toBeGreaterThan(0);
+    expect(screen.queryAllByText((c) => c.includes('not billable'), { exact: false }).length).toBe(0);
+  });
+
+  it('still defers the sticker off page 1 for a paying transfer', async () => {
+    const built = buildPrf('IHT', 'PVT');
+    currentPrf = { ...built.prf, form_data: { ...built.fd, hospital_sticker: STICKER } };
+    renderPrfView();
+    await screen.findAllByText((c) => c.includes(built.anchor));
+    expect(pages()[0].contains(stickerImgs()[0] ?? document.body)).toBe(false);
+    expect(screen.queryAllByText((c) => c.includes('see the patient documents sheet'), { exact: false }).length)
+      .toBeGreaterThan(0);
+  });
+});
