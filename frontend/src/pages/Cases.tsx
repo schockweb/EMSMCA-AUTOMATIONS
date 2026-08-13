@@ -168,16 +168,25 @@ export default function Cases() {
     setRenameCase(null);
   };
 
+  // Scheme-configuration warnings are PARKED (user request, 2026-08-13): the
+  // auth_flag feature still needs tuning before it goes in front of the
+  // client, so the footer chip, the amber row tint and the flagged-first
+  // sort are all disabled together. Flip this one constant to re-enable.
+  const SHOW_SCHEME_CONFIG_WARNINGS = false;
+
   // Search is now server-side (so it reaches the full 7-year history, not just
   // the loaded page) — `cases` already holds the matches. Here we only pin
-  // flagged cases to the top and sort the rest newest-first.
+  // flagged cases to the top (while the warnings are live) and sort the rest
+  // newest-first.
   const sortedCases = [...cases].sort((a, b) => {
-    if (a.auth_flag && !b.auth_flag) return -1;
-    if (!a.auth_flag && b.auth_flag) return 1;
+    if (SHOW_SCHEME_CONFIG_WARNINGS) {
+      if (a.auth_flag && !b.auth_flag) return -1;
+      if (!a.auth_flag && b.auth_flag) return 1;
+    }
     return new Date(b.created_at || '').getTime() - new Date(a.created_at || '').getTime();
   });
 
-  const flaggedCount = cases.filter(c => c.auth_flag).length;
+  const flaggedCount = SHOW_SCHEME_CONFIG_WARNINGS ? cases.filter(c => c.auth_flag).length : 0;
   const activeRfis = rfis.filter(r => cases.some(c => c.claim_id === r.claim_id));
   const openRfiCount = activeRfis.filter(r => r.rfi_status === 'open').length;
 
@@ -346,7 +355,7 @@ export default function Cases() {
                 <div key={c.id} style={{
                   padding: '14px 14px 12px',
                   borderBottom: '1px solid var(--surface-100)',
-                  background: c.auth_flag ? 'rgba(245,124,0,0.04)' : undefined,
+                  background: SHOW_SCHEME_CONFIG_WARNINGS && c.auth_flag ? 'rgba(245,124,0,0.04)' : undefined,
                 }}>
                   <div style={{
                     fontWeight: 700, fontSize: '0.98rem', color: 'var(--text-primary)',
@@ -388,7 +397,7 @@ export default function Cases() {
             <tbody>
               {sortedCases.map(c => (
                 <tr key={c.id}
-                  style={{ background: c.auth_flag ? 'rgba(245,124,0,0.04)' : undefined }}
+                  style={{ background: SHOW_SCHEME_CONFIG_WARNINGS && c.auth_flag ? 'rgba(245,124,0,0.04)' : undefined }}
                 >
 
                   {/* Patient / PRF */}
