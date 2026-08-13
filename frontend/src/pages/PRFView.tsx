@@ -2715,7 +2715,7 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
             ) : billingType === 'RAF' ? (
               <>
                 <FieldRow label="Reference"     value={fd.compensation_reference} />
-                <FieldRow label="Accident Date" value={fd.raf_accident_date} />
+                <FieldRow label="Accident Date" value={fmtDateValue(fd.raf_accident_date)} />
                 <FieldRow label="SAPS / OB No"  value={fd.raf_police_case_number} />
                 <FieldRow label="Accident Loc"  value={fd.raf_accident_location} valueMin={24} />
               </>

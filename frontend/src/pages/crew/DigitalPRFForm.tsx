@@ -7609,6 +7609,12 @@ export default function DigitalPRFForm() {
               <div><Lbl t="Date of Accident" req /><Inp fk="raf_accident_date" type="date" req /></div>
               <div><Lbl t="SAPS Case / OB Number" /><Inp fk="raf_police_case_number" ph="Police case number" /></div>
             </G2>
+            {/* Reference Number lived only on the Transport phase's billing
+                card, so the PDF's Reference row printed a field this card
+                never asked for — captured here with the rest of the RAF
+                details. (The Transport-phase input stays as a second chance;
+                both write compensation_reference.) */}
+            <Lbl t="Reference Number" /><Inp fk="compensation_reference" ph="RAF claim / reference number" />
             <Lbl t="Accident Location" /><AddrInp fk="raf_accident_location" ph="Where the accident occurred" />
             <div style={{ marginBottom: 14 }}>
               <Lbl t="OAR Report" />

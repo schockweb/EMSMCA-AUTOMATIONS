@@ -227,6 +227,10 @@ const FD: Record<string, any> = {
     raf_police_case_number: 'CAS 214/08/2026 Vanderbijlpark SAPS',
     raf_accident_date: '2026-08-11',
     raf_accident_location: 'N1 South, 2.4 km before the Grasmere Plaza off-ramp',
+    // The sketch + OAR each add a full sheet — without them the max-fill
+    // undercounts the tallest legitimate RAF export by two pages.
+    raf_sketch: INK,
+    raf_oar_report_pdf: { name: 'oar-report.pdf', size: 2048, page_count: 2, data_url: INK, extra_pages: [INK] },
     wca_employer: 'Emfuleni Industrial Fabrication (Pty) Ltd',
     wca_employer_address: '14 Foundry Road, Vereeniging Industrial Sites, Gauteng',
     wca_employer_contact: '016 555 0900', wca_employee_number: 'EMP-0099213',
