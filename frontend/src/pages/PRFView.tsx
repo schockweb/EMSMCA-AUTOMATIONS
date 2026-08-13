@@ -126,10 +126,67 @@ const EmptySignature = ({ label = 'Not captured', minHeight = 48 }: { label?: st
 // reads as a visible block on the printed / exported PRF (the bare <img>
 // rendering used previously shrank to near-invisible once the page was
 // scaled onto the A4 sheet). The ink is drawn as large as the box allows.
+// ── Bold ink for print ───────────────────────────────────────────────
+// Signatures are drawn on a full-screen pad and then displayed at ~300px on
+// the sheet, so even a 6px pen shrinks to a faded hairline. Before render the
+// ink is dilated on an offscreen canvas — the image stacked in a ring of
+// offsets with a multiply blend, which thickens and darkens the stroke
+// without lightening anything (multiply is a no-op over white, so opaque
+// white-background captures are safe too). Cached per data-URL: the same ink
+// appears at several call sites and re-processing it each render would jank
+// the sheet. Any failure falls back to the raw image — a signature must
+// never vanish from a medical-legal record because a canvas call threw.
+const boldInkCache = new Map<string, string>();
+function boldenInk(src: string): Promise<string> {
+  const hit = boldInkCache.get(src);
+  if (hit) return Promise.resolve(hit);
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const w = img.naturalWidth, h = img.naturalHeight;
+        if (!w || !h) { resolve(src); return; }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) { resolve(src); return; }
+        // Dilation radius scales with the source so a phone pad and a tablet
+        // pad thicken alike; ~1/180th of the long edge ≈ a 2-3px pen gain.
+        const r = Math.max(2, Math.round(Math.max(w, h) / 180));
+        ctx.globalCompositeOperation = 'multiply';
+        for (let a = 0; a < 8; a++) {
+          const ang = (Math.PI * 2 * a) / 8;
+          ctx.drawImage(img, Math.cos(ang) * r, Math.sin(ang) * r);
+        }
+        ctx.drawImage(img, 0, 0);
+        const out = canvas.toDataURL('image/png');
+        boldInkCache.set(src, out);
+        resolve(out);
+      } catch { resolve(src); }
+    };
+    img.onerror = () => resolve(src);
+    img.src = src;
+  });
+}
+
+function useBoldInk(src?: string | null): string | null | undefined {
+  const [ink, setInk] = useState(src);
+  useEffect(() => {
+    let alive = true;
+    setInk(src ? (boldInkCache.get(src) ?? src) : src);
+    if (src) boldenInk(src).then(v => { if (alive) setInk(v); });
+    return () => { alive = false; };
+  }, [src]);
+  // Until (or unless) processing completes, the raw ink renders — the
+  // <img alt="signature"> node is load-bearing and always present.
+  return ink || src;
+}
+
 const SignatureBox = ({ src, minHeight = 56, label }: {
   src?: string | null; minHeight?: number; label?: string;
-}) => (
-  src ? (
+}) => {
+  const ink = useBoldInk(src);
+  return src ? (
     <div style={{
       minHeight, width: '100%', maxWidth: 300, boxSizing: 'border-box',
       border: '2px solid #475569', borderRadius: 4, background: '#fff',
@@ -140,11 +197,11 @@ const SignatureBox = ({ src, minHeight = 56, label }: {
         position: 'absolute', bottom: '25%', left: '10%', right: '10%',
         borderBottom: '2px dotted #cbd5e1', zIndex: 0
       }} />
-      <img src={src} alt="signature"
+      <img src={ink || src} alt="signature"
            style={{ maxWidth: '100%', maxHeight: minHeight - 6, objectFit: 'contain', position: 'relative', zIndex: 1 }} />
     </div>
-  ) : <EmptySignature label={label} minHeight={minHeight} />
-);
+  ) : <EmptySignature label={label} minHeight={minHeight} />;
+};
 
 // Borderless signing rule — the in-panel variant used beneath the Terms and
 // Conditions clauses. Same evidence, far less furniture: the dotted rule IS
@@ -162,16 +219,19 @@ const SignatureBox = ({ src, minHeight = 56, label }: {
 // no image would silently delete a signature from a medical-legal record — and
 // because the PDF suite makes no style assertions at all, it would do so with
 // every test still green.
-const SignatureRule = ({ src, height = 34 }: { src?: string | null; height?: number }) => (
-  <div style={{
-    height, width: '100%', maxWidth: 300, boxSizing: 'border-box',
-    borderBottom: '2px dotted #475569',
-    display: 'flex', alignItems: 'flex-end', justifyContent: 'center', overflow: 'hidden',
-  }}>
-    {src && <img src={src} alt="signature"
-      style={{ maxWidth: '100%', maxHeight: height - 2, objectFit: 'contain' }} />}
-  </div>
-);
+const SignatureRule = ({ src, height = 34 }: { src?: string | null; height?: number }) => {
+  const ink = useBoldInk(src);
+  return (
+    <div style={{
+      height, width: '100%', maxWidth: 300, boxSizing: 'border-box',
+      borderBottom: '2px dotted #475569',
+      display: 'flex', alignItems: 'flex-end', justifyContent: 'center', overflow: 'hidden',
+    }}>
+      {src && <img src={ink || src} alt="signature"
+        style={{ maxWidth: '100%', maxHeight: height - 2, objectFit: 'contain' }} />}
+    </div>
+  );
+};
 
 // Provider logo — the client brand mark shown top-left on the PDF / print
 // pages. Resolution order:
