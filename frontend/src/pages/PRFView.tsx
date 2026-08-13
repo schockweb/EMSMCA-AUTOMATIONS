@@ -2698,7 +2698,12 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
               <FieldRow label="Age"          value={fd.med_aid_dec_death_deceased_age} />
               <FieldRow label="Cell"         value={fd.med_aid_dec_death_deceased_cell} />
               <FieldRow label="Tel (H)"      value={fd.med_aid_dec_death_deceased_tel_home} />
-              <FieldRow label="Tel (W)"      value={fd.med_aid_dec_death_deceased_tel_work} />
+              {/* Tel (W) omitted when blank — a deceased's work number is
+                  rarely captured, so it was a permanent "—" row. Mirrored in
+                  the dedicated DOD sheet below; keep the two in sync. */}
+              {!isBlank(fd.med_aid_dec_death_deceased_tel_work) && (
+                <FieldRow label="Tel (W)"    value={fd.med_aid_dec_death_deceased_tel_work} />
+              )}
               <FieldRow label="Res. Address" value={fd.med_aid_dec_death_deceased_address} />
               <FieldRow label="Suburb"       value={fd.med_aid_dec_death_deceased_suburb} />
               <FieldRow label="Code"         value={fd.med_aid_dec_death_deceased_postal_code} />
@@ -4114,7 +4119,11 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
                 <FieldRow label="Age"          value={fd.med_aid_dec_death_deceased_age} />
                 <FieldRow label="Cell"         value={fd.med_aid_dec_death_deceased_cell} />
                 <FieldRow label="Tel (H)"      value={fd.med_aid_dec_death_deceased_tel_home} />
-                <FieldRow label="Tel (W)"      value={fd.med_aid_dec_death_deceased_tel_work} />
+                {/* Tel (W) omitted when blank — kept in sync with the DOD
+                    page-1 certificate above. */}
+                {!isBlank(fd.med_aid_dec_death_deceased_tel_work) && (
+                  <FieldRow label="Tel (W)"    value={fd.med_aid_dec_death_deceased_tel_work} />
+                )}
                 <FieldRow label="Res. Address" value={fd.med_aid_dec_death_deceased_address} />
                 <FieldRow label="Suburb"       value={fd.med_aid_dec_death_deceased_suburb} />
                 <FieldRow label="Code"         value={fd.med_aid_dec_death_deceased_postal_code} />
