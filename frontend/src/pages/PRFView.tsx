@@ -1712,24 +1712,33 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
   // ...unless the Billing column is short enough to carry it.
   //
   // Medical Aid bills a fixed, compact set of rows (scheme, number, dependent,
-  // main member, plan, pre-auth) and an Indigent PVT captures no amounts at
-  // all — no quoted figure, no account holder, no cash-received block. On both
-  // the Billing column has room to spare, so the sticker prints where the
-  // adjudicator is already looking rather than sending them to a later sheet.
-  // Every other payer (RAF, Call Out Fee, and PVT on any paying method) fills
-  // that column, and the ~200px image would push page 1 past the sheet ceiling.
+  // main member, plan, pre-auth), RAF bills four (reference, accident date,
+  // SAPS / OB number, accident location), and an Indigent PVT captures no
+  // amounts at all — no quoted figure, no account holder, no cash-received
+  // block. On all of these the Billing column has ruled-line slack to spare,
+  // so the sticker prints where the adjudicator is already looking rather
+  // than sending them to a later sheet. The remaining payers (Call Out Fee,
+  // and PVT on any paying method) fill that column, and the extra block
+  // would push page 1 past the sheet ceiling.
+  //
+  // Height safety: the page-1 render site passes `capped`, which makes the
+  // block cost exactly what the empty "affix here" slot costs — and that
+  // empty slot ALREADY prints on these payers' page 1 when no sticker was
+  // captured. Carrying the captured image is therefore height-neutral by
+  // construction.
   //
   // `Indigent` is a PVT PAYMENT METHOD, not a billing type — BILLING_TYPE_OPTS
   // has no such entry.
   // A COURTESY call is the most compact case of all: it is non-billable, so the
   // Billing block is not rendered at all and the Debtor block collapses to a
-  // one-line banner. That leaves this column emptier than either payer below —
+  // one-line banner. That leaves this column emptier than any payer above —
   // it holds only the Handover Signature — so the sticker prints directly under
   // that signature, where the adjudicator is already looking, instead of
   // sending them to a later sheet for a call that has almost nothing on it.
   const billingBlockIsCompact =
     fd.call_type === 'COURTESY' ||
     fd.billing_type === 'MED AID' ||
+    fd.billing_type === 'RAF' ||
     (fd.billing_type === 'PVT' && fd.pvt_payment_method === 'Indigent');
   const stickerOnPage1 = stickerVisible && !!fd.hospital_sticker && billingBlockIsCompact;
   // Still exactly ONE call site per artefact — the rule this file follows, and

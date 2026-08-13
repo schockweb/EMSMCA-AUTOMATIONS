@@ -901,7 +901,9 @@ describe('page 1 height — the tall blocks moved, and did not go missing', () =
     Object.assign(built.prf.form_data, extra);
     currentPrf = built.prf;
     renderPrfView();
-    await screen.findByText((c) => c.includes(built.anchor), { exact: false });
+    // findAll, not find: extra sheets (RAF sketch, patient documents) repeat
+    // the anchor in their mini-headers, and a singular query throws on that.
+    await screen.findAllByText((c) => c.includes(built.anchor), { exact: false });
     return built;
   }
 
@@ -943,11 +945,12 @@ describe('page 1 height — the tall blocks moved, and did not go missing', () =
       { exact: false }).length).toBeGreaterThan(0);
   });
 
-  // ── The two compact payers carry it on page 1 instead ────────────────────
-  // Medical Aid bills a fixed short set of rows, and an Indigent PVT captures
-  // no amounts at all, so the Billing column has slack the image can use —
-  // measured in Chrome, page 1 does not grow at all, because the grid was
-  // already stretching that column to match the taller Patient column.
+  // ── The compact payers carry it on page 1 instead ────────────────────────
+  // Medical Aid bills a fixed short set of rows, RAF bills four (reference,
+  // accident date, SAPS / OB number, accident location), and an Indigent PVT
+  // captures no amounts at all, so the Billing column has slack the image can
+  // use — measured in Chrome, page 1 does not grow at all, because the grid
+  // was already stretching that column to match the taller Patient column.
   //
   // Each asserts WHERE both copies land, not just how many there are.
   //
@@ -956,11 +959,11 @@ describe('page 1 height — the tall blocks moved, and did not go missing', () =
   // full size. These serve different purposes: the page-1 block is a compact
   // in-context reference capped to ~110px — too small to read an MRN off — and
   // the attachments sheet is the full-size copy an administrator zooms into.
-  for (const [label, extra] of [
-    ['MED AID', { ...withSticker }],
-    ['an Indigent PVT', { ...withSticker, pvt_payment_method: 'Indigent' }],
-  ] as Array<[string, Record<string, unknown>]>) {
-    const billing = label === 'MED AID' ? 'MED AID' : 'PVT';
+  for (const [label, billing, extra] of [
+    ['MED AID', 'MED AID', { ...withSticker }],
+    ['RAF', 'RAF', { ...withSticker }],
+    ['an Indigent PVT', 'PVT', { ...withSticker, pvt_payment_method: 'Indigent' }],
+  ] as Array<[string, string, Record<string, unknown>]>) {
 
     it(`prints the sticker on page 1 under Billing Information for ${label}`, async () => {
       await renderCall('IHT', billing, extra);
