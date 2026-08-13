@@ -438,6 +438,40 @@ function measure() {
 }
 
 (window as any).__measure = measure;
+// Diagnostic capture probe — runs the EXACT html2canvas call buildPrfPdf
+// makes against the first .prf-page and reports the canvas dimensions plus
+// where the ink actually ends inside it. Used to chase the "export breaks
+// under browser zoom / on a small laptop" report: measurements are pure
+// arithmetic and provably viewport-independent, so if the export differs
+// the rasteriser is the stage doing it.
+(window as any).__captureProbe = async (idx = 0, scale = 1.5) => {
+  const el = document.querySelectorAll<HTMLElement>('.prf-page')[idx];
+  if (!el) return { error: 'no sheet' };
+  const { default: h2c } = await import('html2canvas');
+  const canvas = await h2c(el, {
+    scale, useCORS: true, backgroundColor: '#ffffff',
+    windowWidth: el.scrollWidth, windowHeight: el.scrollHeight,
+  });
+  const ctx = canvas.getContext('2d')!;
+  // Find the lowest row containing any dark pixel — cropped content shows
+  // up as inkBottom << canvas height; overflow shows as ink at the very end.
+  let inkBottom = 0;
+  const step = Math.max(1, Math.floor(canvas.height / 400));
+  for (let y = canvas.height - 1; y >= 0 && !inkBottom; y -= step) {
+    const row = ctx.getImageData(0, y, canvas.width, 1).data;
+    for (let i = 0; i < row.length; i += 4) {
+      if (row[i] < 160 && row[i + 3] > 40) { inkBottom = y; break; }
+    }
+  }
+  return {
+    dpr: window.devicePixelRatio,
+    elW: el.offsetWidth, elH: el.offsetHeight,
+    cw: canvas.width, ch: canvas.height,
+    expectedCw: Math.round(el.offsetWidth * 1.5),
+    expectedCh: Math.round(el.offsetHeight * 1.5),
+    inkBottom, inkBottomFrac: Math.round((inkBottom / canvas.height) * 100) / 100,
+  };
+};
 // Structured form of the same numbers, for sweeping the call-type x payer
 // matrix programmatically. Same code path as measure() — the text report and
 // this must never be able to disagree.

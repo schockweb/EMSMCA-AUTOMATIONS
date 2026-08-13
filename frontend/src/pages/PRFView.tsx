@@ -722,7 +722,14 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
     const el = document.getElementById('prf-pdf-content');
     if (el) el.style.zoom = '';
   };
+  // True for the whole multi-second PDF build. html2canvas multiplies an
+  // ancestor CSS zoom into its canvas (probe-verified in the dev harness), so
+  // applyScreenFit re-applying the fit zoom mid-build — it runs on ANY window
+  // resize — would scale every subsequent sheet's snapshot. The guard makes it
+  // a no-op until the build restores the screen state itself.
+  const capturingRef = useRef(false);
   const applyScreenFit = useCallback(() => {
+    if (capturingRef.current) return;
     const el = document.getElementById('prf-pdf-content');
     const wrap = el?.closest('.prf-screen-wrap') as HTMLElement | null;
     if (!el || !wrap) return;
@@ -857,9 +864,32 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
     const pages = Array.from(document.querySelectorAll<HTMLElement>('.prf-page'));
     if (pages.length === 0) return null;
 
+    // The sheets are measured before capture, so the measuring font must be
+    // the DELIVERED font. Without this, a save clicked before Inter finished
+    // loading measured the fallback system font's metrics — a different wrap,
+    // a different height, and potentially a different fit/slice decision than
+    // the very same PRF saved a second later.
+    try { await (document as any).fonts?.ready; } catch { /* older engines */ }
+
     // Capture at the full 1220px design width — the on-screen fit `zoom` would
     // otherwise shrink each page's offsetWidth and the snapshot with it.
+    // capturingRef keeps applyScreenFit from re-applying it mid-build.
+    capturingRef.current = true;
     clearScreenFit();
+
+    // Browser page-zoom BELOW 100% coarsens text layout: rendering rounds to
+    // DEVICE pixels, and at 25% zoom one device pixel spans 4 CSS px, so line
+    // boxes and glyph runs measure differently than at 100% — enough to flip
+    // a marginal sheet across the shrink/slice threshold ("I zoomed out and
+    // the saved layout split"). A devicePixelRatio below 1 can only mean the
+    // page is zoomed out (hardware ratios never drop below 1), so counter-zoom
+    // the capture root by 1/dpr — restoring one device pixel per element pixel
+    // for layout — and divide the html2canvas scale by the same factor so the
+    // canvas resolution stays exactly what a 100% capture produces.
+    const dprRaw = window.devicePixelRatio || 1;
+    const zoomComp = dprRaw < 0.999 ? dprRaw : 1;
+    const content = document.getElementById('prf-pdf-content');
+    if (content && zoomComp < 1) content.style.zoom = String(1 / zoomComp);
 
     // A4 geometry and the sizing policy live in ./prfPdfLayout so they can be
     // unit-tested: jsdom has no layout engine, which is why a defect that
@@ -932,7 +962,10 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
           canvas = await html2canvas(el, {
             // Scale 1.5 gives ~150 DPI on A4 — crisp enough for medical
             // forms while keeping canvas memory and PDF size manageable.
-            scale: 1.5,
+            // Multiplied by zoomComp (<1 only when the page is zoomed out):
+            // the counter-zoom on the capture root scales the snapshot up by
+            // 1/zoomComp, so this keeps the pixel output constant at ×1.5.
+            scale: 1.5 * zoomComp,
             useCORS: true,
             backgroundColor: '#ffffff',
             windowWidth: el.scrollWidth,
@@ -1015,7 +1048,11 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
       // Returning null lets callers show their "couldn't build" fallback.
       return null;
     } finally {
-      // Restore the on-screen fit-to-width zoom regardless of outcome.
+      // Restore the on-screen state regardless of outcome: drop the zoom-out
+      // compensation, lift the mid-build guard, then re-apply the normal
+      // fit-to-width zoom.
+      if (content) content.style.zoom = '';
+      capturingRef.current = false;
       applyScreenFit();
     }
 
@@ -1951,7 +1988,14 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
   return (
     <div className="prf-screen-wrap" style={{
       background: '#eef1f4', minHeight: '100vh', padding: '28px 0',
-      fontFamily: '"Segoe UI", -apple-system, Roboto, Arial, sans-serif',
+      // Inter FIRST, and deliberately so: it is a bundled web font (loaded in
+      // index.css), so Windows and macOS render the sheet with IDENTICAL
+      // glyph metrics. With the old system-font stack the same PRF measured
+      // taller on a MacBook (San Francisco wraps differently than Segoe UI),
+      // which pushed marginal sheets across the shrink→slice threshold — the
+      // export "split" when saved there but not here. The system fonts stay
+      // as fallback for offline devices that never cached Inter.
+      fontFamily: 'Inter, "Segoe UI", -apple-system, Roboto, Arial, sans-serif',
     }}>
       {showSharePrompt && (
         <div className="no-print" style={{
