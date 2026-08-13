@@ -2081,17 +2081,18 @@ const DateInp = ({ fk }: { fk: string }) => {
     max: number,
     val: string,
     setLocal: (v: string) => void,
-    _placeholder: string,
+    placeholder: string,
     width: number,
   ) => (
     <input
       ref={ref}
+      className="prf-date-seg"
       type="text"
       inputMode="numeric"
       pattern="[0-9]*"
       maxLength={max}
       value={val}
-      placeholder=""
+      placeholder={placeholder}
       autoComplete="off"
       onFocus={e => { onF(e); e.currentTarget.select(); }}
       onBlur={onB}
@@ -2132,6 +2133,10 @@ const DateInp = ({ fk }: { fk: string }) => {
       border: `1.5px solid #e2e8f0`,
       background: '#fff',
     }}>
+      {/* Fine-print YYYY / MM / DD hints so the crew can't guess the
+          segment order wrong (day-first is the local habit; ours is
+          year-first). */}
+      <style>{`.prf-date-seg::placeholder { font-size: 0.6rem; font-weight: 700; letter-spacing: 0.08em; color: #b0bac9; }`}</style>
       {seg(yRef, mRef, null, 4, y, setY, 'YYYY', 64)}
       <span style={{ color: '#94a3b8', fontWeight: 700 }}>/</span>
       {seg(mRef, dRef, yRef, 2, m, setM, 'MM', 48)}
