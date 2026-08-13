@@ -66,6 +66,9 @@ interface Vehicle {
 interface Prf {
   id: string;
   prf_number: number;
+  /** The provider's admin-chosen PRF Name prefix (falls back to the company
+   *  name server-side) — drives the row's display name. */
+  prf_name?: string | null;
   case_number: string | null;
   /** Set once the billing pipeline finishes — the View button needs it
    *  because the PRF viewer page loads by case id. */
@@ -79,6 +82,18 @@ interface Prf {
   submitted_at: string | null;
   created_at: string | null;
 }
+
+// Display name for a PRF row: 'PRF name' + 'PRF number' + 'Call type'
+// (e.g. "MICEMS113 IHT") — the same prefix convention as the exported file
+// name (buildPrfFileName in PRFView.tsx: alphanumerics, uppercased, joined
+// straight onto the number). Falls back to a bare "#N" when the backend has
+// not sent prf_name yet (old cached bundle against a new API or vice versa).
+const prfDisplayName = (p: Prf): string => {
+  const prefix = String(p.prf_name || '').replace(/[^A-Za-z0-9 ]/g, '').trim().toUpperCase();
+  const name = [`${prefix}${p.prf_number}`.trim(), String(p.call_type || '').trim()]
+    .filter(Boolean).join(' ');
+  return name || `#${p.prf_number}`;
+};
 
 // Badge colour keyed by HPCSA registration tier — keeps the visual hierarchy
 // (ALS = purple, ILS = green, BLS = teal) regardless of which specific HPCSA
@@ -848,7 +863,7 @@ export default function ProviderAdminDashboard() {
               {prfs.map(p => (
                 <div key={p.id} style={{ background: '#fff', border: `1px solid ${LN}`, borderRadius: 8, padding: 14 }}>
                   <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 10 }}>
-                    <div style={{ fontWeight: 800, fontSize: '0.95rem', fontFamily: 'ui-monospace, monospace' }}>PRF #{p.prf_number}</div>
+                    <div style={{ fontWeight: 800, fontSize: '0.95rem', fontFamily: 'ui-monospace, monospace' }}>{prfDisplayName(p)}</div>
                     <div style={{ fontSize: '0.7rem', color: MUT, whiteSpace: 'nowrap' }}>{fmtDateTime(p.submitted_at || p.created_at)}</div>
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '7px 12px', fontSize: '0.78rem', color: MUT, marginBottom: 12 }}>
@@ -873,7 +888,7 @@ export default function ProviderAdminDashboard() {
                 <thead>
                   <tr>
                     <th style={thStyle}>PRF #</th>
-                    <th style={thStyle}>Case Number</th>
+                    <th style={thStyle}>PRF Name</th>
                     <th style={thStyle}>Patient</th>
                     <th style={thStyle}>Crew</th>
                     <th style={thStyle}>Vehicle</th>
@@ -885,7 +900,7 @@ export default function ProviderAdminDashboard() {
                   {prfs.map(p => (
                     <tr key={p.id} style={{ borderBottom: `1px solid ${LN}` }}>
                       <td style={{ ...tdStyle, fontFamily: 'ui-monospace, monospace', fontWeight: 700 }}>#{p.prf_number}</td>
-                      <td style={{ ...tdStyle, fontFamily: 'ui-monospace, monospace' }}>{p.case_number || '—'}</td>
+                      <td style={{ ...tdStyle, fontFamily: 'ui-monospace, monospace' }}>{prfDisplayName(p)}</td>
                       <td style={tdStyle}>{p.patient_name || '—'}</td>
                       <td style={tdStyle}>{[p.crew_1, p.crew_2].filter(Boolean).join(', ') || '—'}</td>
                       <td style={{ ...tdStyle, fontFamily: 'ui-monospace, monospace' }}>{p.vehicle || '—'}</td>

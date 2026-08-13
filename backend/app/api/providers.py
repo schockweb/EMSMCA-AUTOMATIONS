@@ -2348,6 +2348,16 @@ async def list_provider_prfs(
         )
         vehicle_callsigns = {vid: cs for vid, cs in veh_res.all()}
 
+    # PRF display prefix — the admin-chosen PRF Name, falling back to the
+    # provider name; same source buildPrfFileName (PRFView.tsx) and
+    # _prf_display_name (api/cases.py) use, so the dashboard rows read the
+    # same as the exported files.
+    prov_row = (await db.execute(
+        select(ServiceProvider.prf_name, ServiceProvider.name)
+        .where(ServiceProvider.id == pid)
+    )).first()
+    prf_prefix = (prov_row.prf_name or prov_row.name or "") if prov_row else ""
+
     items = []
     for r in rows:
         fd = r.form_data if isinstance(r.form_data, dict) else {}
@@ -2359,6 +2369,7 @@ async def list_provider_prfs(
         items.append({
             "id": str(r.id),
             "prf_number": r.prf_number,
+            "prf_name": prf_prefix or None,
             "case_number": r.case_number,
             # case_id is set once the billing pipeline finishes — the dashboard
             # only enables "View" when it exists (the PRF viewer loads by case).
