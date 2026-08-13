@@ -3210,7 +3210,7 @@ const DodFormBody = ({ showDeclaration = true }: { showDeclaration?: boolean }) 
   return (
     <>
       <DodG2>
-        <div><Lbl t="Date" /><Inp fk="med_aid_dec_death_date" ph="YYYY-MM-DD" type="date" /></div>
+        <div><Lbl t="Date" /><DateInp fk="med_aid_dec_death_date" /></div>
         <div><Lbl t="Time Of Death" /><Inp fk="med_aid_dec_death_time" ph="HH:MM" type="time" /></div>
       </DodG2>
 
@@ -3404,7 +3404,7 @@ const DodDeclarationSection = () => {
           </div>
 
           <DodG2>
-            <div><Lbl t="Date" /><Inp fk="med_aid_dec_death_signature_date" ph="YYYY-MM-DD" type="date" /></div>
+            <div><Lbl t="Date" /><DateInp fk="med_aid_dec_death_signature_date" /></div>
             <div><Lbl t="Place" /><Inp fk="med_aid_dec_death_signature_place" ph="Place" /></div>
           </DodG2>
 
@@ -7577,7 +7577,7 @@ export default function DigitalPRFForm() {
             </G2>
             <Lbl t="Compensation Reference" req /><Inp fk="compensation_reference" ph="IOD claim / reference number" req />
             <G2>
-              <div><Lbl t="Date of Injury" req /><Inp fk="wca_injury_date" type="date" req /></div>
+              <div><Lbl t="Date of Injury" req /><DateInp fk="wca_injury_date" /></div>
             </G2>
             <Lbl t="Description of Incident" />
             <VoiceTxt fk="wca_incident_description" ph="Describe how the injury occurred, what happened, mechanism of injury..." rows={3} />
@@ -7601,12 +7601,18 @@ export default function DigitalPRFForm() {
         {fd.billing_type === 'RAF' && (
           <Card>
             <G2>
-              <div><Lbl t="Patient Date of Birth" req /><Inp fk="patient_dob" type="date" req /></div>
+              {/* DateInp, not the native date input: the native control holds
+                  an EMPTY value until a complete yyyy/mm/dd is typed, so a
+                  crew member who typed a partial date saw digits in the box
+                  while nothing was committed — prod PRF 128's accident date
+                  was lost exactly this way (and PRF 110 stored a six-digit
+                  year the native input happily accepted). */}
+              <div><Lbl t="Patient Date of Birth" req /><DateInp fk="patient_dob" /></div>
               <div><Lbl t="Passport Number" /><Inp fk="patient_passport_number" ph="For foreign nationals" /></div>
             </G2>
             <Lbl t="ID Number" /><Inp fk="patient_id_number" ph="13-digit SA ID" />
             <G2>
-              <div><Lbl t="Date of Accident" req /><Inp fk="raf_accident_date" type="date" req /></div>
+              <div><Lbl t="Date of Accident" req /><DateInp fk="raf_accident_date" /></div>
               <div><Lbl t="SAPS Case / OB Number" /><Inp fk="raf_police_case_number" ph="Police case number" /></div>
             </G2>
             {/* Reference Number lived only on the Transport phase's billing
