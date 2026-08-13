@@ -5860,12 +5860,25 @@ export default function DigitalPRFForm() {
   // mid-shift can never retro-attach the wrong practitioner to an earlier call.
   const crew2Member = prfMeta?.crew_member_2 || crewMemberById(crew2Id);
 
-  // Crew members on this PRF, used for the submit sign-off list. Crew 1 is the
-  // logged-in crew; crew 2 + any extra crew come from the PRF record.
+  // Crew 1 on this PRF. The server row (`prfMeta.crew_member_1`, resolved from
+  // crew_member_1_id) is authoritative — the form documents who was ON the
+  // call, not whose session is rendering it. The device profile is only the
+  // offline fallback (no server row yet), where the creator IS crew 1 by
+  // construction. Reported from the field: Crew Details showed Crew 1 as "—"
+  // mid-call because the panel read only the local profile, while the server
+  // row named the lead crew the whole time.
+  const crew1Member = {
+    full_name: prfMeta?.crew_member_1?.full_name || profile?.name || '',
+    qualification: prfMeta?.crew_member_1?.qualification || profile?.qualification || '',
+    hpcsa_number: prfMeta?.crew_member_1?.hpcsa_number || profile?.hpcsa_number || '',
+  };
+
+  // Crew members on this PRF, used for the submit sign-off list. Crew 1 and
+  // crew 2 + any extra crew all come from the PRF record.
   const getCrewSignList = (): Array<{ key: string; name: string; sub: string }> => {
     const c2 = crew2Member;
     const sub = (q?: string, h?: string) => [q, h].filter(Boolean).join(' · ');
-    const list = [{ key: 'c1', name: profile?.name || 'Crew 1', sub: sub(profile?.qualification, profile?.hpcsa_number) }];
+    const list = [{ key: 'c1', name: crew1Member.full_name || 'Crew 1', sub: sub(crew1Member.qualification, crew1Member.hpcsa_number) }];
     if (c2) list.push({ key: 'c2', name: c2.full_name || 'Crew 2', sub: sub(c2.qualification, c2.hpcsa_number) });
     if (Array.isArray(fd.extra_crew)) {
       fd.extra_crew.forEach((c: any, i: number) => list.push({
@@ -9323,10 +9336,10 @@ export default function DigitalPRFForm() {
                 <div>
                   <Lbl t="Crew 1" />
                   <div style={{ ...base, background: '#f8fafc', color: '#334155', fontWeight: 600 }}>
-                    {profile.name || '—'}
-                    {profile.qualification || profile.hpcsa_number ? (
+                    {crew1Member.full_name || '—'}
+                    {crew1Member.qualification || crew1Member.hpcsa_number ? (
                       <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: 2, fontWeight: 500 }}>
-                        {profile.qualification || '—'} {profile.hpcsa_number ? `· ${profile.hpcsa_number}` : ''}
+                        {crew1Member.qualification || '—'} {crew1Member.hpcsa_number ? `· ${crew1Member.hpcsa_number}` : ''}
                       </div>
                     ) : null}
                   </div>
@@ -10674,12 +10687,12 @@ export default function DigitalPRFForm() {
           const isTreating = crewPicker.kind === 'treating';
           const kindLabel = isTreating ? '' : crewPicker.kind === 'iv' ? 'IV Line' : 'Medication';
           const opts: Array<{ id: string; tag: string; name: string; qualification: string; hpcsa: string }> = [];
-          const c1Name = prfMeta.crew_member_1?.full_name || profile.name || '';
+          const c1Name = crew1Member.full_name;
           if (c1Name) opts.push({
             id: 'crew1', tag: 'Crew 1',
             name: c1Name,
-            qualification: prfMeta.crew_member_1?.qualification || profile.qualification || '',
-            hpcsa: prfMeta.crew_member_1?.hpcsa_number || profile.hpcsa_number || '',
+            qualification: crew1Member.qualification,
+            hpcsa: crew1Member.hpcsa_number,
           });
           // Falls back to the device's own shift roster when there is no server
           // row yet (PRF captured offline) — otherwise no procedure on an

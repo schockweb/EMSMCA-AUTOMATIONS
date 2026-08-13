@@ -190,3 +190,95 @@ describe('DigitalPRFForm with no server row (captured offline)', () => {
     expect(container.textContent).not.toContain(PARTNER_NAME);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The ONLINE case: the server row names the crew, and it is authoritative.
+//
+// Crew 1 on the Complete screen used to render straight from the device's
+// localStorage profile. Reported from the field mid-call: a session whose
+// stored profile had no usable name showed Crew 1 as "—" on a two-crew call,
+// while the server row named the lead crew the whole time. The form documents
+// who was ON the call, not whose session is rendering it.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('DigitalPRFForm with a server row — the PRF record names Crew 1', () => {
+  const LEAD_NAME = 'Maria Mahon';
+
+  function mockServerPrf() {
+    const prf = {
+      id: PRF_ID,
+      prf_number: 30,
+      case_number: 'HARNESS-2026-08-000030',
+      status: 'DRAFT',
+      updated_at: '2026-08-13T12:44:16Z',
+      form_data: { patient_name: 'Online', patient_surname: 'Capture' },
+      vehicle_id: null,
+      crew_member_1_id: 'crew-1-uuid',
+      crew_member_2_id: PARTNER_ID,
+      crew_member_1: { full_name: LEAD_NAME, qualification: 'ECP', hpcsa_number: 'ECP0001678' },
+      crew_member_2: { full_name: PARTNER_NAME, qualification: 'AEA', hpcsa_number: 'AEA0099' },
+      geo_locations: {},
+    };
+    const instance = {
+      get: vi.fn(async () => ({ data: prf })),
+      patch: vi.fn(async () => ({ data: prf })),
+      post: vi.fn(async () => ({ data: prf })),
+      delete: vi.fn(async () => ({ data: {} })),
+    };
+    (axios as any).create = vi.fn(() => instance);
+    (axios as any).get = instance.get;
+    (axios as any).patch = instance.patch;
+    (axios as any).post = instance.post;
+  }
+
+  beforeEach(() => {
+    localStorage.clear();
+    localStorage.setItem('crew_token', 'online-test-token');
+    mockServerPrf();
+
+    Object.defineProperty(globalThis.navigator, 'geolocation', {
+      configurable: true,
+      value: { getCurrentPosition: vi.fn(), watchPosition: vi.fn(() => 1), clearWatch: vi.fn() },
+    });
+    (globalThis as any).SpeechRecognition = undefined;
+    (globalThis as any).webkitSpeechRecognition = undefined;
+    if (!(globalThis as any).ResizeObserver) {
+      (globalThis as any).ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
+    }
+    window.scrollTo = vi.fn() as any;
+    window.alert = vi.fn();
+  });
+
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+
+  it('names Crew 1 from the server row when the device profile has no name', async () => {
+    // The field report: crew_profile exists (valid token, id, qualification)
+    // but carries no `name`. Both crew are on the server row.
+    localStorage.setItem('crew_profile', JSON.stringify({
+      id: 'crew-1-uuid', provider_id: 'prov-1', provider_slug: PROVIDER,
+      provider_name: 'Harness EMS', qualification: 'ECP', role: 'crew',
+    }));
+    seedDraft('');
+    const { container } = mountForm();
+    await waitFor(() => expect(container.textContent).toMatch(/Crew Details/i));
+    expect(
+      container.textContent,
+      'the lead crew recorded on this PRF must appear on the completion screen',
+    ).toContain(LEAD_NAME);
+    expect(container.textContent).toContain(PARTNER_NAME);
+  });
+
+  it('prefers the recorded Crew 1 over a different logged-in viewer', async () => {
+    // An admin (or partner device) opening the record must see the crew that
+    // is ON the PRF, not themselves.
+    localStorage.setItem('crew_profile', JSON.stringify({
+      id: 'admin-uuid', name: 'Back Office Admin', provider_id: 'prov-1',
+      provider_slug: PROVIDER, provider_name: 'Harness EMS',
+      qualification: 'BAA', role: 'crew_admin',
+    }));
+    seedDraft('');
+    const { container } = mountForm();
+    await waitFor(() => expect(container.textContent).toMatch(/Crew Details/i));
+    expect(container.textContent).toContain(LEAD_NAME);
+  });
+});
