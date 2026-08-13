@@ -1500,3 +1500,47 @@ describe('PRF PDF — Oxygen Admin drops the % Oxygen row when it was not record
     expect(screen.queryAllByText((c) => c.includes('40')).length).toBeGreaterThan(0);
   });
 });
+
+describe('PRF PDF — unrecorded closeout rows and columns drop out', () => {
+  async function renderWith(extraFd: Record<string, any>) {
+    const built = buildPrf('PRIMARY', 'MED AID');
+    currentPrf = { ...built.prf, form_data: { ...built.fd, ...extraFd } };
+    const { container } = renderPrfView();
+    await screen.findAllByText((c) => c.includes(built.anchor));
+    return container;
+  }
+
+  // A debtor supplies one contact number, nearly always a mobile.
+  it('omits the debtor Tel (H) row when blank, keeping the rest of the block', async () => {
+    await renderWith({ debtor_phone_home: '', debtor_phone_cell: '0821234567' });
+    // 'Tel (H)' also labels a PATIENT row, so count instances rather than
+    // asserting absence outright — the patient row must survive.
+    const patientTelH = screen.queryAllByText('Tel (H)').length;
+    expect(patientTelH).toBe(1);
+    expect(screen.queryByText('Debtor Information')).not.toBeNull();
+    expect(screen.queryAllByText((c) => c.includes('0821234567')).length).toBeGreaterThan(0);
+  });
+
+  it('keeps the debtor Tel (H) row when it WAS recorded', async () => {
+    await renderWith({ debtor_phone_home: '0119876543', debtor_phone_cell: '0821234567' });
+    expect(screen.queryAllByText('Tel (H)').length).toBe(2);   // patient + debtor
+    expect(screen.queryAllByText((c) => c.includes('0119876543')).length).toBeGreaterThan(0);
+  });
+
+  it('drops the whole Valuables column when nothing was recorded', async () => {
+    await renderWith({
+      valuables_handed_to: '', valuables_description: '', valuables_signature: '',
+    });
+    expect(screen.queryByText('Valuables')).toBeNull();
+    expect(screen.queryByText('None recorded')).toBeNull();
+    // The band it lives in must still render its crew sign-off columns.
+    expect(screen.queryByText('Crew · Assessed By')).not.toBeNull();
+    expect(screen.queryByText('Crew · Managed By')).not.toBeNull();
+  });
+
+  it('keeps the Valuables column when valuables WERE recorded', async () => {
+    await renderWith({ valuables_handed_to: 'Ward Sister', valuables_description: 'Wallet, phone' });
+    expect(screen.queryByText('Valuables')).not.toBeNull();
+    expect(screen.queryAllByText((c) => c.includes('Ward Sister')).length).toBeGreaterThan(0);
+  });
+});

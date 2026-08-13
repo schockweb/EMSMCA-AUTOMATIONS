@@ -1694,6 +1694,13 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
     (Array.isArray(fd.flags) && fd.flags.includes('debtor_same_as_patient')) ||
     (!anyValue(fd, debtorKeys) && patientHasData);
   const valuablesEmpty = isBlank(fd.valuables_handed_to) && isBlank(fd.valuables_description) && isBlank(fd.valuables_signature) && isBlank(prf.signatures?.valuables_signature);
+  // The Valuables column is dropped from Band C entirely when nothing was
+  // recorded, the same treatment showMotivationCol gives an empty Motivation
+  // section: a letterhead over an italic "None recorded" reads as a hole in the
+  // record. An RHT never has one (no hospital transport, so no handover).
+  // Band C keys its column template AND its last-column border off this, so it
+  // must stay the single source of truth for "is there a fourth column".
+  const showValuablesCol = fd.call_type !== 'RHT' && !valuablesEmpty;
   // Page-1 "Motivation / Other Notes" is its own field now — NO fallback to
   // management_notes (that made the Motivation and Management boxes identical).
   const motivationNotes: string = fd.motivation_notes || '';
@@ -2718,7 +2725,11 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
                 <FieldRow label="Address"  value={fd.debtor_address} />
                 <FieldRow label="Suburb"   value={fd.debtor_suburb} />
                 <FieldRow label="Code"     value={fd.debtor_postal_code} />
-                <FieldRow label="Tel (H)"  value={fd.debtor_phone_home} />
+                {/* A debtor gives one contact number, almost always a mobile,
+                    so the home number was a dash on nearly every account. */}
+                {!isBlank(fd.debtor_phone_home) && (
+                  <FieldRow label="Tel (H)"  value={fd.debtor_phone_home} />
+                )}
                 <FieldRow label="Cell"     value={fd.debtor_phone_cell} />
               </>
             )}
@@ -3152,7 +3163,7 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
             // The Motivation column drops out of the template entirely when
             // hidden, so the crew/valuables columns widen instead of leaving
             // a blank first slot.
-            gridTemplateColumns: fd.call_type === 'RHT'
+            gridTemplateColumns: !showValuablesCol
               ? (showMotivationCol ? '1.5fr 1.5fr 1.46fr' : '1.5fr 1.46fr')
               : (showMotivationCol ? '1.54fr 1.5fr 1.5fr 1.46fr' : '1.5fr 1.5fr 1.46fr'),
             borderTop: `2px solid ${LN}`,
@@ -3200,7 +3211,7 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
             { c: prf.crew_1, sig: fd.crew_signoff_sigs?.c1 || prf.signatures?.crew_signature,   fbName: fd.assessed_by, fbQual: fd.assessor_qualifications, role: 'Assessed By' },
             { c: prf.crew_2, sig: fd.crew_signoff_sigs?.c2 || prf.signatures?.crew_2_signature, fbName: fd.managed_by,  fbQual: fd.manager_qualifications,  role: 'Managed By'  },
           ]).map(({ c, sig, fbName, fbQual, role }, i) => (
-            <div key={i} style={{ borderRight: (fd.call_type === 'RHT' && i === 1) ? 'none' : `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
+            <div key={i} style={{ borderRight: (!showValuablesCol && i === 1) ? 'none' : `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
               <SectionHead label={`Crew · ${role}`} />
               <FieldRow label="Name"  value={c?.full_name || fbName} />
               <FieldRow label="Qual"  value={c?.qualification || fbQual} />
@@ -3211,29 +3222,20 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
             </div>
           ))}
 
-          {/* Valuables + Handover Signature (+ RAF sketch if any) — dropped for
-              RHT (no hospital transport, so no valuables handover). */}
-          {fd.call_type !== 'RHT' && (
+          {/* Valuables — dropped for RHT (no hospital transport, so no valuables
+              handover) and dropped when nothing was recorded; see
+              showValuablesCol. The Handover Signature is NOT in here — it sits
+              in the band above — so hiding this column never hides a signature. */}
+          {showValuablesCol && (
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             <SectionHead label="Valuables" />
-            {valuablesEmpty ? (
-              <div style={{
-                borderTop: `1px solid ${LN}`, padding: '8px', background: SOFT_BG,
-                fontSize: '0.6rem', color: MUT, fontStyle: 'italic', textAlign: 'center',
-              }}>None recorded</div>
-            ) : (
-              <>
-                <FieldRow label="Handed To"   value={fd.valuables_handed_to} />
-                <FieldRow label="Description" value={fd.valuables_description} valueMin={80} flex={1} />
-                {(fd.valuables_signature || prf.signatures?.valuables_signature) && (
-                  <>
-                    <div style={{ padding: '4px 7px', background: SOFT_BG, borderTop: `1px solid ${LN}` }}>
-                      <div style={{ fontSize: '0.58rem', fontWeight: 900, color: MUT, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Recipient Signature</div>
-                      <SignatureBox src={fd.valuables_signature || prf.signatures?.valuables_signature} minHeight={60} />
-                    </div>
-                  </>
-                )}
-              </>
+            <FieldRow label="Handed To"   value={fd.valuables_handed_to} />
+            <FieldRow label="Description" value={fd.valuables_description} valueMin={80} flex={1} />
+            {(fd.valuables_signature || prf.signatures?.valuables_signature) && (
+              <div style={{ padding: '4px 7px', background: SOFT_BG, borderTop: `1px solid ${LN}` }}>
+                <div style={{ fontSize: '0.58rem', fontWeight: 900, color: MUT, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Recipient Signature</div>
+                <SignatureBox src={fd.valuables_signature || prf.signatures?.valuables_signature} minHeight={60} />
+              </div>
             )}
             {/* The RAF accident sketch used to render here, squeezed to 80px
                 inside the valuables column — illegible for what it is, a
