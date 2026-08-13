@@ -763,7 +763,11 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
     // writes back the same value and is visually inert.
     const t = setTimeout(applyScreenFit, 150);
     return () => { window.removeEventListener('resize', applyScreenFit); clearTimeout(t); };
-  }, [applyScreenFit, prf, userZoom]);
+    // recordView is a dependency because Full Record UNMOUNTS the printed
+    // sheets (#prf-pdf-content). Toggling back remounts a fresh element with
+    // no `zoom` style, and without re-running this effect the sheet painted
+    // at the full 1220px and clipped off the right edge of the container.
+  }, [applyScreenFit, prf, userZoom, recordView]);
 
   // Step the reader zoom, keeping whatever is at the centre of the screen at
   // the centre afterwards — zooming in from the left edge otherwise dumps you
