@@ -14,7 +14,10 @@ export default defineConfig({
       includeAssets: ['favicon.svg', 'ems-logo.png', 'jems_logo.png'],
       manifest: false,  // We provide our own manifest.json in public/
       workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
+        // mjs: the pdf.js worker (attach-time PDF→image conversion) is
+        // emitted as a hashed .mjs asset — without it in the precache the
+        // conversion would fail offline.
+        globPatterns: ['**/*.{js,mjs,css,html,svg,png,woff2}'],
         // skipWaiting must be false so the freshly-built service worker waits
         // in the background until the user explicitly confirms the update.
         skipWaiting: false,

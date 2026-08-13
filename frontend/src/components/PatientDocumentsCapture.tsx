@@ -520,22 +520,54 @@ function ViewfinderHint() {
 // attach-a-PDF path kept for documents that arrive as files rather than
 // paper (payslips, medical reports, emailed OARs).
 
-export interface AttachedDocFile { name?: string; size?: number; data_url?: string }
+export interface AttachedDocFile {
+  name?: string;
+  size?: number;
+  data_url?: string;
+  /** Pages 2..N of a converted PDF — page 1 lives in data_url. */
+  extra_pages?: string[];
+  page_count?: number;
+}
 
 export interface DocSpec { key: string; label: string; frame?: DocFrame }
 
 const dataUrlBytes = (dataUrl: string) =>
   Math.max(0, Math.round((dataUrl.length - (dataUrl.indexOf(',') + 1)) * 0.75));
 
+// data_url-based only: a converted PDF carries a JPEG data_url and should
+// show its page-1 thumbnail; only a legacy raw-PDF attachment (stored
+// before attach-time conversion existed) still gets the "PDF" chip.
 const isPdfFile = (f: AttachedDocFile) =>
-  (f.data_url || '').startsWith('data:application/pdf') || (f.name || '').toLowerCase().endsWith('.pdf');
+  (f.data_url || '').startsWith('data:application/pdf');
 
-function readPdfFile(f: File, onDone: (file: { name: string; size: number; data_url: string }) => void) {
+// A picked PDF is rasterised to page images on the spot (pdfToImages), so
+// the exported PRF prints the document's contents instead of a "PDF
+// attached" placeholder. If conversion fails — corrupt/encrypted file, or
+// the pdf.js chunk unreachable on a never-cached offline device — fall
+// back to storing the raw PDF exactly as before; the export then degrades
+// to the labelled record block it always used.
+function readPdfFile(f: File, onDone: (file: AttachedDocFile & { name: string; size: number; data_url: string }) => void) {
   if (f.type !== 'application/pdf' && !f.name.toLowerCase().endsWith('.pdf')) { alert('Only PDF files are accepted.'); return; }
   if (f.size > 10 * 1024 * 1024) { alert('File exceeds 10 MB.'); return; }
-  const reader = new FileReader();
-  reader.onload = () => onDone({ name: f.name, size: f.size, data_url: String(reader.result) });
-  reader.readAsDataURL(f);
+  import('../utils/pdfToImages')
+    .then(({ pdfFileToImages, PDF_MAX_PAGES }) =>
+      pdfFileToImages(f).then(({ pages, totalPages }) => {
+        if (!pages.length) throw new Error('PDF has no pages');
+        if (totalPages > pages.length) {
+          alert(`This PDF has ${totalPages} pages — only the first ${PDF_MAX_PAGES} were attached.`);
+        }
+        onDone({
+          name: f.name, size: f.size, data_url: pages[0],
+          ...(pages.length > 1 ? { extra_pages: pages.slice(1) } : {}),
+          page_count: pages.length,
+        });
+      }),
+    )
+    .catch(() => {
+      const reader = new FileReader();
+      reader.onload = () => onDone({ name: f.name, size: f.size, data_url: String(reader.result) });
+      reader.readAsDataURL(f);
+    });
 }
 
 function AttachedFileCard({ label, file, onRemove }: { label: string; file: AttachedDocFile; onRemove: () => void }) {
@@ -561,7 +593,7 @@ function AttachedFileCard({ label, file, onRemove }: { label: string; file: Atta
         <div style={{ fontWeight: 800, color: GD }}>{label} attached</div>
         {file.name && (
           <div style={{ fontSize: '0.68rem', color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {file.name}{typeof file.size === 'number' ? ` · ${(file.size / 1024).toFixed(1)} KB` : ''}
+            {file.name}{typeof file.size === 'number' ? ` · ${(file.size / 1024).toFixed(1)} KB` : ''}{(file.page_count ?? 0) > 1 ? ` · ${file.page_count} pages` : ''}
           </div>
         )}
       </div>

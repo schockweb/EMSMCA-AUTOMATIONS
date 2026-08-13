@@ -1359,10 +1359,12 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
 
   // Documents the crew attached on the form (WCA / employee docs, RAF OAR
   // report) — each renders on its own sheet after the clinical pages, so the
-  // exported PDF carries the supporting evidence. Photographed documents are
-  // stored as JPEG data-URLs and embed as a full-page image; an uploaded
-  // PDF file can't be painted into the page snapshot, so it renders as a
-  // labelled record block instead (the original stays with the PRF).
+  // exported PDF carries the supporting evidence. Photographed documents and
+  // PDFs converted to page images at attach time (data_url = page 1,
+  // extra_pages = pages 2..N) embed as full-page images, one sheet per page.
+  // A legacy raw-PDF attachment can't be painted into the page snapshot, so
+  // it renders as a labelled record block instead (the original stays with
+  // the PRF).
   const attachedDocs = ([
     { key: 'wca_oar_report_pdf',     label: 'WCA Document' },
     { key: 'wca_employee_id_pdf',    label: 'Employee ID' },
@@ -1370,7 +1372,7 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
     { key: 'wca_medical_report_pdf', label: 'Medical Report' },
     { key: 'raf_oar_report_pdf',     label: 'OAR Report' },
   ] as Array<{ key: string; label: string }>)
-    .map(d => ({ ...d, file: fd[d.key] as { name?: string; size?: number; data_url?: string } | undefined }))
+    .map(d => ({ ...d, file: fd[d.key] as { name?: string; size?: number; data_url?: string; extra_pages?: string[] } | undefined }))
     .filter(d => d.file && typeof d.file === 'object' && typeof d.file.data_url === 'string' && d.file.data_url);
   const isImageDoc = (f: any) => typeof f?.data_url === 'string' && f.data_url.startsWith('data:image/');
 
@@ -3681,14 +3683,22 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
       )}
 
       {/* ═══════════════════ ATTACHED DOCUMENTS ═══════════════════
-          One A4-landscape sheet per document the crew attached on the form
-          (WCA / employee documents, RAF OAR report). Photographed documents
-          render as a full-page image; an uploaded PDF file renders as a
-          labelled record block (a canvas snapshot cannot rasterise PDF pages
-          — the original file stays stored with the PRF). Picked up by the
-          PDF/print pipeline via the shared .prf-page selector. */}
-      {attachedDocs.map(d => (
-        <div className="prf-print-frame" key={`doc-${d.key}`}>
+          One A4-landscape sheet per PAGE of each document the crew attached
+          on the form (WCA / employee documents, RAF OAR report). Photographed
+          documents and attach-time-converted PDFs render as full-page images
+          — a multi-page PDF carries pages 2..N in extra_pages and gets one
+          sheet per page, numbered in the header. Only a legacy raw-PDF
+          attachment still renders as a labelled record block (a canvas
+          snapshot cannot rasterise PDF pages — the original file stays
+          stored with the PRF). Picked up by the PDF/print pipeline via the
+          shared .prf-page selector. */}
+      {attachedDocs.flatMap(d => {
+        const pages: Array<string | null> = isImageDoc(d.file)
+          ? [d.file!.data_url!, ...(Array.isArray(d.file!.extra_pages) ? d.file!.extra_pages.filter(p => typeof p === 'string' && p) : [])]
+          : [null];
+        const pageTotal = pages.length;
+        return pages.map((pageUrl, pageIdx) => (
+        <div className="prf-print-frame" key={`doc-${d.key}-${pageIdx}`}>
           <div className="prf-page" style={{
             width: 1220, minHeight: 862,
             margin: '28px auto 0', background: '#fff', color: INK,
@@ -3712,7 +3722,7 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
                 fontSize: '0.78rem', fontWeight: 800, color: INK,
                 letterSpacing: '0.08em', textTransform: 'uppercase',
               }}>
-                Attached Document — {d.label}
+                Attached Document — {d.label}{pageTotal > 1 ? ` (page ${pageIdx + 1} of ${pageTotal})` : ''}
               </div>
               <div style={{
                 padding: '10px 12px', display: 'flex', alignItems: 'center',
@@ -3724,14 +3734,14 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
               </div>
             </div>
 
-            {isImageDoc(d.file) ? (
+            {pageUrl ? (
               <div style={{
                 flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
                 padding: 14, background: SOFT_BG,
               }}>
                 <img
-                  src={d.file!.data_url}
-                  alt={d.label}
+                  src={pageUrl}
+                  alt={pageTotal > 1 ? `${d.label} page ${pageIdx + 1}` : d.label}
                   style={{ maxWidth: '100%', maxHeight: 770, objectFit: 'contain', border: `1px solid ${LN}`, background: '#fff' }}
                 />
               </div>
@@ -3764,7 +3774,8 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
             )}
           </div>
         </div>
-      ))}
+        ));
+      })}
 
       {/* ═══════════ DECLARATION OF DEATH SHEET ═══════════
           Rendered on its own dedicated A4-landscape sheet, and ONLY when a

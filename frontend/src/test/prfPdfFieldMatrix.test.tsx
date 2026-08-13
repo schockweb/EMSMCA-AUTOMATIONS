@@ -797,6 +797,33 @@ describe('PRF PDF — attachments and extra sheets', () => {
     });
     expect(sheets - base).toBe(0);
   });
+
+  it('renders one sheet per page of a converted PDF, with numbered headers', async () => {
+    // PDFs are rasterised to page images at attach time: data_url carries
+    // page 1, extra_pages the rest. Every page must print — a 3-page payslip
+    // that only printed its first page would silently lose evidence.
+    const base = await baselineSheets();
+    const { sheets } = await sheetsFor({
+      wca_payslip_pdf: {
+        name: 'payslip.pdf', size: 2048, page_count: 3,
+        data_url: PNG, extra_pages: [PNG, PNG],
+      },
+    });
+    expect(sheets - base).toBe(3);
+    expect(screen.getByText(/Payslip \(page 1 of 3\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/Payslip \(page 3 of 3\)/i)).toBeInTheDocument();
+  });
+
+  it('a single-page converted PDF keeps the unnumbered header', async () => {
+    // The "(page 1 of 1)" suffix would be noise on the overwhelmingly common
+    // single-page case — and the suffix-free header is what the older tests
+    // above assert, so this pins that both stay true.
+    await sheetsFor({
+      raf_oar_report_pdf: { name: 'oar.pdf', size: 1024, page_count: 1, data_url: PNG },
+    });
+    expect(screen.getAllByText(/Attached Document — OAR Report/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/OAR Report \(page/i)).not.toBeInTheDocument();
+  });
 });
 
 // ════════════════════════════════════════════════════════════════════════════
