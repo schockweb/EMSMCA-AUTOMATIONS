@@ -1472,3 +1472,31 @@ describe('Full Record — the layout-independent fallback', () => {
       .toBeGreaterThan(0);
   });
 });
+
+describe('PRF PDF — Oxygen Admin drops the % Oxygen row when it was not recorded', () => {
+  /** Render a PRIMARY/MED AID fixture with the oxygen block overridden. */
+  async function renderWithOxygen(oxygen: Record<string, any>) {
+    const built = buildPrf('PRIMARY', 'MED AID');
+    currentPrf = { ...built.prf, form_data: { ...built.fd, ...oxygen } };
+    renderPrfView();
+    await screen.findAllByText((c) => c.includes(built.anchor));
+  }
+
+  // Crews set a flow rate on a mask and routinely leave % oxygen blank, so on a
+  // typical call this was the single empty row in an otherwise filled block.
+  it('omits the row when % oxygen is blank but oxygen was given', async () => {
+    await renderWithOxygen({ o2_percent: '', o2_flow_rate: '8', o2_device: 'Mask' });
+    expect(screen.queryByText('% Oxygen')).toBeNull();
+    // The rest of the block must still be there — otherwise this passes simply
+    // because the whole Oxygen Admin section vanished.
+    expect(screen.queryByText('Oxygen Admin')).not.toBeNull();
+    expect(screen.queryByText('L / Min')).not.toBeNull();
+    expect(screen.queryByText('Device')).not.toBeNull();
+  });
+
+  it('still renders the row, with its value, when % oxygen WAS recorded', async () => {
+    await renderWithOxygen({ o2_percent: '40', o2_flow_rate: '8', o2_device: 'Mask' });
+    expect(screen.queryByText('% Oxygen')).not.toBeNull();
+    expect(screen.queryAllByText((c) => c.includes('40')).length).toBeGreaterThan(0);
+  });
+});

@@ -3328,7 +3328,11 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
               <>
                 <SectionHead label="Oxygen Admin" />
                 <FieldRow label="L / Min"    value={fd.o2_flow_rate} />
-                <FieldRow label="% Oxygen"   value={fd.o2_percent} />
+                {/* Dropped entirely when unrecorded rather than printed as a
+                    dash: % oxygen is not something crews routinely record when
+                    they set a flow rate on a mask, so on a typical call this
+                    was the one empty row in an otherwise filled block. */}
+                {!isBlank(fd.o2_percent) && <FieldRow label="% Oxygen" value={fd.o2_percent} />}
                 <FieldRow label="Device"     value={fd.o2_device} />
                 <FieldRow label="BVM"        value={fd.o2_bvm} />
                 <FieldRow label="Start Time" value={fd.o2_start_time} />
