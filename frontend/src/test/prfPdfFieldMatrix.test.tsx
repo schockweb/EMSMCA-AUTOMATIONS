@@ -1191,6 +1191,27 @@ describe('RHT — the refusal reaches the printed record', () => {
     }
   });
 
+  it('RHT with no billing type hides the Billing Type header row', async () => {
+    // The refusal flow never asks for a billing type (any charge is the
+    // call-out fee basis), so the header row printed a permanent "—".
+    // Blank-guarded, not call-type-hidden: a legacy RHT that captured one
+    // must keep printing it — asserted by the control below.
+    const built = buildPrf('RHT', 'MED AID');
+    delete built.prf.form_data.billing_type;
+    currentPrf = built.prf;
+    renderPrfView();
+    await screen.findAllByText((c) => c.includes(built.anchor), { exact: false });
+    expect(screen.queryByText('Billing Type')).not.toBeInTheDocument();
+
+    // Control: a legacy RHT with a captured billing type keeps its row.
+    cleanup();
+    const legacy = buildPrf('RHT', 'MED AID');
+    currentPrf = legacy.prf;
+    renderPrfView();
+    await screen.findAllByText((c) => c.includes(legacy.anchor), { exact: false });
+    expect(screen.queryAllByText('Billing Type').length).toBeGreaterThan(0);
+  });
+
   it('drops empty Patient / Debtor / Billing columns on a refusal, and keeps captured ones', async () => {
     // The crew form no longer ASKS for these once the patient refuses, so a new
     // refusal would print three columns of "—". Refusals captured BEFORE that

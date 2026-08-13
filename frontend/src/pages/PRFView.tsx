@@ -2498,8 +2498,12 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
                 type, so the scheme could not adjudicate what it was billed. */}
             {fd.transfer_subtype && <FieldRow label="Transfer Reason" value={fd.transfer_subtype} />}
             {/* Courtesy calls are non-billable transfers — no billing type is
-                captured, so the row (which would render an empty "—") is hidden. */}
-            {fd.call_type !== 'COURTESY' && (
+                captured, so the row (which would render an empty "—") is hidden.
+                Same for an RHT with no billing type: the refusal flow never
+                asks for one (any charge is the call-out fee basis above), so
+                the row was a permanent "—". Blank-guarded rather than hidden
+                outright so a legacy RHT that DID capture one keeps printing it. */}
+            {fd.call_type !== 'COURTESY' && !(fd.call_type === 'RHT' && isBlank(fd.billing_type)) && (
               <FieldRow label="Billing Type" value={
                 fd.billing_type === 'PVT' && fd.pvt_payment_method
                   ? `PVT — ${fd.pvt_payment_method}`
@@ -2689,7 +2693,8 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
 
               {/* Crew sign-offs moved to the DOD second sheet (Debtor ·
                   Billing · Crew Sign-Off) so the certificate has page 1 to
-                  itself. */}
+                  itself. Ruled lines absorb the space they vacated. */}
+              <FillLines />
             </div>
 
             {/* Column 2 — practitioner + medical confirmation + handover */}
@@ -2723,6 +2728,7 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
               )}
 
               {/* Crew 2 sign-off — moved to the DOD second sheet with Crew 1. */}
+              <FillLines />
             </div>
 
             {/* Column 3 — the signed declaration */}
@@ -2779,10 +2785,11 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
                   </div>
                 </>
               )}
+              <FillLines />
             </div>
           </div>
         )}
-        
+
         {/* On a refusal the four columns collapse to two, and the payer columns
             stack down the left.
 
@@ -3349,9 +3356,12 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
                   <FieldRow label="Name"  value={c?.full_name || fbName} />
                   <FieldRow label="Qual"  value={c?.qualification || fbQual} />
                   <FieldRow label="HPCSA" value={c?.hpcsa_number} />
-                  <div style={{ padding: '6px 8px', borderTop: `1px solid ${LN}`, flex: 1, display: 'flex', alignItems: 'flex-start' }}>
+                  <div style={{ padding: '6px 8px', borderTop: `1px solid ${LN}` }}>
                     <SignatureBox src={sig} minHeight={80} />
                   </div>
+                  {/* Ruled lines to the sheet bottom — a bare white void under
+                      the signature read as an unfinished column. */}
+                  <FillLines />
                 </div>
               ))}
             </div>
