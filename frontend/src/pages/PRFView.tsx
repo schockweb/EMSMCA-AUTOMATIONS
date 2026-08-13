@@ -1637,6 +1637,11 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
   // Page-1 "Motivation / Other Notes" is its own field now — NO fallback to
   // management_notes (that made the Motivation and Management boxes identical).
   const motivationNotes: string = fd.motivation_notes || '';
+  // The whole Motivation column hides when it has nothing to print — an
+  // empty section still rendered its letterhead over bare ruled lines, which
+  // reads as a missing answer rather than "nothing to declare". The column
+  // also hosts Additional Crew, so it stays whenever extra crew exist.
+  const showMotivationCol = !!motivationNotes.trim() || (Array.isArray(fd.extra_crew) && fd.extra_crew.length > 0);
 
   const vitalsCols = Math.max(vitalsPage1.length, 5);
   const vitalsOverflowCols = Math.max(vitalsOverflow.length, 5);
@@ -3082,11 +3087,22 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
               the sheet edge; on an RHT there is no Valuables column, so the
               second crew column becomes last and drops its border instead. */}
         {fd.call_type !== 'DOD' && (
-          <div style={{ display: 'grid', gridTemplateColumns: fd.call_type === 'RHT' ? '1.5fr 1.5fr 1.46fr' : '1.54fr 1.5fr 1.5fr 1.46fr', borderTop: `2px solid ${LN}` }}>
+          <div style={{
+            display: 'grid',
+            // The Motivation column drops out of the template entirely when
+            // hidden, so the crew/valuables columns widen instead of leaving
+            // a blank first slot.
+            gridTemplateColumns: fd.call_type === 'RHT'
+              ? (showMotivationCol ? '1.5fr 1.5fr 1.46fr' : '1.5fr 1.46fr')
+              : (showMotivationCol ? '1.54fr 1.5fr 1.5fr 1.46fr' : '1.5fr 1.5fr 1.46fr'),
+            borderTop: `2px solid ${LN}`,
+          }}>
           {/* Motivation / Other Notes — the captured text sits at natural
-              height and the remaining space renders as ruled note lines (an
-              empty section is ALL ruling — a proper blank notes area, not an
-              italic apology in a void). */}
+              height and the remaining space renders as ruled note lines.
+              Rendered only when there is content (text or extra crew): an
+              empty section printed its letterhead over bare ruling, which the
+              user read as a hole in the record rather than a blank notes area. */}
+          {showMotivationCol && (
           <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
             <SectionHead label="Motivation / Other Notes" />
             {motivationNotes && (
@@ -3117,6 +3133,7 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
               </>
             )}
           </div>
+          )}
           {/* Crew sign-off — one tidy column per crew member: details stacked
               above a properly-sized signature box (no full-width stretch). */}
           {([

@@ -517,6 +517,13 @@ describe('PRF PDF render — blank passport rows', () => {
     // Geometry is not assertable here — jsdom has no layout — but DOM ORDER is,
     // and for a CSS grid with no explicit order/grid-area the two are the same
     // thing. That makes this a real guard rather than a restatement of the JSX.
+    //
+    // The fixture must carry motivation text: an EMPTY Motivation column now
+    // hides entirely (see the test below), so the ordering can only be
+    // asserted when the column exists.
+    vi.mocked(axios.get).mockResolvedValue({
+      data: { ...PRF_FIXTURE, form_data: { ...PRF_FIXTURE.form_data, motivation_notes: 'Ordering-sentinel motivation' } },
+    });
     const { container } = renderPrfView();
     await screen.findByText(/Sipho-Sentinel/);
 
@@ -534,6 +541,19 @@ describe('PRF PDF render — blank passport rows', () => {
       'lands under Patient Priority, and Valuables must trail',
     ).toEqual([...wanted.map(w => heads.indexOf(w))].sort((a, b) => a - b));
     expect(heads.indexOf('Motivation / Other Notes')).toBeLessThan(heads.indexOf('Valuables'));
+  });
+
+  it('hides the Motivation column entirely when nothing was written', async () => {
+    // An empty Motivation section used to print its letterhead over bare
+    // ruled lines — reading as a hole in the record rather than "nothing to
+    // declare". With no motivation text and no extra crew the whole column
+    // (letterhead included) must vanish; the crew and valuables columns
+    // still render.
+    renderPrfView();   // default fixture: no motivation_notes, no extra_crew
+    await screen.findByText(/Sipho-Sentinel/);
+    expect(screen.queryByText('Motivation / Other Notes')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Crew · Assessed By').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Valuables').length).toBeGreaterThan(0);
   });
 
   it('signs on a dotted rule inside the terms panel, without losing the captured ink', async () => {
