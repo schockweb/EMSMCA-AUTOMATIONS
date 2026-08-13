@@ -817,6 +817,30 @@ describe('PRF PDF — attachments and extra sheets', () => {
     expect(screen.getByText(/Payslip \(page 3 of 3\)/i)).toBeInTheDocument();
   });
 
+  it('DOD: Debtor, Billing and crew sign-offs print on their own sheet, not page 1', async () => {
+    // A DOD certificate fills page 1 by itself; the payer blocks and the
+    // crew sign-offs move to a dedicated second sheet. Both halves are
+    // asserted: gone from page 1 AND present together on the new sheet —
+    // dropping them entirely would silently delete payer data from a
+    // billable record.
+    const built = buildPrf('DOD', 'MED AID');
+    built.prf.form_data.med_aid_dec_death = true;
+    currentPrf = built.prf;
+    const { container } = renderPrfView();
+    await screen.findAllByText((c) => c.includes(built.anchor));
+    const frames = [...container.querySelectorAll('.prf-print-frame')];
+    const p1 = frames[0]?.textContent || '';
+    expect(p1).toMatch(/Declaration of Death/i);
+    for (const gone of ['Debtor Information', 'Billing Information', 'Crew 1 Sign-Off', 'Crew 2 Sign-Off']) {
+      expect(p1, `"${gone}" is still on the DOD page 1`).not.toContain(gone);
+    }
+    const sheet2 = frames.find(f => /Debtor · Billing · Crew Sign-Off/i.test(f.textContent || ''));
+    expect(sheet2, 'the DOD Debtor/Billing/Sign-Off sheet is missing').toBeTruthy();
+    for (const there of ['Debtor Information', 'Billing Information', 'Crew 1 Sign-Off', 'Crew 2 Sign-Off']) {
+      expect(sheet2!.textContent, `"${there}" is missing from the DOD second sheet`).toContain(there);
+    }
+  });
+
   it('the RAF accident sketch gets a full sheet of its own, not a strip on page 1', async () => {
     // The sketch used to render 80px tall inside page 1's valuables column —
     // a scene diagram reduced to a smudge. It must now add exactly one
@@ -1157,7 +1181,9 @@ describe('RHT — the refusal reaches the printed record', () => {
       Object.assign(built.prf.form_data, extra);
       currentPrf = built.prf;
       renderPrfView();
-      await screen.findByText((c) => c.includes(built.anchor), { exact: false });
+      // findAllByText: the DOD second sheet repeats the deceased's name in
+      // its mini-header, so the anchor legitimately appears more than once.
+      await screen.findAllByText((c) => c.includes(built.anchor), { exact: false });
       expect(
         screen.queryAllByText('Mechanism', { exact: true }).length,
         `${callType}: Mechanism rendered the wrong number of times`,

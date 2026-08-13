@@ -1755,6 +1755,183 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
     }
   };
 
+  // ── Debtor + Billing content — ONE definition, rendered at two sites ─────
+  // Every ordinary call prints these in the page-1 band. A DOD certificate
+  // fills page 1 by itself, so there they render on their own second sheet
+  // (with the crew sign-offs) instead of being crushed under the certificate.
+  // Extracted as closures so the two sites cannot drift apart the way the
+  // duplicated DOD certificate blocks did.
+  const debtorInfoContent = () => (
+    <>
+      <SectionHead label="Debtor Information" />
+      {/* A courtesy transfer is non-billable, so no debtor is captured and
+          the Billing block is omitted outright. Without this the column
+          printed a full set of "—" rows, which reads as a crew that forgot
+          to take the payer's details rather than a call that never had one.
+          Takes precedence over the Same-as-Patient banner: on a courtesy call
+          "no biller" is the more specific and more useful statement. See
+          courtesyNoBiller — it defers to any debtor detail actually captured. */}
+      {courtesyNoBiller ? (
+        <div style={{
+          borderTop: `1px solid ${LN}`, flex: 1,
+          display: 'flex', flexDirection: 'column', alignItems: 'center',
+          justifyContent: 'center', gap: 6, padding: '14px 12px',
+          background: SOFT_BG, textAlign: 'center',
+        }}>
+          <div style={{
+            width: 26, height: 26, borderRadius: 999,
+            background: GREEN_DK, color: '#fff',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: '0.85rem', fontWeight: 900,
+          }}>i</div>
+          <div style={{ fontSize: '0.66rem', fontWeight: 800, color: GREEN_DK, letterSpacing: '0.04em', textTransform: 'uppercase' }}>Courtesy Call — No Biller</div>
+          <div style={{ fontSize: '0.58rem', color: MUT, lineHeight: 1.45 }}>
+            This transfer was provided as a courtesy and is not billable, so no debtor or payer details were captured.
+          </div>
+        </div>
+      ) : debtorSameAsPatient ? (
+        <div style={{
+          borderTop: `1px solid ${LN}`,
+          display: 'flex', flexDirection: 'column', alignItems: 'center',
+          justifyContent: 'center', gap: 6, padding: '14px 12px',
+          background: SOFT_BG, textAlign: 'center',
+        }}>
+          <div style={{
+            width: 26, height: 26, borderRadius: 999,
+            background: GREEN, color: '#fff',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: '0.85rem', fontWeight: 900,
+          }}>✓</div>
+          <div style={{ fontSize: '0.66rem', fontWeight: 800, color: GREEN_DK, letterSpacing: '0.04em', textTransform: 'uppercase' }}>Same as Patient</div>
+          <div style={{ fontSize: '0.58rem', color: MUT, lineHeight: 1.45 }}>
+            Refer to Patient Information for full contact / ID details.
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* Full standard debtor row set — blanks print as "—", matching
+              the always-render Patient Information policy. */}
+          <FieldRow label="Gender"   value={fd.debtor_gender} />
+          <FieldRow label="Name"     value={fd.debtor_name} />
+          <FieldRow label="Surname"  value={fd.debtor_surname} />
+          <FieldRow label="ID No"    value={fd.debtor_id_number} />
+          {/* Passport is the alternative to an SA ID, not an extra field —
+              on a local debtor it is always blank, so a permanent row of
+              "—" is noise. Omit it unless captured (same rule the Patient
+              Information block already applies). */}
+          {!isBlank(fd.debtor_passport_number) && (
+            <FieldRow label="Passport" value={fd.debtor_passport_number} />
+          )}
+          <FieldRow label="Age"      value={fd.debtor_age} />
+          <FieldRow label="DOB"      value={fmtDateValue(fd.debtor_dob)} />
+          <FieldRow label="Address"  value={fd.debtor_address} />
+          <FieldRow label="Suburb"   value={fd.debtor_suburb} />
+          <FieldRow label="Code"     value={fd.debtor_postal_code} />
+          {/* A debtor gives one contact number, almost always a mobile,
+              so the home number was a dash on nearly every account. */}
+          {!isBlank(fd.debtor_phone_home) && (
+            <FieldRow label="Tel (H)"  value={fd.debtor_phone_home} />
+          )}
+          <FieldRow label="Cell"     value={fd.debtor_phone_cell} />
+        </>
+      )}
+    </>
+  );
+
+  const billingInfoContent = () => (
+    <>
+      {fd.call_type !== 'COURTESY' && (
+        <>
+          <SectionHead label="Billing Information" />
+          {/* The refusal is stated at the TOP of the billing block, above the
+              payer rows — not instead of them. A refusal is still billable:
+              the scheme, member number and authorisation are exactly what the
+              call-out fee is claimed against. */}
+          {refused && (
+            <RefusedNote detail="No treatment or transport was provided. Any charge is limited to the call-out fee shown in the call details above." />
+          )}
+          {(billingType === 'WCA / IOD' || (fd.call_type || '').toUpperCase() === 'WCA_IOD') ? (
+            <>
+              <FieldRow label="Reference"    value={fd.compensation_reference} />
+              <FieldRow label="Employer"     value={fd.wca_employer} />
+              <FieldRow label="Company Add"  value={fd.wca_employer_address} valueMin={24} />
+              <FieldRow label="Resp. Person" value={fd.wca_employer_responsible_person} />
+              <FieldRow label="Contact"      value={fd.wca_employer_contact} />
+              <FieldRow label="Employee No"  value={fd.wca_employee_number} />
+              <FieldRow label="Injury Date"  value={fmtDateValue(fd.wca_injury_date)} />
+              {!isBlank(fd.wca_oar_number) && <FieldRow label="OAR No" value={fd.wca_oar_number} />}
+              <FieldRow label="Incident"     value={fd.wca_incident_description} valueMin={40} />
+              {attachedDocs.some(d => d.key.startsWith('wca_')) && (
+                <FieldRow label="Documents" valueMin={24} value={
+                  attachedDocs.filter(d => d.key.startsWith('wca_')).map(d => d.label).join(', ') + ' — see attached sheet(s)'
+                } />
+              )}
+            </>
+          ) : billingType === 'RAF' ? (
+            <>
+              <FieldRow label="Reference"     value={fd.compensation_reference} />
+              <FieldRow label="Accident Date" value={fmtDateValue(fd.raf_accident_date)} />
+              <FieldRow label="SAPS / OB No"  value={fd.raf_police_case_number} />
+              <FieldRow label="Accident Loc"  value={fd.raf_accident_location} valueMin={24} />
+            </>
+          ) : billingType === 'PVT' ? (
+            <>
+              <FieldRow label="Method"    value={fd.pvt_payment_method} />
+              {fd.pvt_payment_method !== 'Indigent' && (
+                <>
+                  <FieldRow label="Holder"    value={fd.pvt_account_holder} />
+                  <FieldRow label="Holder ID" value={fd.pvt_account_holder_id} />
+                  <FieldRow label="Contact"   value={fd.pvt_account_holder_phone} />
+                  <FieldRow label="Address"   value={fd.pvt_account_holder_address} valueMin={24} />
+                </>
+              )}
+              {/* The cash receipt always prints on its own sheet — it is the
+                  bulkiest block this column can carry. */}
+              {cashOnOwnSheet && (
+                <div style={{ padding: '3px 6px', borderTop: `1px solid ${LN}`, fontSize: '0.5rem', color: MUT, fontStyle: 'italic' }}>
+                  Cash verification and signatures — see the attachments sheet.
+                </div>
+              )}
+            </>
+          ) : billingType === 'CALL OUT FEE' ? (
+            <>
+              <FieldRow label="Requested By" value={fd.callout_requested_by} />
+              <FieldRow label="Auth Ref"     value={fd.callout_authorisation} />
+              <FieldRow label="Reason"       value={fd.callout_standdown_reason} valueMin={24} />
+            </>
+          ) : (
+            <>
+              {/* Medical-aid rows only appear when actually captured — an
+                  empty medical-aid section shouldn't show a column of "—". */}
+              {!isBlank(fd.medical_scheme)    && <FieldRow label="Scheme"      value={fd.medical_scheme} />}
+              {!isBlank(fd.medical_aid_number) && <FieldRow label="Aid No"      value={fd.medical_aid_number} />}
+              {!isBlank(fd.dependent_number)  && <FieldRow label="Dependent"   value={fd.dependent_number} />}
+              {!isBlank(fd.main_member_id)    && <FieldRow label="Main Member" value={fd.main_member_id} />}
+              {!isBlank(fd.scheme_option)     && <FieldRow label="Plan"        value={fd.scheme_option} />}
+            </>
+          )}
+          {/* Pre-/Post-Auth are transfer authorisations relevant to any payer
+              (IFT/IHT) — render whenever captured, regardless of billing type. */}
+          {!isBlank(fd.preauth_number)   && <FieldRow label="Pre-Auth No"  value={fd.preauth_number} />}
+          {!isBlank(fd.post_auth_number) && <FieldRow label="Post-Auth No" value={fd.post_auth_number} />}
+          {fd.med_aid_resus && (
+            <SubBlock title="Resus" rows={[
+              ['Level',   fd.med_aid_resus_level],
+              ['Fee (R)', fd.med_aid_resus_fee],
+            ]} />
+          )}
+          {/* Declaration of Death is never squeezed into this billing column —
+              it renders on its own certificate page / sheet. */}
+          {fd.med_aid_quoted && (
+            <SubBlock title="Quoted (Med-Aid Decline)" rows={[
+              ['Amount (R)', fd.med_aid_quoted_amount],
+            ]} />
+          )}
+        </>
+      )}
+    </>
+  );
+
   return (
     <div className="prf-screen-wrap" style={{
       background: '#eef1f4', minHeight: '100vh', padding: '28px 0',
@@ -2510,22 +2687,9 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
               <FieldRow label="Suburb"       value={fd.med_aid_dec_death_deceased_suburb} />
               <FieldRow label="Code"         value={fd.med_aid_dec_death_deceased_postal_code} />
 
-              {/* Crew 1 sign-off — pre-submit Crew Sign-Off modal signature.
-                  Crew 2's block lives at the bottom of column 2 and the
-                  Undertaker block at the bottom of column 3, so the three
-                  columns come out roughly equal in height. */}
-              {(prf.crew_1 || fd.crew_signoff_sigs?.c1 || prf.signatures?.crew_signature || fd.assessed_by) && (
-                <>
-                  <SectionHead label="Crew 1 Sign-Off" />
-                  <FieldRow label="Name"  value={prf.crew_1?.full_name || fd.assessed_by} />
-                  <FieldRow label="Qual"  value={prf.crew_1?.qualification || fd.assessor_qualifications} />
-                  <FieldRow label="HPCSA" value={prf.crew_1?.hpcsa_number} />
-                  <div style={{ padding: '6px 8px', borderTop: `1px solid ${LN}` }}>
-                    <div style={{ fontSize: '0.52rem', fontWeight: 800, color: MUT, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Signature</div>
-                    <SignatureBox src={fd.crew_signoff_sigs?.c1 || prf.signatures?.crew_signature} minHeight={56} />
-                  </div>
-                </>
-              )}
+              {/* Crew sign-offs moved to the DOD second sheet (Debtor ·
+                  Billing · Crew Sign-Off) so the certificate has page 1 to
+                  itself. */}
             </div>
 
             {/* Column 2 — practitioner + medical confirmation + handover */}
@@ -2558,20 +2722,7 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
                 </div>
               )}
 
-              {/* Crew 2 sign-off — placed here (not under Crew 1) to balance
-                  the three column heights. */}
-              {(prf.crew_2 || fd.crew_signoff_sigs?.c2 || prf.signatures?.crew_2_signature || fd.managed_by) && (
-                <>
-                  <SectionHead label="Crew 2 Sign-Off" />
-                  <FieldRow label="Name"  value={prf.crew_2?.full_name || fd.managed_by} />
-                  <FieldRow label="Qual"  value={prf.crew_2?.qualification || fd.manager_qualifications} />
-                  <FieldRow label="HPCSA" value={prf.crew_2?.hpcsa_number} />
-                  <div style={{ padding: '6px 8px', borderTop: `1px solid ${LN}` }}>
-                    <div style={{ fontSize: '0.52rem', fontWeight: 800, color: MUT, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Signature</div>
-                    <SignatureBox src={fd.crew_signoff_sigs?.c2 || prf.signatures?.crew_2_signature} minHeight={56} />
-                  </div>
-                </>
-              )}
+              {/* Crew 2 sign-off — moved to the DOD second sheet with Crew 1. */}
             </div>
 
             {/* Column 3 — the signed declaration */}
@@ -2646,11 +2797,15 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
             long, deeply nested siblings, and moving them physically to change
             their visual order is a large edit with nothing to gain. Grid
             placement expresses the same result in one property each. */}
+        {/* Skipped entirely for a DOD certificate: its only occupants there
+            (Debtor + Billing) moved to the dedicated second sheet with the
+            crew sign-offs, so page 1 carries the certificate alone. */}
+        {!(fd.call_type === 'DOD' && fd.med_aid_dec_death) && (
         <div style={{
           display: 'grid',
           gridTemplateColumns: refused
             ? (refusalBlockCount === 0 ? '1fr' : '1.5fr 2.7fr')
-            : (fd.call_type === 'DOD' && fd.med_aid_dec_death) ? '1fr 1fr' : '1.64fr 1.36fr 1.8fr 1.6fr',
+            : '1.64fr 1.36fr 1.8fr 1.6fr',
           // Every block but the last takes only the height it needs; the last
           // absorbs the remainder so the column still reaches the bottom rule
           // and the page does not end in a ragged edge.
@@ -2705,80 +2860,7 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
           {(!refused || refusalDebtor) && (
           <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column',
                         ...(refused ? { gridColumn: 1, gridRow: refusalDebtorRow, borderTop: `1px solid ${LN}` } : {}) }}>
-            <SectionHead label="Debtor Information" />
-            {/* A courtesy transfer is non-billable, so no debtor is captured and
-                the Billing block is omitted outright (see below). Without this
-                the column printed a full set of "—" rows, which reads as a crew
-                that forgot to take the payer's details rather than a call that
-                never had one. Same treatment, and the same visual language, as
-                the Same-as-Patient banner underneath. Takes precedence over that
-                banner: on a courtesy call "no biller" is the more specific and
-                more useful statement. See courtesyNoBiller — it defers to any
-                debtor detail the crew actually captured. */}
-            {courtesyNoBiller ? (
-              <div style={{
-                borderTop: `1px solid ${LN}`, flex: 1,
-                display: 'flex', flexDirection: 'column', alignItems: 'center',
-                justifyContent: 'center', gap: 6, padding: '14px 12px',
-                background: SOFT_BG, textAlign: 'center',
-              }}>
-                <div style={{
-                  width: 26, height: 26, borderRadius: 999,
-                  background: GREEN_DK, color: '#fff',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: '0.85rem', fontWeight: 900,
-                }}>i</div>
-                <div style={{ fontSize: '0.66rem', fontWeight: 800, color: GREEN_DK, letterSpacing: '0.04em', textTransform: 'uppercase' }}>Courtesy Call — No Biller</div>
-                <div style={{ fontSize: '0.58rem', color: MUT, lineHeight: 1.45 }}>
-                  This transfer was provided as a courtesy and is not billable, so no debtor or payer details were captured.
-                </div>
-              </div>
-            ) : debtorSameAsPatient ? (
-              <div style={{
-                borderTop: `1px solid ${LN}`,
-                display: 'flex', flexDirection: 'column', alignItems: 'center',
-                justifyContent: 'center', gap: 6, padding: '14px 12px',
-                background: SOFT_BG, textAlign: 'center',
-              }}>
-                <div style={{
-                  width: 26, height: 26, borderRadius: 999,
-                  background: GREEN, color: '#fff',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: '0.85rem', fontWeight: 900,
-                }}>✓</div>
-                <div style={{ fontSize: '0.66rem', fontWeight: 800, color: GREEN_DK, letterSpacing: '0.04em', textTransform: 'uppercase' }}>Same as Patient</div>
-                <div style={{ fontSize: '0.58rem', color: MUT, lineHeight: 1.45 }}>
-                  Refer to Patient Information for full contact / ID details.
-                </div>
-              </div>
-            ) : (
-              <>
-                {/* Full standard debtor row set — blanks print as "—", matching
-                    the always-render Patient Information policy above. */}
-                <FieldRow label="Gender"   value={fd.debtor_gender} />
-                <FieldRow label="Name"     value={fd.debtor_name} />
-                <FieldRow label="Surname"  value={fd.debtor_surname} />
-                <FieldRow label="ID No"    value={fd.debtor_id_number} />
-                {/* Passport is the alternative to an SA ID, not an extra field —
-                    on a local debtor it is always blank, so a permanent row of
-                    "—" is noise. Omit it unless captured (same rule the Patient
-                    Information block already applies). */}
-                {!isBlank(fd.debtor_passport_number) && (
-                  <FieldRow label="Passport" value={fd.debtor_passport_number} />
-                )}
-                <FieldRow label="Age"      value={fd.debtor_age} />
-                <FieldRow label="DOB"      value={fmtDateValue(fd.debtor_dob)} />
-                <FieldRow label="Address"  value={fd.debtor_address} />
-                <FieldRow label="Suburb"   value={fd.debtor_suburb} />
-                <FieldRow label="Code"     value={fd.debtor_postal_code} />
-                {/* A debtor gives one contact number, almost always a mobile,
-                    so the home number was a dash on nearly every account. */}
-                {!isBlank(fd.debtor_phone_home) && (
-                  <FieldRow label="Tel (H)"  value={fd.debtor_phone_home} />
-                )}
-                <FieldRow label="Cell"     value={fd.debtor_phone_cell} />
-              </>
-            )}
+            {debtorInfoContent()}
             {/* Fallback only: a DOD has no clinical sheet and a refusal's page 2
                 is the watermark alone, so without this the mechanism would not
                 print anywhere on those call types. */}
@@ -2802,102 +2884,7 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
           {(!refused || refusalBilling) && (
           <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column',
                         ...(refused ? { gridColumn: 1, gridRow: refusalBillingRow, borderTop: `1px solid ${LN}` } : {}) }}>
-            {fd.call_type !== 'COURTESY' && (
-              <>
-            <SectionHead label="Billing Information" />
-            {/* The refusal is stated at the TOP of the billing block, above the
-                payer rows — not instead of them.
-
-                Replacing the payer grid was the first attempt and it was wrong:
-                a refusal is still billable. "Refusal Of Treatment" is one of the
-                call-out fee bases the crew can select, so the scheme, member
-                number and authorisation are exactly what the call-out fee is
-                claimed against. Dropping them would have removed the payer
-                details from the one call type most likely to be queried. */}
-            {refused && (
-              <RefusedNote detail="No treatment or transport was provided. Any charge is limited to the call-out fee shown in the call details above." />
-            )}
-            {(billingType === 'WCA / IOD' || (fd.call_type || '').toUpperCase() === 'WCA_IOD') ? (
-              <>
-                <FieldRow label="Reference"    value={fd.compensation_reference} />
-                <FieldRow label="Employer"     value={fd.wca_employer} />
-                <FieldRow label="Company Add"  value={fd.wca_employer_address} valueMin={24} />
-                <FieldRow label="Resp. Person" value={fd.wca_employer_responsible_person} />
-                <FieldRow label="Contact"      value={fd.wca_employer_contact} />
-                <FieldRow label="Employee No"  value={fd.wca_employee_number} />
-                <FieldRow label="Injury Date"  value={fmtDateValue(fd.wca_injury_date)} />
-                {!isBlank(fd.wca_oar_number) && <FieldRow label="OAR No" value={fd.wca_oar_number} />}
-                <FieldRow label="Incident"     value={fd.wca_incident_description} valueMin={40} />
-                {attachedDocs.some(d => d.key.startsWith('wca_')) && (
-                  <FieldRow label="Documents" valueMin={24} value={
-                    attachedDocs.filter(d => d.key.startsWith('wca_')).map(d => d.label).join(', ') + ' — see attached sheet(s)'
-                  } />
-                )}
-              </>
-            ) : billingType === 'RAF' ? (
-              <>
-                <FieldRow label="Reference"     value={fd.compensation_reference} />
-                <FieldRow label="Accident Date" value={fmtDateValue(fd.raf_accident_date)} />
-                <FieldRow label="SAPS / OB No"  value={fd.raf_police_case_number} />
-                <FieldRow label="Accident Loc"  value={fd.raf_accident_location} valueMin={24} />
-              </>
-            ) : billingType === 'PVT' ? (
-              <>
-                <FieldRow label="Method"    value={fd.pvt_payment_method} />
-                {fd.pvt_payment_method !== 'Indigent' && (
-                  <>
-                    <FieldRow label="Holder"    value={fd.pvt_account_holder} />
-                    <FieldRow label="Holder ID" value={fd.pvt_account_holder_id} />
-                    <FieldRow label="Contact"   value={fd.pvt_account_holder_phone} />
-                    <FieldRow label="Address"   value={fd.pvt_account_holder_address} valueMin={24} />
-                  </>
-                )}
-                {/* The cash receipt always prints on its own sheet — it is the
-                    bulkiest block this column can carry. */}
-                {cashOnOwnSheet && (
-                  <div style={{ padding: '3px 6px', borderTop: `1px solid ${LN}`, fontSize: '0.5rem', color: MUT, fontStyle: 'italic' }}>
-                    Cash verification and signatures — see the attachments sheet.
-                  </div>
-                )}
-              </>
-            ) : billingType === 'CALL OUT FEE' ? (
-              <>
-                <FieldRow label="Requested By" value={fd.callout_requested_by} />
-                <FieldRow label="Auth Ref"     value={fd.callout_authorisation} />
-                <FieldRow label="Reason"       value={fd.callout_standdown_reason} valueMin={24} />
-              </>
-            ) : (
-              <>
-                {/* Medical-aid rows only appear when actually captured — an
-                    empty medical-aid section shouldn't show a column of "—". */}
-                {!isBlank(fd.medical_scheme)    && <FieldRow label="Scheme"      value={fd.medical_scheme} />}
-                {!isBlank(fd.medical_aid_number) && <FieldRow label="Aid No"      value={fd.medical_aid_number} />}
-                {!isBlank(fd.dependent_number)  && <FieldRow label="Dependent"   value={fd.dependent_number} />}
-                {!isBlank(fd.main_member_id)    && <FieldRow label="Main Member" value={fd.main_member_id} />}
-                {!isBlank(fd.scheme_option)     && <FieldRow label="Plan"        value={fd.scheme_option} />}
-              </>
-            )}
-            {/* Pre-/Post-Auth are transfer authorisations relevant to any payer
-                (IFT/IHT) — render whenever captured, regardless of billing type. */}
-            {!isBlank(fd.preauth_number)   && <FieldRow label="Pre-Auth No"  value={fd.preauth_number} />}
-            {!isBlank(fd.post_auth_number) && <FieldRow label="Post-Auth No" value={fd.post_auth_number} />}
-            {fd.med_aid_resus && (
-              <SubBlock title="Resus" rows={[
-                ['Level',   fd.med_aid_resus_level],
-                ['Fee (R)', fd.med_aid_resus_fee],
-              ]} />
-            )}
-            {/* Declaration of Death is no longer squeezed into this billing
-                column — when present it renders on its own dedicated A4 page
-                (see the "Declaration of Death" page further below) so all its
-                fields have room. */}
-            {fd.med_aid_quoted && (
-              <SubBlock title="Quoted (Med-Aid Decline)" rows={[
-                ['Amount (R)', fd.med_aid_quoted_amount],
-              ]} />
-            )}
-              </>
-            )}
+            {billingInfoContent()}
             {/* Handover Signature — hidden for DOD (shown in the DOD block) and
                 for RHT (patient refused transport — there's no facility handover).
                 Also hidden once a Declaration of Death is made on a RESUS: the
@@ -3188,6 +3175,7 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
           </div>
           )}
         </div>
+        )}
 
         {/* ── BAND C — Closeout: Motivation │ Crew sign-off (×2) │ Valuables,
               all grouped in one band so nothing stretches across a sparse
@@ -3297,6 +3285,79 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
       </div>
 
       </div>{/* /prf-print-frame (page 1) */}
+
+      {/* ═══════ DOD PAGE 2 — Debtor · Billing · Crew Sign-Off ═══════
+          A DOD certificate fills page 1 on its own, so the payer blocks and
+          the crew sign-offs print on a sheet of their own instead of being
+          crushed under the certificate. Same skeleton as the attachment
+          sheets; picked up by the PDF/print pipeline via the shared
+          .prf-page selector. */}
+      {fd.call_type === 'DOD' && fd.med_aid_dec_death && (
+        <div className="prf-print-frame">
+          <div className="prf-page" style={{
+            width: 1220, minHeight: 862,
+            margin: '28px auto 0', background: '#fff', color: INK,
+            border: `2px solid ${LN}`, boxShadow: '0 6px 24px rgba(0,0,0,0.1)',
+            display: 'flex', flexDirection: 'column',
+          }}>
+            {/* Mini header so the sheet is identifiable on its own */}
+            <div style={{
+              display: 'grid', gridTemplateColumns: '1.3fr 2.4fr 2fr',
+              borderBottom: `2px solid ${LN}`,
+            }}>
+              <div style={{
+                padding: '10px 12px', borderRight: `1px solid ${LN}`,
+                display: 'flex', alignItems: 'center',
+              }}>
+                <ProviderLogo prov={prov} height={30} />
+              </div>
+              <div style={{
+                padding: '10px 12px', borderRight: `1px solid ${LN}`,
+                display: 'flex', alignItems: 'center',
+                fontSize: '0.78rem', fontWeight: 800, color: INK,
+                letterSpacing: '0.08em', textTransform: 'uppercase',
+              }}>
+                Debtor · Billing · Crew Sign-Off
+              </div>
+              <div style={{
+                padding: '10px 12px', display: 'flex', alignItems: 'center',
+                justifyContent: 'flex-end', gap: 18,
+                fontSize: '0.68rem', color: MUT,
+              }}>
+                <span>Deceased: <b style={{ color: INK }}>{[fd.med_aid_dec_death_deceased_first_name, fd.med_aid_dec_death_deceased_surname].filter(Boolean).join(' ') || patientFullName}</b></span>
+                {prf.case_number && <span>Case: <b style={{ color: INK, fontFamily: 'ui-monospace, monospace' }}>{prf.case_number}</b></span>}
+              </div>
+            </div>
+            <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: '1.5fr 1.5fr 1.25fr 1.25fr' }}>
+              <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
+                {debtorInfoContent()}
+                {/* No mechanismAndPriority() here: it no-ops for DOD by its
+                    own guard — a declaration prints neither triage priority
+                    nor mechanism, same as before the split. */}
+                <FillLines />
+              </div>
+              <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
+                {billingInfoContent()}
+                <FillLines />
+              </div>
+              {([
+                { c: prf.crew_1, sig: fd.crew_signoff_sigs?.c1 || prf.signatures?.crew_signature,   fbName: fd.assessed_by, fbQual: fd.assessor_qualifications, title: 'Crew 1 Sign-Off' },
+                { c: prf.crew_2, sig: fd.crew_signoff_sigs?.c2 || prf.signatures?.crew_2_signature, fbName: fd.managed_by,  fbQual: fd.manager_qualifications,  title: 'Crew 2 Sign-Off' },
+              ]).map(({ c, sig, fbName, fbQual, title }, i) => (
+                <div key={title} style={{ borderRight: i === 0 ? `1px solid ${LN}` : 'none', display: 'flex', flexDirection: 'column' }}>
+                  <SectionHead label={title} />
+                  <FieldRow label="Name"  value={c?.full_name || fbName} />
+                  <FieldRow label="Qual"  value={c?.qualification || fbQual} />
+                  <FieldRow label="HPCSA" value={c?.hpcsa_number} />
+                  <div style={{ padding: '6px 8px', borderTop: `1px solid ${LN}`, flex: 1, display: 'flex', alignItems: 'flex-start' }}>
+                    <SignatureBox src={sig} minHeight={80} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ═══════════════════ PAGE 2 — Clinical ═══════════════════
           Same A4-landscape aspect lock as page 1. Top = mini header +
