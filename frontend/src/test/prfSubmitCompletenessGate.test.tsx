@@ -56,9 +56,16 @@ function seedDraft(
       billing_type: 'PVT', pvt_payment_method: 'Card',
       patient_name: 'MICHAEL', patient_surname: 'SCHUTTLER',
       gender: 'Male', patient_phone_cell: '0798823189', priority: 'RED',
+      patient_dob: '1988-03-14',
       receiving_facility: 'Banting Place', ward: 'casualty',
       preauth_number: '1234', med_aid_quoted_amount: '250',
       treating_practitioner_category: 'ECP',
+      // Clinical assessment — required by the review since 2026-08-13.
+      chief_complaint: 'Chest pain radiating to left arm',
+      primary_diagnosis: 'Suspected ACS?',
+      survey_a: 'Patent', survey_b: 'Spontaneous', survey_c: 'Radial pulse present',
+      survey_head_back: 'NAD', survey_neuro: 'Alert', survey_chest: 'Clear air entry',
+      survey_abdo: 'Soft', survey_limbs: 'NAD', survey_back: 'Normal',
       // Signed off already — the condition that used to open the trapdoor.
       crew_signoff_sigs: { c1: SIG },
       ...overrides,
@@ -195,6 +202,42 @@ describe('Submit completeness gate', () => {
     }
   });
 
+  it('flags the clinical assessment and DOB when they are empty', async () => {
+    seedDraft({
+      chief_complaint: '', primary_diagnosis: '', patient_dob: '',
+      survey_a: '', survey_b: '', survey_c: '',
+      survey_head_back: '', survey_neuro: '', survey_chest: '',
+      survey_abdo: '', survey_limbs: '', survey_back: '',
+    });
+    const { container } = mountForm();
+    await tapSubmit(container);
+
+    expect(submitCalls()).toHaveLength(0);
+    const text = container.textContent || '';
+    for (const item of [
+      /Chief Complaint \/ Signs and Symptoms/i,
+      /Primary Diagnosis/i,
+      /Primary Survey/i,
+      /Secondary Survey/i,
+      /Patient date of birth/i,
+    ]) {
+      expect(text, `the review does not flag ${item}`).toMatch(item);
+    }
+  });
+
+  it('names the specific survey parts still empty, not just the section', async () => {
+    seedDraft(
+      { ...COMPLETE_HANDOVER, handover_doctor_email: 'ops@hospital.co.za', survey_b: '', survey_abdo: '', survey_limbs: '' },
+      COMPLETE_TIMES, COMPLETE_SIGS,
+    );
+    const { container } = mountForm();
+    await tapSubmit(container);
+
+    expect(submitCalls()).toHaveLength(0);
+    expect(container.textContent).toMatch(/Primary Survey \(Breathing\)/i);
+    expect(container.textContent).toMatch(/Secondary Survey \(Abdomen, Limbs\)/i);
+  });
+
   it('blocks a facility email with no @ instead of silently skipping the send', async () => {
     // Everything else complete: the ONLY outstanding item is the malformed
     // address. This is PRF 126 — stored as `schockweb.gmail.com`, which failed
@@ -302,6 +345,34 @@ describe('Submit with a reason (override)', () => {
 
     expect(screen.queryByRole('button', { name: OVERRIDE_BTN })).not.toBeNull();
     expect(container.textContent).toMatch(/Hospital sticker/i);
+  });
+
+  it('offers the waiver for a missing date of birth — the patient may not have one to give', async () => {
+    seedDraft(
+      { ...COMPLETE_HANDOVER, handover_doctor_email: 'ops@hospital.co.za', patient_dob: '' },
+      COMPLETE_TIMES, COMPLETE_SIGS,
+    );
+    const { container } = mountForm();
+    await tapSubmit(container);
+
+    expect(screen.queryByRole('button', { name: OVERRIDE_BTN })).not.toBeNull();
+    expect(container.textContent).toMatch(/Patient date of birth/i);
+  });
+
+  it('does NOT offer the waiver while the clinical assessment is missing — it is the crew\'s own work', async () => {
+    seedDraft(
+      { ...COMPLETE_HANDOVER, handover_doctor_email: 'ops@hospital.co.za', primary_diagnosis: '', survey_a: '' },
+      COMPLETE_TIMES, COMPLETE_SIGS,
+    );
+    const { container } = mountForm();
+    await tapSubmit(container);
+
+    expect(
+      screen.queryByRole('button', { name: OVERRIDE_BTN }),
+      'a crew was offered a way to waive their own clinical assessment',
+    ).toBeNull();
+    expect(container.textContent).toMatch(/Must be completed/i);
+    expect(submitCalls()).toHaveLength(0);
   });
 
   it('does NOT offer the waiver while an item only the crew controls is missing', async () => {

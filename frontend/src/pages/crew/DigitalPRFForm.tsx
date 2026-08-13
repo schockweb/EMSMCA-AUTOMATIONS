@@ -2191,7 +2191,10 @@ const DateInp = ({ fk }: { fk: string }) => {
   );
 
   return (
-    <div style={{
+    // The id makes the whole three-segment group findable by the submit
+    // review's tap-to-jump (flashFieldEl looks up `prf-field-<key>`); the
+    // segments themselves are anonymous inputs.
+    <div id={`prf-field-${fk}`} style={{
       display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14,
       padding: '2px', borderRadius: 10,
       border: `1.5px solid #e2e8f0`,
@@ -4916,6 +4919,15 @@ export default function DigitalPRFForm() {
   // form. The crew can still type over Age manually after the auto-fill.
   // Both the patient (Patient Information) and the debtor (Debtor Information)
   // sections share this logic — only the field-key prefixes differ.
+  // Tracks the ID text each autofill target last saw, per dobKey. The clear
+  // branch below exists for the TRANSITION "crew deletes the ID" — stale
+  // derived values from a prior patient must not linger. It must NOT fire on
+  // a plain mount where no ID was ever captured: effects run once on mount
+  // regardless, so reopening a PRF whose patient has no SA ID (passport
+  // holders, unidentified patients, RAF accidents) hit this branch with an
+  // empty ID and silently wiped a manually-typed date of birth and age —
+  // then marked the form dirty, so the wipe was autosaved over the record.
+  const lastAutofillIdRef = useRef<Record<string, string>>({});
   const autofillAgeFromId = (
     idValue: string | number | undefined | null,
     ageKey: string,
@@ -4927,6 +4939,8 @@ export default function DigitalPRFForm() {
     // here. Defend at the point of use as well as at the boundary.
     const idText = idValue == null ? '' : String(idValue);
     const idDigits = idText.replace(/\D/g, '');
+    const prevDigits = lastAutofillIdRef.current[dobKey] ?? '';
+    lastAutofillIdRef.current[dobKey] = idDigits;
     const dob = parseSaIdDob(idText);
     setFd(prev => {
       const next = { ...prev };
@@ -4936,7 +4950,7 @@ export default function DigitalPRFForm() {
         const isoDob = `${dob.getFullYear()}-${String(dob.getMonth() + 1).padStart(2, '0')}-${String(dob.getDate()).padStart(2, '0')}`;
         if (next[ageKey] !== computedAge) { next[ageKey] = computedAge; changed = true; }
         if (next[dobKey] !== isoDob) { next[dobKey] = isoDob; changed = true; }
-      } else if (idDigits.length === 0) {
+      } else if (idDigits.length === 0 && prevDigits.length > 0) {
         if (next[ageKey]) { next[ageKey] = ''; changed = true; }
         if (next[dobKey]) { next[dobKey] = ''; changed = true; }
       }
@@ -5513,6 +5527,12 @@ export default function DigitalPRFForm() {
     chief_complaint: 0, primary_diagnosis: 0, icd10_primary: 0, icd10_external_cause: 0,
     assessment_level: 0, iv_therapy: 0, vitals_sets: 0, resuscitation_attempted: 0,
     has_ecg_attached: 0,
+    // The primary/secondary survey grids live in the clinical stack, which is
+    // embedded on the Dispatch screen alongside chief_complaint above.
+    survey_a: 0, survey_b: 0, survey_c: 0,
+    survey_head_back: 0, survey_neuro: 0, survey_chest: 0,
+    survey_abdo: 0, survey_limbs: 0, survey_back: 0,
+    patient_dob: 2,
     closest_facility_bypassed: 4, direct_admission: 4,
     receiving_facility: 5, handover_qualification: 5, handover_name: 5,
     ward: 5, handover_doctor_email: 5, handover_notes: 5, receiving_doctor: 5,
@@ -5930,12 +5950,39 @@ export default function DigitalPRFForm() {
     const missing = (v: any) => v === undefined || v === null || String(v).trim() === '';
     const push = (text: string, field: string, hard = false) => warn.push({ text, field, hard });
 
-    // Patient information (ID, passport, DOB, age, home/work phones,
+    // Patient information (ID, passport, age, home/work phones,
     // address, suburb and code are intentionally not flagged).
     if (missing(fd.gender)) push('Patient gender', 'gender');
     if (missing(fd.patient_name)) push('Patient first name', 'patient_name');
     if (missing(fd.patient_surname)) push('Patient surname', 'patient_surname');
     if (missing(fd.patient_phone_cell)) push('Patient cell number', 'patient_phone_cell');
+    // Date of birth — scheme matching and age-based adjudication both key off
+    // it. SOFT: it comes from the patient or their documents, and an
+    // unconscious or unidentified patient may genuinely have neither.
+    if (missing(fd.patient_dob)) push('Patient date of birth', 'patient_dob');
+
+    // Clinical assessment — the history and surveys captured on every treated
+    // patient. The early return above already exempts the call types whose
+    // forms never ask for these (DOD / RHT / refused treatment / Resus
+    // declaration of death). HARD: this is the crew's own assessment in their
+    // own words; nothing external can withhold it.
+    if (missing(fd.chief_complaint)) push('Chief Complaint / Signs and Symptoms', 'chief_complaint', true);
+    if (missing(fd.primary_diagnosis)) push('Primary Diagnosis', 'primary_diagnosis', true);
+    // Each survey is reported as ONE item naming the parts still empty, and a
+    // tap jumps to the first of them — nine separate lines would drown the
+    // rest of the review.
+    const surveyGaps = (fields: Array<{ k: string; l: string }>) =>
+      fields.filter(f => missing(fd[f.k]));
+    const primaryGaps = surveyGaps([
+      { k: 'survey_a', l: 'Airway' }, { k: 'survey_b', l: 'Breathing' }, { k: 'survey_c', l: 'Circulation' },
+    ]);
+    if (primaryGaps.length) push(`Primary Survey (${primaryGaps.map(f => f.l).join(', ')})`, primaryGaps[0].k, true);
+    const secondaryGaps = surveyGaps([
+      { k: 'survey_head_back', l: 'Head & Back' }, { k: 'survey_neuro', l: 'Neuro' },
+      { k: 'survey_chest', l: 'Chest' }, { k: 'survey_abdo', l: 'Abdomen' },
+      { k: 'survey_limbs', l: 'Limbs' }, { k: 'survey_back', l: 'Back' },
+    ]);
+    if (secondaryGaps.length) push(`Secondary Survey (${secondaryGaps.map(f => f.l).join(', ')})`, secondaryGaps[0].k, true);
 
     // Priority — Resus never captures one, so skip there.
     if (fd.call_type !== 'RESUS' && missing(fd.priority)) push('Patient priority', 'priority', true);

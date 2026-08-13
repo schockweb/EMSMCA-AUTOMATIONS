@@ -150,6 +150,30 @@ describe('DigitalPRFForm — it renders at all', () => {
     expect(container.textContent).not.toMatch(/something went wrong/i);
   });
 
+  it('keeps a manually-typed DOB when the patient has no ID number', async () => {
+    // The SA-ID autofill's clear branch exists for the transition "crew
+    // deletes the ID". Effects also run once on mount, and that run used to
+    // hit the branch with an empty ID and wipe a manually-typed patient_dob
+    // and age (passport holders and unidentified patients have no SA ID),
+    // then autosave the wipe over the record.
+    localStorage.setItem(`prf-draft:${PRF_ID}`, JSON.stringify({
+      fd: { patient_name: 'Passport', patient_surname: 'Holder', patient_dob: '1988-03-14', age: '38' },
+      vitals: [], ivRows: [], medRows: [],
+      timestamps: {}, kms: {}, geos: {},
+      sigs: {
+        patient_signature: null, witness_signature: null, handover_signature: null,
+        crew_signature: null, valuables_signature: null,
+      },
+      vehicle: '', crew2Id: '', phase: 2, savedAt: Date.now(),
+    }));
+    const { container } = mountForm();
+    await waitFor(() => expect(container.textContent).toBeTruthy());
+    await new Promise(r => setTimeout(r, 200));
+    const yearSeg = Array.from(container.querySelectorAll('input.prf-date-seg'))
+      .find(i => (i as HTMLInputElement).value === '1988');
+    expect(yearSeg, 'the mount-time ID autofill cleared a DOB it never derived').toBeTruthy();
+  });
+
   it('survives array fields arriving as null or as the wrong type', async () => {
     currentPrf = fixturePrf({
       form_data: {
