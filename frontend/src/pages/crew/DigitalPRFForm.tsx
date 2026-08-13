@@ -5963,6 +5963,13 @@ export default function DigitalPRFForm() {
     if (!timestamps.time_at_destination) push('Arrival At Facility time', 'time_at_destination', true);
     if (!timestamps.time_available) push('Available time', 'time_available', true);
 
+    // Available odometer — the closing reading the mileage claim is billed
+    // from. It auto-prefills from the Arrival At Facility reading once the
+    // Available time is marked, so this only fires when that chain broke:
+    // the arrival reading was never captured, or the crew cleared the field.
+    // HARD — it is the crew's own dashboard; nothing external can withhold it.
+    if (missing(kms.km_available)) push('Available odometer reading', 'time_available', true);
+
     // Hospital sticker — not expected for private cash patients.
     const pvtCash = fd.billing_type === 'PVT' && fd.pvt_payment_method === 'Cash';
     if (!pvtCash && missing(fd.hospital_sticker)) push('Hospital sticker', 'hospital_sticker');
