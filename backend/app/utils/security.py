@@ -98,8 +98,16 @@ def validate_password_complexity(password: str) -> None:
     Raises ValueError with a descriptive message if the password is weak.
     """
     errors = []
-    if len(password) < 12:
-        errors.append("Password must be at least 12 characters long")
+    # 8, not 12. The four character-class rules below still apply, and the real
+    # defence against online guessing is not length: a per-account lockout stops
+    # an attacker after 5 attempts, with rate limiting at the edge and in the app
+    # on top of that. NIST SP 800-63B puts the floor at 8 characters. 12 was
+    # costing crews real time on a tablet keyboard mid-call, which pushes people
+    # towards written-down or shared passwords — a worse outcome than 8 with
+    # mixed classes. Length still matters for OFFLINE cracking if the hash store
+    # is ever stolen; bcrypt is what carries that case.
+    if len(password) < 8:
+        errors.append("Password must be at least 8 characters long")
     if not re.search(r'[A-Z]', password):
         errors.append("Must contain at least one uppercase letter")
     if not re.search(r'[a-z]', password):

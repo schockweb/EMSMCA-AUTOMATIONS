@@ -27,7 +27,7 @@ different connection is unaffected, so the denial of service disappears.
 
 A distributed attacker with many addresses defeats the per-IP block — that is
 inherent, and it is why this is not the only control. Password complexity is
-enforced on every set (12 characters, mixed classes), nginx caps each address at
+enforced on every set (8 characters, mixed classes), nginx caps each address at
 10 r/s, the application limiter buckets anonymous callers by trusted IP, and
 every failure is written to the audit log with its address so a spread attempt
 is visible even when no single address trips the threshold.
