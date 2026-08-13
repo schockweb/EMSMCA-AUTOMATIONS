@@ -23,7 +23,7 @@ import { writeDraft } from './prfDraftStore';
 import { CALL_TYPE_OPTS, billingOptsFor } from './prfCallTypeModel';
 import SignaturePad from '../../components/SignaturePad';
 import FullscreenSignaturePad, { FullscreenCanvas } from '../../components/FullscreenSignaturePad';
-import PatientDocumentsCapture from '../../components/PatientDocumentsCapture';
+import PatientDocumentsCapture, { DocumentSetCapture, SingleDocumentCapture } from '../../components/PatientDocumentsCapture';
 import DocumentsCapture from '../../components/DocumentsCapture';
 import BodyDiagram from '../../components/BodyDiagram';
 import {
@@ -3649,66 +3649,9 @@ const ScopedInp = ({ fk, capabilityKey, ph, type = 'text', noMic }: {
 // (StickerCapture moved to the doctor portal page — the receiving doctor
 // photographs and crops the hospital sticker, not the crew.)
 
-// PDF drop zone — accepts a single PDF via drag-drop or file picker, stores
-// it as a base64 data URL inside form_data so it persists with the existing
-// PRF save flow (no separate upload endpoint needed).
-const PdfDrop = ({ fk, label = 'OAR Report (PDF)' }: { fk: string; label?: string }) => {
-  const { fd, sf } = useContext(FormContext);
-  const [drag, setDrag] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState('');
-  const file = fd[fk] as { name: string; size: number; data_url: string } | undefined;
-  const inputId = `pdfdrop-${fk}`;
-
-  const handleFile = (f: File | null) => {
-    setErr('');
-    if (!f) return;
-    if (f.type !== 'application/pdf' && !f.name.toLowerCase().endsWith('.pdf')) {
-      setErr('Only PDF files are accepted.'); return;
-    }
-    if (f.size > 10 * 1024 * 1024) { setErr('File exceeds 10 MB.'); return; }
-    setBusy(true);
-    const reader = new FileReader();
-    reader.onload = () => {
-      sf(fk, { name: f.name, size: f.size, data_url: String(reader.result) });
-      setBusy(false);
-    };
-    reader.onerror = () => { setErr('Failed to read file.'); setBusy(false); };
-    reader.readAsDataURL(f);
-  };
-
-  return (
-    <div style={{ marginBottom: 14 }}>
-      <Lbl t={label} />
-      {file ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderRadius: 10, border: '1.5px solid #5b8def', background: 'rgba(91,141,239,0.08)' }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontWeight: 700, fontSize: '0.85rem', color: '#0f172a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.name}</div>
-            <div style={{ fontSize: '0.7rem', color: '#475569', marginTop: 2 }}>{(file.size / 1024).toFixed(1)} KB · attached</div>
-          </div>
-          <button type="button" onClick={() => sf(fk, undefined)} style={{ padding: '6px 12px', borderRadius: 8, fontSize: '0.72rem', fontWeight: 700, border: '1px solid #e2e8f0', background: '#fff', color: '#ef4444', cursor: 'pointer' }}>Remove</button>
-        </div>
-      ) : (
-        <label htmlFor={inputId}
-          onDragOver={e => { e.preventDefault(); setDrag(true); }}
-          onDragLeave={() => setDrag(false)}
-          onDrop={e => { e.preventDefault(); setDrag(false); handleFile(e.dataTransfer.files?.[0] || null); }}
-          style={{
-            display: 'block', textAlign: 'center', padding: '20px 14px', borderRadius: 10,
-            border: `2px dashed ${drag ? '#5b8def' : '#cbd5e1'}`,
-            background: drag ? 'rgba(91,141,239,0.08)' : '#f8fafc',
-            cursor: 'pointer', transition: 'all 0.12s',
-          }}
-        >
-          <div style={{ fontSize: '0.86rem', fontWeight: 700, color: '#334155' }}>Drop PDF here, or tap to choose</div>
-          <div style={{ fontSize: '0.7rem', color: '#94a3b8', marginTop: 4 }}>{busy ? 'Reading file…' : 'Max 10 MB · PDF only'}</div>
-        </label>
-      )}
-      <input id={inputId} type="file" accept="application/pdf,.pdf" onChange={e => handleFile(e.target.files?.[0] || null)} style={{ display: 'none' }} />
-      {err && <div style={{ fontSize: '0.72rem', color: '#ef4444', marginTop: 6, fontWeight: 600 }}>{err}</div>}
-    </div>
-  );
-};
+// (The OAR report / WCA document PDF drop zone was replaced by the
+// SingleDocumentCapture / DocumentSetCapture camera components — same
+// { name, size, data_url } storage shape, so old PRFs render unchanged.)
 
 const SHdr = ({ t, c = '#3b6fde' }: { t: string; c?: string }) => (
   <div style={{ fontSize: '0.72rem', fontWeight: 800, color: c, textTransform: 'uppercase', letterSpacing: '0.1em', borderBottom: `2px solid ${c}28`, paddingBottom: 8, marginBottom: 16, marginTop: 6 }}>{t}</div>
@@ -4519,55 +4462,9 @@ export default function DigitalPRFForm() {
   const [enRouteOverlay, setEnRouteOverlay] = useState(false);
   const [assessmentModalOpen, setAssessmentModalOpen] = useState(false);
   const [monitoringModalOpen, setMonitoringModalOpen] = useState(false);
-  const [wcaDocKey, setWcaDocKey] = useState<string | null>(null);
-  const [wcaPromptOpen, setWcaPromptOpen] = useState(false);
   const [tempMedReason, setTempMedReason] = useState<string | null>(null);
   const [medReasonPromptOpen, setMedReasonPromptOpen] = useState(false);
   const [ivReasonModalOpen, setIvReasonModalOpen] = useState(false);
-
-  const handleWcaPhoto = (key: string, file: File | null) => {
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const img = new Image();
-      img.onload = () => {
-        const scale = Math.min(1, 1600 / Math.max(img.width, img.height));
-        const w = Math.round(img.width * scale);
-        const h = Math.round(img.height * scale);
-        const canvas = document.createElement('canvas');
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.imageSmoothingEnabled = true;
-          ctx.imageSmoothingQuality = 'high';
-          ctx.drawImage(img, 0, 0, w, h);
-          sf(key, { name: file.name, size: file.size, data_url: canvas.toDataURL('image/jpeg', 0.85) });
-        } else {
-          sf(key, { name: file.name, size: file.size, data_url: String(reader.result) });
-        }
-        setWcaPromptOpen(false);
-        setWcaDocKey(null);
-      };
-      img.src = String(reader.result);
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const handleWcaPdf = (key: string, file: File | null) => {
-    if (!file) return;
-    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
-      alert('Only PDF files are accepted.');
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      sf(key, { name: file.name, size: file.size, data_url: String(reader.result) });
-      setWcaPromptOpen(false);
-      setWcaDocKey(null);
-    };
-    reader.readAsDataURL(file);
-  };
 
   const [preauthVisible, setPreauthVisible] = useState(false);
   const [dispatchPromptOpen, setDispatchPromptOpen] = useState(false);
@@ -7686,81 +7583,17 @@ export default function DigitalPRFForm() {
             <VoiceTxt fk="wca_incident_description" ph="Describe how the injury occurred, what happened, mechanism of injury..." rows={3} />
             <div style={{ marginBottom: 14 }}>
               <Lbl t="Documents (WCA / Employee)" />
-              <select
-                onChange={e => {
-                  const val = e.target.value;
-                  if (val) {
-                    setWcaDocKey(val);
-                    setWcaPromptOpen(true);
-                    e.target.value = ""; // Reset dropdown
-                  }
-                }}
-                style={{ ...base, appearance: 'auto', marginBottom: 14 }}
-              >
-                <option value="">-- Add / Photograph a Document --</option>
-                {[
-                  { key: 'wca_oar_report_pdf', label: 'WCA Document (PDF)' },
-                  { key: 'wca_employee_id_pdf', label: 'Employee ID (PDF)' },
-                  { key: 'wca_payslip_pdf', label: 'Payslip (PDF)' },
-                  { key: 'wca_medical_report_pdf', label: 'Medical Report (PDF)' },
-                ].map(d => {
-                  const attached = !!fd[d.key];
-                  return (
-                    <option key={d.key} value={d.key}>
-                      {d.label}{attached ? ' (Attached)' : ''}
-                    </option>
-                  );
-                })}
-              </select>
-
-              {/* List of attached documents */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {[
-                  { key: 'wca_oar_report_pdf', label: 'WCA Document' },
-                  { key: 'wca_employee_id_pdf', label: 'Employee ID' },
-                  { key: 'wca_payslip_pdf', label: 'Payslip' },
-                  { key: 'wca_medical_report_pdf', label: 'Medical Report' },
-                ].map(d => {
-                  const file = fd[d.key];
-                  if (!file) return null;
-                  const isPdf = file.name.toLowerCase().endsWith('.pdf');
-                  return (
-                    <div key={d.key} style={{
-                      display: 'flex', gap: 12, alignItems: 'center', padding: '10px 14px',
-                      borderRadius: 10, border: `1.5px solid ${G}`, background: GBG
-                    }}>
-                      {isPdf ? (
-                        <div style={{
-                          width: 50, height: 40, borderRadius: 6, border: `1px solid ${S200}`,
-                          background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          fontSize: '0.8rem', fontWeight: 800, color: '#475569'
-                        }}>PDF</div>
-                      ) : (
-                        <img
-                          src={file.data_url}
-                          alt={d.label}
-                          style={{
-                            width: 50, height: 40, objectFit: 'cover',
-                            borderRadius: 6, border: `1px solid ${S200}`, background: W
-                          }}
-                        />
-                      )}
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 800, fontSize: '0.82rem', color: GDK }}>{d.label} attached</div>
-                        <div style={{ fontSize: '0.68rem', color: S500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.name} · {(file.size / 1024).toFixed(1)} KB</div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => sf(d.key, undefined)}
-                        style={{
-                          padding: '6px 12px', borderRadius: 8, fontSize: '0.72rem', fontWeight: 700,
-                          border: '1px solid #fecaca', background: W, color: REDC, cursor: 'pointer'
-                        }}
-                      >Remove</button>
-                    </div>
-                  );
-                })}
-              </div>
+              <DocumentSetCapture
+                buttonLabel="WCA / Employee Documents"
+                docs={[
+                  { key: 'wca_oar_report_pdf', label: 'WCA Document', frame: 'tall' },
+                  { key: 'wca_employee_id_pdf', label: 'Employee ID', frame: 'card' },
+                  { key: 'wca_payslip_pdf', label: 'Payslip', frame: 'tall' },
+                  { key: 'wca_medical_report_pdf', label: 'Medical Report', frame: 'tall' },
+                ]}
+                values={fd}
+                onChange={(k, f) => sf(k, f ?? undefined)}
+              />
             </div>
           </Card>
         )}
@@ -7777,7 +7610,15 @@ export default function DigitalPRFForm() {
               <div><Lbl t="SAPS Case / OB Number" /><Inp fk="raf_police_case_number" ph="Police case number" /></div>
             </G2>
             <Lbl t="Accident Location" /><AddrInp fk="raf_accident_location" ph="Where the accident occurred" />
-            <PdfDrop fk="raf_oar_report_pdf" />
+            <div style={{ marginBottom: 14 }}>
+              <Lbl t="OAR Report" />
+              <SingleDocumentCapture
+                label="OAR Report"
+                frame="tall"
+                file={fd.raf_oar_report_pdf}
+                onChange={f => sf('raf_oar_report_pdf', f ?? undefined)}
+              />
+            </div>
             <RafSketchPad />
           </Card>
         )}
@@ -11582,63 +11423,6 @@ export default function DigitalPRFForm() {
                 >
                   {fd.monitoring_level ? 'Continue →' : 'Select a level'}
                 </button>
-              </div>
-            </Modal>
-          );
-        })()}
-
-        {wcaPromptOpen && wcaDocKey && (() => {
-          const doc = [
-            { key: 'wca_oar_report_pdf', label: 'WCA Document (PDF)' },
-            { key: 'wca_employee_id_pdf', label: 'Employee ID (PDF)' },
-            { key: 'wca_payslip_pdf', label: 'Payslip (PDF)' },
-            { key: 'wca_medical_report_pdf', label: 'Medical Report (PDF)' },
-          ].find(d => d.key === wcaDocKey);
-          if (!doc) return null;
-          return (
-            <Modal open={true} onClose={() => { setWcaPromptOpen(false); setWcaDocKey(null); }}>
-              <div style={{ padding: '0 4px 0px', borderBottom: `1px solid ${S100}`, marginBottom: 14 }}>
-                <div style={{ fontSize: '1.1rem', fontWeight: 900, color: S900, letterSpacing: '-0.01em' }}>
-                  Attach {doc.label}
-                </div>
-                <div style={{ fontSize: '0.78rem', color: S400, marginTop: 3, marginBottom: 12 }}>
-                  Select how you would like to upload this document
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {/* Option 1: Take Photo */}
-                <label style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
-                  padding: '16px', borderRadius: 12, border: `2px dashed ${G}`, background: GBG,
-                  color: GDK, fontSize: '0.94rem', fontWeight: 800, cursor: 'pointer', textAlign: 'center',
-                  transition: 'all 0.15s ease',
-                }}>
-                  📷 Take a Photo
-                  <input
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    onChange={e => handleWcaPhoto(wcaDocKey, e.target.files?.[0] || null)}
-                    style={{ display: 'none' }}
-                  />
-                </label>
-
-                {/* Option 2: Upload PDF */}
-                <label style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
-                  padding: '16px', borderRadius: 12, border: `2px dashed #3b82f6`, background: `rgba(59,130,246,0.09)`,
-                  color: `#2563eb`, fontSize: '0.94rem', fontWeight: 800, cursor: 'pointer', textAlign: 'center',
-                  transition: 'all 0.15s ease',
-                }}>
-                  📄 Choose PDF File
-                  <input
-                    type="file"
-                    accept="application/pdf,.pdf"
-                    onChange={e => handleWcaPdf(wcaDocKey, e.target.files?.[0] || null)}
-                    style={{ display: 'none' }}
-                  />
-                </label>
               </div>
             </Modal>
           );

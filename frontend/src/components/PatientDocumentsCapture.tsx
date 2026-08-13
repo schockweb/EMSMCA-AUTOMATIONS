@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 
 export type DocKey = 'hospital_sticker' | 'admission_form_image' | 'id_document_image' | 'medical_aid_image' | 'aod_document' | 'additional_document_image';
 
@@ -28,6 +28,19 @@ const DOC_LABELS: Record<DocKey, string> = {
   medical_aid_image: 'Medical Aid Card',
   aod_document: 'AOD Document',
   additional_document_image: 'Additional Documents',
+};
+
+// Viewfinder shape per document: 'wide' = sticker strip (2:1), 'card' = an
+// ID / membership card (~1.5:1), 'tall' = a full A4 page.
+export type DocFrame = 'wide' | 'card' | 'tall';
+
+const DOC_FRAMES: Record<DocKey, DocFrame> = {
+  hospital_sticker: 'wide',
+  admission_form_image: 'tall',
+  id_document_image: 'card',
+  medical_aid_image: 'card',
+  aod_document: 'tall',
+  additional_document_image: 'wide',
 };
 
 export default function PatientDocumentsCapture({ docs, onChange }: Props) {
@@ -151,7 +164,8 @@ export default function PatientDocumentsCapture({ docs, onChange }: Props) {
       {/* 4. Fullscreen Camera Overlay */}
       {activeCapture && (
         <CameraOverlay
-          docType={activeCapture}
+          title={DOC_LABELS[activeCapture]}
+          frame={DOC_FRAMES[activeCapture]}
           onCancel={() => { setActiveCapture(null); setShowMenu(true); }}
           onCapture={handleCapture}
         />
@@ -184,12 +198,13 @@ function FlashIcon() {
 // ── Fullscreen Overlay with Viewfinder Cutout ──────────────────────────────
 
 interface OverlayProps {
-  docType: DocKey;
+  title: string;
+  frame: DocFrame;
   onCancel: () => void;
   onCapture: (dataUrl: string) => void;
 }
 
-function CameraOverlay({ docType, onCancel, onCapture }: OverlayProps) {
+function CameraOverlay({ title, frame, onCancel, onCapture }: OverlayProps) {
   const videoRef    = useRef<HTMLVideoElement>(null);
   const fileInputId = 'doc-camera-fallback-input';
   const [stream,   setStream]   = useState<MediaStream | null>(null);
@@ -275,17 +290,17 @@ function CameraOverlay({ docType, onCancel, onCapture }: OverlayProps) {
     const offsetX    = (renderedW - dispW) / 2;
     const offsetY    = (renderedH - dispH) / 2;
 
-    // We adjust the viewfinder based on docType. 
-    // Sticker: 84% width, 42% height (2:1 aspect)
-    // ID/Medical Aid: 84% width, 54% height (~1.5:1 aspect)
-    // Admission Form (A4): 80% width, 85% height (tall aspect)
+    // We adjust the viewfinder based on the frame shape.
+    // wide (sticker): 84% width, 42% height (2:1 aspect)
+    // card (ID/Medical Aid): 84% width, ~1.5:1 aspect
+    // tall (A4 forms): 80% width, 85% height
     let rectScreenW = dispW * 0.84;
     let rectScreenH = dispH * 0.42;
-    if (docType === 'id_document_image' || docType === 'medical_aid_image') {
+    if (frame === 'card') {
       rectScreenH = dispW * 0.84 * 0.65; // ~1.5:1 ratio
-    } else if (docType === 'admission_form_image' || docType === 'aod_document') {
+    } else if (frame === 'tall') {
       rectScreenW = dispW * 0.80;
-      rectScreenH = dispH * 0.85; 
+      rectScreenH = dispH * 0.85;
     }
     const rectScreenX = (dispW - rectScreenW) / 2;
     const rectScreenY = (dispH - rectScreenH) / 2;
@@ -367,7 +382,7 @@ function CameraOverlay({ docType, onCancel, onCapture }: OverlayProps) {
           style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '0.92rem', fontWeight: 700, cursor: 'pointer', padding: '6px 4px' }}
         >Cancel</button>
         <div style={{ fontSize: '0.78rem', fontWeight: 800, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-          {DOC_LABELS[docType]}
+          {title}
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {torchSupported && !captured && (
@@ -403,7 +418,7 @@ function CameraOverlay({ docType, onCancel, onCapture }: OverlayProps) {
           ref={videoRef} autoPlay playsInline muted
           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', background: '#000' }}
         />
-        {!captured && <ViewfinderMask docType={docType} />}
+        {!captured && <ViewfinderMask frame={frame} />}
         {!captured && <ViewfinderHint />}
         {captured && <img src={captured} alt="preview" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', background: '#000' }} />}
         {error && <div style={{ position: 'absolute', left: 16, right: 16, top: 16, background: 'rgba(220,38,38,0.95)', color: '#fff', padding: '10px 14px', borderRadius: 10, fontSize: '0.82rem', fontWeight: 700, lineHeight: 1.4 }}>{error}</div>}
@@ -445,13 +460,13 @@ function CameraOverlay({ docType, onCancel, onCapture }: OverlayProps) {
   );
 }
 
-function ViewfinderMask({ docType }: { docType: DocKey }) {
-  // Determine rectangle coordinates based on document type. (100x100 SVG viewbox)
+function ViewfinderMask({ frame }: { frame: DocFrame }) {
+  // Determine rectangle coordinates based on the frame shape. (100x100 SVG viewbox)
   let w = 84, h = 42;
-  if (docType === 'id_document_image' || docType === 'medical_aid_image') {
+  if (frame === 'card') {
     // 84vw width, ~1.5 ratio height => 54vh (assuming portrait screen), let's use fixed SVG %s
     h = 54;
-  } else if (docType === 'admission_form_image' || docType === 'aod_document') {
+  } else if (frame === 'tall') {
     w = 80;
     h = 85;
   }
@@ -492,6 +507,240 @@ function ViewfinderHint() {
       <div style={{ display: 'inline-block', padding: '6px 14px', background: 'rgba(15,23,42,0.7)', color: '#fff', fontSize: '0.78rem', fontWeight: 700, letterSpacing: '0.04em', borderRadius: 999, textTransform: 'uppercase' }}>
         Fit document inside frame
       </div>
+    </div>
+  );
+}
+
+// ── Reusable capture in the same design, for billing attachments ───────────
+// The WCA / employee documents and the RAF OAR report store files on
+// form_data as { name, size, data_url } (the shape the PDF's attachment
+// sheets render: image data-URLs paint full-page, PDFs get a record block).
+// These two components give those slots the same dashed-green camera button
+// and in-app camera as the Patient Documents capture above, with a small
+// attach-a-PDF path kept for documents that arrive as files rather than
+// paper (payslips, medical reports, emailed OARs).
+
+export interface AttachedDocFile { name?: string; size?: number; data_url?: string }
+
+export interface DocSpec { key: string; label: string; frame?: DocFrame }
+
+const dataUrlBytes = (dataUrl: string) =>
+  Math.max(0, Math.round((dataUrl.length - (dataUrl.indexOf(',') + 1)) * 0.75));
+
+const isPdfFile = (f: AttachedDocFile) =>
+  (f.data_url || '').startsWith('data:application/pdf') || (f.name || '').toLowerCase().endsWith('.pdf');
+
+function readPdfFile(f: File, onDone: (file: { name: string; size: number; data_url: string }) => void) {
+  if (f.type !== 'application/pdf' && !f.name.toLowerCase().endsWith('.pdf')) { alert('Only PDF files are accepted.'); return; }
+  if (f.size > 10 * 1024 * 1024) { alert('File exceeds 10 MB.'); return; }
+  const reader = new FileReader();
+  reader.onload = () => onDone({ name: f.name, size: f.size, data_url: String(reader.result) });
+  reader.readAsDataURL(f);
+}
+
+function AttachedFileCard({ label, file, onRemove }: { label: string; file: AttachedDocFile; onRemove: () => void }) {
+  return (
+    <div style={{
+      display: 'flex', gap: 12, alignItems: 'center', padding: 10,
+      borderRadius: 10, border: `1.5px solid ${G}`, background: `${G}14`,
+    }}>
+      {isPdfFile(file) ? (
+        <div style={{
+          width: 60, height: 40, borderRadius: 6, border: `1px solid ${S200}`,
+          background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: '0.8rem', fontWeight: 800, color: S700, flexShrink: 0,
+        }}>PDF</div>
+      ) : (
+        <img
+          src={file.data_url}
+          alt={label}
+          style={{ width: 60, height: 40, objectFit: 'cover', borderRadius: 6, border: `1px solid ${S200}`, background: W, flexShrink: 0 }}
+        />
+      )}
+      <div style={{ flex: 1, minWidth: 0, fontSize: '0.82rem', color: S700 }}>
+        <div style={{ fontWeight: 800, color: GD }}>{label} attached</div>
+        {file.name && (
+          <div style={{ fontSize: '0.68rem', color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {file.name}{typeof file.size === 'number' ? ` · ${(file.size / 1024).toFixed(1)} KB` : ''}
+          </div>
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={onRemove}
+        style={{
+          padding: '5px 10px', borderRadius: 7, border: `1px solid #fecaca`,
+          background: W, color: REDC, fontSize: '0.68rem', fontWeight: 700,
+          cursor: 'pointer', flexShrink: 0,
+        }}
+      >Remove</button>
+    </div>
+  );
+}
+
+const dashedCameraButton: CSSProperties = {
+  width: '100%', padding: '14px 16px', borderRadius: 10,
+  border: `2px dashed ${G}`, background: `${G}10`,
+  color: GD, fontSize: '0.86rem', fontWeight: 800,
+  cursor: 'pointer', letterSpacing: '0.02em',
+  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+};
+
+/** One document slot (e.g. the RAF OAR report): camera button → in-app camera. */
+export function SingleDocumentCapture({ label, frame = 'tall', file, onChange }: {
+  label: string;
+  frame?: DocFrame;
+  file?: AttachedDocFile | null;
+  onChange: (file: { name: string; size: number; data_url: string } | null) => void;
+}) {
+  const [cameraOpen, setCameraOpen] = useState(false);
+
+  if (file && file.data_url) {
+    return <AttachedFileCard label={label} file={file} onRemove={() => onChange(null)} />;
+  }
+  return (
+    <div>
+      <button type="button" onClick={() => setCameraOpen(true)} style={dashedCameraButton}>
+        <CameraIcon />
+        Photograph {label}
+      </button>
+      <label style={{
+        display: 'block', textAlign: 'center', marginTop: 8,
+        fontSize: '0.72rem', fontWeight: 700, color: '#64748b',
+        cursor: 'pointer', textDecoration: 'underline',
+      }}>
+        or attach a PDF file
+        <input
+          type="file"
+          accept="application/pdf,.pdf"
+          onChange={e => { const f = e.target.files?.[0]; if (f) readPdfFile(f, onChange); e.target.value = ''; }}
+          style={{ display: 'none' }}
+        />
+      </label>
+      {cameraOpen && (
+        <CameraOverlay
+          title={label}
+          frame={frame}
+          onCancel={() => setCameraOpen(false)}
+          onCapture={dataUrl => {
+            onChange({ name: `${label}.jpg`, size: dataUrlBytes(dataUrl), data_url: dataUrl });
+            setCameraOpen(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/** A named set of document slots (the WCA / employee documents): one camera
+ *  button → selection sheet → in-app camera, exactly like Patient Documents. */
+export function DocumentSetCapture({ buttonLabel, docs, values, onChange }: {
+  buttonLabel: string;
+  docs: DocSpec[];
+  values: Record<string, any>;
+  onChange: (key: string, file: { name: string; size: number; data_url: string } | null) => void;
+}) {
+  const [showMenu, setShowMenu] = useState(false);
+  const [active, setActive] = useState<DocSpec | null>(null);
+
+  const attached = docs.filter(d => values[d.key] && values[d.key].data_url);
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      {attached.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+          {attached.map(d => (
+            <AttachedFileCard key={d.key} label={d.label} file={values[d.key]} onRemove={() => onChange(d.key, null)} />
+          ))}
+        </div>
+      )}
+
+      <button type="button" onClick={() => setShowMenu(true)} style={dashedCameraButton}>
+        <CameraIcon />
+        {buttonLabel}
+      </button>
+
+      {showMenu && !active && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 10000, background: 'rgba(0,0,0,0.6)',
+          display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+          paddingBottom: 'env(safe-area-inset-bottom)',
+        }}>
+          <div style={{
+            background: W, width: '100%', borderTopLeftRadius: 20, borderTopRightRadius: 20,
+            padding: '24px 20px', boxShadow: '0 -4px 20px rgba(0,0,0,0.1)',
+            display: 'flex', flexDirection: 'column', gap: 12,
+            animation: 'slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <div style={{ fontSize: '1rem', fontWeight: 900, color: S700 }}>Select Document to Photograph</div>
+              <button
+                type="button"
+                onClick={() => setShowMenu(false)}
+                style={{ background: 'transparent', border: 'none', fontSize: '1.4rem', color: '#94a3b8', cursor: 'pointer', padding: '0 8px' }}
+              >×</button>
+            </div>
+            {docs.map(d => {
+              const isCaptured = !!(values[d.key] && values[d.key].data_url);
+              return (
+                <div key={d.key} style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    type="button"
+                    onClick={() => { setActive(d); setShowMenu(false); }}
+                    style={{
+                      flex: 1, minWidth: 0, padding: '16px', borderRadius: 12, fontSize: '0.9rem', fontWeight: 700,
+                      border: `1.5px solid ${isCaptured ? G : S200}`,
+                      background: isCaptured ? `${G}10` : '#f8fafc',
+                      color: isCaptured ? GD : S700,
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <span>Photograph {d.label}</span>
+                    {isCaptured && <span style={{ fontSize: '1.1rem' }}>✓</span>}
+                  </button>
+                  {/* The paper-free path: payslips / medical reports often
+                      arrive as PDFs, so each row keeps a file picker. */}
+                  <label style={{
+                    flexShrink: 0, padding: '16px 14px', borderRadius: 12,
+                    border: `1.5px solid ${S200}`, background: '#f8fafc',
+                    color: '#2563eb', fontSize: '0.78rem', fontWeight: 800,
+                    display: 'flex', alignItems: 'center', cursor: 'pointer',
+                  }}>
+                    PDF
+                    <input
+                      type="file"
+                      accept="application/pdf,.pdf"
+                      onChange={e => {
+                        const f = e.target.files?.[0];
+                        if (f) readPdfFile(f, file => onChange(d.key, file));
+                        e.target.value = '';
+                      }}
+                      style={{ display: 'none' }}
+                    />
+                  </label>
+                </div>
+              );
+            })}
+            <style>{`
+              @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+            `}</style>
+          </div>
+        </div>
+      )}
+
+      {active && (
+        <CameraOverlay
+          title={active.label}
+          frame={active.frame ?? 'tall'}
+          onCancel={() => { setActive(null); setShowMenu(true); }}
+          onCapture={dataUrl => {
+            onChange(active.key, { name: `${active.label}.jpg`, size: dataUrlBytes(dataUrl), data_url: dataUrl });
+            setActive(null);
+            setShowMenu(true);
+          }}
+        />
+      )}
     </div>
   );
 }
