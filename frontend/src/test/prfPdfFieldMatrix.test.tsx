@@ -610,11 +610,14 @@ describe('PRF PDF field coverage — every call-type × billing-type', () => {
         callType === 'DOD' ? 5 : 6;
 
       describe(label, () => {
+        // findAllByText, not findByText: the RAF sketch sheet (and any
+        // attached-document sheet) repeats the patient identity in its own
+        // mini-header, so the anchor legitimately appears more than once.
         it('renders every captured field onto the PDF pages', async () => {
           const built = buildPrf(callType, billingType);
           currentPrf = built.prf;
           renderPrfView();
-          await screen.findByText((c) => c.includes(built.anchor));
+          await screen.findAllByText((c) => c.includes(built.anchor));
           built.visible.forEach(expectVisible);
         });
 
@@ -622,7 +625,7 @@ describe('PRF PDF field coverage — every call-type × billing-type', () => {
           const built = buildPrf(callType, billingType);
           currentPrf = built.prf;
           renderPrfView();
-          await screen.findByText((c) => c.includes(built.anchor));
+          await screen.findAllByText((c) => c.includes(built.anchor));
 
           if (billingType === 'NONE') {
             // Courtesy: the payer block AND the page-1 "Billing Type" meta row
@@ -648,7 +651,7 @@ describe('PRF PDF field coverage — every call-type × billing-type', () => {
           const built = buildPrf(callType, billingType);
           currentPrf = built.prf;
           const { container } = renderPrfView();
-          await screen.findByText((c) => c.includes(built.anchor));
+          await screen.findAllByText((c) => c.includes(built.anchor));
           expect(
             container.querySelectorAll('img[alt="signature"]').length,
             `${callType} should render ${expectedSignatures} captured signatures`,
@@ -812,6 +815,17 @@ describe('PRF PDF — attachments and extra sheets', () => {
     expect(sheets - base).toBe(3);
     expect(screen.getByText(/Payslip \(page 1 of 3\)/i)).toBeInTheDocument();
     expect(screen.getByText(/Payslip \(page 3 of 3\)/i)).toBeInTheDocument();
+  });
+
+  it('the RAF accident sketch gets a full sheet of its own, not a strip on page 1', async () => {
+    // The sketch used to render 80px tall inside page 1's valuables column —
+    // a scene diagram reduced to a smudge. It must now add exactly one
+    // dedicated sheet and appear nowhere on page 1.
+    const base = await baselineSheets();
+    const { sheets } = await sheetsFor({ raf_sketch: PNG });
+    expect(sheets - base).toBe(1);
+    expect(screen.getByText(/RAF Accident Sketch/i)).toBeInTheDocument();
+    expect(screen.queryByText(/^RAF Sketch$/i)).not.toBeInTheDocument();  // old page-1 section head
   });
 
   it('a single-page converted PDF keeps the unnumbered header', async () => {

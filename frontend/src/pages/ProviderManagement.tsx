@@ -1367,14 +1367,13 @@ export default function ProviderManagement() {
                     <label style={labelStyle}>Full Name *</label>
                     <input style={inputStyle} value={newCrew.full_name} onChange={e => setNewCrew({ ...newCrew, full_name: e.target.value })} />
                   </div>
-                  <div style={{ marginBottom: 4 }}>
-                    <label style={labelStyle}>Email *</label>
-                    <input style={inputStyle} value={newCrew.email} onChange={e => setNewCrew({ ...newCrew, email: e.target.value })} />
-                  </div>
+                  {/* No Email / Phone here: crew sign in with their HPCSA
+                      number via the portal grant (the backend auto-generates
+                      a placeholder email), so both fields were dead weight. */}
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 14px' }}>
                     <div><label style={labelStyle}>Initials</label><input style={inputStyle} value={newCrew.initials} onChange={e => setNewCrew({ ...newCrew, initials: e.target.value })} /></div>
                     <div><label style={labelStyle}>HPCSA Number</label><input style={inputStyle} value={newCrew.hpcsa_number} onChange={e => setNewCrew({ ...newCrew, hpcsa_number: e.target.value })} /></div>
-                    <div>
+                    <div style={{ gridColumn: '1 / -1' }}>
                       <label style={labelStyle}>Qualification</label>
                       <select style={inputStyle} value={newCrew.qualification} onChange={e => setNewCrew({ ...newCrew, qualification: e.target.value })}>
                         {[...legacyOption(newCrew.qualification), ...QUAL_OPTIONS].map(o => (
@@ -1382,7 +1381,6 @@ export default function ProviderManagement() {
                         ))}
                       </select>
                     </div>
-                    <div><label style={labelStyle}>Phone</label><input style={inputStyle} value={newCrew.phone} onChange={e => setNewCrew({ ...newCrew, phone: e.target.value })} /></div>
                   </div>
 
                   {tempPassword && (

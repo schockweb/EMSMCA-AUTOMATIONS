@@ -3158,19 +3158,10 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
                 )}
               </>
             )}
-            {fd.raf_sketch && (
-              <>
-                <SectionHead label="RAF Sketch" />
-                <div style={{
-                  borderTop: `1px solid ${LN}`, padding: 4,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  background: SOFT_BG,
-                }}>
-                  <img src={fd.raf_sketch} alt="RAF sketch"
-                       style={{ maxWidth: '100%', maxHeight: 80, objectFit: 'contain' }} />
-                </div>
-              </>
-            )}
+            {/* The RAF accident sketch used to render here, squeezed to 80px
+                inside the valuables column — illegible for what it is, a
+                drawn diagram of the accident scene. It now gets a full sheet
+                of its own after the clinical pages. */}
             <FillLines />
           </div>
           )}
@@ -3678,6 +3669,61 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
               {cashOnOwnSheet && <CashVerification fd={fd} wide />}
             </div>
             <FillLines />
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════ RAF ACCIDENT SKETCH ═══════════════════
+          The crew's drawn diagram of the accident scene, on a full sheet of
+          its own — it used to render 80px tall inside page 1's valuables
+          column, which reduced a scene diagram to a smudge. Same sheet
+          skeleton as the attached documents below; picked up by the
+          PDF/print pipeline via the shared .prf-page selector. */}
+      {fd.raf_sketch && (
+        <div className="prf-print-frame">
+          <div className="prf-page" style={{
+            width: 1220, minHeight: 862,
+            margin: '28px auto 0', background: '#fff', color: INK,
+            border: `2px solid ${LN}`, boxShadow: '0 6px 24px rgba(0,0,0,0.1)',
+            display: 'flex', flexDirection: 'column',
+          }}>
+            <div style={{
+              display: 'grid', gridTemplateColumns: '1.3fr 2.4fr 2fr',
+              borderBottom: `2px solid ${LN}`,
+            }}>
+              <div style={{
+                padding: '10px 12px', borderRight: `1px solid ${LN}`,
+                display: 'flex', alignItems: 'center',
+              }}>
+                <ProviderLogo prov={prov} height={30} />
+              </div>
+              <div style={{
+                padding: '10px 12px', borderRight: `1px solid ${LN}`,
+                display: 'flex', alignItems: 'center',
+                fontSize: '0.78rem', fontWeight: 800, color: INK,
+                letterSpacing: '0.08em', textTransform: 'uppercase',
+              }}>
+                RAF Accident Sketch
+              </div>
+              <div style={{
+                padding: '10px 12px', display: 'flex', alignItems: 'center',
+                justifyContent: 'flex-end', gap: 18,
+                fontSize: '0.68rem', color: MUT,
+              }}>
+                <span>Patient: <b style={{ color: INK }}>{patientFullName}</b></span>
+                {prf.case_number && <span>Case: <b style={{ color: INK, fontFamily: 'ui-monospace, monospace' }}>{prf.case_number}</b></span>}
+              </div>
+            </div>
+            <div style={{
+              flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              padding: 14, background: SOFT_BG,
+            }}>
+              <img
+                src={fd.raf_sketch}
+                alt="RAF accident sketch"
+                style={{ maxWidth: '100%', maxHeight: 770, objectFit: 'contain', border: `1px solid ${LN}`, background: '#fff' }}
+              />
+            </div>
           </div>
         </div>
       )}
