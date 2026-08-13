@@ -1335,6 +1335,29 @@ describe('RHT — the refusal reaches the printed record', () => {
     }
   });
 
+  it('drops Depart and Arrival At Facility from the times grid once death is DECLARED', async () => {
+    // The deceased is released to an undertaker on scene — the two transport
+    // legs never happen, so their rows printed permanently empty cells on a
+    // lost resuscitation (same rule DOD and RHT already had).
+    const built = buildPrf('RESUS', 'MED AID');
+    built.prf.form_data.med_aid_dec_death = true;
+    currentPrf = built.prf;
+    renderPrfView();
+    await screen.findAllByText((c) => c.includes(built.anchor), { exact: false });
+    expect(screen.queryAllByText('Depart', { exact: true })).toHaveLength(0);
+    expect(screen.queryAllByText('Arrival At Facility', { exact: true })).toHaveLength(0);
+
+    // Control: a resuscitation the crew WINS transports normally and keeps
+    // both legs on the record.
+    cleanup();
+    const liveResus = buildPrf('RESUS', 'MED AID');
+    currentPrf = liveResus.prf;
+    renderPrfView();
+    await screen.findAllByText((c) => c.includes(liveResus.anchor), { exact: false });
+    expect(screen.queryAllByText('Depart', { exact: true }).length).toBeGreaterThan(0);
+    expect(screen.queryAllByText('Arrival At Facility', { exact: true }).length).toBeGreaterThan(0);
+  });
+
   it('prints no Terms and Conditions once death is declared — nobody is left to agree', async () => {
     // The crew form gates its whole T&C block behind `call_type !== 'RESUS'`
     // (DigitalPRFForm.tsx:9089). So on a resuscitation the clauses are never

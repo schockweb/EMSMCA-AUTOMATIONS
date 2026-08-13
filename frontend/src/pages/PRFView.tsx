@@ -1437,9 +1437,12 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
   const isImageDoc = (f: any) => typeof f?.data_url === 'string' && f.data_url.startsWith('data:image/');
 
   // Depart + Arrival At Facility don't apply when the patient was never
-  // transported: a Declaration of Death (deceased at scene) or an RHT
-  // (Refused Hospital Transport) — so those two rows are omitted for both.
-  const noTransport = fd.call_type === 'DOD' || fd.call_type === 'RHT';
+  // transported: a Declaration of Death (deceased at scene), an RHT
+  // (Refused Hospital Transport), or a RESUS the crew lost (death declared
+  // on scene — the deceased goes to an undertaker, not a facility). A resus
+  // the crew WINS transports normally and keeps both rows.
+  const noTransport = fd.call_type === 'DOD' || fd.call_type === 'RHT'
+    || (fd.call_type === 'RESUS' && !!fd.med_aid_dec_death);
 
   // A refusal, however it was reached.
   //

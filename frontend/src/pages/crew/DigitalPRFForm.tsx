@@ -7490,10 +7490,12 @@ export default function DigitalPRFForm() {
           <Toggle fk="gender" opts={['Male', 'Female', 'Other']} />
         </div>
         <G2>
-          <div><Lbl t="First Name" req /><Inp fk="patient_name" ph="First name" req upper /></div>
-          <div><Lbl t="Surname" req /><Inp fk="patient_surname" ph="Surname" req upper /></div>
+          {/* No `upper` here: block-caps-as-you-type was read as the form
+              shouting back; names save exactly as the crew types them. */}
+          <div><Lbl t="First Name" req /><Inp fk="patient_name" ph="First name" req /></div>
+          <div><Lbl t="Surname" req /><Inp fk="patient_surname" ph="Surname" req /></div>
           <div><Lbl t="ID Number" req /><Inp fk="patient_id_number" ph="13-digit SA ID" req /></div>
-          <div><Lbl t="Passport Number" /><Inp fk="patient_passport_number" ph="For foreign nationals" upper /></div>
+          <div><Lbl t="Passport Number" /><Inp fk="patient_passport_number" ph="For foreign nationals" /></div>
           <div><Lbl t="Date of Birth" /><DateInp fk="patient_dob" /></div>
           <div><Lbl t="Age" /><Inp fk="age" ph="Age" type="number" /></div>
           <div><Lbl t="Cell" /><Inp fk="patient_phone_cell" ph="Cell" type="tel" /></div>
@@ -7502,8 +7504,8 @@ export default function DigitalPRFForm() {
         <Lbl t="Tel (W)" /><Inp fk="patient_phone_work" ph="Work number" type="tel" />
         <Lbl t="Residential Address" /><AddrInp fk="patient_address" ph="Street address" suburbKey="patient_suburb" codeKey="patient_postal_code" manualOnly googleLookup />
         <G2>
-          <div><Lbl t="Suburb" /><Inp fk="patient_suburb" ph="Suburb" upper /></div>
-          <div><Lbl t="Code" /><Inp fk="patient_postal_code" ph="Code" upper /></div>
+          <div><Lbl t="Suburb" /><Inp fk="patient_suburb" ph="Suburb" /></div>
+          <div><Lbl t="Code" /><Inp fk="patient_postal_code" ph="Code" /></div>
         </G2>
       </Card>
       </>

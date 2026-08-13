@@ -160,8 +160,12 @@ describe('The vitals reminder must not throw the crew into a phase they have not
   });
 });
 
-describe('Patient Information is captured in block capitals', () => {
-  it('stores the value uppercased, not merely displays it', async () => {
+describe('Patient Information stays exactly as typed', () => {
+  it('stores names as the crew typed them — no forced block capitals', async () => {
+    // Block-caps-as-you-type shipped briefly (`upper` on the patient fields)
+    // and was reverted at the user's request: the form read as shouting back
+    // while typing. Names now save with the capitalisation the crew gives
+    // them — "van der Merwe" must never become "VAN DER MERWE".
     seedDraft(2);
     mountForm();
 
@@ -171,22 +175,17 @@ describe('Patient Information is captured in block capitals', () => {
       return el;
     }, { timeout: 4000 });
 
-    fireEvent.change(first, { target: { value: 'thabo' } });
-
-    // Reading the value back proves the STORED value changed. A CSS-only
-    // text-transform would leave this as 'thabo' and the PRF PDF would print
-    // lower case while the crew saw capitals.
+    fireEvent.change(first, { target: { value: 'Thabo' } });
     await waitFor(() => expect(
       (document.getElementById('prf-field-patient_name') as HTMLInputElement).value,
-      'the patient first name is not stored in capitals — a CSS-only transform '
-      + 'would look right on screen and print wrong on the PDF',
-    ).toBe('THABO'), { timeout: 4000 });
+      'the patient first name was altered — it must store exactly as typed',
+    ).toBe('Thabo'), { timeout: 4000 });
 
     const surname = document.getElementById('prf-field-patient_surname') as HTMLInputElement;
-    fireEvent.change(surname, { target: { value: 'mokoena' } });
+    fireEvent.change(surname, { target: { value: 'van der Merwe' } });
     await waitFor(() => expect(
       (document.getElementById('prf-field-patient_surname') as HTMLInputElement).value,
-    ).toBe('MOKOENA'), { timeout: 4000 });
+    ).toBe('van der Merwe'), { timeout: 4000 });
   });
 
   it('leaves the residential address as typed', async () => {
