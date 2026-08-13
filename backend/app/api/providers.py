@@ -846,7 +846,7 @@ async def _duplicate_client_edit_error(
         owner = await _owner_name(
             select(ServiceProvider)
             .join(CrewMember, CrewMember.provider_id == ServiceProvider.id)
-            .where(CrewMember.email == admin_email)
+            .where(func.lower(CrewMember.email) == admin_email.lower())
         )
         return HTTPException(
             400,
@@ -925,7 +925,7 @@ async def create_provider(
         # Optionally create an admin crew member
         if body.admin_email and body.admin_password:
             admin_email = body.admin_email.strip().lower()
-            existing_crew_email = await db.execute(select(CrewMember).where(CrewMember.email == admin_email))
+            existing_crew_email = await db.execute(select(CrewMember).where(func.lower(CrewMember.email) == admin_email.lower()))
             if existing_crew_email.scalar_one_or_none():
                 raise HTTPException(400, f"Admin email '{admin_email}' is already registered as a crew member.")
 
@@ -1174,7 +1174,7 @@ async def update_provider(
                 wanted = body.admin_email.strip().lower()
                 if not admin or wanted != (admin.email or "").lower():
                     taken = (await db.execute(
-                        select(CrewMember).where(CrewMember.email == wanted)
+                        select(CrewMember).where(func.lower(CrewMember.email) == wanted.lower())
                     )).scalar_one_or_none()
                     if taken:
                         owner = (await db.execute(
@@ -1668,7 +1668,7 @@ async def update_provider_settings(
         new_email = body.admin_email.strip().lower() if body.admin_email else None
 
         if new_email and (not admin or new_email != (admin.email or "").lower()):
-            dup_q = select(CrewMember).where(CrewMember.email == new_email)
+            dup_q = select(CrewMember).where(func.lower(CrewMember.email) == new_email.lower())
             if admin:
                 dup_q = dup_q.where(CrewMember.id != admin.id)
             dup = await db.execute(dup_q)
@@ -1796,11 +1796,20 @@ async def add_crew_member(
         if existing_hpcsa.scalar_one_or_none():
             raise HTTPException(400, f"HPCSA number '{body.hpcsa_number}' is already registered for this provider.")
 
-    # Auto-generate a placeholder email if not supplied (login by email is not used)
-    email = (body.email or f"{body.hpcsa_number or uuid.uuid4().hex[:8]}@hpcsa.placeholder").strip().lower()
+    # Auto-generate a placeholder email if not supplied (login by email is not used).
+    # Stored EXACTLY as typed (whitespace trimmed only). This is a sign-in name
+    # shown back to the administrator who set it, so forcing it to lower case
+    # silently rewrote "EMSMCAadmin" as "emsmcaadmin". Sign-in matches
+    # case-insensitively (crew_auth.crew_login), so preserving capitals costs
+    # nothing at login time.
+    email = (body.email or f"{body.hpcsa_number or uuid.uuid4().hex[:8]}@hpcsa.placeholder").strip()
 
-    # Ensure email is unique across all crew
-    existing_email = await db.execute(select(CrewMember).where(CrewMember.email == email))
+    # Unique across all crew, compared case-INSENSITIVELY: sign-in ignores case,
+    # so "Admin" and "admin" would be two rows that both answer to one sign-in
+    # name. The column's unique index is case-sensitive and would not catch it.
+    existing_email = await db.execute(
+        select(CrewMember).where(func.lower(CrewMember.email) == email.lower())
+    )
     if existing_email.scalar_one_or_none():
         email = f"{uuid.uuid4().hex[:8]}.{email}"  # de-dupe with prefix
 
@@ -1869,6 +1878,25 @@ async def update_crew_member(
             val = _validate_category(val, required=False)
             if val is None:
                 continue   # silently skip "unset" qualification PATCHes
+        elif key == "email" and val is not None:
+            # Trimmed but NOT lower-cased: this is the sign-in name as the
+            # administrator typed it. Sign-in matches case-insensitively.
+            val = val.strip()
+            if not val:
+                raise HTTPException(400, "Sign-in name cannot be blank.")
+            # Reject a collision here rather than letting the column's unique
+            # index raise IntegrityError as a 500. Case-insensitive and scoped
+            # to OTHER rows, so re-saving the form unchanged is not a clash.
+            clash = await db.execute(
+                select(CrewMember).where(
+                    func.lower(CrewMember.email) == val.lower(),
+                    CrewMember.id != crew.id,
+                )
+            )
+            if clash.scalar_one_or_none():
+                raise HTTPException(
+                    409, f"The sign-in name '{val}' is already in use by another crew member."
+                )
         setattr(crew, key, val)
 
     # An individual deactivation is not a cascaded one: reactivating the client

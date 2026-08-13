@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -146,8 +146,18 @@ def _crew_login_audit(db: AsyncSession, crew: CrewMember, action: str, ip: str, 
 async def crew_login(body: CrewLoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
     """Authenticate a crew member and return a JWT. Enforces account lockout."""
     client_ip = get_trusted_client_ip(request)
+    # Case-INSENSITIVE match, comparing lower() on both sides rather than
+    # lower-casing only the typed value against a stored value that may carry
+    # capitals. The sign-in name is now stored exactly as the administrator
+    # typed it (so "EMSMCAadmin" displays that way), and the crew member types
+    # it on a tablet whose keyboard auto-capitalises the first letter. Matching
+    # exactly on a lower-cased input would mean an account created or edited
+    # with any capital could never sign in — a silent lockout, discovered only
+    # when someone cannot start a shift.
     result = await db.execute(
-        select(CrewMember).where(CrewMember.email == body.email.strip().lower())
+        select(CrewMember).where(
+            func.lower(CrewMember.email) == body.email.strip().lower()
+        )
     )
     crew = result.scalar_one_or_none()
 
