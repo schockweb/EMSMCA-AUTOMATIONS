@@ -5492,6 +5492,24 @@ export default function DigitalPRFForm() {
     return false;
   }, [kms]);
 
+  // Available odometer = Arrival At Facility odometer — the vehicle hasn't
+  // moved between handover and going available, so the reading is prefilled
+  // rather than asked for twice. One-shot (ref-guarded): fills only while
+  // km_available is empty, whichever lands first of the arrival reading or
+  // the Available mark, and never re-fills after the crew clears it to type
+  // a different number.
+  const availKmPrefilledRef = useRef(false);
+  useEffect(() => {
+    if (availKmPrefilledRef.current) return;
+    if (!timestamps.time_available) return;
+    if (kms.km_available) return;
+    const arrival = kms.km_at_destination;
+    if (!arrival) return;
+    availKmPrefilledRef.current = true;
+    setKms(p => (p.km_available ? p : { ...p, km_available: arrival }));
+    dirtyRef.current = true;
+  }, [timestamps.time_available, kms.km_available, kms.km_at_destination]);
+
   // ── Scheme-based validation (Netcare CMG v5.2 rules + others) ───────────
   // Findings shown in a banner. Blockers prevent advance/submit; warnings
   // stay visible so the crew can address them but allow continuing.
