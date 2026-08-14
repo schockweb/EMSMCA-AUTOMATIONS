@@ -6,7 +6,13 @@ hand-captured reference PRFs and varying the patient.
     python seed_demo_prfs.py --provider EMSMCA --templates            # inspect
     python seed_demo_prfs.py --provider EMSMCA --count 500 --plan     # write nothing
     python seed_demo_prfs.py --provider EMSMCA --count 500 --seed     # create
+    python seed_demo_prfs.py --provider EMSMCA --count 15000 --fill matrix --seed
     python seed_demo_prfs.py --teardown demo_seed_manifest_<stamp>.json --yes
+
+`--fill matrix` grades the records across DENSITY_BANDS instead of leaving each
+one the size its template happened to be, so the set spans a quiet call through
+to the largest the form can hold. That is what makes it useful for finding where
+the PDF stops fitting on a sheet — see the band table further down.
 
 WHY THIS CLONES INSTEAD OF GENERATING
 -------------------------------------
@@ -157,6 +163,134 @@ TEMPLATE_NAMES = ["Primary", "IFT/IHT", "RHT", "WCA/IOD", "Courtesy", "RESUS", "
 TEMPLATE_MIX = {"Primary": 44, "IFT/IHT": 25, "RHT": 9, "WCA/IOD": 7,
                 "Courtesy": 5, "RESUS": 6, "DOD": 4}
 
+# ── Fill density ───────────────────────────────────────────────────────────
+# A record's SIZE on the page is driven by three repeating tables and by how
+# much prose the crew typed. The numbers below are the same ones the PDF layout
+# gate uses (frontend/scripts/pdf-layout-matrix.mjs), so a band here and a band
+# there mean the same thing and the seeded data exercises the same geometry the
+# gate measures.
+#
+# `text` selects a prose tier: 0 short, 1 long, 2 maximum.
+DENSITY_BANDS = {
+    "typical": {"iv": 1,  "med": 2,  "vitals": 3, "text": 0},
+    "heavy":   {"iv": 3,  "med": 5,  "vitals": 5, "text": 1},
+    "max":     {"iv": 6,  "med": 8,  "vitals": 6, "text": 2},
+    "extreme": {"iv": 12, "med": 16, "vitals": 6, "text": 2},
+}
+# Weighted toward the top: the point of this data set is to find where the sheet
+# breaks, and a set that is mostly 'typical' finds nothing. 'typical' is kept in
+# so the list still reads like real work when a client scrolls it.
+DENSITY_MIX = {"typical": 25, "heavy": 30, "max": 30, "extreme": 15}
+
+# Clinical rows only belong on call types that render the clinical stack. A
+# refusal (RHT) hides it entirely — fd.patient_refused_treatment collapses the
+# whole capture — and a declaration of death has no observations to carry, so
+# padding either with 12 IV lines would inflate the record without ever
+# reaching the page. Those two get the prose tiers and nothing else.
+CLINICAL_TEMPLATES = {"Primary", "IFT/IHT", "RESUS", "Courtesy", "WCA/IOD"}
+
+# Prose at three lengths, per field. Tier 0 is what a busy crew actually types;
+# tier 2 is the longest entry the field can hold and still be a real answer.
+PROSE = {
+    "events_hpi": [
+        "Central crushing chest pain radiating to the left arm, onset 40 minutes prior to call.",
+        "Patient reports central crushing chest pain that began approximately 40 minutes before the "
+        "call while walking up stairs at home, radiating to the left arm and jaw, associated with "
+        "nausea, sweating and shortness of breath. No relief from rest. No prior episodes of this "
+        "severity, although patient describes two milder episodes over the past fortnight.",
+        "Patient reports central crushing chest pain that began approximately 40 minutes before the "
+        "call while walking up a flight of stairs at home, radiating to the left arm and the angle of "
+        "the jaw, associated with nausea, profuse diaphoresis and progressive shortness of breath. "
+        "Pain described as 8/10, constant, not pleuritic and not reproducible on palpation. No relief "
+        "from rest or from a single sublingual nitrate taken from a family member's supply. Patient "
+        "describes two milder self-limiting episodes over the preceding fortnight, both on exertion "
+        "and both resolving within ten minutes. No syncope, no palpitations, no calf pain or swelling, "
+        "no recent long-haul travel or immobilisation. Family reports patient has been non-adherent "
+        "with antihypertensive therapy for several months following a change of treating doctor.",
+    ],
+    "findings_on_arrival": [
+        "Patient seated, alert, clammy and in obvious discomfort.",
+        "Patient found seated upright on a dining chair, alert and orientated, pale, clammy and in "
+        "obvious discomfort, clutching the anterior chest. Airway patent, speaking full sentences with "
+        "mild effort. Radial pulse present and regular.",
+        "Patient found seated upright on a dining chair in the lounge, alert and fully orientated to "
+        "person, place and time, pale, cool peripherally and markedly diaphoretic, in obvious "
+        "discomfort and clutching the anterior chest wall. Airway patent and self-maintained, speaking "
+        "in full sentences with mild increased effort. Chest clear bilaterally on auscultation with "
+        "equal air entry and no added sounds. Radial pulse present, regular and of reduced volume. "
+        "Abdomen soft and non-tender. No peripheral oedema, no calf tenderness, no external injury. "
+        "Family present and cooperative; scene safe with clear egress to the vehicle.",
+    ],
+    "management_notes": [
+        "Oxygen, IV access, analgesia. Transported stable.",
+        "High-flow oxygen applied via non-rebreather, 12-lead acquired and transmitted to the "
+        "receiving unit, IV access established, aspirin and titrated analgesia administered. Patient "
+        "monitored throughout and transported in a position of comfort. Handed over stable.",
+        "High-flow oxygen applied via non-rebreather mask at 15 l/min with continuous saturation "
+        "monitoring. A 12-lead ECG was acquired on scene, interpreted and transmitted ahead to the "
+        "receiving unit, and the cardiac team was placed on standby prior to arrival. Two large-bore "
+        "IV lines were established in the antecubital fossae after two attempts, and analgesia was "
+        "titrated to effect with reassessment after each increment. Aspirin was administered after "
+        "confirming no allergy and no active bleeding. Vital signs were recorded at regular intervals "
+        "throughout and remained within the ranges documented in the observation series. The patient "
+        "was moved by carry chair to the vehicle, transported in a semi-recumbent position of comfort "
+        "with continuous cardiac monitoring, and handed over to the receiving practitioner together "
+        "with the ECG trace, the medication record and this report form. No deterioration en route.",
+    ],
+    "past_medical_history": [
+        "Hypertension.",
+        "Hypertension diagnosed 2019, Type 2 Diabetes Mellitus on oral therapy, previous myocardial "
+        "infarction 2021 with stenting, ex-smoker of 20 pack-years.",
+        "Hypertension diagnosed 2019 and poorly controlled by patient's own account, Type 2 Diabetes "
+        "Mellitus on oral therapy since 2017 with documented peripheral neuropathy, previous "
+        "myocardial infarction in 2021 managed with primary angioplasty and a single drug-eluting "
+        "stent to the left anterior descending artery, hypercholesterolaemia, mild chronic kidney "
+        "disease stage 2, and an ex-smoking history of approximately 20 pack-years stopped in 2021. "
+        "Appendicectomy 1998. No previous cerebrovascular event and no known arrhythmia.",
+    ],
+    "current_medications": [
+        "Metformin 850mg BD.",
+        "Metformin 850mg BD, Enalapril 10mg daily, Atorvastatin 20mg nocte, Aspirin 75mg daily.",
+        "Metformin 850mg twice daily, Enalapril 10mg daily, Atorvastatin 20mg nocte, Aspirin 75mg "
+        "daily, Clopidogrel 75mg daily, Hydrochlorothiazide 12.5mg daily, Gabapentin 300mg at night "
+        "for neuropathic pain, and an as-required short-acting inhaler. Patient reports intermittent "
+        "adherence over the past three months and is unsure of the last dose taken today.",
+    ],
+    "allergies": [
+        "NKDA",
+        "Penicillin — rash. Sulfa drugs — reported intolerance.",
+        "Penicillin — widespread urticarial rash documented in 2014, no airway involvement. Sulfa "
+        "drugs — reported gastrointestinal intolerance rather than true allergy. Adhesive dressings — "
+        "local skin reaction. No known food or latex allergy.",
+    ],
+    "chief_complaint": [
+        "Chest pain",
+        "Chest pain with associated shortness of breath and sweating",
+        "Central chest pain radiating to the left arm with associated shortness of breath, nausea and "
+        "sweating, worsening over 40 minutes",
+    ],
+    "primary_diagnosis": [
+        "Acute coronary syndrome",
+        "Acute coronary syndrome — suspected STEMI",
+        "Acute coronary syndrome — suspected ST-elevation myocardial infarction, anterior territory, "
+        "with ongoing chest pain and autonomic features at handover",
+    ],
+    "rht_refusal_reason": [
+        "Patient feels better and will consult own GP in the morning.",
+        "Patient states symptoms have resolved and declines transport, intending to consult their own "
+        "general practitioner in the morning. Risks of non-conveyance explained and understood.",
+        "Patient states symptoms have fully resolved and declines both further assessment and "
+        "transport, intending to consult their own general practitioner in the morning. The reasons "
+        "transport was recommended were explained in the patient's home language, together with the "
+        "specific risks of non-conveyance including deterioration, collapse and death, and the "
+        "patient repeated these back in their own words. Patient is alert, orientated, has no "
+        "evidence of intoxication or head injury and was assessed as having capacity to refuse. A "
+        "family member was present throughout and was given the same explanation. Patient was advised "
+        "to call again without hesitation should symptoms return, and the emergency number was left "
+        "in writing on the kitchen counter.",
+    ],
+}
+
 
 def sa_id(dob: datetime, female: bool) -> str:
     """13-digit SA ID with a correct Luhn check digit."""
@@ -204,11 +338,62 @@ class Person:
         return f"{self.first} {self.surname}"
 
 
-def vary_vitals(sets: list, when: datetime) -> list:
+# Row shapes lifted from whichever reference PRF captured the richest one, so a
+# template that recorded no medications can still be grown to sixteen of them
+# with the exact keys the renderer reads. Filled by _collect_donors().
+DONOR: dict[str, dict] = {}
+
+
+def _collect_donors(tpls: dict) -> None:
+    """Remember the widest row of each repeating table across all templates.
+    Widest, not first: a row with more keys populated is the one that renders
+    every column, and a narrow donor would silently print half-empty tables."""
+    for field in ("vitals_sets", "iv_therapy", "medications"):
+        best = None
+        for prf in tpls.values():
+            for row in (prf.form_data or {}).get(field) or []:
+                if isinstance(row, dict) and (best is None or len(row) > len(best)):
+                    best = row
+        if best is not None:
+            DONOR[field] = copy.deepcopy(best)
+
+
+def _fit(rows: list, target: int | None, field: str = "") -> list:
+    """Grow or trim a repeating table to `target` rows, reusing the template's own
+    row as the shape so every added row carries exactly the keys the renderer
+    reads. Falls back to the donor shape when the template captured none."""
+    if target is None:
+        return rows
+    shapes = [r for r in rows if isinstance(r, dict)]
+    if not shapes:
+        donor = DONOR.get(field)
+        if donor is None:
+            return rows
+        shapes = [donor]
+        rows = []
+    if target <= len(rows):
+        return rows[:target]
+    out = list(rows)
+    while len(out) < target:
+        clone = copy.deepcopy(shapes[len(out) % len(shapes)])
+        # Drop embedded images from ADDED rows only. A per-row signature is real,
+        # but pasting the same 15 kB PNG into sixteen medication rows would put a
+        # quarter-megabyte of duplicate image into every record and measure the
+        # renderer's appetite for base64 rather than its layout. vary_rows writes
+        # the practitioner's name into the cleared field.
+        for k, v in list(clone.items()):
+            if isinstance(v, str) and v.startswith("data:"):
+                clone[k] = ""
+        out.append(clone)
+    return out
+
+
+def vary_vitals(sets: list, when: datetime, target: int | None = None) -> list:
     """Keep the template's vitals STRUCTURE (its exact keys) and replace only the
     measured values. gcs_total is derived — a blank total beside three filled
     components reads as a broken form."""
     severity = random.choices(["routine", "moderate", "critical"], weights=[55, 32, 13])[0]
+    sets = _fit(sets, target, "vitals_sets")
     out = []
     for i, s in enumerate(sets):
         if not isinstance(s, dict):
@@ -239,9 +424,11 @@ def vary_vitals(sets: list, when: datetime) -> list:
     return out
 
 
-def vary_rows(rows: list, when: datetime, crew_name: str, qual: str, kind: str) -> list:
+def vary_rows(rows: list, when: datetime, crew_name: str, qual: str, kind: str,
+              target: int | None = None) -> list:
+    rows = _fit(rows, target, "iv_therapy" if kind == "iv" else "medications")
     out = []
-    for r in rows:
+    for i, r in enumerate(rows):
         if not isinstance(r, dict):
             out.append(r)
             continue
@@ -250,12 +437,14 @@ def vary_rows(rows: list, when: datetime, crew_name: str, qual: str, kind: str) 
             new = {"type": random.choice(FLUIDS), "jelco_size": random.choice(["16g", "18g", "20g"]),
                    "site": random.choice(["Left ACF", "Right ACF", "Left dorsum of hand", "Right forearm"]),
                    "vol_infused": random.choice(["250", "500", "1000"]),
-                   "time_up": f"{when + timedelta(minutes=6):%H:%M}",
+                   # Stagger down the table: sixteen medications all stamped the
+                   # same minute is the tell that a record was generated.
+                   "time_up": f"{when + timedelta(minutes=6 + 4 * i):%H:%M}",
                    "indication": random.choice(["Fluid resuscitation", "Maintenance", "Medication route"])}
         else:
             drug, dose, route = random.choice(DRUGS)
             new = {"type": drug, "dose": dose, "route": route,
-                   "time": f"{when + timedelta(minutes=10):%H:%M}",
+                   "time": f"{when + timedelta(minutes=10 + 3 * i):%H:%M}",
                    "reason": f"Medication Administered via {route}"}
         for k, v in new.items():
             if k in n:
@@ -269,9 +458,14 @@ def vary_rows(rows: list, when: datetime, crew_name: str, qual: str, kind: str) 
     return out
 
 
-def build_from_template(tpl_fd: dict, when: datetime) -> tuple[dict, dict]:
+def build_from_template(tpl_fd: dict, when: datetime, band: str | None = None,
+                        tname: str = "") -> tuple[dict, dict]:
     """Deep-copy the template's form_data, then overwrite ONLY what must differ.
-    Anything not named here is preserved exactly as the crew captured it."""
+    Anything not named here is preserved exactly as the crew captured it.
+
+    `band` (a DENSITY_BANDS key) additionally sizes the record: it grows the
+    three repeating tables and swaps the free-text answers for a longer tier, so
+    the set spans from a quiet call to the largest one the form can hold."""
     fd = copy.deepcopy(tpl_fd)
     p = Person(when)
     crew1, q1, h1 = random.choice(CREW)
@@ -385,12 +579,30 @@ def build_from_template(tpl_fd: dict, when: datetime) -> tuple[dict, dict]:
     put("treating_practitioner_category", q1)
 
     # ── structured rows: keep the template's shape, vary the readings ───────
-    if isinstance(fd.get("vitals_sets"), list) and fd["vitals_sets"]:
-        fd["vitals_sets"] = vary_vitals(fd["vitals_sets"], when)
-    if isinstance(fd.get("iv_therapy"), list) and fd["iv_therapy"]:
-        fd["iv_therapy"] = vary_rows(fd["iv_therapy"], when, crew1, q1, "iv")
-    if isinstance(fd.get("medications"), list) and fd["medications"]:
-        fd["medications"] = vary_rows(fd["medications"], when, crew1, q1, "med")
+    # With a density band the tables are sized to it (growing from the donor
+    # shape when this template captured none); without one they keep exactly the
+    # rows the crew recorded, which is the original behaviour.
+    b = DENSITY_BANDS.get(band or "", None)
+    clinical = bool(b) and tname in CLINICAL_TEMPLATES
+    for field, key, fn in (("vitals_sets", "vitals", "vitals"),
+                           ("iv_therapy", "iv", "iv"),
+                           ("medications", "med", "med")):
+        cur = fd.get(field)
+        # A clinical call type that never captured this table at all still gets
+        # one built from the donor: "no medications key" is the commonest shape
+        # among the references and would otherwise cap the whole set at the two
+        # rows one template happened to record.
+        if cur is None and clinical:
+            cur = []
+        if not isinstance(cur, list):
+            continue
+        target = b[key] if clinical else None
+        if not cur and target is None:
+            continue
+        if fn == "vitals":
+            fd[field] = vary_vitals(cur, when, target)
+        else:
+            fd[field] = vary_rows(cur, when, crew1, q1, fn, target)
 
     # ── refusal wording ────────────────────────────────────────────────────
     if fd.get("patient_refused_treatment"):
@@ -403,7 +615,27 @@ def build_from_template(tpl_fd: dict, when: datetime) -> tuple[dict, dict]:
         put("rht_waiver_signatory_name", p.full)
         put("rht_waiver_witness_name", f"Const. {random.choice('KMTS')}. {random.choice(SURNAMES)}, SAPS")
 
-    fd[MARKER] = True
+    # ── prose tier ─────────────────────────────────────────────────────────
+    # LAST, deliberately: the refusal block above writes a short reason of its
+    # own, and an earlier pass here would be silently overwritten on exactly the
+    # call type (RHT) whose sheet is driven by how much the crew wrote.
+    #
+    # This is also the one place that will ADD a key the template did not carry,
+    # a deliberate exception to the preserve-by-default rule. A crew leaving
+    # "Findings on arrival" blank is the case this data set must NOT be limited
+    # to — the sheet only reaches its limits when they fill it in. Every key
+    # below is one PRFView renders.
+    if b:
+        tier = b["text"]
+        for key, tiers in PROSE.items():
+            if key.startswith("rht_") and not fd.get("patient_refused_treatment"):
+                continue
+            fd[key] = tiers[tier]
+
+    # The marker doubles as the band label, so "show me every extreme record"
+    # is one query. Teardown only tests it for NOT NULL, which a string satisfies
+    # exactly as the boolean the earlier batches carry.
+    fd[MARKER] = band or True
 
     mirror = {
         "patient_name": p.full,
@@ -508,11 +740,19 @@ async def run(args) -> None:
                         t.vehicle_id, t.crew_member_1_id, t.crew_member_2_id)
                     for n, t in tpls.items()}
         tpl_objs = {n: t for n, t in tpls.items()}
+        _collect_donors(tpls)
 
     names = list(TEMPLATE_MIX)
     weights = [TEMPLATE_MIX[n] for n in names]
     picks = random.choices(names, weights=weights, k=args.count)
     counts = {n: picks.count(n) for n in names}
+
+    if args.fill == "matrix":
+        bnames = list(DENSITY_MIX)
+        bands = random.choices(bnames, weights=[DENSITY_MIX[b] for b in bnames], k=args.count)
+    else:
+        bands = [None] * args.count
+    bcounts = {b: bands.count(b) for b in DENSITY_MIX}
 
     print(f"\n  Provider     : {provider.name}")
     print(f"  Existing PRFs: {existing}  (numbers up to #{base_no})")
@@ -522,7 +762,17 @@ async def run(args) -> None:
         f"{n}(#{tpl_data[n][0]})×{counts[n]}" for n in names if counts[n]))
     print(f"  Copied as-is : signatures, hospital sticker, vehicle + crew links, all other keys")
     print(f"  Overwritten  : identity, times, kms, clinical values, scheme, facility, crew")
-    print(f"  Marker       : form_data['{MARKER}'] = true  (+ manifest for teardown)")
+    if args.fill == "matrix":
+        print("  Fill density : " + ", ".join(
+            f"{b}×{bcounts[b]} (iv {DENSITY_BANDS[b]['iv']}/med {DENSITY_BANDS[b]['med']}"
+            f"/vitals {DENSITY_BANDS[b]['vitals']})" for b in DENSITY_MIX if bcounts[b]))
+        print(f"                 clinical tables grown only on {', '.join(sorted(CLINICAL_TEMPLATES))}"
+              " — RHT and DOD get the prose tiers only")
+        print(f"  Donor rows   : " + ", ".join(f"{k}({len(v)} keys)" for k, v in DONOR.items()))
+    else:
+        print("  Fill density : as captured (--fill matrix grades it for PDF limit testing)")
+    print(f"  Marker       : form_data['{MARKER}'] = band  (+ manifest for teardown)")
+    print(f"  Batch commit : every {args.batch} records")
     if args.plan:
         print("\n  --plan: nothing was written.\n")
         await engine.dispose()
@@ -533,13 +783,22 @@ async def run(args) -> None:
                 "provider_name": provider.name, "marker": MARKER, "records": []}
     made = 0
 
+    out = Path(args.manifest or f"demo_seed_manifest_{now:%Y%m%dT%H%M%SZ}.json")
+
+    def flush_manifest() -> None:
+        """Rewritten after every batch, never only at the end. A run interrupted
+        at record 9,000 must still leave a manifest that covers what was
+        committed — otherwise those records exist with no handle to remove them
+        but the marker, and teardown cross-checks the two against each other."""
+        out.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
     async with S() as db:
-        for i, tname in enumerate(picks, start=1):
+        for i, (tname, band) in enumerate(zip(picks, bands), start=1):
             tpl = tpl_objs[tname]
             when = now - timedelta(days=random.uniform(0, args.spread_days),
                                    hours=random.uniform(0, 24))
             number = base_no + i
-            fd, mirror = build_from_template(tpl_data[tname][1], when)
+            fd, mirror = build_from_template(tpl_data[tname][1], when, band, tname)
 
             prf = DigitalPRF(
                 provider_id=provider.id, prf_number=number, status=PRFStatus.DRAFT,
@@ -600,13 +859,20 @@ async def run(args) -> None:
 
             manifest["records"].append({
                 "prf_id": str(prf.id), "prf_number": number, "case_id": str(case.id),
-                "document_id": str(document.id), "claim_id": str(claim.id), "template": tname})
+                "document_id": str(document.id), "claim_id": str(claim.id),
+                "template": tname, "band": band})
             made += 1
-            if made % 100 == 0:
-                print(f"    ... {made}/{args.count}")
 
-        out = Path(args.manifest or f"demo_seed_manifest_{now:%Y%m%dT%H%M%SZ}.json")
-        out.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+            # Commit and release in batches. Held to the end, 15,000 records of
+            # ~65 kB each sit in the identity map at once and the process grows
+            # past a gigabyte before anything reaches the database.
+            if made % args.batch == 0:
+                flush_manifest()
+                await db.commit()
+                db.expunge_all()
+                print(f"    ... {made}/{args.count} committed")
+
+        flush_manifest()
         await db.commit()
 
     print(f"\n  Created {made} PRFs (+ case, document, claim each).")
@@ -675,6 +941,12 @@ def main() -> None:
     ap.add_argument("--spread-days", type=int, default=45)
     ap.add_argument("--rand-seed", type=int, default=20260814)
     ap.add_argument("--manifest")
+    ap.add_argument("--fill", choices=["real", "matrix"], default="real",
+                    help="real: keep each template's own field count. "
+                         "matrix: grade records across the DENSITY_BANDS so the "
+                         "set spans a quiet call to the largest the form holds.")
+    ap.add_argument("--batch", type=int, default=500,
+                    help="commit every N records (keeps memory flat on big runs)")
     ap.add_argument("--templates", action="store_true", help="show the reference PRFs and exit")
     ap.add_argument("--plan", action="store_true")
     ap.add_argument("--seed", action="store_true")

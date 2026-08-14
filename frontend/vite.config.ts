@@ -57,7 +57,10 @@ export default defineConfig({
   },
 
   server: {
-    port: 5173,
+    // PORT wins when it is set, so a tool that assigns a free port can start
+    // this server while the Docker frontend container is already bound to 5173.
+    // Falls back to 5173, which keeps a plain `npm run dev` behaving as before.
+    port: Number(process.env.PORT) || 5173,
     host: true,           // bind to 0.0.0.0 — accessible from phone on LAN at 192.168.68.116:5173
     // Allow Ngrok tunnels and external hosts
     allowedHosts: true,

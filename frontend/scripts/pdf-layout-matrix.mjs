@@ -26,6 +26,11 @@ import { chromium } from 'playwright';
 const BASE = process.env.HARNESS_URL || 'http://localhost:5199';
 const CEILING = 944;      // px — above this the exporter slices the sheet
 const LABEL_FLOOR = 5.0;  // pt — FieldRow labels below this are unreadable
+// The 0.46rem text is the smallest on any sheet and prints at 4.84pt when the
+// page needs no shrinking. The same 0.9-of-design rule the 944px ceiling is
+// derived from puts its floor at 4.84 x 0.9. Deriving it rather than picking a
+// round number keeps this gate and the ceiling describing one policy.
+const TEXT_FLOOR  = +(4.84 * 0.9).toFixed(2);   // 4.36pt
 const JSON_OUT = process.argv.includes('--json');
 
 const CALLS = ['PRIMARY', 'IHT', 'RHT', 'WCA_IOD', 'COURTESY', 'RESUS', 'DOD'];
@@ -45,8 +50,18 @@ const parse = (out) => {
     const m = ln.match(/^sheet (\d+): (\d+)x(\d+)px -> width (\d+)px.*branch=(\S+(?: x\d+)?)/);
     if (m) sheets.push({ n: +m[1], h: +m[3], branch: m[5] });
   }
-  const labels = [...String(out).matchAll(/label\s+0\.56rem: ([0-9.]+)pt/g)].map((x) => +x[1]);
-  return { sheets, minLabelPt: labels.length ? Math.min(...labels) : null };
+  const labels = [...String(out).matchAll(/label\s+[0-9.]+rem: ([0-9.]+)pt/g)].map((x) => +x[1]);
+  // The 0.56rem label is NOT the smallest text on the sheet — 0.46rem is, and a
+  // sheet that shrinks to fit takes both down together. Reading only the label
+  // let a page pass at 5.2pt while its smallest text printed at about 4.3pt,
+  // which is the whole defect this gate exists to catch. The harness has always
+  // printed this line; nothing was reading it.
+  const smalls = [...String(out).matchAll(/T&C\s+[0-9.]+rem: ([0-9.]+)pt/g)].map((x) => +x[1]);
+  return {
+    sheets,
+    minLabelPt: labels.length ? Math.min(...labels) : null,
+    minTextPt: smalls.length ? Math.min(...smalls) : null,
+  };
 };
 
 const run = async () => {
@@ -61,17 +76,20 @@ const run = async () => {
       await page.waitForSelector('.prf-page', { timeout: 15000 });
       await page.waitForTimeout(400);            // let fonts and the logo settle
       const out = await page.evaluate(() => window.__measure && window.__measure());
-      const { sheets, minLabelPt } = parse(out);
+      const { sheets, minLabelPt, minTextPt } = parse(out);
       const sliced = sheets.filter((s) => /slice/.test(s.branch));
+      const illegible = minTextPt !== null && minTextPt < TEXT_FLOOR;
       results.push({
         call, density: dname,
         sheets: sheets.length,
         tallest: Math.max(...sheets.map((s) => s.h), 0),
         sliced: sliced.map((s) => `sheet${s.n} ${s.branch} @${s.h}px (+${s.h - CEILING})`),
-        minLabelPt,
+        minLabelPt, minTextPt, illegible,
         // Page 1 slicing cuts a signature box in half — always a failure.
         page1Sliced: /slice/.test(sheets[0]?.branch || ''),
-        pass: sliced.length === 0 && (minLabelPt === null || minLabelPt >= LABEL_FLOOR),
+        pass: sliced.length === 0
+          && (minLabelPt === null || minLabelPt >= LABEL_FLOOR)
+          && !illegible,
       });
     }
   }
@@ -84,11 +102,16 @@ if (JSON_OUT) {
   console.log(JSON.stringify(results, null, 2));
 } else {
   console.log(`\n  PDF layout matrix — ceiling ${CEILING}px, label floor ${LABEL_FLOOR}pt\n`);
-  console.log(`  ${'call'.padEnd(9)} ${'density'.padEnd(8)} ${'sheets'.padEnd(7)} ${'tallest'.padEnd(8)} ${'label'.padEnd(7)} result`);
+  console.log(`  ${'call'.padEnd(9)} ${'density'.padEnd(8)} ${'sheets'.padEnd(7)} ${'tallest'.padEnd(8)} `
+    + `${'label'.padEnd(7)} ${'min-text'.padEnd(9)} result`);
   for (const r of results) {
-    const verdict = r.pass ? 'ok' : (r.page1Sliced ? 'FAIL page 1 sliced' : `FAIL ${r.sliced.join('; ')}`);
+    const verdict = r.pass ? 'ok'
+      : r.page1Sliced ? 'FAIL page 1 sliced'
+      : r.illegible ? `FAIL smallest text ${r.minTextPt}pt < ${TEXT_FLOOR}pt`
+      : `FAIL ${r.sliced.join('; ')}`;
     console.log(`  ${r.call.padEnd(9)} ${r.density.padEnd(8)} ${String(r.sheets).padEnd(7)} `
-      + `${String(r.tallest).padEnd(8)} ${String(r.minLabelPt ?? '-').padEnd(7)} ${verdict}`);
+      + `${String(r.tallest).padEnd(8)} ${String(r.minLabelPt ?? '-').padEnd(7)} `
+      + `${String(r.minTextPt ?? '-').padEnd(9)} ${verdict}`);
   }
   const failed = results.filter((r) => !r.pass);
   console.log(`\n  ${results.length - failed.length}/${results.length} pass`);
