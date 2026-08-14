@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { compressFile, MAX_RAW_FILE_BYTES, STICKER_MAX_DIM, STICKER_JPEG_QUAL } from '../utils/imageUtils';
 
 export type DocKey = 'hospital_sticker' | 'admission_form_image' | 'id_document_image' | 'medical_aid_image' | 'aod_document' | 'additional_document_image';
 
@@ -355,13 +356,24 @@ function CameraOverlay({ title, frame, onCancel, onCapture }: OverlayProps) {
     if (captured) onCapture(captured);
   };
 
-  const onPickFile = (f: File | null) => {
+  const onPickFile = async (f: File | null) => {
     if (!f) return;
     if (!f.type.startsWith('image/')) { alert('Please choose an image.'); return; }
-    if (f.size > 12 * 1024 * 1024)    { alert('Image exceeds 12 MB.');     return; }
-    const reader = new FileReader();
-    reader.onload = () => setCaptured(String(reader.result));
-    reader.readAsDataURL(f);
+    if (f.size > MAX_RAW_FILE_BYTES)  { alert('Image exceeds 12 MB.');     return; }
+    // Compress, like the camera path already does. This used to store the
+    // picked file VERBATIM — so a PNG screenshot from the gallery went into the
+    // record at full resolution, which is where 11 of 16 stored hospital
+    // stickers came from, and the 260 KB worst case. The camera button was
+    // never the problem; the "choose a file" button was.
+    try {
+      setCaptured(await compressFile(f, STICKER_MAX_DIM, STICKER_JPEG_QUAL));
+    } catch {
+      // Never lose the capture to a compression failure — the sticker is
+      // evidence. Fall back to the raw file, as before.
+      const reader = new FileReader();
+      reader.onload = () => setCaptured(String(reader.result));
+      reader.readAsDataURL(f);
+    }
   };
 
   return (

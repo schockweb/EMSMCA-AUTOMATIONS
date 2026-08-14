@@ -1,8 +1,10 @@
 /**
  * SignaturePad — Touch-to-sign canvas component.
- * Works on mobile touch screens. Outputs base64 PNG.
+ * Works on mobile touch screens. Outputs a cropped WebP data URL
+ * (PNG on browsers without WebP encode support) — see encodeSignature.
  */
 import { useRef, useEffect, useState, useCallback } from 'react';
+import { encodeSignature } from '../utils/imageUtils';
 
 interface SignaturePadProps {
   label: string;
@@ -85,7 +87,10 @@ export default function SignaturePad({ label, value, onChange, height = 140 }: S
     setIsDrawing(false);
     const canvas = canvasRef.current;
     if (canvas && hasContent) {
-      onChange(canvas.toDataURL('image/png'));
+      // Cropped WebP, not a full-canvas PNG: this pad was writing ~30 KB per
+      // signature, more than the hospital sticker costs. Same ink, ~6x smaller.
+      const encoded = encodeSignature(canvas);
+      if (encoded) onChange(encoded);
     }
   }, [hasContent, onChange]);
 

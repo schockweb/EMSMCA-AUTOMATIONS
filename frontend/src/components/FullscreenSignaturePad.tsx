@@ -4,6 +4,7 @@
  * room for an accurate signature (e.g. handover on mobile).
  */
 import { useRef, useEffect, useState, useCallback } from 'react';
+import { encodeSignature } from '../utils/imageUtils';
 
 interface Props {
   label: string;
@@ -247,24 +248,16 @@ export function FullscreenCanvas({ label, initial, onCancel, onSave }: CanvasPro
     const canvas = canvasRef.current;
     if (!canvas || !hasContent) return;
     
-    // Downscale massive mobile canvases before export to prevent 2MB+ base64
-    // payloads that bloat the DB and trigger Nginx 413 Payload Too Large.
-    const MAX_WIDTH = 600;
-    let exportDataUrl = canvas.toDataURL('image/png');
-    
-    if (canvas.width > MAX_WIDTH) {
-      const scale = MAX_WIDTH / canvas.width;
-      const tCanvas = document.createElement('canvas');
-      tCanvas.width = MAX_WIDTH;
-      tCanvas.height = canvas.height * scale;
-      const tCtx = tCanvas.getContext('2d');
-      if (tCtx) {
-        tCtx.drawImage(canvas, 0, 0, tCanvas.width, tCanvas.height);
-        exportDataUrl = tCanvas.toDataURL('image/webp', 0.8);
-      }
-    }
-    
-    onSave(exportDataUrl);
+    // Crop to the ink and encode WebP — unconditionally.
+    //
+    // This used to compress ONLY when the canvas was wider than 600px, and keep
+    // a full-canvas PNG otherwise, so a narrower pad silently produced the
+    // biggest file. It also downscaled, which measurably makes a signature
+    // LARGER (anti-aliasing a crisp stroke defeats the compressor) as well as
+    // softer. encodeSignature crops instead, which is where the real saving is:
+    // the ink occupies about 12% of the canvas.
+    const encoded = encodeSignature(canvas);
+    onSave(encoded || canvas.toDataURL('image/png'));
   };
 
   return (
