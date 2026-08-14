@@ -728,16 +728,10 @@ async def list_providers(
             "logo_url": p.logo_url,
             "is_active": p.is_active,
             "portal_login_username": p.portal_login_email,
-            # Presence only, never the value. The client-settings form is driven
-            # from THIS list rather than from GET /{id}/settings, so the flag has
-            # to be here too or the form cannot tell a client that has no portal
-            # password from one whose password simply is not displayed.
-            "portal_login_password_set": bool(p.portal_login_password_hash),
             "admin_email": admin_email,
             "smtp_service": p.smtp_service,
             "smtp_email": p.smtp_email,
             "smtp_configured": bool(p.smtp_email and p.smtp_password_encrypted),
-            "smtp_password_set": bool(p.smtp_password_encrypted),
             "crew_count": crew_counts.get(p.id, 0),
             "vehicle_count": vehicle_counts.get(p.id, 0),
             "prf_count": prf_counts.get(p.id, 0),
@@ -1604,24 +1598,10 @@ async def get_provider_settings(
         "address": provider.address,
         "logo_url": provider.logo_url,
         "portal_login_username": provider.portal_login_email,
-        # Whether a password EXISTS — never the password or its hash. The edit
-        # form cannot pre-fill a password, so without this an administrator
-        # cannot tell "no password has ever been set" from "one is set and is
-        # simply not shown", and the two need opposite actions.
-        #
-        # There is deliberately no equivalent flag for the portal ADMIN
-        # password: an admin is a CrewMember, and every crew row is created
-        # with a random unusable hash (add_crew_member), so a hash being
-        # present would report "set" for an account that has never had a
-        # usable password. Claiming that in the UI would be worse than saying
-        # nothing. Reporting it truthfully needs a "password last set" marker
-        # on crew_members, which is a schema change.
-        "portal_login_password_set": bool(provider.portal_login_password_hash),
         "admin_email": admin_res.scalar_one_or_none(),
         "smtp_service": provider.smtp_service,
         "smtp_email": provider.smtp_email,
         "smtp_configured": bool(provider.smtp_email and provider.smtp_password_encrypted),
-        "smtp_password_set": bool(provider.smtp_password_encrypted),
     }
 
 

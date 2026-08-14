@@ -45,15 +45,11 @@ interface Provider {
   logo_url?: string | null;
   portal_login_username?: string | null;
   admin_email?: string | null;
-  // Whether a password EXISTS. The password itself is never returned, so a
-  // blank field alone cannot tell "never set" from "set but not shown".
-  portal_login_password_set?: boolean;
   // PRF outbound email account — the address submitted PRF PDFs are emailed
   // FROM to receiving facilities. Password is write-only (never returned).
   smtp_service?: string | null;
   smtp_email?: string | null;
   smtp_configured?: boolean;
-  smtp_password_set?: boolean;
 }
 
 interface CrewMember {
@@ -78,95 +74,6 @@ interface Vehicle {
 
 const teal = '#088395';
 const rose = '#C2185B';
-
-// ── Password fields ────────────────────────────────────────────────────────
-// A stored password is never sent back to the browser, so every password box
-// on this form loads blank. Blank therefore means two opposite things — "no
-// password has ever been set" and "one is set and simply cannot be shown" —
-// and they need opposite actions from the administrator. The status line below
-// each box says which it is, and the field's own placeholder says what leaving
-// it blank will do.
-
-/** Satisfies validate_password_complexity: >= 8 chars, upper, lower, digit, symbol. */
-const generatePassword = (): string => {
-  const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';   // no I/O — misread on a printout
-  const lower = 'abcdefghijkmnopqrstuvwxyz';  // no l
-  const digit = '23456789';                   // no 0/1
-  const symbol = '!@#$%^&*?';
-  const all = upper + lower + digit + symbol;
-  const pick = (set: string, n: number) => {
-    const out: string[] = [];
-    const rnd = new Uint32Array(n);
-    crypto.getRandomValues(rnd);
-    for (let i = 0; i < n; i++) out.push(set[rnd[i] % set.length]);
-    return out;
-  };
-  // One guaranteed character from each class, then fill, then shuffle — so the
-  // policy is met by construction rather than by luck.
-  const chars = [...pick(upper, 1), ...pick(lower, 1), ...pick(digit, 1), ...pick(symbol, 1), ...pick(all, 10)];
-  const order = new Uint32Array(chars.length);
-  crypto.getRandomValues(order);
-  return chars.map((c, i) => ({ c, k: order[i] })).sort((a, b) => a.k - b.k).map(x => x.c).join('');
-};
-
-/** "Password set" / "No password set" line + Reset and Show controls. */
-const PasswordStatus = ({ isSet, unknown, value, revealed, onGenerate, onToggleReveal }: {
-  isSet?: boolean;
-  /** True where the backend cannot prove either way — say nothing rather than guess. */
-  unknown?: boolean;
-  value: string;
-  revealed: boolean;
-  /** Omitted where a password cannot be generated here — a mail provider's app
-      password is issued by Google or Microsoft, so offering to "reset" it would
-      promise something this form cannot do. */
-  onGenerate?: () => void;
-  onToggleReveal: () => void;
-}) => (
-  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 5, flexWrap: 'wrap' }}>
-    {!unknown && (
-      <span style={{
-        display: 'inline-flex', alignItems: 'center', gap: 5,
-        fontSize: '0.68rem', fontWeight: 700,
-        color: isSet ? '#1d7a4c' : '#946510',
-      }}>
-        <span style={{
-          width: 7, height: 7, borderRadius: 999,
-          background: isSet ? '#1d7a4c' : '#946510', display: 'inline-block',
-        }} />
-        {isSet ? 'Password is set' : 'No password set'}
-      </span>
-    )}
-    {onGenerate && (
-      <button
-        type="button"
-        onClick={onGenerate}
-        style={{
-          background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-          color: teal, fontSize: '0.68rem', fontWeight: 700, textDecoration: 'underline',
-        }}
-      >
-        Reset password
-      </button>
-    )}
-    {value && (
-      <button
-        type="button"
-        onClick={onToggleReveal}
-        style={{
-          background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-          color: '#5b6478', fontSize: '0.68rem', fontWeight: 700, textDecoration: 'underline',
-        }}
-      >
-        {revealed ? 'Hide' : 'Show'}
-      </button>
-    )}
-    {value && (
-      <span style={{ flexBasis: '100%', fontSize: '0.65rem', color: '#946510', fontWeight: 600 }}>
-        Copy this now — once saved it is stored encrypted and cannot be shown again.
-      </span>
-    )}
-  </div>
-);
 
 // ── Inline SVG icons (stroke = currentColor so they inherit text color) ──
 type IconProps = { size?: number };
@@ -331,17 +238,6 @@ export default function ProviderManagement() {
   // Edit client modal state
   const [showEditClient, setShowEditClient] = useState(false);
   const [editForm, setEditForm] = useState({ name: '', pr_number: '', prf_name: '', phone: '', email: '', address: '', is_active: true, portal_username: '', portal_password: '', admin_email: '', admin_password: '', prfNumber: '', smtp_service: 'gmail', smtp_email: '', smtp_password: '' });
-  // Which password boxes are showing their text. A freshly generated password
-  // is revealed automatically: it is the only moment it can be read, since it
-  // is hashed on save and never returned again.
-  const [revealPw, setRevealPw] = useState<Record<string, boolean>>({});
-  const pwKeys = ['portal_password', 'admin_password', 'smtp_password'] as const;
-  type PwKey = typeof pwKeys[number];
-  const generateInto = (key: PwKey) => {
-    const pw = generatePassword();
-    setEditForm(f => ({ ...f, [key]: pw }));
-    setRevealPw(r => ({ ...r, [key]: true }));
-  };
   const [editSaving, setEditSaving] = useState(false);
   // Deactivate, not delete. A client cannot be removed: their crew are named on
   // submitted PRFs and on the record of who opened which patient's file, and
@@ -529,9 +425,6 @@ export default function ProviderManagement() {
     });
     setLogoPreview(selectedProvider.logo_url || null);
     setLogoPreviewFailed(false);
-    // Never carry a revealed password across an open — the fields themselves
-    // are blank again, so a stale "revealed" flag would only be confusing.
-    setRevealPw({});
     setShowEditClient(true);
     setShowDeactivateConfirm(false);
   };
@@ -1245,20 +1138,10 @@ export default function ProviderManagement() {
                     <label style={labelStyle}>Password</label>
                     <input
                       style={inputStyle}
-                      type={revealPw.portal_password ? 'text' : 'password'}
+                      type="password"
                       value={editForm.portal_password}
                       onChange={e => setEditForm({ ...editForm, portal_password: e.target.value })}
-                      placeholder={selectedProvider?.portal_login_password_set
-                        ? 'Leave blank to keep the current password'
-                        : 'Set a password'}
                       autoComplete="new-password" data-lpignore="true" data-form-type="other"
-                    />
-                    <PasswordStatus
-                      isSet={!!selectedProvider?.portal_login_password_set}
-                      value={editForm.portal_password}
-                      revealed={!!revealPw.portal_password}
-                      onGenerate={() => generateInto('portal_password')}
-                      onToggleReveal={() => setRevealPw(r => ({ ...r, portal_password: !r.portal_password }))}
                     />
                   </div>
                 </div>
@@ -1282,22 +1165,10 @@ export default function ProviderManagement() {
                     <label style={labelStyle}>Admin Password</label>
                     <input
                       style={inputStyle}
-                      type={revealPw.admin_password ? 'text' : 'password'}
+                      type="password"
                       value={editForm.admin_password}
                       onChange={e => setEditForm({ ...editForm, admin_password: e.target.value })}
-                      placeholder="Leave blank to keep the current password"
                       autoComplete="new-password" data-lpignore="true" data-form-type="other"
-                    />
-                    {/* `unknown`: the admin is a crew record, and every crew row
-                        carries a hash from the moment it is created, so the
-                        server cannot tell a real password from the placeholder
-                        one. Claiming "set" here would be a guess. */}
-                    <PasswordStatus
-                      unknown
-                      value={editForm.admin_password}
-                      revealed={!!revealPw.admin_password}
-                      onGenerate={() => generateInto('admin_password')}
-                      onToggleReveal={() => setRevealPw(r => ({ ...r, admin_password: !r.admin_password }))}
                     />
                   </div>
                 </div>
@@ -1337,21 +1208,10 @@ export default function ProviderManagement() {
                   <label style={labelStyle}>App Password</label>
                   <input
                     style={inputStyle}
-                    type={revealPw.smtp_password ? 'text' : 'password'}
+                    type="password"
                     value={editForm.smtp_password}
                     onChange={e => setEditForm({ ...editForm, smtp_password: e.target.value })}
-                    placeholder={selectedProvider?.smtp_password_set
-                      ? 'Leave blank to keep the current app password'
-                      : 'Paste the app password from Gmail / Outlook'}
                     autoComplete="new-password" data-lpignore="true" data-form-type="other"
-                  />
-                  {/* No Reset here on purpose — an app password is issued by the
-                      mail provider, so it can only be pasted in, never generated. */}
-                  <PasswordStatus
-                    isSet={!!selectedProvider?.smtp_password_set}
-                    value={editForm.smtp_password}
-                    revealed={!!revealPw.smtp_password}
-                    onToggleReveal={() => setRevealPw(r => ({ ...r, smtp_password: !r.smtp_password }))}
                   />
                 </div>
               </div>
