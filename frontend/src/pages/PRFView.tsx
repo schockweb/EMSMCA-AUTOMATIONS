@@ -441,6 +441,61 @@ const CashVerification = ({ fd, wide = false }: { fd: any; wide?: boolean }) => 
 // taller and had slack to spare; on a PRF with short addresses it is not free
 // at all. The cap makes the block cost the same whether a sticker was captured
 // or not, so page 1's height no longer depends on it.
+// ── IV / medication rows ───────────────────────────────────────────────────
+// Extracted so the clinical page and the continuation sheet render byte-identical
+// rows from ONE definition. They were duplicated inline before; a second copy is
+// how a table starts drifting from itself between two sheets of the same record.
+//
+// Each row costs ~178px: four field rows plus a 50px signature box. That box is
+// the bulk of it and is not padding — it is the practitioner's signature against
+// a drug they gave, which is the whole evidentiary point of the section.
+const RowSignature = ({ sign }: { sign: any }) => (
+  <div style={{ padding: '4px 7px', background: SOFT_BG, borderTop: `1px solid ${LN}` }}>
+    <div style={{ fontSize: '0.58rem', fontWeight: 900, color: MUT, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Signature</div>
+    <div style={{
+      minHeight: 50, width: '100%', boxSizing: 'border-box',
+      border: '2px solid #475569', borderRadius: 4, background: '#fff',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 2,
+      position: 'relative',
+    }}>
+      <div style={{ position: 'absolute', bottom: '25%', left: '10%', right: '10%', borderBottom: '2px dotted #cbd5e1', zIndex: 0 }} />
+      {typeof sign === 'string' && sign.startsWith('data:image/') ? (
+        <img src={sign} alt="Sign" style={{ maxWidth: '100%', maxHeight: 44, objectFit: 'contain', position: 'relative', zIndex: 1 }} />
+      ) : (
+        <span style={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: sign ? INK : DIM, position: 'relative', zIndex: 1 }}>{sign || 'Not captured'}</span>
+      )}
+    </div>
+  </div>
+);
+
+const IvRow = ({ row, first }: { row: any; first: boolean }) => (
+  <>
+    {!first && <div style={{ borderTop: `2px solid ${GREEN_DK}` }} />}
+    <FieldRow label="Type / Fluid" value={[row.type, row.jelco_size].filter(Boolean).join(' · ')} />
+    <FieldRow label="Site" value={row.site} />
+    <div style={{ display: 'flex' }}>
+      <div style={{ flex: 1 }}><FieldRow label="Vol Inf." value={row.vol_infused} /></div>
+      <div style={{ flex: 1, borderLeft: `1px solid ${LN}` }}><FieldRow label="Time Up" value={row.time_up} /></div>
+    </div>
+    <FieldRow label="Reason" value={row.indication} />
+    <RowSignature sign={row.sign} />
+  </>
+);
+
+const MedRow = ({ row, first }: { row: any; first: boolean }) => (
+  <>
+    {!first && <div style={{ borderTop: `2px solid ${GREEN_DK}` }} />}
+    <FieldRow label="Drug / Type" value={row.type} />
+    <FieldRow label="Route" value={row.route} />
+    <div style={{ display: 'flex' }}>
+      <div style={{ flex: 1 }}><FieldRow label="Dose" value={row.dose} /></div>
+      <div style={{ flex: 1, borderLeft: `1px solid ${LN}` }}><FieldRow label="Time" value={row.time} /></div>
+    </div>
+    <FieldRow label="Reason" value={row.reason} />
+    <RowSignature sign={row.sign} />
+  </>
+);
+
 const HospitalSticker = ({ fd, wide = false, capped = false }: { fd: any; wide?: boolean; capped?: boolean }) => (
   <>
     <SectionHead label="Hospital Sticker" />
@@ -1464,8 +1519,46 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
   // an otherwise-hidden IV / Medication section on the PDF.
   const ivRows: any[] = (Array.isArray(fd.iv_therapy) ? fd.iv_therapy : [])
     .filter((r: any) => anyValue(r, ['type', 'jelco_size', 'site', 'vol_infused', 'time_up', 'indication', 'sign']));
+  // How many IV + medication rows may sit on the clinical page before the sheet
+  // is sliced. MEASURED, not chosen — scripts/pdf-layout-matrix.mjs, 2026-08-14:
+  //
+  //     iv=1 med=1    893px   fits (51px of the 944px budget left)
+  //     iv=1 med=2   1128px   slice x2
+  //     iv=6 med=8   3079px   slice x4
+  //
+  // The clinical page's FIXED content already occupies 862px of the 944px
+  // one-sheet budget, and each row costs ~178px, so the true capacity is two
+  // rows. Widening cannot buy more: the exporter's widen and shrink trade
+  // exactly, which is where the 944px comes from in the first place.
+  //
+  // Re-run the matrix and change this number if the clinical page's fixed
+  // content ever shrinks or grows. Do not raise it by eye.
+  const CLINICAL_IVMED_BUDGET = 2;
   const medRows: any[] = (Array.isArray(fd.medications) ? fd.medications : [])
     .filter((r: any) => anyValue(r, ['type', 'route', 'dose', 'time', 'reason', 'sign']));
+  // All-or-nothing, NOT a split. Printing two rows here and the rest overleaf
+  // would make an adjudicator read one table across two sheets and invite them
+  // to miss the remainder; the drugs a patient was given is exactly the section
+  // that must be read whole. So either the section fits on the clinical page or
+  // it moves to a sheet of its own, with a pointer left behind.
+  const ivMedTotal = ivRows.length + medRows.length;
+  const ivMedInline = ivMedTotal <= CLINICAL_IVMED_BUDGET;
+  const ivMedOwnSheet = ivMedTotal > CLINICAL_IVMED_BUDGET;
+  // The continuation sheet has to paginate too, or the fix just moves the
+  // overflow one sheet along. The first attempt did exactly that: 8 medication
+  // rows in one column measured 1487px and sliced, which is header(63px) +
+  // 8 x 178px almost to the pixel.
+  //
+  //     rows per column = (944 - 63) / 178 = 4.9  ->  4, with the remainder as
+  //     margin for a row that wraps to an extra line.
+  //
+  // Each sheet carries up to 4 IV and 4 medication rows side by side, so a
+  // sheet is emitted for every 4 of whichever list is longer.
+  const IVMED_ROWS_PER_SHEET = 4;
+  const ivMedSheetCount = ivMedOwnSheet
+    ? Math.max(Math.ceil(ivRows.length / IVMED_ROWS_PER_SHEET),
+               Math.ceil(medRows.length / IVMED_ROWS_PER_SHEET))
+    : 0;
 
   // Documents the crew attached on the form (WCA / employee docs, RAF OAR
   // report) — each renders on its own sheet after the clinical pages, so the
@@ -3625,7 +3718,22 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
             {/* Intravenous Therapy (stacked vertically) — the whole section is
                 omitted when no IV row was recorded, instead of printing an
                 empty placeholder row with a "Not captured" signature box. */}
-            {ivRows.length > 0 && (
+            {/* Moved wholesale to its own sheet once the two sections together
+                exceed what the clinical page can carry — see ivMedInline. */}
+            {ivMedOwnSheet && ivMedTotal > 0 && (
+              <>
+                <SectionHead label="Intravenous Therapy & Medication" />
+                <div style={{
+                  borderTop: `1px solid ${LN}`, padding: '8px 9px', background: SOFT_BG,
+                  fontSize: '0.62rem', color: MUT, fontStyle: 'italic',
+                }}>
+                  {ivRows.length} IV {ivRows.length === 1 ? 'line' : 'lines'} and {medRows.length}{' '}
+                  {medRows.length === 1 ? 'medication' : 'medications'} recorded — printed in full on
+                  the “Intravenous Therapy &amp; Medication” sheet.
+                </div>
+              </>
+            )}
+            {ivRows.length > 0 && ivMedInline && (
               <>
             <SectionHead label="Intravenous Therapy" />
             {/* Clinical justification for the IV. The crew must answer these
@@ -3646,68 +3754,18 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
                 : null;
             })()}
             {ivRows.map((row: any, i: number) => (
-              <Fragment key={`iv-${i}`}>
-                {i > 0 && <div style={{ borderTop: `2px solid ${GREEN_DK}` }} />}
-                <FieldRow label="Type / Fluid" value={[row.type, row.jelco_size].filter(Boolean).join(' · ')} />
-                <FieldRow label="Site" value={row.site} />
-                <div style={{ display: 'flex' }}>
-                  <div style={{ flex: 1 }}><FieldRow label="Vol Inf." value={row.vol_infused} /></div>
-                  <div style={{ flex: 1, borderLeft: `1px solid ${LN}` }}><FieldRow label="Time Up" value={row.time_up} /></div>
-                </div>
-                <FieldRow label="Reason" value={row.indication} />
-                <div style={{ padding: '4px 7px', background: SOFT_BG, borderTop: `1px solid ${LN}` }}>
-                  <div style={{ fontSize: '0.58rem', fontWeight: 900, color: MUT, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Signature</div>
-                  <div style={{
-                    minHeight: 50, width: '100%', boxSizing: 'border-box',
-                    border: '2px solid #475569', borderRadius: 4, background: '#fff',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 2,
-                    position: 'relative',
-                  }}>
-                    <div style={{ position: 'absolute', bottom: '25%', left: '10%', right: '10%', borderBottom: '2px dotted #cbd5e1', zIndex: 0 }} />
-                    {typeof row.sign === 'string' && row.sign.startsWith('data:image/') ? (
-                      <img src={row.sign} alt="Sign" style={{ maxWidth: '100%', maxHeight: 44, objectFit: 'contain', position: 'relative', zIndex: 1 }} />
-                    ) : (
-                      <span style={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: row.sign ? INK : DIM, position: 'relative', zIndex: 1 }}>{row.sign || 'Not captured'}</span>
-                    )}
-                  </div>
-                </div>
-              </Fragment>
+              <Fragment key={`iv-${i}`}><IvRow row={row} first={i === 0} /></Fragment>
             ))}
               </>
             )}
 
             {/* Medication / Infusion (stacked vertically) — likewise omitted
                 entirely when no medication row was recorded. */}
-            {medRows.length > 0 && (
+            {medRows.length > 0 && ivMedInline && (
               <>
             <SectionHead label="Medication / Infusion" />
             {medRows.map((row: any, i: number) => (
-              <Fragment key={`med-${i}`}>
-                {i > 0 && <div style={{ borderTop: `2px solid ${GREEN_DK}` }} />}
-                <FieldRow label="Drug / Type" value={row.type} />
-                <FieldRow label="Route" value={row.route} />
-                <div style={{ display: 'flex' }}>
-                  <div style={{ flex: 1 }}><FieldRow label="Dose" value={row.dose} /></div>
-                  <div style={{ flex: 1, borderLeft: `1px solid ${LN}` }}><FieldRow label="Time" value={row.time} /></div>
-                </div>
-                <FieldRow label="Reason" value={row.reason} />
-                <div style={{ padding: '4px 7px', background: SOFT_BG, borderTop: `1px solid ${LN}` }}>
-                  <div style={{ fontSize: '0.58rem', fontWeight: 900, color: MUT, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Signature</div>
-                  <div style={{
-                    minHeight: 50, width: '100%', boxSizing: 'border-box',
-                    border: '2px solid #475569', borderRadius: 4, background: '#fff',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 2,
-                    position: 'relative',
-                  }}>
-                    <div style={{ position: 'absolute', bottom: '25%', left: '10%', right: '10%', borderBottom: '2px dotted #cbd5e1', zIndex: 0 }} />
-                    {typeof row.sign === 'string' && row.sign.startsWith('data:image/') ? (
-                      <img src={row.sign} alt="Sign" style={{ maxWidth: '100%', maxHeight: 44, objectFit: 'contain', position: 'relative', zIndex: 1 }} />
-                    ) : (
-                      <span style={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: row.sign ? INK : DIM, position: 'relative', zIndex: 1 }}>{row.sign || 'Not captured'}</span>
-                    )}
-                  </div>
-                </div>
-              </Fragment>
+              <Fragment key={`med-${i}`}><MedRow row={row} first={i === 0} /></Fragment>
             ))}
               </>
             )}
@@ -3836,6 +3894,73 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
       </div>{/* /prf-print-frame (page 2) */}
       </>
       )}
+      {/* ═══════ IV Therapy & Medication — own sheet ═══════
+          Rendered when the two sections together exceed CLINICAL_IVMED_BUDGET.
+          They print here IN FULL and not at all on the clinical page, so the
+          drug record is read as one table rather than hunted across two sheets.
+          Two columns, because a single stacked list of ~178px rows would itself
+          overflow at about five rows and reintroduce the very problem this
+          solves. */}
+      {Array.from({ length: ivMedSheetCount }, (_, s) => {
+        const ivSlice = ivRows.slice(s * IVMED_ROWS_PER_SHEET, (s + 1) * IVMED_ROWS_PER_SHEET);
+        const medSlice = medRows.slice(s * IVMED_ROWS_PER_SHEET, (s + 1) * IVMED_ROWS_PER_SHEET);
+        const part = ivMedSheetCount > 1 ? ` (page ${s + 1} of ${ivMedSheetCount})` : '';
+        return (
+        <div className="prf-print-frame" key={`ivmed-${s}`}>
+          <div className="prf-page" style={{
+            width: 1220, minHeight: 862,
+            margin: '28px auto 0', background: '#fff', color: INK,
+            border: `2px solid ${LN}`, boxShadow: '0 6px 24px rgba(0,0,0,0.1)',
+            display: 'flex', flexDirection: 'column',
+          }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 2.4fr 2fr', borderBottom: `2px solid ${LN}` }}>
+              <div style={{ padding: '10px 12px', borderRight: `1px solid ${LN}`, display: 'flex', alignItems: 'center' }}>
+                <ProviderLogo prov={prov} height={30} />
+              </div>
+              <div style={{
+                padding: '10px 12px', borderRight: `1px solid ${LN}`, display: 'flex', alignItems: 'center',
+                fontSize: '0.78rem', fontWeight: 800, color: INK, letterSpacing: '0.08em', textTransform: 'uppercase',
+              }}>
+                Intravenous Therapy &amp; Medication{part}
+              </div>
+              <div style={{
+                padding: '10px 12px', display: 'flex', alignItems: 'center',
+                justifyContent: 'flex-end', gap: 18, fontSize: '0.68rem', color: MUT,
+              }}>
+                <span>Patient: <b style={{ color: INK }}>{patientFullName}</b></span>
+                {prf.case_number && <span>Case: <b style={{ color: INK, fontFamily: 'ui-monospace, monospace' }}>{prf.case_number}</b></span>}
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', flex: 1, minHeight: 0 }}>
+              <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
+                {ivSlice.length > 0 && (
+                  <>
+                    <SectionHead label="Intravenous Therapy" />
+                    {ivSlice.map((row: any, i: number) => (
+                      <Fragment key={`iv-o-${s}-${i}`}><IvRow row={row} first={i === 0} /></Fragment>
+                    ))}
+                  </>
+                )}
+                <FillLines />
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                {medSlice.length > 0 && (
+                  <>
+                    <SectionHead label="Medication / Infusion" />
+                    {medSlice.map((row: any, i: number) => (
+                      <Fragment key={`med-o-${s}-${i}`}><MedRow row={row} first={i === 0} /></Fragment>
+                    ))}
+                  </>
+                )}
+                <FillLines />
+              </div>
+            </div>
+          </div>
+        </div>
+        );
+      })}
+
       {/* ═══════════════════ PAGE 3 — Vitals Continuation ═══════════════════
           Rendered only when more than VITALS_PER_PAGE (3) vital sets were
           captured. Same A4-landscape frame as the earlier pages so the print

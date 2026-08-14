@@ -33,6 +33,10 @@ const DENSITIES = [
   ['min',     { iv: 0, med: 0, vitals: 1 }],
   ['typical', { iv: 1, med: 2, vitals: 3 }],
   ['max',     { iv: 6, med: 8, vitals: 6 }],
+  // Beyond anything a real call should produce. Present because clearing only
+  // the density that happened to fail proves nothing about the next one — the
+  // first pagination attempt passed 'max' while still slicing at this arm.
+  ['extreme', { iv: 12, med: 16, vitals: 6 }],
 ];
 
 const parse = (out) => {

@@ -1730,3 +1730,68 @@ describe('PRF PDF — vitals fill the clinical page before spilling to a continu
     expect(pages().length).toBeGreaterThan(2);
   });
 });
+
+describe('PRF PDF — IV and medication rows never overflow the clinical page', () => {
+  const pages = () => Array.from(document.querySelectorAll('.prf-page'));
+  const ivRows = (n: number) => Array.from({ length: n }, (_, i) => ({
+    type: `Fluid-${i}`, jelco_size: '18g', site: 'Left ACF', vol_infused: '500',
+    time_up: '09:5' + (i % 10), indication: `IV-INDICATION-${i}`, sign: `Crew ${i}`,
+  }));
+  const medRows = (n: number) => Array.from({ length: n }, (_, i) => ({
+    type: `Drug-${i}`, route: 'IV', dose: `${i + 1} mg`, time: '10:0' + (i % 10),
+    reason: `MED-REASON-${i}`, sign: `Crew ${i}`,
+  }));
+
+  async function renderWith(iv: number, med: number) {
+    const built = buildPrf('PRIMARY', 'MED AID');
+    currentPrf = { ...built.prf, form_data: { ...built.fd, iv_therapy: ivRows(iv), medications: medRows(med) } };
+    renderPrfView();
+    await screen.findAllByText((c) => c.includes(built.anchor));
+  }
+
+  const sheetOf = (label: string) =>
+    pages().findIndex(pg => Array.from(pg.querySelectorAll('*'))
+      .some(el => el.children.length === 0 && (el.textContent || '').trim() === label));
+
+  // Two rows is the measured capacity of the clinical page (scripts/pdf-layout-matrix.mjs).
+  it('keeps a small IV/medication section on the clinical page', async () => {
+    await renderWith(1, 1);
+    expect(screen.queryByText('Intravenous Therapy')).not.toBeNull();
+    expect(screen.queryByText('Medication / Infusion')).not.toBeNull();
+    // No separate sheet, and therefore no pointer.
+    expect(screen.queryAllByText((c) => c.includes('printed in full on'), { exact: false }).length).toBe(0);
+  });
+
+  // The regression that started this: 1 IV + 2 drugs measured 1128px and sliced.
+  it('moves the whole section to its own sheet once it exceeds the page budget', async () => {
+    await renderWith(1, 2);
+    // A pointer is left where the section used to be...
+    expect(screen.queryAllByText((c) => c.includes('printed in full on'), { exact: false }).length)
+      .toBeGreaterThan(0);
+    // ...and every row still renders, on a LATER sheet than the clinical page.
+    for (let i = 0; i < 2; i++) {
+      expect(screen.queryAllByText((c) => c.includes(`MED-REASON-${i}`), { exact: false }).length)
+        .toBeGreaterThan(0);
+    }
+    expect(sheetOf('Intravenous Therapy')).toBeGreaterThan(1);
+  });
+
+  // The first fix moved the overflow onto one sheet that then sliced itself.
+  it('paginates the continuation sheet instead of letting it grow without bound', async () => {
+    const before = (await renderWith(1, 2), pages().length);
+    cleanup();
+    await renderWith(12, 16);
+    // 16 medications at 4 per sheet needs 4 continuation sheets, so the total
+    // must grow rather than pile onto a single over-tall one.
+    expect(pages().length).toBeGreaterThan(before);
+    // Every row is still present — pagination must not drop the tail.
+    for (const i of [0, 7, 15]) {
+      expect(screen.queryAllByText((c) => c.includes(`MED-REASON-${i}`), { exact: false }).length,
+        `medication row ${i} vanished`).toBeGreaterThan(0);
+    }
+    for (const i of [0, 11]) {
+      expect(screen.queryAllByText((c) => c.includes(`IV-INDICATION-${i}`), { exact: false }).length,
+        `IV row ${i} vanished`).toBeGreaterThan(0);
+    }
+  });
+});
