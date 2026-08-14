@@ -51,6 +51,12 @@ export default function Cases() {
   const [error, setError] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [total, setTotal] = useState(0);
+  // Server-side paging. The list used to pull a flat 200 and tell the user
+  // "showing 200 of N" — everything past the 200th was reachable only by
+  // guessing a search term. At ~1500 PRFs a day that is most of a day's work
+  // invisible by lunchtime, so the page walks the whole set instead.
+  const PAGE_SIZE = 50;
+  const [page, setPage] = useState(0);
 
   // Failed-PRF alert (amber triangle in the header). Counts PRFs that failed
   // processing + ones stuck in SUBMITTED with no case. When > 0 the triangle
@@ -101,11 +107,15 @@ export default function Cases() {
   // Server-side search (debounced). Fires on mount too (empty term = full list),
   // so 7 years of retained cases stay reachable — matching happens on the server,
   // not just within the loaded page. See GET /api/cases + /api/cases/count.
+  // A new search restarts at page 1 — staying on page 12 of the old result set
+  // would show an empty list and read as "no matches".
+  useEffect(() => { setPage(0); }, [searchTerm]);
+
   useEffect(() => {
     const t = setTimeout(() => { fetchCases(); }, 300);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchTerm]);
+  }, [searchTerm, page]);
 
   useEffect(() => {
     if (showRfiQueue) loadRFIs();
@@ -141,10 +151,11 @@ export default function Cases() {
       setLoading(true);
       const term = searchTerm.trim();
       const searchQs = term ? `&search=${encodeURIComponent(term)}` : '';
-      // Pull a generous page plus the true total, so "showing N of M" is honest
-      // and records past the page stay reachable by searching.
+      // One page at a time, plus the true total so the pager knows how far it
+      // can walk. The list is ordered created_at DESC, id DESC server-side, so
+      // skip/limit is stable and a record cannot appear on two pages.
       const [listRes, countRes] = await Promise.all([
-        api.get(`/api/cases/?queue=management&limit=200${searchQs}`),
+        api.get(`/api/cases/?queue=management&skip=${page * PAGE_SIZE}&limit=${PAGE_SIZE}${searchQs}`),
         api.get(`/api/cases/count?queue=management${searchQs}`),
       ]);
       setCases(listRes.data);
@@ -439,8 +450,42 @@ export default function Cases() {
             background: 'var(--surface-50)',
           }}>
             <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-              Showing <strong style={{ color: 'var(--text-primary)' }}>{sortedCases.length}</strong> of <strong style={{ color: 'var(--text-primary)' }}>{total}</strong> cases
+              {total === 0 ? 'No cases' : (
+                <>
+                  Showing <strong style={{ color: 'var(--text-primary)' }}>{page * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE + sortedCases.length, total)}</strong>
+                  {' '}of <strong style={{ color: 'var(--text-primary)' }}>{total}</strong> cases
+                </>
+              )}
             </span>
+
+            {/* Pager. Rendered whenever there is more than one page — at ~1500
+                PRFs a day that is every day, so it is not an edge case. */}
+            {total > PAGE_SIZE && (() => {
+              const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+              const btn = (disabled: boolean): React.CSSProperties => ({
+                padding: '5px 12px', fontSize: '0.8rem', fontWeight: 700,
+                borderRadius: 'var(--radius-sm)',
+                border: '1px solid var(--surface-200)',
+                background: disabled ? 'var(--surface-100)' : 'var(--surface-0)',
+                color: disabled ? 'var(--text-muted)' : 'var(--text-primary)',
+                cursor: disabled ? 'default' : 'pointer',
+              });
+              return (
+                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <button type="button" style={btn(page === 0)} disabled={page === 0}
+                          onClick={() => setPage(0)} title="First page">« First</button>
+                  <button type="button" style={btn(page === 0)} disabled={page === 0}
+                          onClick={() => setPage(p => Math.max(0, p - 1))}>‹ Prev</button>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', minWidth: 96, textAlign: 'center' }}>
+                    Page <strong style={{ color: 'var(--text-primary)' }}>{page + 1}</strong> of {pageCount}
+                  </span>
+                  <button type="button" style={btn(page >= pageCount - 1)} disabled={page >= pageCount - 1}
+                          onClick={() => setPage(p => p + 1)}>Next ›</button>
+                  <button type="button" style={btn(page >= pageCount - 1)} disabled={page >= pageCount - 1}
+                          onClick={() => setPage(pageCount - 1)} title="Last page">Last »</button>
+                </span>
+              );
+            })()}
             {flaggedCount > 0 && (
               <span style={{
                 fontSize: '0.76rem', color: 'var(--brand-orange)', fontWeight: 700,

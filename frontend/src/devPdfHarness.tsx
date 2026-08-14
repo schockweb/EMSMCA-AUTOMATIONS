@@ -98,7 +98,13 @@ const MAXFILL = qs.get('max') === '1';
 // ?refused=1 — RHT where the patient declined. Hides five blocks and prints
 // the waiver instead, so it is a different page-1 shape, not a smaller one.
 const REFUSED = qs.get('refused') === '1';
-const LOREM = (n: number) => Array.from({ length: n }, (_, i) =>
+// ?text=N multiplies every free-text block. Row counts are paginated now
+// (vitals, IV, medication), so narrative length is the remaining unbounded
+// dimension — a genuinely sick patient is not extra ROWS so much as a much
+// longer history, findings and management note. This is the axis that decides
+// whether page 1 and the clinical page hold.
+const TEXT_MULT = Math.max(1, Number(qs.get('text') ?? 1));
+const LOREM = (n: number) => Array.from({ length: n * TEXT_MULT }, (_, i) =>
   `Line ${i + 1}: documented in full by the attending practitioner at the scene, including all relevant observations and the clinical reasoning applied.`).join(' ');
 
 // ?sticker=1 attaches a hospital sticker. A CAPTURED sticker is what changes
