@@ -506,6 +506,10 @@ async def save_prf(
         if new_c1 is not None and new_c1 != crew.id:
             raise HTTPException(403, "Cannot reassign the primary crew member of a PRF.")
 
+    # After BOTH form_data and the signature columns are set for this request —
+    # the duplicate can only be recognised once both sides are current.
+    _drop_duplicated_crew_signature(prf)
+
     await db.commit()
     await db.refresh(prf)
 
@@ -906,6 +910,45 @@ async def delete_prf(
     await db.commit()
     logger.info("Crew %s deleted draft PRF #%d", crew.full_name, prf_number)
     return {"status": "deleted", "prf_number": prf_number}
+
+
+def _drop_duplicated_crew_signature(prf: DigitalPRF) -> None:
+    """Stop storing crew 1's signature twice.
+
+    The same PNG/WebP was being written to BOTH `crew_signature` (a column) and
+    `form_data['crew_signoff_sigs']['c1']` — measured on production, 25 of 36
+    real records carried both copies. The reader already prefers the blob and
+    falls back to the column:
+
+        fd.crew_signoff_sigs?.c1 || prf.signatures?.crew_signature   (PRFView)
+
+    so removing the blob copy renders identically via the fallback, which is a
+    path the UI already exercises on every record that has only the column.
+
+    ONLY removed when the two are byte-identical. If they differ, or the column
+    is empty, the blob is the sole copy of that signature and dropping it would
+    destroy evidence on a clinical-legal document — so this never guesses.
+
+    c2 is deliberately untouched: `signatures` in the API response carries no
+    crew_2_signature field, so `crew_signoff_sigs['c2']` is the ONLY copy of the
+    second crew member's signature. The `prf.signatures?.crew_2_signature`
+    fallback beside it in PRFView is dead code and must not be relied on.
+    """
+    fd = prf.form_data
+    if not isinstance(fd, dict):
+        return
+    sigs = fd.get("crew_signoff_sigs")
+    if not isinstance(sigs, dict):
+        return
+    col = prf.crew_signature
+    if not col or sigs.get("c1") != col:
+        return
+    trimmed = {k: v for k, v in sigs.items() if k != "c1"}
+    # Reassign rather than mutate: form_data is a plain JSON column, so an
+    # in-place edit leaves no history for SQLAlchemy to notice and the change
+    # would never be written.
+    prf.form_data = {**fd, "crew_signoff_sigs": trimmed} if trimmed else \
+        {k: v for k, v in fd.items() if k != "crew_signoff_sigs"}
 
 
 _TIMESTAMP_COLS = (
