@@ -496,27 +496,34 @@ const MedRow = ({ row, first }: { row: any; first: boolean }) => (
   </>
 );
 
-const HospitalSticker = ({ fd, wide = false, capped = false }: { fd: any; wide?: boolean; capped?: boolean }) => (
+// `slim` is for a Billing column that is already full. The empty affix box is
+// not decoration — a printed form needs somewhere to physically stick the
+// hospital label, and there is no attachments sheet to send it to when nothing
+// was captured — so it is shortened rather than dropped. At 44px it costs the
+// column about 75px against the full slot's ~145px, which is the difference
+// between a WCA/IOD sheet fitting and shrinking below the legibility floor.
+const HospitalSticker = ({ fd, wide = false, capped = false, slim = false }:
+  { fd: any; wide?: boolean; capped?: boolean; slim?: boolean }) => (
   <>
     <SectionHead label="Hospital Sticker" />
     <div style={{
-      borderTop: `1px solid ${LN}`, padding: 6,
+      borderTop: `1px solid ${LN}`, padding: slim ? 4 : 6,
       display: 'flex', alignItems: 'center', justifyContent: 'center',
     }}>
       <div style={{
-        width: '96%', minHeight: wide ? 150 : 110,
-        ...(capped ? { maxHeight: 110 } : {}),
+        width: '96%', minHeight: slim ? 44 : (wide ? 150 : 110),
+        ...(capped ? { maxHeight: slim ? 44 : 110 } : {}),
         border: `1.6px dashed ${MUT}`, borderRadius: 4,
         background: SOFT_BG,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        padding: 6, overflow: 'hidden',
+        padding: slim ? 3 : 6, overflow: 'hidden',
       }}>
         {fd.hospital_sticker ? (
           <img src={fd.hospital_sticker} alt="hospital sticker"
                style={{ maxWidth: '100%', maxHeight: capped ? 96 : (wide ? 260 : 200), objectFit: 'contain' }} />
         ) : (
           <div style={{
-            fontSize: '0.62rem', fontWeight: 700, color: DIM,
+            fontSize: slim ? '0.5rem' : '0.62rem', fontWeight: 700, color: DIM,
             textTransform: 'uppercase', letterSpacing: '0.08em', textAlign: 'center',
             lineHeight: 1.6,
           }}>Affix hospital sticker here</div>
@@ -1828,12 +1835,28 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
   // it holds only the Handover Signature — so the sticker prints directly under
   // that signature, where the adjudicator is already looking, instead of
   // sending them to a later sheet for a call that has almost nothing on it.
-  const billingBlockIsCompact =
+  // The employer block renders on EITHER the billing type or the call type —
+  // see the first branch of billingInfoContent. This test has to use the same
+  // condition or the two drift apart, and they had: it read billing_type alone,
+  // so a WCA/IOD call billed to a medical aid (a real combination — the crew
+  // picks the payer independently of the call type) rendered the nine-row
+  // employer block AND was classified compact. Page 1 kept the ~145px sticker
+  // block on top of a column that was already full and came to 984px against a
+  // 944px ceiling, so it shrank to fit and printed its smallest text at 4.27pt.
+  const billsAsWcaIod = billingType === 'WCA / IOD'
+    || (fd.call_type || '').toUpperCase() === 'WCA_IOD';
+  const billingBlockIsCompact = !billsAsWcaIod && (
     fd.call_type === 'COURTESY' ||
     fd.billing_type === 'MED AID' ||
     fd.billing_type === 'RAF' ||
-    (fd.billing_type === 'PVT' && fd.pvt_payment_method === 'Indigent');
-  const stickerOnPage1 = stickerVisible && !!fd.hospital_sticker && billingBlockIsCompact;
+    (fd.billing_type === 'PVT' && fd.pvt_payment_method === 'Indigent'));
+  // Compactness, not capture, decides whether page 1 carries the block at all.
+  // The empty "affix here" slot costs the column the same ~145px the image does
+  // (the render site caps the image to the slot), so gating only the captured
+  // case left the expensive half on exactly the sheets that had no room: a
+  // WCA/IOD call with NO sticker still printed the full empty slot and still
+  // overflowed. Both halves now follow the same rule.
+  const stickerOnPage1 = stickerVisible && billingBlockIsCompact;
   // Still exactly ONE call site per artefact — the rule this file follows, and
   // the one whose breach printed the same sticker twice. Page 1 and the
   // documents sheet are now mutually exclusive by construction.
@@ -3088,11 +3111,17 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
                 sticker captured the empty slot still prints, so it can be
                 affixed to the paper form by hand. Hidden entirely for RHT (no
                 hospital transport, so no sticker). */}
-            {stickerVisible && !stickerOnDocumentSheet && <HospitalSticker fd={fd} capped />}
+            {stickerOnPage1 && <HospitalSticker fd={fd} capped />}
             {stickerOnDocumentSheet && (
               <div style={{ padding: '3px 6px', borderTop: `1px solid ${LN}`, fontSize: '0.5rem', color: MUT, fontStyle: 'italic' }}>
                 Hospital sticker — see the patient documents sheet.
               </div>
+            )}
+            {/* Full column, nothing captured: there is no documents sheet to
+                defer to, so the affix box stays — at the slim height, because
+                the full one is what pushed this column past the ceiling. */}
+            {stickerVisible && !stickerOnPage1 && !stickerOnDocumentSheet && (
+              <HospitalSticker fd={fd} capped slim />
             )}
             <FillLines />
           </div>

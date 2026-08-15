@@ -32,17 +32,36 @@ const LABEL_FLOOR = 5.0;  // pt — FieldRow labels below this are unreadable
 // round number keeps this gate and the ceiling describing one policy.
 const TEXT_FLOOR  = +(4.84 * 0.9).toFixed(2);   // 4.36pt
 const JSON_OUT = process.argv.includes('--json');
+// 112 combinations is too many to read when they pass. --quiet prints only the
+// failures plus the tally.
+const QUIET = process.argv.includes('--quiet');
 
 const CALLS = ['PRIMARY', 'IHT', 'RHT', 'WCA_IOD', 'COURTESY', 'RESUS', 'DOD'];
+// Density was only ever the ROW count — iv / med / vitals. It is not what makes
+// page 1 tall. Page 1 carries no clinical tables at all; its height comes from
+// how much text sits in the patient, debtor and billing columns, and the
+// harness has always had fixtures for that (`max=1` fills every optional field,
+// `long=1` the long free-text answers, `sig=3` the three T&C marks). Nothing
+// passed them, so every "max" and "extreme" result was measured against a sheet
+// whose billing column read "—" on every row. WCA/IOD at genuine max fill is
+// 1499px against a 944px ceiling and slices in two; the gate reported it ok.
+//
+// The bands now carry the fill flags they always implied.
 const DENSITIES = [
-  ['min',     { iv: 0, med: 0, vitals: 1 }],
-  ['typical', { iv: 1, med: 2, vitals: 3 }],
-  ['max',     { iv: 6, med: 8, vitals: 6 }],
+  ['min',     { iv: 0,  med: 0,  vitals: 1 }, {}],
+  ['typical', { iv: 1,  med: 2,  vitals: 3 }, {}],
+  ['max',     { iv: 6,  med: 8,  vitals: 6 }, { max: 1 }],
   // Beyond anything a real call should produce. Present because clearing only
   // the density that happened to fail proves nothing about the next one — the
   // first pagination attempt passed 'max' while still slicing at this arm.
-  ['extreme', { iv: 12, med: 16, vitals: 6 }],
+  ['extreme', { iv: 12, med: 16, vitals: 6 }, { max: 1, long: 1, sig: 3 }],
 ];
+// The billing block a call type is actually billed under is chosen by the crew
+// and is NOT implied by the call type: a WCA/IOD call billed to a medical aid
+// renders the tall employer block AND is classified compact by the sticker
+// rule, which is the combination that overflowed. Sweeping the payer axis is
+// the only way that pairing shows up.
+const BILLINGS = ['MED AID', 'WCA / IOD', 'RAF', 'PVT'];
 
 const parse = (out) => {
   const sheets = [];
@@ -70,8 +89,11 @@ const run = async () => {
   const results = [];
 
   for (const call of CALLS) {
-    for (const [dname, d] of DENSITIES) {
-      const url = `${BASE}/pdf-harness.html?call=${call}&iv=${d.iv}&med=${d.med}&vitals=${d.vitals}&sticker=1`;
+    for (const [dname, d, fill] of DENSITIES) {
+     for (const billing of BILLINGS) {
+      const extra = Object.entries(fill).map(([k, v]) => `&${k}=${v}`).join('');
+      const url = `${BASE}/pdf-harness.html?call=${call}&iv=${d.iv}&med=${d.med}`
+        + `&vitals=${d.vitals}&sticker=1&billing=${encodeURIComponent(billing)}${extra}`;
       await page.goto(url, { waitUntil: 'networkidle' });
       await page.waitForSelector('.prf-page', { timeout: 15000 });
       await page.waitForTimeout(400);            // let fonts and the logo settle
@@ -80,7 +102,7 @@ const run = async () => {
       const sliced = sheets.filter((s) => /slice/.test(s.branch));
       const illegible = minTextPt !== null && minTextPt < TEXT_FLOOR;
       results.push({
-        call, density: dname,
+        call, density: dname, billing,
         sheets: sheets.length,
         tallest: Math.max(...sheets.map((s) => s.h), 0),
         sliced: sliced.map((s) => `sheet${s.n} ${s.branch} @${s.h}px (+${s.h - CEILING})`),
@@ -91,6 +113,7 @@ const run = async () => {
           && (minLabelPt === null || minLabelPt >= LABEL_FLOOR)
           && !illegible,
       });
+     }
     }
   }
   await browser.close();
@@ -102,19 +125,27 @@ if (JSON_OUT) {
   console.log(JSON.stringify(results, null, 2));
 } else {
   console.log(`\n  PDF layout matrix — ceiling ${CEILING}px, label floor ${LABEL_FLOOR}pt\n`);
-  console.log(`  ${'call'.padEnd(9)} ${'density'.padEnd(8)} ${'sheets'.padEnd(7)} ${'tallest'.padEnd(8)} `
-    + `${'label'.padEnd(7)} ${'min-text'.padEnd(9)} result`);
+  console.log(`  ${'call'.padEnd(9)} ${'density'.padEnd(8)} ${'billing'.padEnd(10)} ${'sheets'.padEnd(7)} `
+    + `${'tallest'.padEnd(8)} ${'label'.padEnd(7)} ${'min-text'.padEnd(9)} result`);
   for (const r of results) {
     const verdict = r.pass ? 'ok'
-      : r.page1Sliced ? 'FAIL page 1 sliced'
+      : r.page1Sliced ? `FAIL page 1 sliced @${r.tallest}px`
       : r.illegible ? `FAIL smallest text ${r.minTextPt}pt < ${TEXT_FLOOR}pt`
       : `FAIL ${r.sliced.join('; ')}`;
-    console.log(`  ${r.call.padEnd(9)} ${r.density.padEnd(8)} ${String(r.sheets).padEnd(7)} `
-      + `${String(r.tallest).padEnd(8)} ${String(r.minLabelPt ?? '-').padEnd(7)} `
-      + `${String(r.minTextPt ?? '-').padEnd(9)} ${verdict}`);
+    if (!r.pass || !QUIET) {
+      console.log(`  ${r.call.padEnd(9)} ${r.density.padEnd(8)} ${r.billing.padEnd(10)} `
+        + `${String(r.sheets).padEnd(7)} `
+        + `${String(r.tallest).padEnd(8)} ${String(r.minLabelPt ?? '-').padEnd(7)} `
+        + `${String(r.minTextPt ?? '-').padEnd(9)} ${verdict}`);
+    }
   }
   const failed = results.filter((r) => !r.pass);
   console.log(`\n  ${results.length - failed.length}/${results.length} pass`);
-  if (failed.length) console.log(`  FAILING: ${[...new Set(failed.map((f) => f.call + '/' + f.density))].join(', ')}\n`);
+  if (failed.length) {
+    const byCall = {};
+    for (const f of failed) (byCall[f.call] ||= new Set()).add(f.density);
+    console.log('  FAILING: ' + Object.entries(byCall)
+      .map(([c, s]) => `${c}(${[...s].join(',')})`).join('  ') + '\n');
+  }
 }
 process.exit(results.every((r) => r.pass) ? 0 : 1);
