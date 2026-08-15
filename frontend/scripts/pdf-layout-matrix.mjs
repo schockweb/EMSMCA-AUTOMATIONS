@@ -2,8 +2,16 @@
  * PDF layout regression gate — renders the PRF in a REAL browser and fails when
  * a sheet exceeds the one-page ceiling or drops below the legibility floor.
  *
+ *     npm i --no-save playwright && npx playwright install chromium   # once
  *     npx vite --config vite.config.ts --port 5199 &      # or: preview_start pdf-harness
- *     node scripts/pdf-layout-matrix.mjs                  # add --json for machine output
+ *     node scripts/pdf-layout-matrix.mjs --quiet          # add --json for machine output
+ *
+ * playwright is installed with --no-save ON PURPOSE. Adding it to package.json
+ * regenerates package-lock.json, and regenerating the lock on Windows drops the
+ * optional dependencies that only resolve on Linux (11 @emnapi entries went to
+ * 6). The production image builds with `npm ci`, which refuses a lock that
+ * disagrees with package.json — so committing the dependency for this dev-only
+ * gate broke the deploy. It is not worth a lock file.
  *
  * WHY THIS EXISTS
  * ---------------
