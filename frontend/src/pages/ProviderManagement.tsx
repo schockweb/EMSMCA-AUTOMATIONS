@@ -805,17 +805,17 @@ export default function ProviderManagement() {
 
                 <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12 }}>
                   <div>
-                    <label style={labelStyle}>PR Number</label>
+                    <label style={labelStyle}>Practice Number</label>
                     <input style={inputStyle} maxLength={50} value={newProvider.prNumber} onChange={e => setNewProvider({ ...newProvider, prNumber: e.target.value })} />
                   </div>
                   <div>
-                    <label style={labelStyle}>PTY Reg Number</label>
+                    <label style={labelStyle}>Company Registration Number</label>
                     <input style={inputStyle} maxLength={50} value={newProvider.ptyRegNumber} onChange={e => setNewProvider({ ...newProvider, ptyRegNumber: e.target.value })} />
                   </div>
                 </div>
 
                 <div>
-                  <label style={labelStyle}>Latest PRF Number</label>
+                  <label style={labelStyle}>Start PRF Number</label>
                   {/* Accepts the keyword+number form used to categorise PRFs — the counter is seeded from the digits (EL30 → 30, next PRF 31). */}
                   <input
                     style={inputStyle}
@@ -826,7 +826,7 @@ export default function ProviderManagement() {
                 </div>
 
                 <div>
-                  <label style={labelStyle}>PRF Name</label>
+                  <label style={labelStyle}>PRF Prefix</label>
                   <input
                     style={inputStyle}
                     maxLength={100}
@@ -871,7 +871,7 @@ export default function ProviderManagement() {
                 </div>
 
                 <div style={{ background: 'var(--surface-50)', padding: 16, borderRadius: 8, border: '1px solid var(--surface-100)' }}>
-                  <h4 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: 12, color: 'var(--text)' }}>Portal Admin Login</h4>
+                  <h4 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: 12, color: 'var(--text)' }}>Portal Admin Login (USER)</h4>
                   <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12 }}>
                     <div>
                       <label style={labelStyle}>Admin Email</label>
@@ -897,7 +897,7 @@ export default function ProviderManagement() {
                 {/* PRF sending account — submitted PRF PDFs are emailed to the
                     receiving facility FROM this address. */}
                 <div style={{ background: 'var(--surface-50)', padding: 16, borderRadius: 8, border: '1px solid var(--surface-100)' }}>
-                  <h4 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: 12, color: 'var(--text)' }}>PRF Sending Email</h4>
+                  <h4 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: 12, color: 'var(--text)' }}>PRF Submission Email</h4>
                   <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12 }}>
                     <div>
                       <label style={labelStyle}>Email Service</label>
@@ -915,7 +915,7 @@ export default function ProviderManagement() {
                     </div>
                   </div>
                   <div style={{ marginTop: 12 }}>
-                    <label style={labelStyle}>App Password</label>
+                    <label style={labelStyle}>Email Password for Verification</label>
                     <input style={inputStyle} type="password" value={newProvider.smtpPassword}
                       onChange={e => setNewProvider({ ...newProvider, smtpPassword: e.target.value })}
                       autoComplete="new-password" data-lpignore="true" data-form-type="other" />
