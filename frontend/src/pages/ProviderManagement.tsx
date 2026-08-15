@@ -1076,7 +1076,7 @@ export default function ProviderManagement() {
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12 }}>
                 <div>
-                  <label style={labelStyle}>PR Number</label>
+                  <label style={labelStyle}>Practice Number</label>
                   <input style={inputStyle} value={editForm.pr_number} onChange={e => setEditForm({ ...editForm, pr_number: e.target.value })} />
                 </div>
                 <div>
@@ -1093,7 +1093,7 @@ export default function ProviderManagement() {
                 <input style={inputStyle} value={editForm.address} onChange={e => setEditForm({ ...editForm, address: e.target.value })} />
               </div>
               <div>
-                <label style={labelStyle}>Latest PRF Number</label>
+                <label style={labelStyle}>Start PRF Number</label>
                 {/* Accepts the keyword+number form used to categorise PRFs — the counter is seeded from the digits (EL30 → 30, next PRF 31). */}
                 <input
                   style={inputStyle}
@@ -1103,7 +1103,7 @@ export default function ProviderManagement() {
                 />
               </div>
               <div>
-                <label style={labelStyle}>PRF Name</label>
+                <label style={labelStyle}>PRF Prefix</label>
                 <input
                   style={inputStyle}
                   value={editForm.prf_name}
@@ -1149,7 +1149,7 @@ export default function ProviderManagement() {
 
               {/* ── Portal Admin Login ── */}
               <div style={{ background: 'var(--surface-50)', padding: '14px 16px', borderRadius: 10, border: '1px solid var(--surface-200)' }}>
-                <div style={{ fontSize: '0.7rem', fontWeight: 800, color: '#2563eb', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>Portal Admin Login</div>
+                <div style={{ fontSize: '0.7rem', fontWeight: 800, color: '#2563eb', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>Portal Admin Login (USER)</div>
                 <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 10 }}>
                   <div>
                     <label style={labelStyle}>Admin Email</label>
@@ -1179,7 +1179,7 @@ export default function ProviderManagement() {
                     write-only: blank keeps the stored one. ── */}
               <div style={{ background: 'var(--surface-50)', padding: '14px 16px', borderRadius: 10, border: '1px solid var(--surface-200)' }}>
                 <div style={{ fontSize: '0.7rem', fontWeight: 800, color: teal, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
-                  PRF Sending Email{selectedProvider?.smtp_configured ? ' — configured' : ''}
+                  PRF Submission Email{selectedProvider?.smtp_configured ? ' — configured' : ''}
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 10 }}>
                   <div>
@@ -1205,7 +1205,7 @@ export default function ProviderManagement() {
                   </div>
                 </div>
                 <div style={{ marginTop: 10 }}>
-                  <label style={labelStyle}>App Password</label>
+                  <label style={labelStyle}>Email Password for Verification</label>
                   <input
                     style={inputStyle}
                     type="password"
