@@ -51,9 +51,24 @@ FROM nginx:1.29-alpine AS serve
 LABEL maintainer="EMS Claims Portal <admin@emsclaims.co.za>"
 LABEL description="EMS Claims Portal — Frontend (production)"
 
-# Remove default Nginx site and create snippets dir
-# (snippets dir is needed for security-headers.conf include)
-RUN rm -f /etc/nginx/conf.d/default.conf \
+# Take Alpine's current security patches, then remove the default site and
+# create the snippets dir (needed for the security-headers.conf include).
+#
+# The base image is only rebuilt when nginx itself is released, so on any given
+# day it lags Alpine's package repo. Pinning the base got this container from
+# 35 HIGH/CRITICAL to 11; every one of the remaining 11 was a base package with
+# a patch already published and simply not yet baked in — libssl3/libcrypto3
+# (TLS) and nghttp2 (HTTP/2) among them, which is this container's actual
+# attack surface. `apk upgrade` takes them to zero.
+#
+# This trades exact reproducibility for currency, deliberately: two builds of
+# the same commit a month apart will not be byte-identical. For the only
+# internet-reachable service in the deployment, shipping known-patched
+# libraries is worth more than a reproducible hash — and releases are tagged as
+# images (see deploy/scripts/tag-release.sh), so rollback still targets an
+# exact artefact rather than a rebuild.
+RUN apk upgrade --no-cache \
+    && rm -f /etc/nginx/conf.d/default.conf \
     && mkdir -p /etc/nginx/snippets
 
 # Copy built static assets from the build stage
