@@ -1727,6 +1727,15 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
   // separate sheet each would spend two pages on one story.
   const clinicalDetailSheet = historyOwnSheet || surveyOwnSheet;
 
+  // The clinical page's middle column carries History AND the inline IV /
+  // Medication tables. It is only worth a column while it still holds one of
+  // them: with the history moved and the drug tables on their own sheet, it
+  // measured 330px wide with 143px of content and 717px of blank ruled lines
+  // under it. On a printed clinical form an empty column does not read as
+  // spare room, it reads as a section the crew failed to fill in.
+  const hasInlineIvMed = ivMedInline && ivMedTotal > 0;
+  const clinicalCol2Hidden = historyOwnSheet && !hasInlineIvMed;
+
   const IVMED_ROWS_PER_SHEET = 4;
   const ivMedSheetCount = ivMedOwnSheet
     ? Math.max(Math.ceil(ivRows.length / IVMED_ROWS_PER_SHEET),
@@ -3871,7 +3880,19 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
             headings underneath only argued with it. */}
         {refused ? null : (
         <div style={{
-          display: 'grid', gridTemplateColumns: '1fr 1.3fr 2.5fr',
+          display: 'grid',
+          // When the history has moved to the Clinical Detail sheet its column
+          // has nothing left to hold. Keeping it cost a 330px-wide strip with
+          // one italic line of content and 717px of blank ruled lines under it
+          // — the page stopped being truncated and started being half empty
+          // instead, which is the same defect wearing a different hat.
+          //
+          // Dropping it gives the width back to the two columns that need it:
+          // the survey goes from 254px to ~380px, so its prose wraps less and
+          // the column gets SHORTER, and the vitals table gets room for its
+          // widest rows. The pointer moves to a single line at the foot of the
+          // survey column, where it costs ~20px instead of a column.
+          gridTemplateColumns: clinicalCol2Hidden ? '1.15fr 2.5fr' : '1fr 1.3fr 2.5fr',
           borderTop: `2px solid ${LN}`, flex: 1, minHeight: 0,
         }}>
           {/* COL 1 — Oxygen / Airway / Circ / Immob / Primary + Secondary Survey */}
@@ -3943,17 +3964,7 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
               );
             })()}
 
-            {surveyOwnSheet ? (
-              <>
-                <SectionHead label="Primary & Secondary Survey" />
-                <div style={{
-                  borderTop: `1px solid ${LN}`, padding: '8px 9px', background: SOFT_BG,
-                  fontSize: '0.62rem', color: MUT, fontStyle: 'italic',
-                }}>
-                  Written up in full on the “Clinical Detail” sheet.
-                </div>
-              </>
-            ) : (
+            {surveyOwnSheet ? null : (
               <>
             <SectionHead label="Primary Survey" />
             <FieldRow label="A — Airway"      value={fd.survey_a} />
@@ -3975,6 +3986,23 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
                 they read with the clinical survey. They still hide when nothing
                 was captured, and Patient Priority is still omitted for Resus. */}
             {mechanismAndPriority()}
+            {/* ONE pointer for whatever moved, at the foot of this column and
+                costing a line rather than a column. Naming both sections in a
+                single sentence beats two separate notices saying the same
+                thing about the same sheet. */}
+            {(historyOwnSheet || surveyOwnSheet) && (
+              <div style={{
+                borderTop: `1px solid ${LN}`, padding: '7px 9px', background: SOFT_BG,
+                fontSize: '0.6rem', color: MUT, fontStyle: 'italic',
+              }}>
+                {historyOwnSheet && surveyOwnSheet
+                  ? 'Clinical history and the primary / secondary survey are'
+                  : historyOwnSheet
+                    ? 'The clinical history is'
+                    : 'The primary and secondary survey is'}
+                {' '}printed in full on the “Clinical Detail” sheet.
+              </div>
+            )}
             <FillLines />
           </div>
 
@@ -3982,28 +4010,24 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
               IV + Medication were relocated here from col 3 so that col 3
               can absorb the full vitals time-series (all 26 rows when fully
               captured) without the IV / Medication tables getting clipped
-              and breaking the layout. */}
+              and breaking the layout.
+              Omitted entirely once the history has moved: an empty column is
+              not a neutral thing on a printed form, it reads as a section the
+              crew failed to complete. */}
+          {!clinicalCol2Hidden && (
           <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
-            <SectionHead label="History" />
-            {historyOwnSheet ? (
-              <div style={{
-                borderTop: `1px solid ${LN}`, padding: '8px 9px', background: SOFT_BG,
-                fontSize: '0.62rem', color: MUT, fontStyle: 'italic',
-              }}>
-                The clinical history for this call runs to {historyChars.toLocaleString()}{' '}
-                characters — printed in full on the “Clinical History” sheet.
-              </div>
-            ) : (
+            {!historyOwnSheet && <SectionHead label="History" />}
+            {!historyOwnSheet && (
               <>
-            <FieldRow label="Complaint"      value={fd.chief_complaint}      valueMin={24} />
-            <FieldRow label="Primary Diagnosis" value={fd.primary_diagnosis} />
-            <FieldRow label="Findings"       value={fd.findings_on_arrival}  valueMin={24} />
-            <FieldRow label="Allergies"      value={fd.allergies} />
-            <FieldRow label="Current Meds"   value={fd.current_medications}  valueMin={24} />
-            <FieldRow label="Past History"   value={fd.past_medical_history} valueMin={24} />
-            <FieldRow label="Last Meal"      value={fd.last_meal} />
-            <FieldRow label="Last Meal Time" value={fd.last_meal_time} />
-            <FieldRow label="Events / HPI"   value={fd.events_hpi}           valueMin={48} />
+                <FieldRow label="Complaint"         value={fd.chief_complaint}      valueMin={24} />
+                <FieldRow label="Primary Diagnosis" value={fd.primary_diagnosis} />
+                <FieldRow label="Findings"          value={fd.findings_on_arrival}  valueMin={24} />
+                <FieldRow label="Allergies"         value={fd.allergies} />
+                <FieldRow label="Current Meds"      value={fd.current_medications}  valueMin={24} />
+                <FieldRow label="Past History"      value={fd.past_medical_history} valueMin={24} />
+                <FieldRow label="Last Meal"         value={fd.last_meal} />
+                <FieldRow label="Last Meal Time"    value={fd.last_meal_time} />
+                <FieldRow label="Events / HPI"      value={fd.events_hpi}           valueMin={48} />
               </>
             )}
 
@@ -4064,6 +4088,7 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
 
             <FillLines />
           </div>
+          )}
 
           {/* COL 3 — Vitals time-series + IV Therapy + Medication + Management */}
           <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
