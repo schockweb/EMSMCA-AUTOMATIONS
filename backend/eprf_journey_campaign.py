@@ -205,13 +205,28 @@ async def req(client, pacer, method, url, out, **kw):
     "come back shortly", not "this failed". Anything else is returned as-is —
     a 4xx must surface, not be papered over by a retry loop.
     """
+    last_exc = None
     for attempt in range(6):
         await pacer.take()
-        r = await client.request(method, url, **kw)
+        try:
+            r = await client.request(method, url, **kw)
+        except httpx.TransportError as e:
+            # The connection itself failed — no response to inspect. A crew on
+            # a moving vehicle gets these constantly, and so does anything
+            # running while the ingress is recreated, which is exactly how this
+            # gap surfaced: a deploy mid-run turned recoverable blips into
+            # journeys abandoned halfway, leaving half-saved records that read
+            # as layout faults later. Retried like any other transient.
+            last_exc = e
+            out["throttled"] += 1
+            await asyncio.sleep(min(6.0, 0.5 * (2 ** attempt)) * (0.7 + random.random() * 0.6))
+            continue
         if r.status_code not in (429, 503):
             return r
         out["throttled"] += 1
         await asyncio.sleep(min(4.0, 0.25 * (2 ** attempt)) * (0.7 + random.random() * 0.6))
+    if last_exc is not None:
+        raise last_exc
     return r
 
 
@@ -310,9 +325,13 @@ async def run(args):
             async with sem:
                 when = now - __import__("datetime").timedelta(
                     days=random.uniform(0, args.spread_days), hours=random.uniform(0, 24))
-                rec = await one_journey(
-                    client, pacer, tokens[i % len(tokens)], tpl[picks[i]],
-                    picks[i], bands[i], when, out)
+                try:
+                    rec = await one_journey(
+                        client, pacer, tokens[i % len(tokens)], tpl[picks[i]],
+                        picks[i], bands[i], when, out)
+                except Exception as e:            # noqa: BLE001 - one journey, not the run
+                    out["fail"].append(("transport", 0, str(e)[:110]))
+                    rec = None
                 if rec:
                     created.append(rec)
                 done = len(created) + len(out["fail"])
