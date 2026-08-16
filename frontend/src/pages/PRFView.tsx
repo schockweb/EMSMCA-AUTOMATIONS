@@ -1823,23 +1823,28 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
   // new refusal all three would print as columns of "—". Refusals captured
   // BEFORE that change do carry the data, and it must keep printing, so the
   // test is content, not call type.
-  const refusalPatient = anyValue(fd, [
+  // Named, because the same three lists answer two questions: does the block
+  // render at all, and how tall will it be if it does. Two copies would drift.
+  const refusalPatientKeys = [
     'gender', 'patient_name', 'patient_surname', 'patient_id_number',
     'patient_passport_number', 'age', 'patient_dob', 'patient_address',
     'patient_suburb', 'patient_postal_code', 'patient_postal_address',
     'patient_phone_home', 'patient_phone_work', 'patient_phone_cell',
     'accompanying_persons_count',
-  ]);
-  const refusalDebtor = anyValue(fd, [
+  ];
+  const refusalDebtorKeys = [
     'debtor_gender', 'debtor_name', 'debtor_surname', 'debtor_id_number',
     'debtor_passport_number', 'debtor_age', 'debtor_dob', 'debtor_address',
     'debtor_suburb', 'debtor_postal_code', 'debtor_phone_home', 'debtor_phone_cell',
-  ]);
-  const refusalBilling = anyValue(fd, [
+  ];
+  const refusalBillingKeys = [
     'billing_type', 'medical_scheme', 'medical_aid_number', 'main_member_id',
     'scheme_option', 'dependent_number', 'preauth_number',
     'raf_claim_number', 'wca_employer_name', 'pvt_payment_method',
-  ]);
+  ];
+  const refusalPatient = anyValue(fd, refusalPatientKeys);
+  const refusalDebtor = anyValue(fd, refusalDebtorKeys);
+  const refusalBilling = anyValue(fd, refusalBillingKeys);
   // Rows are COMPUTED, not fixed. The old layout pinned Patient to row 1,
   // Billing to row 2 and Debtor to row 3; dropping any one of them would have
   // left a hole in the column where that row used to be.
@@ -1850,6 +1855,35 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
   const refusalPatientRow = refusalPatient ? nextRefusalRow() : 0;
   const refusalBillingRow = refusalBilling ? nextRefusalRow() : 0;
   const refusalDebtorRow  = refusalDebtor  ? nextRefusalRow() : 0;
+
+  // ── When stacking them stops being the right answer ───────────────────────
+  // Stacking Patient / Billing / Debtor in a narrow column so the waiver gets a
+  // wide one is right for the refusal it was designed around: a sparse one,
+  // where those three are mostly empty and the waiver is the whole document.
+  // Measured, that band is 437px and page 1 comes to 915px.
+  //
+  // It stops being right when all three are filled in. Then they stack to
+  // 489 + 298 + 452 = 1,239px against a 944px ceiling — one indivisible band,
+  // so not even the page-1 continuation sheets can place it, and it was the
+  // last thing in the export still cutting page 1 in half.
+  //
+  // Above the budget the same four blocks go side by side with the waiver
+  // spanning underneath, which makes the band `tallest block + waiver` instead
+  // of `sum of blocks`. Note the waiver is NOT squeezed into a narrow column to
+  // achieve that — full width, it sets shorter than it did at 2.7fr.
+  //
+  // The estimate is deliberately crude: 34px per captured field (a measured
+  // average — rows are ~22px and the address lines wrap) plus a header each.
+  // It only has to answer "is this a sparse refusal or a full one", and the
+  // two cases are 437px and 1,239px apart.
+  const REFUSAL_STACK_BUDGET_PX = 850;
+  const REFUSAL_BLOCK_KEYS = [refusalPatientKeys, refusalDebtorKeys, refusalBillingKeys];
+  const refusalStackEstimate = REFUSAL_BLOCK_KEYS.reduce((total, keys) => {
+    const filled = keys.filter(k => !isBlank(fd[k])).length;
+    return total + (filled ? 22 + filled * 34 : 0);
+  }, 0);
+  const refusalSideBySide = refused && refusalBlockCount > 1
+    && refusalStackEstimate > REFUSAL_STACK_BUDGET_PX;
 
   // Must cover EVERY field the Return Trip rows render — a guard that misses one
   // silently drops captured times from the PDF that goes to the scheme.
@@ -3194,14 +3228,21 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
         <div style={{
           display: 'grid',
           gridTemplateColumns: refused
-            ? (refusalBlockCount === 0 ? '1fr' : '1.5fr 2.7fr')
+            ? (refusalBlockCount === 0 ? '1fr'
+              : refusalSideBySide
+                // One column each, waiver spanning beneath: the band becomes
+                // `tallest block + waiver` rather than `sum of the blocks`.
+                ? `repeat(${refusalBlockCount}, 1fr)`
+                : '1.5fr 2.7fr')
             : '1.64fr 1.36fr 1.8fr 1.6fr',
           // Every block but the last takes only the height it needs; the last
           // absorbs the remainder so the column still reaches the bottom rule
           // and the page does not end in a ragged edge.
           ...(refused && refusalBlockCount > 0
-            ? { gridTemplateRows: Array.from({ length: refusalBlockCount },
-                  (_, i) => (i === refusalBlockCount - 1 ? '1fr' : 'auto')).join(' ') }
+            ? (refusalSideBySide
+              ? { gridTemplateRows: 'auto 1fr' }
+              : { gridTemplateRows: Array.from({ length: refusalBlockCount },
+                    (_, i) => (i === refusalBlockCount - 1 ? '1fr' : 'auto')).join(' ') })
             : {}),
           borderTop: `2px solid ${LN}`, flex: 1, minHeight: 0,
         }}>
@@ -3210,7 +3251,9 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
               dd/mm/yyyy. */}
           {!(fd.call_type === 'DOD' && fd.med_aid_dec_death) && (!refused || refusalPatient) && (
           <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column',
-                        ...(refused ? { gridColumn: 1, gridRow: refusalPatientRow } : {}) }}>
+                        ...(refused ? (refusalSideBySide
+                          ? { gridColumn: refusalPatientRow, gridRow: 1 }
+                          : { gridColumn: 1, gridRow: refusalPatientRow }) : {}) }}>
             <SectionHead label="Patient Information" />
             {(([
               ['Gender',        fd.gender],
@@ -3249,7 +3292,9 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
               the least useful block on the page and takes the leftover height. */}
           {(!refused || refusalDebtor) && (
           <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column',
-                        ...(refused ? { gridColumn: 1, gridRow: refusalDebtorRow, borderTop: `1px solid ${LN}` } : {}) }}>
+                        ...(refused ? (refusalSideBySide
+                          ? { gridColumn: refusalDebtorRow, gridRow: 1 }
+                          : { gridColumn: 1, gridRow: refusalDebtorRow, borderTop: `1px solid ${LN}` }) : {}) }}>
             {debtorInfoContent()}
             {/* Fallback only: a DOD has no clinical sheet and a refusal's page 2
                 is the watermark alone, so without this the mechanism would not
@@ -3273,7 +3318,9 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
               not billing. */}
           {(!refused || refusalBilling) && (
           <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column',
-                        ...(refused ? { gridColumn: 1, gridRow: refusalBillingRow, borderTop: `1px solid ${LN}` } : {}) }}>
+                        ...(refused ? (refusalSideBySide
+                          ? { gridColumn: refusalBillingRow, gridRow: 1 }
+                          : { gridColumn: 1, gridRow: refusalBillingRow, borderTop: `1px solid ${LN}` }) : {}) }}>
             {billingInfoContent()}
             {/* Handover Signature — hidden for DOD (shown in the DOD block) and
                 for RHT (patient refused transport — there's no facility handover).
@@ -3323,7 +3370,9 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
               renders so the T&C are on every PRF. */}
           {!(fd.call_type === 'DOD' && fd.med_aid_dec_death) && (
           <div style={{ display: 'flex', flexDirection: 'column',
-                        ...(refused ? { gridColumn: 2, gridRow: '1 / -1' } : {}) }}>
+                        ...(refused ? (refusalSideBySide
+                          ? { gridColumn: '1 / -1', gridRow: 2, borderTop: `1px solid ${LN}` }
+                          : { gridColumn: 2, gridRow: '1 / -1' }) : {}) }}>
             {/* "Channel Detail" section removed per request. The return-trip
                 times used to render here as a SectionHead + six FieldRows.
                 They now render as "Ret. …" rows in the journey-times table in
