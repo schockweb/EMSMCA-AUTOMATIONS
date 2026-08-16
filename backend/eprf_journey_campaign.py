@@ -81,7 +81,8 @@ from app.utils.security import create_access_token
 
 from seed_demo_prfs import (
     TEMPLATE_NAMES, TEMPLATE_MIX, TIME_COLS, KM_COLS, SIG_COLS,
-    DENSITY_BANDS, DENSITY_MIX, build_from_template, shift_times, shift_kms,
+    DENSITY_BANDS, DENSITY_MIX, DENSITY_MIX_HUNT, DONOR,
+    _collect_donors, build_from_template, shift_times, shift_kms,
 )
 
 LOAD_SLUG = "zzz-loadtest-temporary"
@@ -99,10 +100,17 @@ async def load_context(source: str, load_slug: str, n_tokens: int):
         if not src:
             raise SystemExit(f"No provider matches '{source}'.")
 
+        # Filter to the seven reference cases IN SQL. Selecting every PRF on the
+        # provider and picking them out in Python was fine when EMSMCA held
+        # 3,500 records and OOM-killed the container at 13,500: each row drags
+        # its full form_data, so the query grew to roughly 880MB of blobs to
+        # find seven of them. It failed with exit 137 and no output at all,
+        # which reads like the script never ran rather than like a memory limit.
         rows = (await db.execute(
             select(DigitalPRF, Case.custom_display_name)
             .join(Case, Case.id == DigitalPRF.case_id)
-            .where(DigitalPRF.provider_id == src.id))).all()
+            .where(DigitalPRF.provider_id == src.id,
+                   Case.custom_display_name.in_(TEMPLATE_NAMES)))).all()
         templates = {}
         for prf, label in rows:
             name = (label or "").strip()
@@ -111,6 +119,19 @@ async def load_context(source: str, load_slug: str, n_tokens: int):
         missing = [n for n in TEMPLATE_NAMES if n not in templates]
         if missing:
             raise SystemExit(f"Missing reference PRFs on {src.name}: {', '.join(missing)}")
+
+        # WITHOUT THIS EVERY MEDICATION TABLE COMES OUT EMPTY.
+        # _fit grows a repeating table by cloning a row that already exists, and
+        # falls back to a donor shape when the template captured none. The
+        # donors are collected here, and the campaign was never calling it —
+        # seed_demo_prfs.run() does, so seeded records were fine and driven ones
+        # were not. Of the seven references only Courtesy has a medication row
+        # and only three have an IV row, so with no donors a Primary call
+        # rendered a full IV column beside a blank Medication column, on every
+        # sheet, all the way to "page 5 of 5". Spotted on a printed export.
+        _collect_donors(templates)
+        if not DONOR.get("medications"):
+            raise SystemExit("No medication row anywhere in the reference PRFs to clone from.")
 
         # Detach: the loop below runs long after this session closes.
         tpl = {}
@@ -255,8 +276,11 @@ async def run(args):
 
     names = list(TEMPLATE_MIX)
     picks = random.choices(names, weights=[TEMPLATE_MIX[n] for n in names], k=args.count)
-    bnames = list(DENSITY_MIX)
-    bands = random.choices(bnames, weights=[DENSITY_MIX[b] for b in bnames], k=args.count)
+    # --hunt weights the run past every layout budget, which is what finds
+    # faults; the default mix looks like real work, which does not.
+    mix = DENSITY_MIX_HUNT if args.hunt else DENSITY_MIX
+    bnames = list(mix)
+    bands = random.choices(bnames, weights=[mix[b] for b in bnames], k=args.count)
 
     print(f"\n  Target        : {BASE_URL}  (public HTTPS, through nginx)")
     print(f"  Journey       : POST create -> PATCH full capture -> POST submit -> verify")
@@ -395,6 +419,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--count", type=int, default=3000)
     ap.add_argument("--concurrency", type=int, default=10)
+    ap.add_argument("--hunt", action="store_true",
+                    help="weight the run past every layout budget (fault hunting)")
     ap.add_argument("--rps", type=float, default=8.0,
                     help="global request pacing; nginx allows 10r/s per client IP")
     ap.add_argument("--tokens", type=int, default=250)

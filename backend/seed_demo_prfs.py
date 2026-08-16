@@ -172,21 +172,33 @@ TEMPLATE_MIX = {"Primary": 44, "IFT/IHT": 25, "RHT": 9, "WCA/IOD": 7,
 #
 # `text` selects a prose tier: 0 short, 1 long, 2 maximum.
 DENSITY_BANDS = {
-    "typical": {"iv": 1,  "med": 2,  "vitals": 3, "text": 0},
-    "heavy":   {"iv": 3,  "med": 5,  "vitals": 5, "text": 1},
-    "max":     {"iv": 6,  "med": 8,  "vitals": 6, "text": 2},
-    "extreme": {"iv": 12, "med": 16, "vitals": 6, "text": 2},
+    "typical":  {"iv": 1,  "med": 2,  "vitals": 3,  "text": 0},
+    "heavy":    {"iv": 3,  "med": 5,  "vitals": 5,  "text": 1},
+    "max":      {"iv": 6,  "med": 8,  "vitals": 6,  "text": 2},
+    "extreme":  {"iv": 12, "med": 16, "vitals": 6,  "text": 2},
+    # Past anything a real call produces, on purpose. Every layout budget in
+    # PRFView was derived from a measurement, and a budget is only trustworthy
+    # once something has been pushed through the far side of it: this band is
+    # what proves the sheet SPILLS instead of slicing rather than proving it
+    # happens to fit. Twenty-six observation sets is the form's own maximum, and
+    # tier 3 prose is a crew who typed a page into every free-text box.
+    "overfill": {"iv": 20, "med": 26, "vitals": 26, "text": 3},
 }
 # Weighted toward the top: the point of this data set is to find where the sheet
 # breaks, and a set that is mostly 'typical' finds nothing. 'typical' is kept in
 # so the list still reads like real work when a client scrolls it.
 DENSITY_MIX = {"typical": 25, "heavy": 30, "max": 30, "extreme": 15}
+# Fault-hunting mix: almost entirely past the budgets, with a little ordinary
+# work so a regression in the NORMAL path still shows up in the same run.
+DENSITY_MIX_HUNT = {"typical": 5, "heavy": 10, "max": 20, "extreme": 25, "overfill": 40}
 
 # Clinical rows only belong on call types that render the clinical stack. A
 # refusal (RHT) hides it entirely — fd.patient_refused_treatment collapses the
 # whole capture — and a declaration of death has no observations to carry, so
 # padding either with 12 IV lines would inflate the record without ever
 # reaching the page. Those two get the prose tiers and nothing else.
+
+
 CLINICAL_TEMPLATES = {"Primary", "IFT/IHT", "RESUS", "Courtesy", "WCA/IOD"}
 
 # Prose at three lengths, per field. Tier 0 is what a busy crew actually types;
@@ -290,6 +302,72 @@ PROSE = {
         "in writing on the kitchen counter.",
     ],
 }
+
+# ── Tier 3: the overfill band's prose ──────────────────────────────────────
+# Built by CONTINUING each tier-2 answer rather than repeating or padding it,
+# so the result is still one coherent clinical account and still exercises real
+# wrapping. Lorem or a repeated paragraph would measure the renderer against
+# text no crew would ever produce, and the whole point of this band is to find
+# out what the form does with a crew who genuinely wrote a lot.
+PROSE_TIER3_EXTRA = {
+    "events_hpi":
+        " On direct questioning the patient denies any preceding viral illness, recent dental work or "
+        "invasive procedure. There is no history of intravenous drug use and no recent hospital "
+        "admission. The pain has not changed with position or with deep inspiration at any point. A "
+        "neighbour present at onset confirms the patient was ambulant and speaking normally immediately "
+        "beforehand, and describes no seizure activity, no incontinence and no head strike during the "
+        "episode. The patient took no analgesia of their own before the crew arrived beyond the single "
+        "sublingual nitrate already noted. Repeat questioning at the receiving unit produced the same "
+        "account without variation.",
+    "findings_on_arrival":
+        " On repeat assessment ten minutes after the initial survey the patient remained alert and "
+        "orientated with no change in conscious level. Peripheral perfusion improved slightly following "
+        "oxygen and analgesia, with capillary refill shortening and the skin becoming less clammy. Chest "
+        "auscultation was repeated in four zones anteriorly and two posteriorly with no interval change "
+        "and no new crackles at the bases. There was no jugular venous distension at forty-five degrees "
+        "and no hepatojugular reflux. Calves remained soft and non-tender with no asymmetry.",
+    "management_notes":
+        " A second 12-lead was acquired en route at the twelve-minute mark and compared against the "
+        "first, with no interval change in ST segments and no new arrhythmia; both traces accompanied "
+        "the patient. Oxygen was weaned in step with saturations once they had held above 94 per cent "
+        "for five consecutive minutes. The receiving unit was updated by radio twice during transport "
+        "with an amended estimated time of arrival. On arrival a full verbal handover was given using "
+        "the ATMIST structure, covering age, time of onset, mechanism, injuries and findings, vital "
+        "signs and treatment given, and questions were invited and answered before the crew cleared.",
+    "past_medical_history":
+        " Immunisation history reported as complete for the childhood schedule with an additional "
+        "tetanus booster in 2019 following a garden injury. No previous adverse reaction to anaesthesia "
+        "in the patient or in any first-degree relative. Family history of ischaemic heart disease in "
+        "both the father, who sustained a fatal myocardial infarction at fifty-eight, and a paternal "
+        "uncle who underwent bypass grafting in his early sixties. The patient lives independently in a "
+        "single-storey dwelling, manages all activities of daily living unaided, and has no recorded "
+        "cognitive impairment.",
+    "current_medications":
+        " Patient additionally reports occasional over-the-counter ibuprofen for joint pain, taken "
+        "perhaps twice a week and not disclosed at the last clinic review, and a herbal preparation "
+        "obtained informally whose contents they cannot name. Compliance aids are not in use. Repeat "
+        "prescriptions are collected monthly by a family member and the patient is uncertain whether "
+        "the most recent collection has been made.",
+    "allergies":
+        " A reaction to iodine-based contrast was reported by a relative but is not documented in any "
+        "record the crew could access and the patient does not recall it; it is recorded as unconfirmed "
+        "so the receiving unit can verify before imaging rather than discover it during a procedure.",
+    "chief_complaint":
+        ", with associated nausea and a single episode of vomiting shortly before the crew arrived",
+    "primary_diagnosis":
+        ", differential including pulmonary embolism and aortic dissection, neither excluded "
+        "pre-hospital",
+    "rht_refusal_reason":
+        " The conversation was repeated a second time after a ten-minute interval to allow the patient "
+        "to reconsider, and their answer did not change. The crew remained on scene throughout that "
+        "interval and reassessed observations before departing, all of which were within normal limits "
+        "and are recorded above.",
+}
+for _k, _extra in PROSE_TIER3_EXTRA.items():
+    if _k in PROSE:
+        PROSE[_k].append(PROSE[_k][2] + _extra)
+    else:                       # a PROSE key was renamed and this went stale
+        raise SystemExit(f"PROSE_TIER3_EXTRA names '{_k}', which PROSE does not have")
 
 
 def sa_id(dob: datetime, female: bool) -> str:

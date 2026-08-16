@@ -1619,10 +1619,8 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
   // the page height — the row set is fixed (resp. rate, rhythm, GCS, …), so a
   // further set adds content to existing cells rather than new rows.
   //
-  // Keep this and the `5` in vitalsCols in step; they are one decision.
-  const VITALS_PER_PAGE = 5;
-  const vitalsPage1: any[] = vitals.slice(0, VITALS_PER_PAGE);
-  const vitalsOverflow: any[] = vitals.slice(VITALS_PER_PAGE);
+  // Keep this and vitalsCols in step; they are one decision.
+  // (moved below clinicalCol2Hidden — the count depends on it)
   // Only rows with actual content count — the form can save a blank row shell
   // (section opened, nothing entered), and an all-blank row must not resurrect
   // an otherwise-hidden IV / Medication section on the PDF.
@@ -1735,6 +1733,22 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
   // spare room, it reads as a section the crew failed to fill in.
   const hasInlineIvMed = ivMedInline && ivMedTotal > 0;
   const clinicalCol2Hidden = historyOwnSheet && !hasInlineIvMed;
+
+  // How many observation sets fit on the clinical page.
+  //
+  // Sets are COLUMNS, not rows: the row list (resp. rate, rhythm, GCS, …) is
+  // fixed, so another set fills existing cells and costs WIDTH, never height.
+  // The limit is therefore how narrow a cell can get before "Equal/Reactive"
+  // and "Well Perfused" stop fitting — measured at ~100px, which is what the
+  // three-column layout already gives at five sets and which renders fine.
+  //
+  // So when the history column is gone the vitals table is ~834px instead of
+  // ~634px, and seven sets sit at the same ~102px per cell that five sit at
+  // today. That is not cosmetic: a call with 26 observation sets needs
+  // ceil(26/7) = 4 continuation sheets instead of ceil(26/5) = 6.
+  const VITALS_PER_PAGE = clinicalCol2Hidden ? 7 : 5;
+  const vitalsPage1: any[] = vitals.slice(0, VITALS_PER_PAGE);
+  const vitalsOverflow: any[] = vitals.slice(VITALS_PER_PAGE);
 
   const IVMED_ROWS_PER_SHEET = 4;
   const ivMedSheetCount = ivMedOwnSheet
@@ -2116,7 +2130,7 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
   // also hosts Additional Crew, so it stays whenever extra crew exist.
   const showMotivationCol = !!motivationNotes.trim() || (Array.isArray(fd.extra_crew) && fd.extra_crew.length > 0);
 
-  const vitalsCols = Math.max(vitalsPage1.length, 5);
+  const vitalsCols = Math.max(vitalsPage1.length, VITALS_PER_PAGE);
   const vitalsOverflowCols = Math.max(vitalsOverflow.length, 5);
 
   const recipientEmail = (fd.handover_doctor_email || '').trim();
