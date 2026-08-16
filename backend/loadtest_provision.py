@@ -117,12 +117,22 @@ async def teardown(yes: bool) -> None:
                  (select case_id from digital_prfs where provider_id = cast(:p as uuid) and case_id is not null)"""),
             ("claims", """delete from claims where case_id in
                  (select case_id from digital_prfs where provider_id = cast(:p as uuid) and case_id is not null)"""),
-            ("documents", """delete from documents where case_id in
-                 (select case_id from digital_prfs where provider_id = cast(:p as uuid) and case_id is not null)"""),
-            ("cases_hold", """create temporary table _lt_cases as select case_id as id from digital_prfs
-                 where provider_id = cast(:p as uuid) and case_id is not null"""),
+            # ORDER MATTERS, and it was wrong here. `digital_prfs.document_id`
+            # is an FK to `documents`, so deleting documents first fails with
+            # digital_prfs_document_id_fkey the moment the tenant contains a
+            # PROCESSED PRF. The load test never caught it because a pure
+            # create-only run leaves every PRF a DRAFT with document_id NULL;
+            # it surfaced the first time a campaign drove PRFs all the way
+            # through the pipeline. Hold BOTH id sets first, then delete the
+            # child (digital_prfs) before either parent.
+            ("hold", """create temporary table _lt_ids as
+                 select case_id, document_id from digital_prfs
+                 where provider_id = cast(:p as uuid)"""),
             ("digital_prfs", "delete from digital_prfs where provider_id = cast(:p as uuid)"),
-            ("cases", "delete from cases where id in (select id from _lt_cases)"),
+            ("documents", """delete from documents where id in
+                 (select document_id from _lt_ids where document_id is not null)"""),
+            ("cases", """delete from cases where id in
+                 (select case_id from _lt_ids where case_id is not null)"""),
             ("crew_members", "delete from crew_members where provider_id = cast(:p as uuid)"),
             ("vehicles", "delete from vehicles where provider_id = cast(:p as uuid)"),
             ("service_provider", "delete from service_providers where id = cast(:p as uuid)"),
