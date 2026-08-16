@@ -1725,6 +1725,63 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
   // separate sheet each would spend two pages on one story.
   const clinicalDetailSheet = historyOwnSheet || surveyOwnSheet;
 
+  // The spill target has to paginate, or the fix just moves the overflow one
+  // sheet along. It did: at the top prose tier the Clinical Detail sheet came
+  // to 1,031px against the 944px ceiling and sliced — 72 records in the fault
+  // hunt, all of them here. A continuation sheet that can itself overflow is
+  // not a continuation sheet.
+  //
+  // Sections are packed greedily into sheets against a character budget.
+  // 2,600 is measured, not guessed: a detail sheet carrying 2,845 characters
+  // of history laid out at 570px and 419px in its two columns, inside an
+  // 804px band — comfortable, so the budget sits just under what is proven to
+  // fit rather than at the edge of it.
+  const CLINICAL_DETAIL_CHAR_BUDGET = 2600;
+  const detailSections: Array<{ head: string; rows: Array<[string, any, number?]> }> = [];
+  if (historyOwnSheet) {
+    detailSections.push({ head: 'Presentation', rows: [
+      ['Complaint', fd.chief_complaint, 24],
+      ['Primary Diagnosis', fd.primary_diagnosis, 24],
+      ['Findings', fd.findings_on_arrival, 48],
+    ]});
+    detailSections.push({ head: 'Events / History of Presenting Illness', rows: [
+      ['Events / HPI', fd.events_hpi, 72],
+    ]});
+    detailSections.push({ head: 'Background', rows: [
+      ['Allergies', fd.allergies, 24],
+      ['Current Meds', fd.current_medications, 48],
+      ['Past History', fd.past_medical_history, 48],
+      ['Last Meal', fd.last_meal],
+      ['Last Meal Time', fd.last_meal_time],
+    ]});
+  }
+  if (surveyOwnSheet) {
+    detailSections.push({ head: 'Primary Survey', rows: [
+      ['A — Airway', fd.survey_a, 24],
+      ['B — Breathing', fd.survey_b, 24],
+      ['C — Circulation', fd.survey_c, 24],
+    ]});
+    detailSections.push({ head: 'Secondary Survey', rows: [
+      ['Head & Back', fd.survey_head_back, 24],
+      ['Neuro', fd.survey_neuro, 24],
+      ['Chest', fd.survey_chest, 24],
+      ['Abdomen', fd.survey_abdo, 24],
+      ['Limbs', fd.survey_limbs, 24],
+      ['Back', fd.survey_back, 24],
+    ]});
+  }
+  const sectionChars = (sec: { rows: Array<[string, any, number?]> }) =>
+    sec.rows.reduce((n, [, v]) => n + String(v ?? '').length, 0);
+  // A section is never split across sheets — half a secondary survey on each of
+  // two pages is how a reader misses the half they were not shown.
+  const detailSheets: Array<Array<{ head: string; rows: Array<[string, any, number?]> }>> = [];
+  for (const sec of detailSections) {
+    const last = detailSheets[detailSheets.length - 1];
+    const used = last ? last.reduce((n, x) => n + sectionChars(x), 0) : 0;
+    if (!last || used + sectionChars(sec) > CLINICAL_DETAIL_CHAR_BUDGET) detailSheets.push([sec]);
+    else last.push(sec);
+  }
+
   // The clinical page's middle column carries History AND the inline IV /
   // Medication tables. It is only worth a column while it still holds one of
   // them: with the history moved and the drug tables on their own sheet, it
@@ -2131,7 +2188,18 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
   const showMotivationCol = !!motivationNotes.trim() || (Array.isArray(fd.extra_crew) && fd.extra_crew.length > 0);
 
   const vitalsCols = Math.max(vitalsPage1.length, VITALS_PER_PAGE);
-  const vitalsOverflowCols = Math.max(vitalsOverflow.length, 5);
+  // The continuation sheet has to paginate too, or the fix just moves the
+  // problem: this drew EVERY remaining set in one grid, so a call with 26
+  // observations put 19 columns on one sheet at (1220-120)/19 = 58px each and
+  // "Equal/Reactive" was silently clipped. Nothing sliced, no sheet was over
+  // the ceiling, every height check passed, and the pupil reaction simply was
+  // not on the page. Found by scripts/prf-fault-hunt.mjs on real records —
+  // 300 clipped cells across 100 of them.
+  //
+  // 10 per sheet is (1220-120)/10 = 110px per cell, above the ~102px that
+  // renders "Equal/Reactive" and "Well Perfused" intact on the clinical page.
+  const VITALS_OVERFLOW_PER_SHEET = 10;
+  const vitalsOverflowSheets = Math.ceil(vitalsOverflow.length / VITALS_OVERFLOW_PER_SHEET);
 
   const recipientEmail = (fd.handover_doctor_email || '').trim();
   const patientFullName = [fd.patient_name, fd.patient_surname].filter(Boolean).join(' ') || 'the patient';
@@ -4231,8 +4299,14 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
           so the same text sets about four times shorter and in far longer
           lines, which is how clinical prose should be read anyway. Two columns,
           so a long Events / HPI cannot run the sheet off the bottom on its own. */}
-      {clinicalDetailSheet && (
-        <div className="prf-print-frame">
+      {detailSheets.map((secs, ds) => {
+        const part = detailSheets.length > 1 ? ` (page ${ds + 1} of ${detailSheets.length})` : '';
+        // Two columns, split by section rather than by row so a section stays
+        // whole. The taller half goes left, which is where a reader starts.
+        const mid = Math.ceil(secs.length / 2);
+        const cols = [secs.slice(0, mid), secs.slice(mid)];
+        return (
+        <div className="prf-print-frame" key={`cd-${ds}`}>
           <div className="prf-page" style={{
             width: 1220, minHeight: 862, margin: '28px auto 0', background: '#fff', color: INK,
             border: `2px solid ${LN}`, boxShadow: '0 6px 24px rgba(0,0,0,0.1)',
@@ -4246,7 +4320,7 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
                 padding: '10px 12px', borderRight: `1px solid ${LN}`, display: 'flex', alignItems: 'center',
                 fontSize: '0.78rem', fontWeight: 800, color: INK,
                 letterSpacing: '0.08em', textTransform: 'uppercase',
-              }}>Clinical Detail</div>
+              }}>Clinical Detail{part}</div>
               <div style={{
                 padding: '10px 12px', display: 'flex', alignItems: 'center',
                 justifyContent: 'flex-end', gap: 18, fontSize: '0.68rem', color: MUT,
@@ -4255,56 +4329,31 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
                 {prf.case_number && <span>Case: <b style={{ color: INK, fontFamily: 'ui-monospace, monospace' }}>{prf.case_number}</b></span>}
               </div>
             </div>
-            <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
-              <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
-                {historyOwnSheet && (
-                  <>
-                    <SectionHead label="Presentation" />
-                    <FieldRow label="Complaint"         value={fd.chief_complaint}      valueMin={24} />
-                    <FieldRow label="Primary Diagnosis" value={fd.primary_diagnosis}    valueMin={24} />
-                    <FieldRow label="Findings"          value={fd.findings_on_arrival}  valueMin={48} />
-                    <SectionHead label="Events / History of Presenting Illness" />
-                    <FieldRow label="Events / HPI"      value={fd.events_hpi}           valueMin={72} />
-                  </>
-                )}
-                {surveyOwnSheet && (
-                  <>
-                    <SectionHead label="Primary Survey" />
-                    <FieldRow label="A — Airway"      value={fd.survey_a}      valueMin={24} />
-                    <FieldRow label="B — Breathing"   value={fd.survey_b}      valueMin={24} />
-                    <FieldRow label="C — Circulation" value={fd.survey_c}      valueMin={24} />
-                  </>
-                )}
-                <FillLines />
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column' }}>
-                {historyOwnSheet && (
-                  <>
-                    <SectionHead label="Background" />
-                    <FieldRow label="Allergies"      value={fd.allergies}            valueMin={24} />
-                    <FieldRow label="Current Meds"   value={fd.current_medications}  valueMin={48} />
-                    <FieldRow label="Past History"   value={fd.past_medical_history} valueMin={48} />
-                    <FieldRow label="Last Meal"      value={fd.last_meal} />
-                    <FieldRow label="Last Meal Time" value={fd.last_meal_time} />
-                  </>
-                )}
-                {surveyOwnSheet && (
-                  <>
-                    <SectionHead label="Secondary Survey" />
-                    <FieldRow label="Head & Back" value={fd.survey_head_back} valueMin={24} />
-                    <FieldRow label="Neuro"       value={fd.survey_neuro}     valueMin={24} />
-                    <FieldRow label="Chest"       value={fd.survey_chest}     valueMin={24} />
-                    <FieldRow label="Abdomen"     value={fd.survey_abdo}      valueMin={24} />
-                    <FieldRow label="Limbs"       value={fd.survey_limbs}     valueMin={24} />
-                    <FieldRow label="Back"        value={fd.survey_back}      valueMin={24} />
-                  </>
-                )}
-                <FillLines />
-              </div>
+            <div style={{
+              flex: 1, minHeight: 0, display: 'grid',
+              gridTemplateColumns: cols[1].length ? '1fr 1fr' : '1fr',
+            }}>
+              {cols.map((group, gi) => (group.length ? (
+                <div key={gi} style={{
+                  borderRight: gi === 0 && cols[1].length ? `1px solid ${LN}` : 'none',
+                  display: 'flex', flexDirection: 'column',
+                }}>
+                  {group.map((sec) => (
+                    <Fragment key={sec.head}>
+                      <SectionHead label={sec.head} />
+                      {sec.rows.map(([label, value, vmin]) => (
+                        <FieldRow key={label} label={label} value={value} valueMin={vmin} />
+                      ))}
+                    </Fragment>
+                  ))}
+                  <FillLines />
+                </div>
+              ) : null))}
             </div>
           </div>
         </div>
-      )}
+        );
+      })}
 
       {/* ═══════ IV Therapy & Medication — own sheet ═══════
           Rendered when the two sections together exceed CLINICAL_IVMED_BUDGET.
@@ -4396,8 +4445,13 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
           Rendered only when more than VITALS_PER_PAGE (3) vital sets were
           captured. Same A4-landscape frame as the earlier pages so the print
           / PDF pipeline picks it up via the existing .prf-page selector. */}
-      {vitalsOverflow.length > 0 && (
-        <div className="prf-print-frame">
+      {Array.from({ length: vitalsOverflowSheets }, (_, vs) => {
+        const vSlice = vitalsOverflow.slice(vs * VITALS_OVERFLOW_PER_SHEET,
+                                            (vs + 1) * VITALS_OVERFLOW_PER_SHEET);
+        const vCols = Math.max(vSlice.length, 5);
+        const vPart = vitalsOverflowSheets > 1 ? ` (page ${vs + 1} of ${vitalsOverflowSheets})` : '';
+        return (
+        <div className="prf-print-frame" key={`vitals-o-${vs}`}>
           <div className="prf-page" style={{
             width: 1220, minHeight: 862,
             margin: '28px auto 0', background: '#fff', color: INK,
@@ -4421,7 +4475,7 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
                 fontSize: '0.78rem', fontWeight: 800, color: INK,
                 letterSpacing: '0.08em', textTransform: 'uppercase',
               }}>
-                Vitals — Continuation
+                Vitals — Continuation{vPart}
               </div>
               <div style={{
                 padding: '10px 12px', display: 'flex', alignItems: 'center',
@@ -4438,34 +4492,35 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
             <SectionHead label="Time Recorded" />
             <div style={{
               display: 'grid',
-              gridTemplateColumns: `120px repeat(${vitalsOverflowCols}, minmax(0, 1fr))`,
+              gridTemplateColumns: `120px repeat(${vCols}, minmax(0, 1fr))`,
               fontSize: '0.66rem',
             }}>
               <div style={{
                 padding: '3px 6px', background: GREEN_TINT,
                 borderRight: `1px solid ${LN}`, borderBottom: `1px solid ${LN}`, fontWeight: 800,
               }}></div>
-              {[...Array(vitalsOverflowCols)].map((_, i) => (
+              {[...Array(vCols)].map((_, i) => (
                 <div key={i} style={{
                   padding: '3px 3px', background: GREEN_TINT,
-                  borderRight: i < vitalsOverflowCols - 1 ? `1px solid ${LN}` : 'none',
+                  borderRight: i < vCols - 1 ? `1px solid ${LN}` : 'none',
                   borderBottom: `1px solid ${LN}`,
                   fontWeight: 800, fontFamily: 'ui-monospace, monospace',
                   textAlign: 'center', fontSize: '0.64rem', color: INK,
-                }}>{vitalsOverflow[i]?.time || ''}</div>
+                }}>{vSlice[i]?.time || ''}</div>
               ))}
 
               {VITALS_PDF_ROWS.filter(([, key]) =>
                 vitals.some((v: any) => !isBlank(v?.[key]))
               ).map(([label, key]) => (
-                <Row key={key} label={label} keyName={key} vitals={vitalsOverflow} cols={vitalsOverflowCols} />
+                <Row key={key} label={label} keyName={key} vitals={vSlice} cols={vCols} />
               ))}
             </div>
 
             <div style={{ flex: 1 }} />
           </div>
         </div>
-      )}
+        );
+      })}
 
       {/* ═══════════════════ RECEIPTS & ATTACHMENTS ═══════════════════
           The cash receipt and the hospital sticker, on a sheet of their own.
