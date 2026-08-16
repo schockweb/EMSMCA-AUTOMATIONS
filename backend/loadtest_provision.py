@@ -133,6 +133,26 @@ async def teardown(yes: bool) -> None:
                  (select document_id from _lt_ids where document_id is not null)"""),
             ("cases", """delete from cases where id in
                  (select case_id from _lt_ids where case_id is not null)"""),
+            # `audit_logs.crew_member_id` has an FK to crew_members, and that FK
+            # is deliberate: it is what stops a real crew member being deleted
+            # out from under the POPIA trail (see the deactivate-not-delete
+            # design). It blocks this teardown as soon as the tenant's crew have
+            # actually READ a record — an API-only load run never trips it, a
+            # browser session does, because reading a PRF logs a PHI read.
+            #
+            # Removing these rows is not weakening that trail. They record a
+            # synthetic crew member reading a synthetic patient inside a tenant
+            # that is about to cease to exist, and the delete is scoped through
+            # this provider's crew, so it cannot reach a real client's log.
+            # The table is append-only at the DATABASE level, not just by
+            # convention, and refuses DELETE unless the transaction opts in.
+            # That guard is right and is left alone — this is the authorised
+            # maintenance it describes, taken deliberately and one tenant wide.
+            # SET LOCAL, so the opt-in dies with this transaction and cannot
+            # leak into anything else on the connection.
+            ("audit_maintenance", "set local ems.audit_maintenance = 'on'"),
+            ("audit_logs", """delete from audit_logs where crew_member_id in
+                 (select id from crew_members where provider_id = cast(:p as uuid))"""),
             ("crew_members", "delete from crew_members where provider_id = cast(:p as uuid)"),
             ("vehicles", "delete from vehicles where provider_id = cast(:p as uuid)"),
             ("service_provider", "delete from service_providers where id = cast(:p as uuid)"),
