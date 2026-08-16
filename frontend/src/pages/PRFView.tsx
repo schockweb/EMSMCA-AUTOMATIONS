@@ -1663,6 +1663,70 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
   //
   // Each sheet carries up to 4 IV and 4 medication rows side by side, so a
   // sheet is emitted for every 4 of whichever list is longer.
+  // ── History block budget ──────────────────────────────────────────────────
+  // The clinical page's History column is the tallest thing in the export and
+  // nothing bounded it. Measured on real records at increasing fill, its height
+  // is almost exactly linear in how much the crew typed:
+  //
+  //     chars   column     sheet
+  //       231     384px      862px
+  //       985     839px      862px
+  //     2,845   2,123px    2,126px   <- against a 944px ceiling
+  //
+  //     height ~= 230px + 0.665 x characters
+  //
+  // Two things go wrong at once when it overflows, and both are visible on the
+  // printed sheet: the column is cut off mid-sentence, and the other two
+  // columns stretch to match it, so the page is simultaneously truncated AND
+  // most of it is blank ruled lines.
+  //
+  // 1,000 characters puts the column at ~895px, inside the ceiling with room
+  // for a line that wraps unevenly — and it keeps a heavily-filled call (985)
+  // inline, which renders at 862px today and must not gain a sheet.
+  //
+  // Derived from measurement, like CLINICAL_IVMED_BUDGET above. Re-run
+  // scripts/pdf-layout-matrix.mjs and re-measure before changing it; do not
+  // raise it by eye.
+  const HISTORY_CHAR_BUDGET = 1000;
+  const HISTORY_KEYS = [
+    'chief_complaint', 'primary_diagnosis', 'findings_on_arrival', 'allergies',
+    'current_medications', 'past_medical_history', 'last_meal', 'last_meal_time',
+    'events_hpi',
+  ];
+  const historyChars = HISTORY_KEYS.reduce((n, k) => n + String(fd[k] ?? '').length, 0);
+  // All-or-nothing, for the same reason the IV/medication table is: a clinical
+  // history split across two sheets invites an adjudicator to read half of it.
+  // Moved whole, with a pointer left behind — and on its own sheet it is four
+  // times wider, so the same text comes to roughly a quarter of the height.
+  const historyOwnSheet = historyChars > HISTORY_CHAR_BUDGET;
+
+  // The survey column is the clinical page's OTHER driver, and it only becomes
+  // visible once History is dealt with: measured at 1,421px with History cut to
+  // 142px, so it alone still put the sheet at 1,427px.
+  //
+  // It is two different things stacked. About 660px is short fixed rows —
+  // oxygen, immobilisation, the mechanism checkboxes, priority — which cannot
+  // be shortened and must stay with the clinical picture. The rest is the
+  // primary and secondary survey PROSE, about 700px of it in a ~254px column.
+  //
+  // 944 - 660 leaves roughly 284px for prose, which in that column width is
+  // about 220 characters. Below that a crew is writing clinical shorthand
+  // ("Patent", "Clear bilaterally") and it stays where it belongs; above it
+  // they are writing sentences, and sentences read better on the detail sheet
+  // at full width anyway.
+  const SURVEY_CHAR_BUDGET = 220;
+  const SURVEY_KEYS = [
+    'survey_a', 'survey_b', 'survey_c', 'survey_head_back', 'survey_neuro',
+    'survey_chest', 'survey_abdo', 'survey_limbs', 'survey_back',
+  ];
+  const surveyChars = SURVEY_KEYS.reduce((n, k) => n + String(fd[k] ?? '').length, 0);
+  const surveyOwnSheet = surveyChars > SURVEY_CHAR_BUDGET;
+
+  // One continuation sheet carries whichever of the two overflowed. They are
+  // both clinical narrative and both belong together when read; emitting a
+  // separate sheet each would spend two pages on one story.
+  const clinicalDetailSheet = historyOwnSheet || surveyOwnSheet;
+
   const IVMED_ROWS_PER_SHEET = 4;
   const ivMedSheetCount = ivMedOwnSheet
     ? Math.max(Math.ceil(ivRows.length / IVMED_ROWS_PER_SHEET),
@@ -3830,6 +3894,18 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
               );
             })()}
 
+            {surveyOwnSheet ? (
+              <>
+                <SectionHead label="Primary & Secondary Survey" />
+                <div style={{
+                  borderTop: `1px solid ${LN}`, padding: '8px 9px', background: SOFT_BG,
+                  fontSize: '0.62rem', color: MUT, fontStyle: 'italic',
+                }}>
+                  Written up in full on the “Clinical Detail” sheet.
+                </div>
+              </>
+            ) : (
+              <>
             <SectionHead label="Primary Survey" />
             <FieldRow label="A — Airway"      value={fd.survey_a} />
             <FieldRow label="B — Breathing"   value={fd.survey_b} />
@@ -3842,6 +3918,8 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
             <FieldRow label="Abdomen"     value={fd.survey_abdo} />
             <FieldRow label="Limbs"       value={fd.survey_limbs} />
             <FieldRow label="Back"        value={fd.survey_back} />
+              </>
+            )}
 
             {/* Mechanism + Patient Priority, directly under the Secondary Survey.
                 Both describe HOW the patient was hurt and how sick they are, so
@@ -3858,6 +3936,16 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
               and breaking the layout. */}
           <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
             <SectionHead label="History" />
+            {historyOwnSheet ? (
+              <div style={{
+                borderTop: `1px solid ${LN}`, padding: '8px 9px', background: SOFT_BG,
+                fontSize: '0.62rem', color: MUT, fontStyle: 'italic',
+              }}>
+                The clinical history for this call runs to {historyChars.toLocaleString()}{' '}
+                characters — printed in full on the “Clinical History” sheet.
+              </div>
+            ) : (
+              <>
             <FieldRow label="Complaint"      value={fd.chief_complaint}      valueMin={24} />
             <FieldRow label="Primary Diagnosis" value={fd.primary_diagnosis} />
             <FieldRow label="Findings"       value={fd.findings_on_arrival}  valueMin={24} />
@@ -3867,6 +3955,8 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
             <FieldRow label="Last Meal"      value={fd.last_meal} />
             <FieldRow label="Last Meal Time" value={fd.last_meal_time} />
             <FieldRow label="Events / HPI"   value={fd.events_hpi}           valueMin={48} />
+              </>
+            )}
 
             {/* Intravenous Therapy (stacked vertically) — the whole section is
                 omitted when no IV row was recorded, instead of printing an
@@ -4047,6 +4137,87 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
       </div>{/* /prf-print-frame (page 2) */}
       </>
       )}
+      {/* ═══════ Clinical History — own sheet ═══════
+          Rendered when the history exceeds HISTORY_CHAR_BUDGET. On the clinical
+          page this block lives in a ~330px column; here it has the full sheet,
+          so the same text sets about four times shorter and in far longer
+          lines, which is how clinical prose should be read anyway. Two columns,
+          so a long Events / HPI cannot run the sheet off the bottom on its own. */}
+      {clinicalDetailSheet && (
+        <div className="prf-print-frame">
+          <div className="prf-page" style={{
+            width: 1220, minHeight: 862, margin: '28px auto 0', background: '#fff', color: INK,
+            border: `2px solid ${LN}`, boxShadow: '0 6px 24px rgba(0,0,0,0.1)',
+            display: 'flex', flexDirection: 'column',
+          }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 2.4fr 2fr', borderBottom: `2px solid ${LN}` }}>
+              <div style={{ padding: '10px 12px', borderRight: `1px solid ${LN}`, display: 'flex', alignItems: 'center' }}>
+                <ProviderLogo prov={prov} height={30} />
+              </div>
+              <div style={{
+                padding: '10px 12px', borderRight: `1px solid ${LN}`, display: 'flex', alignItems: 'center',
+                fontSize: '0.78rem', fontWeight: 800, color: INK,
+                letterSpacing: '0.08em', textTransform: 'uppercase',
+              }}>Clinical Detail</div>
+              <div style={{
+                padding: '10px 12px', display: 'flex', alignItems: 'center',
+                justifyContent: 'flex-end', gap: 18, fontSize: '0.68rem', color: MUT,
+              }}>
+                <span>Patient: <b style={{ color: INK }}>{patientFullName}</b></span>
+                {prf.case_number && <span>Case: <b style={{ color: INK, fontFamily: 'ui-monospace, monospace' }}>{prf.case_number}</b></span>}
+              </div>
+            </div>
+            <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
+              <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
+                {historyOwnSheet && (
+                  <>
+                    <SectionHead label="Presentation" />
+                    <FieldRow label="Complaint"         value={fd.chief_complaint}      valueMin={24} />
+                    <FieldRow label="Primary Diagnosis" value={fd.primary_diagnosis}    valueMin={24} />
+                    <FieldRow label="Findings"          value={fd.findings_on_arrival}  valueMin={48} />
+                    <SectionHead label="Events / History of Presenting Illness" />
+                    <FieldRow label="Events / HPI"      value={fd.events_hpi}           valueMin={72} />
+                  </>
+                )}
+                {surveyOwnSheet && (
+                  <>
+                    <SectionHead label="Primary Survey" />
+                    <FieldRow label="A — Airway"      value={fd.survey_a}      valueMin={24} />
+                    <FieldRow label="B — Breathing"   value={fd.survey_b}      valueMin={24} />
+                    <FieldRow label="C — Circulation" value={fd.survey_c}      valueMin={24} />
+                  </>
+                )}
+                <FillLines />
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                {historyOwnSheet && (
+                  <>
+                    <SectionHead label="Background" />
+                    <FieldRow label="Allergies"      value={fd.allergies}            valueMin={24} />
+                    <FieldRow label="Current Meds"   value={fd.current_medications}  valueMin={48} />
+                    <FieldRow label="Past History"   value={fd.past_medical_history} valueMin={48} />
+                    <FieldRow label="Last Meal"      value={fd.last_meal} />
+                    <FieldRow label="Last Meal Time" value={fd.last_meal_time} />
+                  </>
+                )}
+                {surveyOwnSheet && (
+                  <>
+                    <SectionHead label="Secondary Survey" />
+                    <FieldRow label="Head & Back" value={fd.survey_head_back} valueMin={24} />
+                    <FieldRow label="Neuro"       value={fd.survey_neuro}     valueMin={24} />
+                    <FieldRow label="Chest"       value={fd.survey_chest}     valueMin={24} />
+                    <FieldRow label="Abdomen"     value={fd.survey_abdo}      valueMin={24} />
+                    <FieldRow label="Limbs"       value={fd.survey_limbs}     valueMin={24} />
+                    <FieldRow label="Back"        value={fd.survey_back}      valueMin={24} />
+                  </>
+                )}
+                <FillLines />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ═══════ IV Therapy & Medication — own sheet ═══════
           Rendered when the two sections together exceed CLINICAL_IVMED_BUDGET.
           They print here IN FULL and not at all on the clinical page, so the
