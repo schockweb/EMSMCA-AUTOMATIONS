@@ -223,7 +223,16 @@ export default function CrewDashboard() {
       return;
     }
 
-    axios.get(`/api/providers/${providerSlug}/public-vehicles`)
+    // grantHeaders is NOT optional here. `public-vehicles` is "public" only in
+    // the sense that it needs no CREW login — it still requires the device to
+    // hold a portal grant, and answers 401 "This device is not unlocked"
+    // without one. This was the single call in this file that omitted them
+    // (public-crew, shift-start and the rest all pass them), so an ONLINE crew
+    // opening the vehicle picker always got "Could not reach the server", with
+    // no fallback to the cached list because the error path does not read it.
+    // Only the offline branch above worked, and only because it never asks.
+    axios.get(`/api/providers/${providerSlug}/public-vehicles`,
+              { headers: grantHeaders(providerSlug) })
       .then(res => {
         const d = res.data;
         const list = Array.isArray(d) ? d : [];
@@ -1045,7 +1054,8 @@ export default function CrewDashboard() {
                     <button onClick={() => {
                       setVehiclesLoading(true);
                       setVehiclesError(null);
-                      axios.get(`/api/providers/${providerSlug}/public-vehicles`)
+                      axios.get(`/api/providers/${providerSlug}/public-vehicles`,
+                                { headers: grantHeaders(providerSlug) })
                         .then(res => setVehicles(res.data))
                         .catch(err => setVehiclesError(err?.response?.status === 404 ? 'Provider not found. Check the URL.' : 'Could not reach the server. Check your connection and try again.'))
                         .finally(() => setVehiclesLoading(false));
