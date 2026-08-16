@@ -4301,9 +4301,19 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
           so a long Events / HPI cannot run the sheet off the bottom on its own. */}
       {detailSheets.map((secs, ds) => {
         const part = detailSheets.length > 1 ? ` (page ${ds + 1} of ${detailSheets.length})` : '';
-        // Two columns, split by section rather than by row so a section stays
-        // whole. The taller half goes left, which is where a reader starts.
-        const mid = Math.ceil(secs.length / 2);
+        // Two columns, split by section so a section stays whole — but split
+        // on SIZE, not on count. Splitting at the halfway section put the
+        // long ones (Findings, HPI, Past History) on one side and the short
+        // ones on the other, leaving 529px of blank ruled lines beside them.
+        // Filling the left column until it passes half the characters balances
+        // the two and is why the same content now needs no extra sheet.
+        const total = secs.reduce((n, x) => n + sectionChars(x), 0);
+        let acc = 0, mid = secs.length;
+        for (let i = 0; i < secs.length; i++) {
+          acc += sectionChars(secs[i]);
+          if (acc >= total / 2) { mid = i + 1; break; }
+        }
+        if (mid >= secs.length && secs.length > 1) mid = secs.length - 1;
         const cols = [secs.slice(0, mid), secs.slice(mid)];
         return (
         <div className="prf-print-frame" key={`cd-${ds}`}>
