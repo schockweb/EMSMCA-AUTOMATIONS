@@ -3,7 +3,7 @@
  * Renders the submitted Digital PRF in a clean, print-ready paper-form layout
  * with the provider's branding (logo, PR number, address, phone) prominent.
  */
-import { useEffect, useLayoutEffect, useRef, useState, useCallback, Fragment } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useCallback, Fragment, Children } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router';
 import axios from '../api/client';
 import { getCrewToken, ensureProviderSession } from '../utils/crewSession';
@@ -24,7 +24,7 @@ import PrfRecordView from './PrfRecordView';
 import {
   INSET_MM, MAX_W_MM, MAX_H_MM, SHEET_RATIO,
   DESIGN_W_PX, MAX_FIT_W, SLICE_ESCAPE_W, planPlacement, screenZoomFor,
-  PX_PER_MM, printScaleFor,
+  PX_PER_MM, printScaleFor, planPage1Sheets,
 } from './prfPdfLayout';
 const INK      = '#0b1020';      // body text
 const MUT      = '#5b6478';      // secondary text
@@ -533,6 +533,52 @@ const HospitalSticker = ({ fd, wide = false, capped = false, slim = false }:
   </>
 );
 
+/** Marker class for page 1's sheets, so the measuring pass can find exactly
+ *  those bands and not the clinical / attachment sheets that follow. */
+const PAGE1_CLASS = 'prf-page prf-page-1';
+
+/**
+ * Page 1, as one sheet or as several.
+ *
+ * Its children are the page's BANDS, already siblings in the markup — this
+ * takes them as children rather than importing the 900 lines of JSX, so
+ * splitting the page moved no content and changed no band.
+ *
+ * `groups` comes from planPage1Sheets (band indices per sheet). Empty means
+ * "not measured yet" and everything renders on one sheet, which is both the
+ * pre-existing behaviour and what jsdom gets, since it reports every height
+ * as 0 and can never trigger a split.
+ *
+ * React.Children.toArray drops false and null, so a band that renders
+ * conditionally (Band C is absent on a DOD) never occupies an index.
+ */
+const Page1Sheets = ({ groups, header, children }: {
+  groups: number[][];
+  header: (sheet: number, total: number) => React.ReactNode;
+  children: React.ReactNode;
+}) => {
+  const bands = Children.toArray(children);
+  const plan = groups.length > 0 ? groups : [bands.map((_, i) => i)];
+  const sheet: React.CSSProperties = {
+    width: 1220, minHeight: 862,
+    margin: '0 auto', background: '#fff', color: INK,
+    border: `2px solid ${LN}`, boxShadow: '0 6px 24px rgba(0,0,0,0.1)',
+    display: 'flex', flexDirection: 'column',
+  };
+  return (
+    <>
+      {plan.map((idxs, s) => (
+        <div className="prf-print-frame" key={s}>
+          <div className={PAGE1_CLASS} style={s === 0 ? sheet : { ...sheet, margin: '28px auto 0' }}>
+            {s > 0 && header(s, plan.length)}
+            {idxs.map(i => bands[i])}
+          </div>
+        </div>
+      ))}
+    </>
+  );
+};
+
 const FillLines = ({ minHeight = 0 }: { minHeight?: number }) => (
   // The line stack is absolutely positioned so it contributes ZERO intrinsic
   // height — the container only ever absorbs the column's genuine leftover
@@ -837,6 +883,62 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
     // no `zoom` style, and without re-running this effect the sheet painted
     // at the full 1220px and clipped off the right edge of the container.
   }, [applyScreenFit, prf, userZoom, recordView]);
+
+  // ── Page 1 continuation sheets ────────────────────────────────────────────
+  // Page 1 is the only sheet with no continuation, and at full field entry it
+  // outgrew what the exporter can place — 1187px on a Primary, 2015px on a
+  // refusal, against a 944px ceiling. The exporter's fallback is to shrink to
+  // the legibility floor and then cut, and the cut lands wherever the midpoint
+  // happens to be: through a signature box, through a row of identifiers.
+  //
+  // The decision is planPage1Sheets (pure, unit-tested); the measuring has to
+  // happen here because it needs a real browser.
+  //
+  // MEASURED ONCE per record, deliberately, and measured with every band still
+  // on one sheet.
+  //
+  // Bands DO stretch — Band B carries `flex: 1`, so on a page with room to
+  // spare it absorbs the slack and measures taller than its content. That
+  // sounds like it would cause spurious splits and does not, because it makes
+  // the measured heights sum to the sheet's ACTUAL height, which is the precise
+  // thing the budget is about: a page that fits sums to 862 and stays one
+  // sheet, a page that overflows has no slack to distribute so every band
+  // measures its true content.
+  //
+  // What it does mean is that a band's height changes once it moves to a sheet
+  // of its own, so re-measuring after a split would feed itself. Measuring once
+  // from the unsplit state is what makes the result stable, and it errs on the
+  // side of splitting early rather than cutting.
+  const [page1Groups, setPage1Groups] = useState<number[][]>([]);
+  const page1KeyRef = useRef<string>('');
+  const measurePage1 = useCallback(() => {
+    const bands = Array.from(
+      document.querySelectorAll<HTMLElement>('.prf-page-1 > *'),
+    ).filter(el => el.dataset.contHeader === undefined);
+    if (bands.length === 0) return;
+    const heights = bands.map(el => el.offsetHeight);
+    // jsdom reports 0 for everything, and a real browser reports 0 before
+    // layout. Either way there is nothing to decide yet — bail rather than
+    // "measure" a page as zero-height and split it into one sheet per band.
+    if (!heights.some(h => h > 0)) return;
+    const next = planPage1Sheets(heights);
+    setPage1Groups(prev =>
+      JSON.stringify(prev) === JSON.stringify(next) ? prev : next);
+  }, []);
+  useLayoutEffect(() => {
+    const key = prf ? `${prf.id}:${prf.updated_at ?? ''}` : '';
+    if (!key || page1KeyRef.current === key) return;
+    page1KeyRef.current = key;
+    // Reset before measuring: the natural band heights are the ones taken with
+    // every band on one sheet, which is also what a fresh record renders.
+    setPage1Groups([]);
+    measurePage1();
+    // The provider logo is the one image that can lag (everything else is an
+    // inline data-URL), and a band containing it measures short until it
+    // decodes. Same 400ms settle the share-sheet build already waits out.
+    const t = setTimeout(measurePage1, 450);
+    return () => clearTimeout(t);
+  }, [prf, measurePage1]);
 
   // Step the reader zoom, keeping whatever is at the centre of the screen at
   // the centre afterwards — zooming in from the left edge otherwise dumps you
@@ -2594,13 +2696,37 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
             • Band B — patient / clinical summary / med-aid / channel
             • Band C — debtor / handover+sticker / valuables+sigs / terms
           Every captured field is rendered; empty-only sections fold. */}
-      <div className="prf-print-frame">
-      <div className="prf-page" style={{
-        width: 1220, minHeight: 862,
-        margin: '0 auto', background: '#fff', color: INK,
-        border: `2px solid ${LN}`, boxShadow: '0 6px 24px rgba(0,0,0,0.1)',
-        display: 'flex', flexDirection: 'column',
-      }}>
+      <Page1Sheets
+        groups={page1Groups}
+        header={(sheet, total) => (
+          <div data-cont-header="1" style={{
+            display: 'grid', gridTemplateColumns: '1.3fr 2.4fr 2fr',
+            borderBottom: `2px solid ${LN}`,
+          }}>
+            <div style={{
+              padding: '10px 12px', borderRight: `1px solid ${LN}`,
+              display: 'flex', alignItems: 'center',
+            }}>
+              <ProviderLogo prov={prov} height={30} />
+            </div>
+            <div style={{
+              padding: '10px 12px', borderRight: `1px solid ${LN}`,
+              display: 'flex', alignItems: 'center',
+              fontSize: '0.78rem', fontWeight: 800, color: INK,
+              letterSpacing: '0.08em', textTransform: 'uppercase',
+            }}>
+              Page 1 continued ({sheet + 1} of {total})
+            </div>
+            <div style={{
+              padding: '10px 12px', display: 'flex', alignItems: 'center',
+              justifyContent: 'flex-end', gap: 18, fontSize: '0.68rem', color: MUT,
+            }}>
+              <span>Patient: <b style={{ color: INK }}>{patientFullName}</b></span>
+              {prf.case_number && <span>Case: <b style={{ color: INK, fontFamily: 'ui-monospace, monospace' }}>{prf.case_number}</b></span>}
+            </div>
+          </div>
+        )}
+      >
         {/* ── BAND A — Brand │ Address+Date+Call-Type │ Call Info │ Alpha Unit + Times ── */}
         <div style={{ display: 'grid', gridTemplateColumns: '1.95fr 1.45fr 2.2fr 2.0fr' }}>
           {/* Brand block — framed logo placeholder + enlarged provider details */}
@@ -3488,9 +3614,7 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
 
           </div>
         )}
-      </div>
-
-      </div>{/* /prf-print-frame (page 1) */}
+      </Page1Sheets>{/* page 1 — one sheet, or several if the bands overflow */}
 
       {/* ═══════ DOD PAGE 2 — Debtor · Billing · Crew Sign-Off ═══════
           A DOD certificate fills page 1 on its own, so the payer blocks and

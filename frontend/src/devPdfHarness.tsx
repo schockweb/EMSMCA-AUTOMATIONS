@@ -435,7 +435,8 @@ function measure() {
     const capped = w >= MAX_FIT_W;
     lines.push(
       `sheet ${i + 1}: ${w0}x${h0}px -> width ${w}px (${passes} pass${passes === 1 ? '' : 'es'})` +
-      `${capped ? ' [at cap]' : ''}  branch=${branch}\n` +
+      `${capped ? ' [at cap]' : ''} page1=${el.classList.contains('prf-page-1') ? 'yes' : 'no'}` +
+      `  branch=${branch}\n` +
       `          label  ${LABEL_REM}rem: ${labelPt.toFixed(2)}pt${labelPt < 5 ? '   <<< BELOW LEGIBILITY' : '   ok'}\n` +
       `          T&C ${SMALLEST_REM}rem: ${smallestPt.toFixed(2)}pt   (smallest text on the sheet)`,
     );

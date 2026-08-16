@@ -74,8 +74,10 @@ const BILLINGS = ['MED AID', 'WCA / IOD', 'RAF', 'PVT'];
 const parse = (out) => {
   const sheets = [];
   for (const ln of String(out).split('\n')) {
-    const m = ln.match(/^sheet (\d+): (\d+)x(\d+)px -> width (\d+)px.*branch=(\S+(?: x\d+)?)/);
-    if (m) sheets.push({ n: +m[1], h: +m[3], branch: m[5] });
+    // page1 is per-sheet, not per-export: page 1 can now be several sheets, so
+    // "did page 1 slice" is no longer "did sheets[0] slice".
+    const m = ln.match(/^sheet (\d+): (\d+)x(\d+)px -> width (\d+)px.*page1=(yes|no).*branch=(\S+(?: x\d+)?)/);
+    if (m) sheets.push({ n: +m[1], h: +m[3], page1: m[5] === 'yes', branch: m[6] });
   }
   const labels = [...String(out).matchAll(/label\s+[0-9.]+rem: ([0-9.]+)pt/g)].map((x) => +x[1]);
   // The 0.56rem label is NOT the smallest text on the sheet — 0.46rem is, and a
@@ -115,8 +117,10 @@ const run = async () => {
         tallest: Math.max(...sheets.map((s) => s.h), 0),
         sliced: sliced.map((s) => `sheet${s.n} ${s.branch} @${s.h}px (+${s.h - CEILING})`),
         minLabelPt, minTextPt, illegible,
-        // Page 1 slicing cuts a signature box in half — always a failure.
-        page1Sliced: /slice/.test(sheets[0]?.branch || ''),
+        page1Sheets: sheets.filter((s) => s.page1).length,
+        // Page 1 slicing cuts a signature box in half — always a failure. Any
+        // of page 1's sheets, not just the first: it continues now.
+        page1Sliced: sheets.some((s) => s.page1 && /slice/.test(s.branch)),
         pass: sliced.length === 0
           && (minLabelPt === null || minLabelPt >= LABEL_FLOOR)
           && !illegible,

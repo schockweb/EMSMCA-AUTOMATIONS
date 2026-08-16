@@ -123,6 +123,79 @@ export const SHRINK_LIMIT_MM = MAX_H_MM * 1.4;
  */
 export const PAGE1_MIN_PT = 4.75;
 
+/**
+ * The tallest page 1 may be before the exporter stops being able to place it
+ * whole. Derived, not chosen: a sheet of height H is reflowed to
+ * `ceil(H / SHEET_RATIO)` and capped at MAX_FIT_W, so H <= MAX_FIT_W *
+ * SHEET_RATIO is exactly the set of heights that reach the sheet ratio without
+ * hitting the cap — i.e. that fit at or above the legibility floor.
+ */
+export const PAGE1_MAX_H_PX = Math.floor(MAX_FIT_W * SHEET_RATIO);   // 944
+
+/**
+ * Split page 1's bands across as many sheets as they need.
+ *
+ * WHY THIS EXISTS
+ * ---------------
+ * Page 1 is the one sheet with no continuation. Every other sheet in the export
+ * is a LIST that survives being continued (vitals, drugs, attachments), and
+ * each already has its own budget — VITALS_PER_PAGE, CLINICAL_IVMED_BUDGET.
+ * Page 1 had none: it rendered whatever the crew captured at whatever height
+ * that came to, and the exporter was left to place a sheet that could not be
+ * placed. It shrank it until the text went sub-legible, then cut it in half
+ * through whatever happened to be at the midpoint — a signature box, a row of
+ * patient identifiers.
+ *
+ * Measured at genuine maximum field entry, page 1 ran from 1187px (Primary) to
+ * 2015px (a refusal, whose waiver text is one 1473px column) against a 944px
+ * ceiling. So this is not a matter of trimming a band: page 1 needs to be able
+ * to become two or three sheets, the same way the clinical pages already do.
+ *
+ * GREEDY, AND WHY THAT IS THE RIGHT CHOICE HERE
+ * ---------------------------------------------
+ * Bands are packed in order, opening a new sheet when the next one would not
+ * fit. Page 1's bands are strongly ordered — identity and call details, then
+ * the payer and consent columns, then the closeout — and an adjudicator reads
+ * them in that order. Balancing sheets more evenly would reorder nothing but
+ * would move the split to a less natural place; keeping the reading order and
+ * filling each sheet as far as it goes is what a paper form does.
+ *
+ * A band taller than the budget on its own gets a sheet to itself and is
+ * returned as-is. It will still be over — this function cannot make a single
+ * indivisible band shorter — but it is then the ONLY thing on its sheet, so
+ * the exporter's shrink-then-slice fallback acts on that band alone instead of
+ * on the whole page. That converts "the page was cut through a signature box"
+ * into "the long block continued", which is the outcome that matters.
+ *
+ * Pure arithmetic on purpose: the measuring happens in PRFView, which needs a
+ * real browser. jsdom reports every height as 0, and with all-zero heights this
+ * returns a single group — i.e. exactly today's behaviour — so the 566-test
+ * suite keeps describing a real thing.
+ */
+export function planPage1Sheets(
+  bandHeights: number[],
+  budgetPx: number = PAGE1_MAX_H_PX,
+): number[][] {
+  if (bandHeights.length === 0) return [];
+  const sheets: number[][] = [];
+  let current: number[] = [];
+  let used = 0;
+  bandHeights.forEach((h, i) => {
+    const height = Number.isFinite(h) && h > 0 ? h : 0;
+    // Never emit an empty sheet: the first band always joins the current one,
+    // however tall it is.
+    if (current.length > 0 && used + height > budgetPx) {
+      sheets.push(current);
+      current = [];
+      used = 0;
+    }
+    current.push(i);
+    used += height;
+  });
+  if (current.length > 0) sheets.push(current);
+  return sheets;
+}
+
 export type Placement =
   | { kind: 'fit'; drawWmm: number; drawHmm: number; textScale: number }
   | { kind: 'shrink'; drawWmm: number; drawHmm: number; textScale: number }
