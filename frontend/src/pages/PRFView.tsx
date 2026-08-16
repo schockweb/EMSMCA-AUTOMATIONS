@@ -1732,11 +1732,19 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
   // not a continuation sheet.
   //
   // Sections are packed greedily into sheets against a character budget.
-  // 2,600 is measured, not guessed: a detail sheet carrying 2,845 characters
-  // of history laid out at 570px and 419px in its two columns, inside an
-  // 804px band — comfortable, so the budget sits just under what is proven to
-  // fit rather than at the edge of it.
-  const CLINICAL_DETAIL_CHAR_BUDGET = 2600;
+  //
+  // 2,845 characters of history is MEASURED to lay out at 570px and 419px in
+  // the two columns of an 804px band — comfortable. Scaling that linearly, the
+  // taller column reaches the band at about 4,000, so 3,600 keeps a margin for
+  // a section that wraps badly.
+  //
+  // The first cut used 2,600, which was under the one number actually measured
+  // and therefore split a record that demonstrably fits: the fault hunt came
+  // back with two Clinical Detail sheets each 33% full and 529px of blank
+  // ruled lines. Being conservative with a budget is not free — it buys an
+  // empty sheet, which on a printed clinical form reads as a section nobody
+  // completed.
+  const CLINICAL_DETAIL_CHAR_BUDGET = 3600;
   const detailSections: Array<{ head: string; rows: Array<[string, any, number?]> }> = [];
   if (historyOwnSheet) {
     detailSections.push({ head: 'Presentation', rows: [
