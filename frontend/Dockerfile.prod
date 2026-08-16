@@ -35,7 +35,18 @@ RUN npm run build
 
 # ── Stage 2: Serve with Nginx ─────────────────────────────
 # Minimal alpine Nginx image — only static files, no Node runtime.
-FROM nginx:1.27-alpine AS serve
+# nginx:1.27-alpine is ABANDONED upstream — re-pulling it in August 2026 still
+# yields Alpine 3.21.3 with libcrypto3 3.3.3-r0, carrying CVE-2025-15467
+# (OpenSSL RCE/DoS) and CVE-2026-31789. This container terminates TLS for
+# portal.emsmca.co.za and is the only internet-reachable service on the box, so
+# a stale OpenSSL here is the highest-value target in the whole deployment.
+# 1.29-alpine is Alpine 3.23.4 with libcrypto3 3.5.6-r0, which fixes both.
+#
+# Pinned to a MINOR line, not `alpine`: the tag must be allowed to pick up
+# patch rebuilds without a silent jump across a major nginx version. Re-check
+# it whenever a scan flags this image — an abandoned tag fails silently, since
+# `docker build --pull` cheerfully re-pulls the same stale layer.
+FROM nginx:1.29-alpine AS serve
 
 LABEL maintainer="EMS Claims Portal <admin@emsclaims.co.za>"
 LABEL description="EMS Claims Portal — Frontend (production)"

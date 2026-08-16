@@ -29,7 +29,24 @@ export async function pdfFileToImages(f: File): Promise<{ pages: string[]; total
   pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
   const data = await f.arrayBuffer();
-  const doc = await pdfjs.getDocument({ data }).promise;
+  // The file is whatever the user picked, so this call is the one place the app
+  // hands attacker-controllable bytes to a parser. Two advisories were checked
+  // against this line rather than assumed:
+  //
+  //  GHSA-hq66-cqwq-w95j (pdfjs-dist <6.2.108, "arbitrary JS on opening a
+  //    malicious PDF") does NOT apply. It needs enableScripting, which is a
+  //    VIEWER option; this module never builds a viewer — it rasterises pages
+  //    — and pdf.sandbox is never imported, so the scripting layer is not even
+  //    in the bundle. The 6.x upgrade is a major bump, tracked separately.
+  //  CVE-2024-4367 (JS via a crafted font) is structurally gone: the eval-based
+  //    font path was removed upstream, and with it the isEvalSupported switch —
+  //    it is no longer a member of DocumentInitParameters in 5.x, so passing it
+  //    is a type error rather than hardening.
+  //
+  // enableXfa is already false by default. It is pinned because XFA is a whole
+  // second parser, and a default flip upstream would silently widen this
+  // surface on the one call that takes untrusted input.
+  const doc = await pdfjs.getDocument({ data, enableXfa: false }).promise;
   try {
     const totalPages = doc.numPages;
     const n = Math.min(totalPages, PDF_MAX_PAGES);
