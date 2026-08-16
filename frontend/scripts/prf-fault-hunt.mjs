@@ -68,10 +68,19 @@ const run = async () => {
         const sheets = [...document.querySelectorAll('.prf-page')];
         const out = { sheets: [], clipped: [] };
 
-        // CLIPPED: walk every element and compare what it wants to draw with
-        // the box it is drawing into. Only counted where something in the
-        // ancestry actually hides the overflow — otherwise the content is
-        // merely spilling visibly, which the height checks already catch.
+        // CLIPPED: only LEAF elements that actually hold text.
+        //
+        // The first version compared scrollHeight to clientHeight on every
+        // element and reported 36 clips per record, all of them "DIV loses
+        // 873px" with empty text. Those were FillLines — the ruled-line stack
+        // is absolutely positioned precisely so it contributes no intrinsic
+        // height, which makes a huge scrollHeight its designed behaviour, not a
+        // fault. A container's scrollHeight says nothing about whether the
+        // words inside it are readable.
+        //
+        // A leaf's does: with no element children, scrollHeight is its own
+        // text. That is the actual question — is a line of the clinical record
+        // being cut off — and it is what this now measures.
         const hides = (el) => {
           for (let n = el; n && n !== document.body; n = n.parentElement) {
             const o = getComputedStyle(n);
@@ -81,13 +90,14 @@ const run = async () => {
         };
         for (const sheet of sheets) {
           for (const el of sheet.querySelectorAll('*')) {
+            if (el.children.length) continue;                 // not a leaf
+            const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
+            if (text.length < 4) continue;                    // nothing to lose
+            if (getComputedStyle(el).position === 'absolute') continue;
             const dy = el.scrollHeight - el.clientHeight;
             const dx = el.scrollWidth - el.clientWidth;
             if ((dy > 2 || dx > 2) && el.clientHeight > 0 && hides(el)) {
-              out.clipped.push({
-                dy, dx, tag: el.tagName,
-                text: (el.textContent || '').replace(/\s+/g, ' ').slice(0, 70),
-              });
+              out.clipped.push({ dy, dx, tag: el.tagName, text: text.slice(0, 70) });
             }
           }
         }
@@ -95,17 +105,36 @@ const run = async () => {
         for (const [i, pg] of sheets.entries()) {
           const bands = [...pg.children].filter((x) => x.dataset.contHeader !== '1');
           let worstFill = 1;
+          let worstWaste = 0;
           for (const bd of bands) {
             if (bd.offsetHeight < 200) continue;      // header strips are not holes
+            // A sheet whose content is one big image (an attached document, a
+            // sticker) has no in-flow child stack to add up and measured 0%
+            // filled — reported as a hole on every attachment sheet in the
+            // trial run. It is a picture, not an empty column.
+            if (bd.querySelector('img')) continue;
+            if ((bd.textContent || '').replace(/\s+/g, '').length < 40) continue;
             const prev = bd.style.alignItems; bd.style.alignItems = 'start';
             for (const col of bd.children) {
-              const kids = [...col.children];
+              // Absolutely-positioned children (FillLines) contribute no height
+              // by design; counting them as content would hide a real hole and
+              // counting the column as empty would invent one.
+              const kids = [...col.children]
+                .filter((k) => getComputedStyle(k).position !== 'absolute');
+              if (!kids.length) continue;
               const inked = kids.reduce((n, k) => n + k.offsetHeight, 0);
+              // Absolute waste, not a ratio. Columns in a multi-column band
+              // legitimately differ in height, so "worst fill" flagged one
+              // column on almost every sheet and said nothing. What the eye
+              // actually sees — and what was reported on the clinical page —
+              // is a tall empty strip: 717px of blank ruled lines under one
+              // line of text. Measure that.
+              worstWaste = Math.max(worstWaste, bd.offsetHeight - inked);
               worstFill = Math.min(worstFill, inked / bd.offsetHeight);
             }
             bd.style.alignItems = prev;
           }
-          out.sheets.push({ n: i + 1, h: pg.offsetHeight, fill: worstFill });
+          out.sheets.push({ n: i + 1, h: pg.offsetHeight, fill: worstFill, waste: worstWaste });
         }
         out.over = out.sheets.filter((x) => x.h > ceiling);
         return out;
@@ -123,8 +152,11 @@ const run = async () => {
       }
       // A hole only matters on a sheet that had room to be fuller.
       for (const sh of r.sheets) {
-        if (sh.fill < 0.33 && sh.h > 400) {
-          faults.push({ ...c, type: 'HOLE', detail: `sheet ${sh.n} tallest column ${(sh.fill * 100).toFixed(0)}% filled` });
+        // 400px is roughly half a sheet's usable height — enough blank for a
+        // reader to take it as a section nobody completed.
+        if (sh.waste > 400) {
+          faults.push({ ...c, type: 'HOLE',
+            detail: `sheet ${sh.n}: ${Math.round(sh.waste)}px blank in one column (${(sh.fill * 100).toFixed(0)}% filled)` });
         }
       }
       for (const cl of r.clipped.slice(0, 3)) {

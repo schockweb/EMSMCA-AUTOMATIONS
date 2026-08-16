@@ -33,3 +33,5 @@ dist-ssr
 session.json
 # PDF benchmark sample — carries a live ADMIN token.
 pdfbench*.json
+hunt.json
+fault-hunt-report.json

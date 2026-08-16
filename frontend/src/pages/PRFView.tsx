@@ -4344,8 +4344,24 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
               </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', flex: 1, minHeight: 0 }}>
-              <div style={{ borderRight: `1px solid ${LN}`, display: 'flex', flexDirection: 'column' }}>
+            {/* One column when only one list still has rows. The two lists are
+                different lengths (12 IV against 16 medications is ordinary),
+                the sheet count follows the LONGER one, and the shorter runs
+                out first — so the final sheet drew a full Medication column
+                beside 789px of blank ruled lines. Found by the fault hunt on
+                real records, and it is the same defect as the clinical page's
+                empty middle column: on a printed clinical form an empty column
+                reads as a section nobody completed. */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: (ivSlice.length > 0 && medSlice.length > 0) ? '1fr 1fr' : '1fr',
+              flex: 1, minHeight: 0,
+            }}>
+              {ivSlice.length > 0 && (
+              <div style={{
+                borderRight: medSlice.length > 0 ? `1px solid ${LN}` : 'none',
+                display: 'flex', flexDirection: 'column',
+              }}>
                 {ivSlice.length > 0 && (
                   <>
                     <SectionHead label="Intravenous Therapy" />
@@ -4356,6 +4372,8 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
                 )}
                 <FillLines />
               </div>
+              )}
+              {medSlice.length > 0 && (
               <div style={{ display: 'flex', flexDirection: 'column' }}>
                 {medSlice.length > 0 && (
                   <>
@@ -4367,6 +4385,7 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
                 )}
                 <FillLines />
               </div>
+              )}
             </div>
           </div>
         </div>
