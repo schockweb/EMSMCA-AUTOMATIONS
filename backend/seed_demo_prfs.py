@@ -182,25 +182,45 @@ TEMPLATE_MIX = {"Primary": 44, "IFT/IHT": 25, "RHT": 9, "WCA/IOD": 7,
 # The rest of the stress stays: 26 observation sets is the form's own maximum
 # and tier-3 prose is a crew who typed a page into every box.
 DENSITY_BANDS = {
-    "typical":  {"iv": 1,  "med": 2,  "vitals": 3,  "text": 0},
-    "heavy":    {"iv": 2,  "med": 3,  "vitals": 5,  "text": 1},
-    "max":      {"iv": 3,  "med": 3,  "vitals": 6,  "text": 2},
-    "extreme":  {"iv": 3,  "med": 3,  "vitals": 6,  "text": 2},
-    # Past anything a real call produces, on purpose. Every layout budget in
-    # PRFView was derived from a measurement, and a budget is only trustworthy
-    # once something has been pushed through the far side of it: this band is
-    # what proves the sheet SPILLS instead of slicing rather than proving it
-    # happens to fit. Twenty-six observation sets is the form's own maximum, and
-    # tier 3 prose is a crew who typed a page into every free-text box.
-    "overfill": {"iv": 3,  "med": 3,  "vitals": 26, "text": 3},
+    # Sized for a CLEAN document, not for maximum stress — owner's instruction,
+    # 2026-08-17: "clean 2 pages PDF with the hospital sticker at the end, some
+    # can be 4 pages in total".
+    #
+    # The page count follows directly from the budgets in PRFView:
+    #   history under 1,000 chars  -> no Clinical Detail sheet   (tier 0 ~245)
+    #   iv + med at most 2         -> drug tables stay inline
+    #   vitals at most 7           -> no vitals continuation
+    # so a record inside all three is page 1 + the clinical page, then the
+    # hospital sticker on the attachments sheet at the end.
+    #
+    # `full` deliberately crosses ONE budget (observation sets) to produce the
+    # four-page case, and crosses it with short prose so the extra sheet is a
+    # vitals continuation rather than a wall of text.
+    #
+    # Layout STRESS has not been given up: pdf-layout-matrix.mjs still drives
+    # 112 combinations at 12 IV, 16 medications and every field filled. That is
+    # a synthetic fixture, which is where extremes belong — not in the records a
+    # client opens.
+    # Measured, not assumed — 28 of these were rendered and counted:
+    #   iv + med at most 2 (CLINICAL_IVMED_BUDGET) keeps the drug tables
+    #   INLINE on the clinical page, giving page 1 + clinical + sticker = 3.
+    #   Above that the tables take a sheet of their own, giving 4.
+    #   Vitals stay at or under 7 everywhere, so nothing earns a vitals
+    #   continuation — 10 produced a fifth sheet, which is past what was asked.
+    # VITALS AT OR UNDER 5, not 7. VITALS_PER_PAGE is 7 only when the history
+    # column has been vacated (clinicalCol2Hidden); with the short prose these
+    # bands use, the history stays on the clinical page and the limit is 5. Six
+    # observation sets therefore earned a continuation sheet and a fifth page.
+    # Reasoning from the constant rather than from the condition attached to it
+    # is what put it wrong the first time.
+    "quiet":   {"iv": 1, "med": 1, "vitals": 3, "text": 0},
+    "typical": {"iv": 1, "med": 1, "vitals": 4, "text": 0},
+    "busy":    {"iv": 2, "med": 2, "vitals": 5, "text": 0},
+    "full":    {"iv": 3, "med": 3, "vitals": 5, "text": 0},
 }
-# Weighted toward the top: the point of this data set is to find where the sheet
-# breaks, and a set that is mostly 'typical' finds nothing. 'typical' is kept in
-# so the list still reads like real work when a client scrolls it.
-DENSITY_MIX = {"typical": 25, "heavy": 30, "max": 30, "extreme": 15}
-# Fault-hunting mix: almost entirely past the budgets, with a little ordinary
-# work so a regression in the NORMAL path still shows up in the same run.
-DENSITY_MIX_HUNT = {"typical": 5, "heavy": 10, "max": 20, "extreme": 25, "overfill": 40}
+# A real day: mostly ordinary calls, a few busy ones, the occasional long one.
+DENSITY_MIX = {"quiet": 30, "typical": 40, "busy": 22, "full": 8}
+DENSITY_MIX_HUNT = DENSITY_MIX
 
 # Clinical rows only belong on call types that render the clinical stack. A
 # refusal (RHT) hides it entirely — fd.patient_refused_treatment collapses the
