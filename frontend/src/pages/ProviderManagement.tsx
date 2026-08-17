@@ -758,8 +758,29 @@ export default function ProviderManagement() {
     }
   };
 
+  // ── What a complete record looks like ────────────────────────────────────
+  //
+  // The HPCSA number is the reason this gate exists. It was optional on the
+  // form and compulsory on the document: a crew member saved without one
+  // looked entirely fine here, then printed a dash where their registration
+  // number belongs on every report they signed — on a record a medical scheme
+  // adjudicates, and nobody notices a missing number they never saw.
+  //
+  // Gating the button rather than validating on submit is deliberate: the
+  // operator sees what is outstanding while they are still typing, instead of
+  // filling a form, pressing the button and being told no.
+  const trimmed = (s: string) => (s || '').trim() !== '';
+  const canAddCrew = trimmed(newCrew.full_name) && trimmed(newCrew.hpcsa_number);
+  const canAddVehicle = trimmed(newVehicle.callsign) && trimmed(newVehicle.registration);
+  // Edit is held to the same standard, or the rule is one click wide: the edit
+  // form could blank an HPCSA number that Add had just insisted on.
+  const canSaveCrew = trimmed(editCrewForm.full_name)
+    && trimmed(editCrewForm.email)
+    && trimmed(editCrewForm.hpcsa_number);
+  const canSaveVehicle = trimmed(editVehicleForm.callsign) && trimmed(editVehicleForm.registration);
+
   const handleAddCrew = async () => {
-    if (!selectedProvider) return;
+    if (!selectedProvider || !canAddCrew) return;
     try {
       const res = await api.post(`/api/providers/${selectedProvider.id}/crew`, newCrew);
       setTempPassword(res.data.temp_password);
@@ -779,7 +800,7 @@ export default function ProviderManagement() {
   };
 
   const handleAddVehicle = async () => {
-    if (!selectedProvider) return;
+    if (!selectedProvider || !canAddVehicle) return;
     try {
       await api.post(`/api/providers/${selectedProvider.id}/vehicles`, newVehicle);
       setShowAddVehicle(false);
@@ -895,6 +916,16 @@ export default function ProviderManagement() {
     fontWeight: 700,
     cursor: 'pointer',
     letterSpacing: '0.03em',
+  };
+
+  // A primary button that is off until the form is complete. Greyed and
+  // not-allowed rather than hidden: the operator needs to see that the action
+  // exists and is waiting on them, and the starred labels say which field.
+  const btnPrimaryGated = (enabled: boolean): React.CSSProperties => enabled ? btnPrimary : {
+    ...btnPrimary,
+    background: 'var(--surface-200)',
+    color: 'var(--text-muted)',
+    cursor: 'not-allowed',
   };
 
   const inputStyle: React.CSSProperties = {
@@ -1550,7 +1581,7 @@ export default function ProviderManagement() {
                       a placeholder email), so both fields were dead weight. */}
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 14px' }}>
                     <div><label style={labelStyle}>Initials</label><input style={inputStyle} value={newCrew.initials} onChange={e => setNewCrew({ ...newCrew, initials: e.target.value })} /></div>
-                    <div><label style={labelStyle}>HPCSA Number</label><input style={inputStyle} value={newCrew.hpcsa_number} onChange={e => setNewCrew({ ...newCrew, hpcsa_number: e.target.value })} /></div>
+                    <div><label style={labelStyle}>HPCSA Number *</label><input style={inputStyle} value={newCrew.hpcsa_number} onChange={e => setNewCrew({ ...newCrew, hpcsa_number: e.target.value })} /></div>
                     <div style={{ gridColumn: '1 / -1' }}>
                       <label style={labelStyle}>Qualification</label>
                       <select style={inputStyle} value={newCrew.qualification} onChange={e => setNewCrew({ ...newCrew, qualification: e.target.value })}>
@@ -1572,7 +1603,12 @@ export default function ProviderManagement() {
                 {/* Footer */}
                 <div style={{ display: 'flex', gap: 10, padding: '16px 26px 22px' }}>
                   <button style={{ ...btnPrimary, background: 'var(--surface-100)', color: 'var(--text)', flex: 1, padding: '10px 18px' }} onClick={closeAddCrew}>Cancel</button>
-                  <button style={{ ...btnPrimary, flex: 2, padding: '10px 18px' }} onClick={handleAddCrew}>Add Crew Member</button>
+                  <button
+                    style={{ ...btnPrimaryGated(canAddCrew), flex: 2, padding: '10px 18px' }}
+                    onClick={handleAddCrew}
+                    disabled={!canAddCrew}
+                    title={canAddCrew ? undefined : 'Enter the full name and HPCSA number first'}
+                  >Add Crew Member</button>
                 </div>
               </div>
             </div>
@@ -1593,7 +1629,7 @@ export default function ProviderManagement() {
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 14px' }}>
                     <div><label style={labelStyle}>Initials</label><input style={inputStyle} value={editCrewForm.initials} onChange={e => setEditCrewForm({ ...editCrewForm, initials: e.target.value })} /></div>
-                    <div><label style={labelStyle}>HPCSA Number</label><input style={inputStyle} value={editCrewForm.hpcsa_number} onChange={e => setEditCrewForm({ ...editCrewForm, hpcsa_number: e.target.value })} /></div>
+                    <div><label style={labelStyle}>HPCSA Number *</label><input style={inputStyle} value={editCrewForm.hpcsa_number} onChange={e => setEditCrewForm({ ...editCrewForm, hpcsa_number: e.target.value })} /></div>
                     <div>
                       <label style={labelStyle}>Qualification</label>
                       <select style={inputStyle} value={editCrewForm.qualification} onChange={e => setEditCrewForm({ ...editCrewForm, qualification: e.target.value })}>
@@ -1608,7 +1644,12 @@ export default function ProviderManagement() {
 
                 <div style={{ display: 'flex', gap: 10, padding: '16px 26px 22px' }}>
                   <button style={{ ...btnPrimary, background: 'var(--surface-100)', color: 'var(--text)', flex: 1, padding: '10px 18px' }} onClick={closeEditCrew}>Cancel</button>
-                  <button style={{ ...btnPrimary, flex: 2, padding: '10px 18px' }} onClick={handleSaveCrew} disabled={editCrewSaving}>
+                  <button
+                    style={{ ...btnPrimaryGated(canSaveCrew && !editCrewSaving), flex: 2, padding: '10px 18px' }}
+                    onClick={handleSaveCrew}
+                    disabled={editCrewSaving || !canSaveCrew}
+                    title={canSaveCrew ? undefined : 'Full name, email and HPCSA number are all required'}
+                  >
                     {editCrewSaving ? 'Saving...' : 'Save Changes'}
                   </button>
                 </div>
@@ -1785,7 +1826,12 @@ export default function ProviderManagement() {
                 {/* Footer */}
                 <div style={{ display: 'flex', gap: 10, padding: '16px 26px 22px' }}>
                   <button style={{ ...btnPrimary, background: 'var(--surface-100)', color: 'var(--text)', flex: 1, padding: '10px 18px' }} onClick={closeAddVehicle}>Cancel</button>
-                  <button style={{ ...btnPrimary, flex: 2, padding: '10px 18px' }} onClick={handleAddVehicle}>Add Vehicle</button>
+                  <button
+                    style={{ ...btnPrimaryGated(canAddVehicle), flex: 2, padding: '10px 18px' }}
+                    onClick={handleAddVehicle}
+                    disabled={!canAddVehicle}
+                    title={canAddVehicle ? undefined : 'Enter the callsign and registration first'}
+                  >Add Vehicle</button>
                 </div>
               </div>
             </div>
@@ -1816,7 +1862,12 @@ export default function ProviderManagement() {
 
                 <div style={{ display: 'flex', gap: 10, padding: '16px 26px 22px' }}>
                   <button style={{ ...btnPrimary, background: 'var(--surface-100)', color: 'var(--text)', flex: 1, padding: '10px 18px' }} onClick={closeEditVehicle}>Cancel</button>
-                  <button style={{ ...btnPrimary, flex: 2, padding: '10px 18px' }} onClick={handleSaveVehicle} disabled={editVehicleSaving}>
+                  <button
+                    style={{ ...btnPrimaryGated(canSaveVehicle && !editVehicleSaving), flex: 2, padding: '10px 18px' }}
+                    onClick={handleSaveVehicle}
+                    disabled={editVehicleSaving || !canSaveVehicle}
+                    title={canSaveVehicle ? undefined : 'Callsign and registration are both required'}
+                  >
                     {editVehicleSaving ? 'Saving...' : 'Save Changes'}
                   </button>
                 </div>
