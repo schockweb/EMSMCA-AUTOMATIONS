@@ -171,18 +171,28 @@ TEMPLATE_MIX = {"Primary": 44, "IFT/IHT": 25, "RHT": 9, "WCA/IOD": 7,
 # gate measures.
 #
 # `text` selects a prose tier: 0 short, 1 long, 2 maximum.
+# IV and medication rows are capped at 3 by the owner's instruction
+# (2026-08-17). A real call runs one to three lines and one to three drugs; the
+# earlier 20/26 produced seven continuation sheets of drug tables per record,
+# which stressed the paginator but made the demo records unlike anything a crew
+# would recognise. The layout paginator is still exercised to 12 IV and 16
+# medications by scripts/pdf-layout-matrix.mjs, which is where that belongs —
+# a synthetic fixture, not the data a client is shown.
+#
+# The rest of the stress stays: 26 observation sets is the form's own maximum
+# and tier-3 prose is a crew who typed a page into every box.
 DENSITY_BANDS = {
     "typical":  {"iv": 1,  "med": 2,  "vitals": 3,  "text": 0},
-    "heavy":    {"iv": 3,  "med": 5,  "vitals": 5,  "text": 1},
-    "max":      {"iv": 6,  "med": 8,  "vitals": 6,  "text": 2},
-    "extreme":  {"iv": 12, "med": 16, "vitals": 6,  "text": 2},
+    "heavy":    {"iv": 2,  "med": 3,  "vitals": 5,  "text": 1},
+    "max":      {"iv": 3,  "med": 3,  "vitals": 6,  "text": 2},
+    "extreme":  {"iv": 3,  "med": 3,  "vitals": 6,  "text": 2},
     # Past anything a real call produces, on purpose. Every layout budget in
     # PRFView was derived from a measurement, and a budget is only trustworthy
     # once something has been pushed through the far side of it: this band is
     # what proves the sheet SPILLS instead of slicing rather than proving it
     # happens to fit. Twenty-six observation sets is the form's own maximum, and
     # tier 3 prose is a crew who typed a page into every free-text box.
-    "overfill": {"iv": 20, "med": 26, "vitals": 26, "text": 3},
+    "overfill": {"iv": 3,  "med": 3,  "vitals": 26, "text": 3},
 }
 # Weighted toward the top: the point of this data set is to find where the sheet
 # breaks, and a set that is mostly 'typical' finds nothing. 'typical' is kept in
