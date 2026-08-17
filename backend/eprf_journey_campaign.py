@@ -63,7 +63,7 @@ import sys
 import time
 import uuid
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -155,11 +155,16 @@ async def load_context(source: str, load_slug: str, n_tokens: int):
                                  .limit(n_tokens))).scalars().all()
         if not crew:
             raise SystemExit(f"'{load_slug}' has no crew.")
+        # Minted once, for the whole run. The default access-token life is about
+        # an hour and a 10,000-record run takes just over one, so the previous
+        # campaign ended in 401s — 401 forms of 10,000, all in the final
+        # minutes, every one of them the harness expiring rather than the
+        # platform refusing. Six hours covers any run this drives.
         tokens = [create_access_token({
             "sub": str(c.id), "crew_id": str(c.id),
             "provider_id": str(load.id), "provider_slug": load.slug,
             "role": c.role, "token_scope": "crew",
-        }) for c in crew]
+        }, expires_delta=timedelta(hours=6)) for c in crew]
 
         real_prfs = (await db.execute(select(func.count()).select_from(DigitalPRF)
                                       .where(DigitalPRF.provider_id != load.id))).scalar()

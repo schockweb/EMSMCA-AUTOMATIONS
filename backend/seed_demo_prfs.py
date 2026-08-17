@@ -672,6 +672,17 @@ def build_from_template(tpl_fd: dict, when: datetime, band: str | None = None,
     # rows the crew recorded, which is the original behaviour.
     b = DENSITY_BANDS.get(band or "", None)
     clinical = bool(b) and tname in CLINICAL_TEMPLATES
+    # The band's iv/med figure is a CEILING, not a quota. Owner's instruction,
+    # 2026-08-17: "2 or none or 1 or even 3". Drawing 0..ceiling per record is
+    # what a real day looks like — plenty of calls run no line and give no drug
+    # at all — and it exercises the renderer's empty-section paths, which a
+    # fixed count never would. Observation sets are NOT drawn this way: they are
+    # what the layout stress rests on now that the drug tables are capped.
+    draw = {}
+    if clinical:
+        draw["iv"] = random.randint(0, b["iv"])
+        draw["med"] = random.randint(0, b["med"])
+        draw["vitals"] = b["vitals"]
     for field, key, fn in (("vitals_sets", "vitals", "vitals"),
                            ("iv_therapy", "iv", "iv"),
                            ("medications", "med", "med")):
@@ -684,7 +695,7 @@ def build_from_template(tpl_fd: dict, when: datetime, band: str | None = None,
             cur = []
         if not isinstance(cur, list):
             continue
-        target = b[key] if clinical else None
+        target = draw[key] if clinical else None
         if not cur and target is None:
             continue
         if fn == "vitals":
