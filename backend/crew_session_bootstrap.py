@@ -38,10 +38,10 @@ async def main():
         profile = {
             "id": str(c1.id), "name": c1.full_name, "provider_id": str(prov.id),
             "provider_name": prov.name, "provider_slug": prov.slug,
-            "qualification": c1.qualification, "hpcsa_number": None, "role": "crew",
+            "qualification": c1.qualification, "hpcsa_number": c1.hpcsa_number, "role": "crew",
         }
         partner = {"id": str(c2.id), "name": c2.full_name,
-                   "qualification": c2.qualification, "hpcsa_number": None}
+                   "qualification": c2.qualification, "hpcsa_number": c2.hpcsa_number}
     print(json.dumps({
         "provider_slug": prov.slug, "provider_id": str(prov.id),
         "crew_token": token, "crew_profile": profile, "partner": partner,

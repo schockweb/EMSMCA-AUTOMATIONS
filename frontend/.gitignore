@@ -35,3 +35,5 @@ session.json
 pdfbench*.json
 hunt.json
 fault-hunt-report.json
+prf-seed.json
+form-driver-report.json
