@@ -4309,6 +4309,31 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
                 {fd.management_notes}
               </div>
             )}
+
+            {/* Communication with the overseeing ALS / ILS practitioner.
+                Captured by the crew (DigitalPRFForm: "Document communication
+                with overseeing ALS or ILS practitioner here...") and, until
+                now, never printed — found by scripts/prf-field-fidelity.mjs on
+                208 of 272 real records.
+                It belongs here rather than in the crew block: it is an account
+                of clinical direction received during the call, so it reads with
+                the management narrative it explains. It is also the record that
+                a lower-qualification crew acted under supervision, which is the
+                first thing asked when scope of practice is questioned — and it
+                only renders when the crew wrote something, so a call with no
+                such contact prints nothing. */}
+            {!isBlank(fd.overseen_practitioner_communication) && (
+              <>
+                <SectionHead label="Overseeing Practitioner — Communication" />
+                <div style={{
+                  padding: '6px 9px', fontSize: '0.74rem', color: INK,
+                  whiteSpace: 'pre-wrap', lineHeight: 1.45,
+                  borderTop: `1px solid ${LN}`,
+                }}>
+                  {fd.overseen_practitioner_communication}
+                </div>
+              </>
+            )}
             <FillLines />
           </div>
         </div>
