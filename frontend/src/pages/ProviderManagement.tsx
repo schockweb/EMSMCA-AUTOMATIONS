@@ -132,6 +132,12 @@ const HospitalIcon = ({ size = 16 }: IconProps) => (
 const PowerIcon = ({ size = 16 }: IconProps) => (
   <svg {...svgBase(size)}><path d="M18.36 6.64a9 9 0 1 1-12.73 0M12 2v10" /></svg>
 );
+const QuestionIcon = ({ size = 16 }: IconProps) => (
+  <svg {...svgBase(size)}>
+    <circle cx="12" cy="12" r="10" />
+    <path d="M9.1 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01" />
+  </svg>
+);
 // Deactivation is visible on the name tag itself, in the client list and the
 // crew list, rather than only inside the edit form. A deactivated company that
 // looks identical to a working one is how a crew ends up phoning to ask why
@@ -200,6 +206,174 @@ function FieldWarning({ children }: { children: React.ReactNode }) {
       <span style={{ flexShrink: 0, marginTop: 1 }}><WarnIcon size={14} /></span>
       <span>{children}</span>
     </div>
+  );
+}
+
+/**
+ * "How do I get this password?" — the single question every onboarding call
+ * gets stuck on. The field wants a Gmail/Outlook APP password, not the
+ * mailbox password (both providers reject the mailbox password for SMTP since
+ * basic auth was retired — see backend/app/utils/emailer.py), and there is
+ * nothing on the form that says so. The steps live here rather than in a
+ * support document because the worker filling this in is not the person who
+ * has the mailbox: they read these down the phone to the client.
+ */
+const APP_PASSWORD_HELP: Record<'gmail' | 'outlook', { label: string; where: string; steps: string[]; caveat: string }> = {
+  gmail: {
+    label: 'Gmail',
+    where: 'myaccount.google.com/apppasswords',
+    steps: [
+      'Sign in to Google with the exact address entered above — the app password belongs to that mailbox.',
+      'Turn on 2-Step Verification first: Google Account → Security → 2-Step Verification. Google will not offer app passwords until it is on.',
+      'Go to myaccount.google.com/apppasswords.',
+      'Type any name for it (for example "EMS Portal") and press Create.',
+      'Google shows a 16-character password in four blocks. Copy it and paste it into this field — the spaces do not matter.',
+      'Press Done. Google will not show it again; if it is lost, delete that entry and create a new one.',
+    ],
+    caveat: 'On a Google Workspace (company) account the administrator can switch app passwords off. If the App passwords page will not open, their Google admin has to allow it.',
+  },
+  outlook: {
+    label: 'Outlook',
+    where: 'account.microsoft.com/security',
+    steps: [
+      'Sign in to Microsoft with the exact address entered above.',
+      'Turn on two-step verification first: account.microsoft.com → Security → Advanced security options.',
+      'On that same Advanced security options page, under App passwords, choose Create a new app password.',
+      'Copy the password it shows and paste it into this field.',
+      'It is shown once only; if it is lost, delete that entry and create a new one.',
+    ],
+    caveat: 'On a Microsoft 365 work or school account this is usually blocked until the IT administrator enables Authenticated SMTP for the mailbox and allows app passwords.',
+  },
+};
+
+/** Question-mark button beside the app-password field; opens the steps above. */
+function AppPasswordHelp({ service }: { service: string }) {
+  const isMobile = useIsMobile();
+  const [open, setOpen] = useState(false);
+  // Open on whichever service is selected in the form — that is the one being
+  // asked about — but let them read the other without changing the setting.
+  const [tab, setTab] = useState<'gmail' | 'outlook'>('gmail');
+  const show = () => {
+    setTab(service === 'outlook' ? 'outlook' : 'gmail');
+    setOpen(true);
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); }
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [open]);
+
+  const guide = APP_PASSWORD_HELP[tab];
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={show}
+        aria-label="How to get an app password"
+        aria-expanded={open}
+        title="How to get an app password"
+        style={{
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          width: 20, height: 20, padding: 0, flexShrink: 0,
+          verticalAlign: 'middle', marginBottom: 5,
+          background: 'none', border: 'none', borderRadius: '50%',
+          color: teal, cursor: 'pointer', lineHeight: 0,
+        }}
+      >
+        <QuestionIcon size={16} />
+      </button>
+
+      {open && (
+        // Sits ABOVE the client modal (zIndex 1000) rather than inside it — the
+        // field is at the bottom of a scrolling modal, so an inline panel would
+        // open below the fold on exactly the screen that needs it.
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="How to get an app password"
+          onClick={() => setOpen(false)}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)',
+            display: 'flex', justifyContent: 'center', alignItems: 'center',
+            zIndex: 1100, padding: 12,
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: 'var(--surface-0)', borderRadius: 12,
+              border: '1px solid var(--surface-200)',
+              boxShadow: '0 18px 45px rgba(0,0,0,0.28)',
+              width: isMobile ? '100%' : 460, maxWidth: '100%',
+              maxHeight: '82vh', overflowY: 'auto',
+              padding: isMobile ? 16 : 20, position: 'relative',
+              textTransform: 'none', letterSpacing: 'normal',
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              aria-label="Close"
+              style={{ position: 'absolute', top: 8, right: 12, background: 'none', border: 'none', fontSize: '1.3rem', lineHeight: 1, cursor: 'pointer', color: 'var(--text-muted)' }}
+            >&times;</button>
+
+            <h4 style={{ margin: '0 0 4px', fontSize: '0.95rem', fontWeight: 800, color: teal }}>
+              Getting an app password
+            </h4>
+            <p style={{ margin: '0 0 12px', fontSize: '0.78rem', lineHeight: 1.5, color: 'var(--text-muted)', fontWeight: 400 }}>
+              This field does not take the mailbox's normal password — Gmail and Outlook both
+              refuse it for sending. It takes a one-off app password generated by the mailbox owner.
+            </p>
+
+            <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+              {(['gmail', 'outlook'] as const).map(k => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => setTab(k)}
+                  style={{
+                    flex: 1, padding: '6px 10px', borderRadius: 8, cursor: 'pointer',
+                    fontSize: '0.78rem', fontWeight: 700,
+                    background: tab === k ? teal : 'var(--surface-100)',
+                    color: tab === k ? '#fff' : 'var(--text)',
+                    border: `1px solid ${tab === k ? teal : 'var(--surface-200)'}`,
+                  }}
+                >{APP_PASSWORD_HELP[k].label}</button>
+              ))}
+            </div>
+
+            <ol style={{ margin: 0, paddingLeft: 20, display: 'grid', gap: 7 }}>
+              {guide.steps.map((s, i) => (
+                <li key={i} style={{ fontSize: '0.8rem', lineHeight: 1.5, color: 'var(--text)', fontWeight: 400 }}>{s}</li>
+              ))}
+            </ol>
+
+            <p style={{ margin: '12px 0 0', fontSize: '0.76rem', lineHeight: 1.5, color: '#78350f', background: '#fffbeb', border: '1px solid #f59e0b', borderRadius: 8, padding: '8px 10px', fontWeight: 400 }}>
+              {guide.caveat}
+            </p>
+
+            <p style={{ margin: '10px 0 0', fontSize: '0.76rem', lineHeight: 1.5, color: 'var(--text-muted)', fontWeight: 400 }}>
+              The portal signs in to {guide.label} with this password when the client is saved. If
+              {' '}{guide.label} rejects it the save is refused there and then, rather than the
+              first PRF failing to reach a facility days later.
+            </p>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 14 }}>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                style={{ background: teal, color: '#fff', border: 'none', borderRadius: 8, padding: '7px 16px', fontSize: '0.8rem', fontWeight: 700, cursor: 'pointer' }}
+              >Got it</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -915,7 +1089,10 @@ export default function ProviderManagement() {
                     </div>
                   </div>
                   <div style={{ marginTop: 12 }}>
-                    <label style={labelStyle}>Email Password for Verification</label>
+                    {/* Label and help button stay siblings of the input so a
+                        lookup by label still finds the field. */}
+                    <label style={{ ...labelStyle, display: 'inline-block', verticalAlign: 'middle', marginRight: 6 }}>Email Password for Verification</label>
+                    <AppPasswordHelp service={newProvider.smtpService} />
                     <input style={inputStyle} type="password" value={newProvider.smtpPassword}
                       onChange={e => setNewProvider({ ...newProvider, smtpPassword: e.target.value })}
                       autoComplete="new-password" data-lpignore="true" data-form-type="other" />
@@ -1205,7 +1382,8 @@ export default function ProviderManagement() {
                   </div>
                 </div>
                 <div style={{ marginTop: 10 }}>
-                  <label style={labelStyle}>Email Password for Verification</label>
+                  <label style={{ ...labelStyle, display: 'inline-block', verticalAlign: 'middle', marginRight: 6 }}>Email Password for Verification</label>
+                  <AppPasswordHelp service={editForm.smtp_service} />
                   <input
                     style={inputStyle}
                     type="password"

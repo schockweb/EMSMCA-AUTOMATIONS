@@ -213,3 +213,61 @@ describe('Add New Client — the submit button', () => {
     });
   });
 });
+
+describe('Add New Client — app password help', () => {
+  // The field wants a Gmail/Outlook APP password, never the mailbox password.
+  // The worker filling this in usually does not own the mailbox, so the steps
+  // have to be readable from this screen while they are on the phone.
+  const openHelp = async () => {
+    fireEvent.click(screen.getByLabelText('How to get an app password'));
+    await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy());
+    return screen.getByRole('dialog');
+  };
+
+  it('opens on the service selected in the form, and can switch to the other', async () => {
+    renderPage();
+    await openModal();
+
+    const dialog = await openHelp();
+    // Gmail is the default selection, so Gmail's steps are what opens.
+    expect(dialog.textContent).toMatch(/myaccount\.google\.com\/apppasswords/);
+    expect(dialog.textContent).toMatch(/2-Step Verification/);
+    expect(dialog.textContent).not.toMatch(/account\.microsoft\.com/);
+
+    fireEvent.click(screen.getByText('Outlook', { selector: 'button' }));
+    await waitFor(() =>
+      expect(screen.getByRole('dialog').textContent).toMatch(/account\.microsoft\.com/));
+
+    // Reading the other service must not change what the client is saved with.
+    const service = screen.getAllByText('Email Service')[0]
+      .parentElement?.querySelector('select') as HTMLSelectElement;
+    expect(service.value).toBe('gmail');
+  });
+
+  it('opens on Outlook once Outlook is the chosen service', async () => {
+    renderPage();
+    await openModal();
+
+    const service = screen.getAllByText('Email Service')[0]
+      .parentElement?.querySelector('select') as HTMLSelectElement;
+    fireEvent.change(service, { target: { value: 'outlook' } });
+
+    const dialog = await openHelp();
+    expect(dialog.textContent).toMatch(/account\.microsoft\.com/);
+    expect(dialog.textContent).toMatch(/Authenticated SMTP/);
+  });
+
+  it('closes without touching the form, and the password field still takes input', async () => {
+    renderPage();
+    await openModal();
+
+    await openHelp();
+    fireEvent.click(screen.getByText('Got it'));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+
+    // The label lookup used across this file must still find the input.
+    const pw = fieldUnder('Email Password for Verification');
+    fireEvent.change(pw, { target: { value: 'abcd efgh ijkl mnop' } });
+    expect(pw.value).toBe('abcd efgh ijkl mnop');
+  });
+});
