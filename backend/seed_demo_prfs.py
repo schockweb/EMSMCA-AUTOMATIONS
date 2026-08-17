@@ -798,10 +798,16 @@ async def _resolve_provider(db, ident: str) -> ServiceProvider:
 
 async def _load_templates(db, provider) -> dict:
     """The reference PRFs, keyed by the display name their case carries."""
+    # Filter to the seven reference cases IN SQL. Selecting every PRF on the
+    # provider and picking them out in Python dragged each row's full form_data:
+    # fine at 500 records, and at 13,500 it OOM-killed the container (exit 137,
+    # no output, which reads like the script never started). The campaign hit
+    # this first and was fixed there; the seeder kept the original query.
     rows = (await db.execute(
         select(DigitalPRF, Case.custom_display_name)
         .join(Case, Case.id == DigitalPRF.case_id)
-        .where(DigitalPRF.provider_id == provider.id))).all()
+        .where(DigitalPRF.provider_id == provider.id,
+               Case.custom_display_name.in_(TEMPLATE_NAMES)))).all()
     found = {}
     for prf, label in rows:
         name = (label or "").strip()
