@@ -15,6 +15,7 @@ import { useNavigate } from 'react-router';
 import axios from 'axios';
 import { grantHeaders } from '../../utils/portalGrant';
 import { saveShiftSession } from '../../utils/crewSession';
+import { checkVehicleInUse, confirmTakeOccupiedVehicle } from '../../utils/vehicleOccupancy';
 
 export interface CrewOption {
   id: string;
@@ -49,6 +50,28 @@ export default function StartShiftWizard({
   const [selectedCrewIds, setSelectedCrewIds] = useState<string[]>([]);
   const [shiftLoading, setShiftLoading] = useState(false);
   const [shiftError, setShiftError] = useState('');
+  const [checkingVehicleId, setCheckingVehicleId] = useState('');
+
+  /**
+   * Pick a vehicle — warning first if another crew is already on it.
+   *
+   * The check runs on TAP rather than on the list, so the picker stays clean
+   * and the crew is only told about the one ambulance they actually reached
+   * for. It fails open: an unanswerable check advances exactly as before.
+   */
+  const pickVehicle = async (v: VehicleOption) => {
+    if (checkingVehicleId) return;          // ignore a double-tap mid-check
+    setCheckingVehicleId(v.id);
+    let occupied = null;
+    try {
+      occupied = await checkVehicleInUse(providerSlug, v.id);
+    } finally {
+      setCheckingVehicleId('');
+    }
+    if (occupied && !confirmTakeOccupiedVehicle(v.callsign, occupied)) return;
+    setSelectedVehicleId(v.id);
+    setShiftStep(2);
+  };
 
   const toggleCrewSelection = (id: string) => {
     setSelectedCrewIds(prev =>
@@ -188,19 +211,21 @@ export default function StartShiftWizard({
                 <button
                   key={v.id}
                   type="button"
-                  onClick={() => { setSelectedVehicleId(v.id); setShiftStep(2); }}
+                  onClick={() => { void pickVehicle(v); }}
+                  disabled={!!checkingVehicleId}
                   style={{
                     padding: '14px 16px', borderRadius: '10px', border: '1px solid #e5e7eb',
                     background: '#fff',
-                    textAlign: 'left', cursor: 'pointer', transition: 'all 0.15s',
+                    textAlign: 'left', cursor: checkingVehicleId ? 'wait' : 'pointer', transition: 'all 0.15s',
                     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    opacity: checkingVehicleId && checkingVehicleId !== v.id ? 0.5 : 1,
                   }}
                 >
                   <div>
                     <div style={{ fontWeight: 600, fontSize: '0.88rem', color: '#1f2937' }}>{v.callsign}</div>
                     <div style={{ fontSize: '0.72rem', color: '#9ca3af', marginTop: 1 }}>{v.registration_number}</div>
                   </div>
-                  <span style={{ color: '#d1d5db', fontSize: '1rem' }}>›</span>
+                  <span style={{ color: '#d1d5db', fontSize: '1rem' }}>{checkingVehicleId === v.id ? '…' : '›'}</span>
                 </button>
               ))}
               {vehicleList.length === 0 && (

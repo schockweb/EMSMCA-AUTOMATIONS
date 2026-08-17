@@ -160,6 +160,10 @@ async def teardown(yes: bool) -> None:
             ("audit_maintenance", "set local ems.audit_maintenance = 'on'"),
             ("audit_logs", """delete from audit_logs where crew_member_id in
                  (select id from crew_members where provider_id = cast(:p as uuid))"""),
+            # Vehicle-occupancy rows. The FKs cascade, so this is not strictly
+            # required — it is here to print a count, and so the teardown does
+            # not depend on a cascade to be complete.
+            ("crew_shifts", "delete from crew_shifts where provider_id = cast(:p as uuid)"),
             ("crew_members", "delete from crew_members where provider_id = cast(:p as uuid)"),
             ("vehicles", "delete from vehicles where provider_id = cast(:p as uuid)"),
             ("service_provider", "delete from service_providers where id = cast(:p as uuid)"),

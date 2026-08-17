@@ -15,6 +15,7 @@ import { grantHeaders } from '../../utils/portalGrant';
 import { useScrollLock } from '../../hooks/useScrollLock';
 import { shouldSkipNetwork, reportSuccess, reportFailure } from '../../services/serverHealth';
 import { cacheCrewRoster, getCachedCrewRoster, cacheVehicles, getCachedVehicles } from '../../services/offlineShiftCache';
+import { checkVehicleInUse, confirmTakeOccupiedVehicle, claimVehicle } from '../../utils/vehicleOccupancy';
 import {
   getCrewToken,
   getCrewProfile,
@@ -83,6 +84,8 @@ export default function CrewDashboard() {
   const [vehicleSearch, setVehicleSearch] = useState('');
   const [step, setStep] = useState<Step>(token ? null : 'vehicle');
   const [selectedVehicle, setSelectedVehicle] = useState<Vehicle | null>(savedVehicle);
+  // Id of the vehicle whose occupancy is being checked right now, '' when idle.
+  const [checkingVehicleId, setCheckingVehicleId] = useState('');
 
   // Freeze the background page while the shift-start modal is open so it can't
   // be scrolled under a finger on mobile (position:fixed lock — plain
@@ -437,6 +440,27 @@ export default function CrewDashboard() {
     setCrewPickerSearch('');
   };
 
+  /**
+   * Tap a vehicle — warn first if another crew is already signed on to it.
+   *
+   * On tap rather than on the list, so the picker stays clean and the crew is
+   * only told about the ambulance they actually reached for. Fails open: an
+   * unanswerable check (offline, server down) selects exactly as before, which
+   * matters because this picker is reachable with no signal at all.
+   */
+  const handleVehicleTap = async (v: Vehicle) => {
+    if (checkingVehicleId) return;          // ignore a double-tap mid-check
+    setCheckingVehicleId(v.id);
+    let occupied = null;
+    try {
+      occupied = await checkVehicleInUse(providerSlug, v.id);
+    } finally {
+      setCheckingVehicleId('');
+    }
+    if (occupied && !confirmTakeOccupiedVehicle(v.callsign, occupied)) return;
+    setSelectedVehicle(v);
+  };
+
   /** Authenticate every crew member, then either start the shift or branch
    *  to the supervisor capture step if every crew on board is BAA. */
   const handleCrewLogin = async () => {
@@ -492,6 +516,13 @@ export default function CrewDashboard() {
 
       // Save vehicle for PRF creation
       localStorage.setItem(CREW_SESSION_KEYS.vehicle, JSON.stringify(selectedVehicle));
+
+      // Tell the server which ambulance this crew took, so the next crew to tap
+      // it is warned. This flow authenticates through lookup-hpcsa, which never
+      // receives a vehicle — without this call the vehicle would stay on the
+      // device only and nothing would ever mark it in use. Awaited but never
+      // fatal: claimVehicle swallows its own failures.
+      if (selectedVehicle?.id) await claimVehicle(newToken, selectedVehicle.id);
 
       // Load Crew 1's existing drafts
       loadDrafts(newToken);
@@ -1104,18 +1135,23 @@ export default function CrewDashboard() {
                       ) : (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
                           {filtered.map(v => (
-                            <button key={v.id} onClick={() => setSelectedVehicle(v)} style={{
+                            <button key={v.id} onClick={() => { void handleVehicleTap(v); }}
+                              disabled={!!checkingVehicleId} style={{
                               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                               padding: '14px 16px', borderRadius: 12, textAlign: 'left',
                               border: `2px solid ${selectedVehicle?.id === v.id ? G : B}`,
                               background: selectedVehicle?.id === v.id ? 'rgba(16,185,129,0.04)' : '#fff',
-                              cursor: 'pointer', transition: 'all 0.15s',
+                              cursor: checkingVehicleId ? 'wait' : 'pointer', transition: 'all 0.15s',
+                              opacity: checkingVehicleId && checkingVehicleId !== v.id ? 0.5 : 1,
                               boxShadow: selectedVehicle?.id === v.id ? `0 0 0 3px rgba(16,185,129,0.08)` : 'none',
                             }}>
                               <div>
                                 <div style={{ fontWeight: 800, fontSize: '0.94rem', color: T }}>{v.callsign}</div>
                                 <div style={{ fontSize: '0.76rem', color: M, marginTop: 3, fontFamily: 'monospace', letterSpacing: '0.04em' }}>{v.registration} · {v.vehicle_type}</div>
                               </div>
+                              {checkingVehicleId === v.id && (
+                                <div style={{ fontSize: '0.76rem', color: M, flexShrink: 0 }}>checking…</div>
+                              )}
                               {selectedVehicle?.id === v.id && (
                                 <div style={{ width: 22, height: 22, borderRadius: '50%', background: G, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                   <svg width="11" height="8" viewBox="0 0 11 8" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">

@@ -27,6 +27,7 @@ from app.models.user import User
 from app.api.crew_auth import get_current_crew
 from app.utils.security import get_current_user, has_permission
 from app.services.phi_audit import record_phi_access, ACTION_READ, ACTION_TRANSMIT
+from app.services.vehicle_occupancy import release_crew
 from app.models.user import UserRole
 from app.utils.hpcsa import to_tier as _qual_to_tier
 from app.tasks.publish import publish_task, publish_delay
@@ -1005,6 +1006,24 @@ async def end_shift(
         await db.delete(prf)
     await db.commit()
 
+    # Hand the ambulance back. This is the ONLY place a crew reliably tells the
+    # server their shift is over — /api/crew/logout exists but nothing in the
+    # app calls it — so if the release did not happen here the vehicle would
+    # stay marked in use until the 14-hour staleness window expired, warning
+    # the next crew off a vehicle sitting in the yard.
+    #
+    # Its own transaction, after the drafts are safely committed, swallowing
+    # everything. Ending a shift wipes patient data from the device on the
+    # strength of this call succeeding, so an advisory bookkeeping row must not
+    # be able to fail it.
+    released = 0
+    try:
+        released = await release_crew(db, crew.id, "crew")
+        await db.commit()
+    except Exception:
+        logger.warning("Could not release vehicle claim at end of shift", exc_info=True)
+        await db.rollback()
+
     logger.info(
         "Crew %s ended shift — discarded %d empty draft(s): %s; kept %d in-progress draft(s): %s",
         crew.full_name, len(deleted_numbers), deleted_numbers,
@@ -1015,6 +1034,7 @@ async def end_shift(
         "drafts_deleted": len(deleted_numbers),
         "prf_numbers": deleted_numbers,
         "drafts_kept": len(kept),
+        "vehicles_released": released,
     }
 
 

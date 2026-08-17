@@ -4,6 +4,7 @@ Separate from the admin auth system — crew get a JWT with provider_id + crew_i
 """
 from __future__ import annotations
 import logging
+import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -16,6 +17,8 @@ from app.database import get_db
 from app.models.audit_log import AuditLog
 from app.models.crew_member import CrewMember
 from app.models.service_provider import ServiceProvider
+from app.models.vehicle import Vehicle
+from app.services.vehicle_occupancy import claim_vehicle, release_crew
 from app.utils.client_ip import get_trusted_client_ip
 from app.utils.login_throttle import (
     clear_source_failures,
@@ -631,6 +634,43 @@ async def shift_start_by_id(
     crew.last_login = now
     await db.commit()
 
+    # Record the vehicle so the NEXT crew to tap it is told it is taken.
+    # Advisory only — see app/models/crew_shift.py for why this is a warning
+    # and not a lock. The vehicle is verified to belong to this provider first:
+    # body.vehicle_id is client-supplied and was previously copied into the
+    # token unchecked, so without this a tablet could claim an id from another
+    # company's fleet and appear in their picker's warning.
+    #
+    # AFTER the commit above, in its own transaction, and swallowing everything.
+    # Starting a shift is the one crew action that must never fail: if this ran
+    # inside the same transaction, any error — a malformed id, or the
+    # crew_shifts table not yet existing on a database the migration has not
+    # reached — would poison the session, fail the commit, and stop every crew
+    # in the company from signing on. A courtesy warning is not allowed to cost
+    # that.
+    if body.vehicle_id:
+        try:
+            vehicle = (await db.execute(
+                select(Vehicle).where(
+                    Vehicle.id == uuid.UUID(body.vehicle_id),
+                    Vehicle.provider_id == provider.id,
+                )
+            )).scalar_one_or_none()
+            if vehicle:
+                await claim_vehicle(
+                    db,
+                    provider_id=provider.id,
+                    crew_member_id=crew.id,
+                    vehicle_id=vehicle.id,
+                    vehicle_callsign=vehicle.callsign,
+                    crew_name=crew.full_name,
+                    partner_name=body.partner_name or None,
+                )
+                await db.commit()
+        except Exception:
+            logger.warning("Could not record vehicle claim at shift start", exc_info=True)
+            await db.rollback()
+
     token = create_access_token(
         {
             "sub": str(crew.id),
@@ -668,6 +708,57 @@ async def shift_start_by_id(
     )
 
 
+class ClaimVehicleRequest(BaseModel):
+    vehicle_id: str
+
+
+@router.post("/claim-vehicle")
+async def claim_vehicle_endpoint(
+    body: ClaimVehicleRequest,
+    crew: CrewMember = Depends(get_current_crew),
+    db: AsyncSession = Depends(get_db),
+):
+    """Record that the caller is on this vehicle for the rest of their shift.
+
+    The dashboard's shift-start flow authenticates through `lookup-hpcsa`,
+    which never receives a vehicle — the crew picks one first and it is only
+    kept on the device. Without this call that entire flow would claim nothing,
+    and the warning would fire for the login-page wizard alone.
+
+    Deliberately separate from shift start rather than bolted onto
+    `lookup-hpcsa`: that endpoint is also used to add a colleague mid-shift and
+    to resolve each extra crew member, so writing a claim inside it would
+    record a vehicle takeover every time a third crew member was added.
+
+    Scoped to the caller's own provider. A crew cannot claim, and therefore
+    cannot appear to occupy, another company's ambulance.
+    """
+    try:
+        vid = uuid.UUID(body.vehicle_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid vehicle id")
+
+    vehicle = (await db.execute(
+        select(Vehicle).where(
+            Vehicle.id == vid,
+            Vehicle.provider_id == crew.provider_id,
+        )
+    )).scalar_one_or_none()
+    if not vehicle:
+        raise HTTPException(status_code=404, detail="Vehicle not found")
+
+    await claim_vehicle(
+        db,
+        provider_id=crew.provider_id,
+        crew_member_id=crew.id,
+        vehicle_id=vehicle.id,
+        vehicle_callsign=vehicle.callsign,
+        crew_name=crew.full_name,
+    )
+    await db.commit()
+    return {"message": "Vehicle claimed", "vehicle_callsign": vehicle.callsign}
+
+
 @router.post("/logout")
 async def crew_logout(
     token: str = Depends(crew_oauth2_scheme),
@@ -692,6 +783,17 @@ async def crew_logout(
         exp = datetime.fromtimestamp(payload.get("exp", 0), tz=timezone.utc)
         await blacklist_token(jti, payload.get("crew_id"), "access", exp, db)
         await db.commit()
+
+    # Free the ambulance. A session that has been revoked cannot be in use, so
+    # holding the claim open would warn the next crew off a vehicle that is
+    # standing free — the failure mode this feature exists to avoid.
+    try:
+        if payload.get("crew_id"):
+            if await release_crew(db, uuid.UUID(payload["crew_id"]), "logout"):
+                await db.commit()
+    except Exception:   # releasing a vehicle must never fail a logout
+        logger.warning("Could not release vehicle claim on crew logout", exc_info=True)
+        await db.rollback()
 
     # Purge this session's cached responses.
     #

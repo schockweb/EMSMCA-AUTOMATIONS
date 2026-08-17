@@ -27,6 +27,7 @@ from app.models.service_provider import ServiceProvider
 from app.models.crew_member import CrewMember
 from app.models.vehicle import Vehicle
 from app.models.digital_prf import DigitalPRF, PRFStatus
+from app.services.vehicle_occupancy import describe, open_shift_for_vehicle
 from app.utils.client_ip import get_trusted_client_ip
 from app.utils.login_throttle import (
     clear_source_failures,
@@ -616,6 +617,39 @@ async def list_vehicles_public_by_slug(
         }
         for v in vehicle_result.scalars().all()
     ]
+
+
+@router.get("/{slug}/vehicle-status/{vehicle_id}")
+async def vehicle_status(
+    slug: str,
+    vehicle_id: UUIDPath,
+    db: AsyncSession = Depends(get_db),
+    grant: str | None = Depends(portal_grant_scheme),
+):
+    """Is anyone already signed on to this vehicle?
+
+    Asked when a crew TAPS a vehicle in the shift-start picker, not when the
+    list is drawn. That is deliberate: the list stays clean, and one crew's
+    whereabouts are disclosed only to a crew who is about to take the same
+    ambulance and has a reason to know. It also keeps the picker to one query
+    instead of one per vehicle.
+
+    Behind the same device unlock as public-vehicles, and scoped to the slug in
+    the path, so this cannot be used to enumerate another company's fleet.
+    """
+    provider = await require_portal_grant(slug, grant, db)
+
+    vehicle = (await db.execute(
+        select(Vehicle).where(
+            Vehicle.id == uuid.UUID(vehicle_id),
+            Vehicle.provider_id == provider.id,
+        )
+    )).scalar_one_or_none()
+    if not vehicle:
+        raise HTTPException(status_code=404, detail="Vehicle not found")
+
+    shift = await open_shift_for_vehicle(db, vehicle.id)
+    return describe(shift)
 
 
 @router.get("/{slug}/public-crew")
