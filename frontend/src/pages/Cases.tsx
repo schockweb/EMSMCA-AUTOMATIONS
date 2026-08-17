@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import api from '../api/client';
 import { useScrollLock } from '../hooks/useScrollLock';
 import useIsMobile from '../hooks/useIsMobile';
@@ -49,14 +49,42 @@ export default function Cases() {
   const [cases, setCases] = useState<Case[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [searchTerm, setSearchTerm] = useState('');
+  // ── Where you are in the list lives in the URL, not in component state ────
+  //
+  // Opening a PRF unmounts this page. When `page` and `searchTerm` were plain
+  // useState, Back rebuilt the component from scratch: whatever page you were
+  // on and whatever you had searched for were simply gone, and you landed at
+  // the top of page 1. Reviewing case 40 of page 7 meant paging back out to
+  // page 7 after every single document.
+  //
+  // The URL is the one piece of state the history entry preserves, so the
+  // list position goes there. Back now restores the exact view you left, and
+  // a page of results becomes linkable and survives a refresh as a side
+  // effect. Written with { replace: true } throughout — paging is not a
+  // navigation the Back button should have to walk through one step at a time.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchTerm, setSearchTerm] = useState(() => searchParams.get('q') || '');
   const [total, setTotal] = useState(0);
   // Server-side paging. The list used to pull a flat 200 and tell the user
   // "showing 200 of N" — everything past the 200th was reachable only by
   // guessing a search term. At ~1500 PRFs a day that is most of a day's work
   // invisible by lunchtime, so the page walks the whole set instead.
   const PAGE_SIZE = 50;
-  const [page, setPage] = useState(0);
+  // 1-based in the URL (?page=7 is the seventh page, as the pager displays it),
+  // 0-based internally where it is a skip multiplier.
+  const [page, setPage] = useState(() => {
+    const n = Number(searchParams.get('page'));
+    return Number.isFinite(n) && n > 1 ? Math.floor(n) - 1 : 0;
+  });
+
+  // The row to scroll back to, handed over by the View PRF click. Held in
+  // sessionStorage rather than the URL because it is a one-shot piece of UI
+  // intent, not part of the address of the page — and because writing it at
+  // click time would mean a replace and a push in the same tick, which is
+  // exactly the kind of ordering the router does not owe us.
+  const FOCUS_KEY = 'cases_focus_return';
+  const [focusId, setFocusId] = useState<string | null>(null);
+  const rowRefs = useRef<Record<string, HTMLElement | null>>({});
 
   // Failed-PRF alert (amber triangle in the header). Counts PRFs that failed
   // processing + ones stuck in SUBMITTED with no case. When > 0 the triangle
@@ -109,7 +137,29 @@ export default function Cases() {
   // not just within the loaded page. See GET /api/cases + /api/cases/count.
   // A new search restarts at page 1 — staying on page 12 of the old result set
   // would show an empty list and read as "no matches".
-  useEffect(() => { setPage(0); }, [searchTerm]);
+  //
+  // The first run is skipped. This effect fires on mount as well as on change,
+  // so without the guard it would reset to page 1 immediately after a page was
+  // restored from the URL — silently undoing the fix above, and only when
+  // arriving with a ?page= set, which is the one case nobody tests by hand.
+  const searchSettled = useRef(false);
+  useEffect(() => {
+    if (!searchSettled.current) { searchSettled.current = true; return; }
+    setPage(0);
+  }, [searchTerm]);
+
+  // Keep the address bar in step with the list. Only writes when something
+  // actually differs, so this cannot loop against the state it derives from.
+  useEffect(() => {
+    const next = new URLSearchParams(searchParams);
+    const term = searchTerm.trim();
+    if (page > 0) next.set('page', String(page + 1)); else next.delete('page');
+    if (term) next.set('q', term); else next.delete('q');
+    if (next.toString() !== searchParams.toString()) {
+      setSearchParams(next, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, searchTerm]);
 
   useEffect(() => {
     const t = setTimeout(() => { fetchCases(); }, 300);
@@ -132,6 +182,51 @@ export default function Cases() {
       setRfiLoading(false);
     }
   };
+
+  /**
+   * Open a case's PRF, leaving a note about where we were standing.
+   *
+   * The page number comes back from the URL on its own; this is the finer
+   * half of the same complaint — landing on the right page but at the top of
+   * it, hunting for the row you were just on.
+   */
+  const openPrf = (c: Case) => {
+    try {
+      sessionStorage.setItem(FOCUS_KEY, JSON.stringify({
+        id: c.id, page, q: searchTerm.trim(),
+      }));
+    } catch { /* private mode — the page restore still works without this */ }
+    navigate(`/cases/${c.id}/prf`);
+  };
+
+  // Claim that note on the way back in. Honoured ONCE, and only if the list
+  // still shows the same page and search it was written against — otherwise a
+  // crew who wandered off and returned later would get a row highlighted for
+  // no reason they could connect to anything.
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(FOCUS_KEY);
+      if (!raw) return;
+      sessionStorage.removeItem(FOCUS_KEY);
+      const saved = JSON.parse(raw);
+      if (saved?.id && saved.page === page && (saved.q || '') === searchTerm.trim()) {
+        setFocusId(saved.id);
+      }
+    } catch { /* unreadable note — nothing to restore */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Once the rows are on screen, bring that one back into view and mark it
+  // briefly so the eye can find it. The highlight clears itself; a permanent
+  // one would read as a selection the user has to dismiss.
+  useEffect(() => {
+    if (!focusId || loading) return;
+    const el = rowRefs.current[focusId];
+    if (!el) return;
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    const t = setTimeout(() => setFocusId(null), 2600);
+    return () => clearTimeout(t);
+  }, [focusId, loading, cases]);
 
   const getPrfDisplayName = (c: Case): string => {
     // Prefer the backend's canonical PRF name (matches the exported-PDF filename:
@@ -159,8 +254,20 @@ export default function Cases() {
         api.get(`/api/cases/count?queue=management${searchQs}`),
       ]);
       setCases(listRes.data);
-      setTotal(countRes.data?.total ?? listRes.data.length);
+      const totalNow = countRes.data?.total ?? listRes.data.length;
+      setTotal(totalNow);
       setError('');
+
+      // Clamp a page that has run off the end of the results.
+      //
+      // Now that the page number lives in the URL it can arrive from a
+      // bookmark, a refresh, or a link shared while the list was longer. Past
+      // the last page the table is empty AND the pager is hidden, so there is
+      // no control left to climb back with — it reads as "no matches" and the
+      // only way out is editing the address bar. Land them on the last real
+      // page instead.
+      const lastPage = Math.max(0, Math.ceil(totalNow / PAGE_SIZE) - 1);
+      if (page > lastPage) setPage(lastPage);
     } catch (err: any) {
       setError(err.message || 'Failed to fetch cases');
     } finally {
@@ -363,10 +470,16 @@ export default function Cases() {
                Each card wraps the full name and carries explicit buttons. */
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               {sortedCases.map(c => (
-                <div key={c.id} style={{
+                <div key={c.id}
+                  ref={el => { rowRefs.current[c.id] = el; }}
+                  style={{
                   padding: '14px 14px 12px',
                   borderBottom: '1px solid var(--surface-100)',
-                  background: SHOW_SCHEME_CONFIG_WARNINGS && c.auth_flag ? 'rgba(245,124,0,0.04)' : undefined,
+                  transition: 'background 0.4s, box-shadow 0.4s',
+                  boxShadow: focusId === c.id ? 'inset 3px 0 0 var(--brand-teal)' : undefined,
+                  background: focusId === c.id
+                    ? 'rgba(8,131,149,0.07)'
+                    : SHOW_SCHEME_CONFIG_WARNINGS && c.auth_flag ? 'rgba(245,124,0,0.04)' : undefined,
                 }}>
                   <div style={{
                     fontWeight: 700, fontSize: '0.98rem', color: 'var(--text-primary)',
@@ -375,7 +488,7 @@ export default function Cases() {
                     {getPrfDisplayName(c)}
                   </div>
                   <div style={{ display: 'flex', gap: 8 }}>
-                    <button onClick={() => navigate(`/cases/${c.id}/prf`)}
+                    <button onClick={() => openPrf(c)}
                       style={{
                         flex: 1, minHeight: 44, borderRadius: 9, cursor: 'pointer',
                         border: '1px solid rgba(8,131,149,0.35)', background: 'rgba(8,131,149,0.06)',
@@ -408,7 +521,14 @@ export default function Cases() {
             <tbody>
               {sortedCases.map(c => (
                 <tr key={c.id}
-                  style={{ background: SHOW_SCHEME_CONFIG_WARNINGS && c.auth_flag ? 'rgba(245,124,0,0.04)' : undefined }}
+                  ref={el => { rowRefs.current[c.id] = el; }}
+                  style={{
+                    transition: 'background 0.4s, box-shadow 0.4s',
+                    boxShadow: focusId === c.id ? 'inset 3px 0 0 var(--brand-teal)' : undefined,
+                    background: focusId === c.id
+                      ? 'rgba(8,131,149,0.07)'
+                      : SHOW_SCHEME_CONFIG_WARNINGS && c.auth_flag ? 'rgba(245,124,0,0.04)' : undefined,
+                  }}
                 >
 
                   {/* Patient / PRF */}
@@ -423,7 +543,7 @@ export default function Cases() {
                   {/* Actions */}
                   <td style={{ paddingRight: 16 }}>
                     <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                      <button onClick={() => navigate(`/cases/${c.id}/prf`)}
+                      <button onClick={() => openPrf(c)}
                         title="View PRF (branded for scheme submission)"
                         style={{
                           padding: '7px 12px', borderRadius: 7, border: 'none', cursor: 'pointer',
