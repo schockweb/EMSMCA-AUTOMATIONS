@@ -134,7 +134,13 @@ const run = async () => {
             }
             bd.style.alignItems = prev;
           }
-          out.sheets.push({ n: i + 1, h: pg.offsetHeight, fill: worstFill, waste: worstWaste });
+          // Name the sheet. "sheet 10 is 47% full" is not actionable; "the
+          // vitals continuation sheet is 47% full" tells you where to look.
+          const label = (pg.textContent || '').replace(/\s+/g, ' ')
+            .replace(/^.*?(safe to delete|\(Pty\) Ltd|Ambulance Service)?\s*/, '').slice(0, 30);
+          out.sheets.push({ n: i + 1, h: pg.offsetHeight, fill: worstFill,
+                            waste: worstWaste, label,
+                            cols: [...(pg.children[pg.children.length - 1]?.children || [])].length });
         }
         out.over = out.sheets.filter((x) => x.h > ceiling);
         return out;
@@ -156,7 +162,7 @@ const run = async () => {
         // reader to take it as a section nobody completed.
         if (sh.waste > 400) {
           faults.push({ ...c, type: 'HOLE',
-            detail: `sheet ${sh.n}: ${Math.round(sh.waste)}px blank in one column (${(sh.fill * 100).toFixed(0)}% filled)` });
+            detail: `sheet ${sh.n} [${sh.label}] ${sh.cols}col: ${Math.round(sh.waste)}px blank (${(sh.fill * 100).toFixed(0)}% filled)` });
         }
       }
       for (const cl of r.clipped.slice(0, 3)) {

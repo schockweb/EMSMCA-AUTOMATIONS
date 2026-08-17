@@ -1815,6 +1815,24 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
   const vitalsPage1: any[] = vitals.slice(0, VITALS_PER_PAGE);
   const vitalsOverflow: any[] = vitals.slice(VITALS_PER_PAGE);
 
+  // Rows are spread EVENLY across the sheets, not filled-then-remainder.
+  //
+  // This is the same rule planPlacement already applies to bands, and for the
+  // same reason. Filling each sheet to four and letting the last take what is
+  // left gave 3 IV + 5 medications two sheets of (3,4) and (0,1): a trailing
+  // sheet holding ONE medication row with 594px of blank ruled lines under it,
+  // reported 30 times by the fault hunt. Evenly it is (2,3) and (1,2) — same
+  // two sheets, both columns present on both, no hole.
+  //
+  // Sheet COUNT is still driven by the cap, so no sheet ever exceeds four rows;
+  // only the distribution across that count changes.
+  const evenSlice = (rows: any[], sheets: number, idx: number) => {
+    if (sheets <= 0) return [];
+    const base = Math.floor(rows.length / sheets);
+    const extra = rows.length % sheets;
+    const start = idx * base + Math.min(idx, extra);
+    return rows.slice(start, start + base + (idx < extra ? 1 : 0));
+  };
   const IVMED_ROWS_PER_SHEET = 4;
   const ivMedSheetCount = ivMedOwnSheet
     ? Math.max(Math.ceil(ivRows.length / IVMED_ROWS_PER_SHEET),
@@ -4381,8 +4399,8 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
           overflow at about five rows and reintroduce the very problem this
           solves. */}
       {Array.from({ length: ivMedSheetCount }, (_, s) => {
-        const ivSlice = ivRows.slice(s * IVMED_ROWS_PER_SHEET, (s + 1) * IVMED_ROWS_PER_SHEET);
-        const medSlice = medRows.slice(s * IVMED_ROWS_PER_SHEET, (s + 1) * IVMED_ROWS_PER_SHEET);
+        const ivSlice = evenSlice(ivRows, ivMedSheetCount, s);
+        const medSlice = evenSlice(medRows, ivMedSheetCount, s);
         const part = ivMedSheetCount > 1 ? ` (page ${s + 1} of ${ivMedSheetCount})` : '';
         return (
         <div className="prf-print-frame" key={`ivmed-${s}`}>
