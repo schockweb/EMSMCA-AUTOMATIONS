@@ -67,6 +67,13 @@ async def setup(n_crew: int) -> None:
                 hashed_password=hash_password(uuid.uuid4().hex),
                 full_name=f"Load Crew {i:04d}",
                 qualification="AEA",
+                # A registration number, because the PDF prints one and a crew
+                # member without it renders "—" in the HPCSA row. The demo
+                # records looked like the document was dropping the number when
+                # in fact the test crew had never been given one. Format matches
+                # a real HPCSA registration (category prefix + digits) so the
+                # sheet reads the way a client's would.
+                hpcsa_number=f"AEA{i:07d}",
                 role="crew",
             ))
         await db.commit()

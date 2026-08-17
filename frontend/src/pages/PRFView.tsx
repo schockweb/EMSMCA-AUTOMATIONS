@@ -2228,6 +2228,28 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
   const vitalsOverflowSheets = Math.ceil(vitalsOverflow.length / VITALS_OVERFLOW_PER_SHEET);
 
   const recipientEmail = (fd.handover_doctor_email || '').trim();
+  // HPCSA number for a crew block, when the CREW RECORD does not carry one.
+  //
+  // Name and Qual already fall back to what the crew typed (fbName / fbQual);
+  // HPCSA did not, so a crew member onboarded without a registration number
+  // printed "—" even when the number was captured on the form. Not
+  // hypothetical: on this deployment EMSMCA has 2 of 3 crew with a number and
+  // MICEMS 3 of 4, so those PRFs print a dash today. Falling back for two of
+  // the three fields and not the third is the actual defect.
+  //
+  // The fallback is NAME-MATCHED on purpose. The only HPCSA number in
+  // form_data belongs to the TREATING practitioner, who is often but not
+  // always crew 1 — and attributing one clinician's registration number to
+  // another on a document an HPCSA inquiry reads is far worse than a blank.
+  // No match, no number.
+  const hpcsaFor = (name?: string | null): string | undefined => {
+    const treating = String(fd.treating_practitioner_name || '').trim().toLowerCase();
+    const who = String(name || '').trim().toLowerCase();
+    if (!treating || !who || treating !== who) return undefined;
+    const n = String(fd.treating_practitioner_hpcsa || '').trim();
+    return n || undefined;
+  };
+
   const patientFullName = [fd.patient_name, fd.patient_surname].filter(Boolean).join(' ') || 'the patient';
 
   // Auto-send session: the post-submit popup runs as a gated status screen
@@ -3811,7 +3833,7 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
               <SectionHead label={`Crew · ${role}`} />
               <FieldRow label="Name"  value={c?.full_name || fbName} />
               <FieldRow label="Qual"  value={c?.qualification || fbQual} />
-              <FieldRow label="HPCSA" value={c?.hpcsa_number} />
+              <FieldRow label="HPCSA" value={c?.hpcsa_number || hpcsaFor(c?.full_name || fbName)} />
               <div style={{ padding: '6px 8px', borderTop: `1px solid ${LN}`, flex: 1, display: 'flex', alignItems: 'center' }}>
                 <SignatureBox src={sig} minHeight={80} />
               </div>
@@ -3908,7 +3930,7 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
                   <SectionHead label={title} />
                   <FieldRow label="Name"  value={c?.full_name || fbName} />
                   <FieldRow label="Qual"  value={c?.qualification || fbQual} />
-                  <FieldRow label="HPCSA" value={c?.hpcsa_number} />
+                  <FieldRow label="HPCSA" value={c?.hpcsa_number || hpcsaFor(c?.full_name || fbName)} />
                   <div style={{ padding: '6px 8px', borderTop: `1px solid ${LN}` }}>
                     <SignatureBox src={sig} minHeight={80} />
                   </div>
