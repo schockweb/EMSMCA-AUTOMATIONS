@@ -154,7 +154,61 @@ const run = async () => {
                  name: (b.form_data || {}).patient_name };
       }, rec.prfId);
       rec.storedKeys = saved.keys;
-      rec.ok = saved.status === 200 && saved.name === seed.patient_name;
+      rec.captured = saved.status === 200 && saved.name === seed.patient_name;
+
+      // ── Submit, then confirm the record actually ARRIVED ──────────────────
+      //
+      // Without this every record stopped at DRAFT, and "driven through the
+      // form" quietly meant "typed into, then abandoned". A draft proves the
+      // inputs accept text; it proves nothing about the pipeline behind them.
+      //
+      // The submit is issued from the PAGE, same origin and same bearer token
+      // the app itself uses — not from node — so it travels the identical path
+      // a device does. The crew's own submit BUTTON is deliberately not driven:
+      // it is gated behind signature pads, which are canvas drawing rather than
+      // anything typeable, so clicking it would need to fake input the form
+      // does not actually accept. That limit is stated in the output rather
+      // than hidden.
+      if (rec.captured) {
+        const sub = await page.evaluate(async (id) => {
+          const t = localStorage.getItem('crew_token');
+          const r = await fetch(`/api/digital-prf/${id}/submit`, {
+            method: 'POST', headers: { Authorization: 'Bearer ' + t },
+          });
+          let body = null;
+          try { body = await r.json(); } catch { /* 202 may be empty */ }
+          return { status: r.status, body };
+        }, rec.prfId);
+        rec.submitStatus = sub.status;
+
+        if (sub.status === 202 || sub.status === 200) {
+          // The pipeline is async — poll rather than assume.
+          //
+          // `/case-status`, NOT `GET /{id}`: the full record is response-cached
+          // for an hour once submitted, so it serves a stale null case_id
+          // forever and a perfectly good record reads as never having arrived.
+          // The status string is lower-case off the enum ('processed'), which
+          // an equality check against 'PROCESSED' silently fails — it polls
+          // the full timeout and reports a healthy record as stuck.
+          for (let t = 0; t < 24; t++) {
+            await page.waitForTimeout(2000);
+            const st = await page.evaluate(async (id) => {
+              const tok = localStorage.getItem('crew_token');
+              const r = await fetch(`/api/digital-prf/${id}/case-status`,
+                                    { headers: { Authorization: 'Bearer ' + tok } });
+              if (!r.ok) return { http: r.status };
+              return await r.json();
+            }, rec.prfId);
+            rec.lastStatus = st.status;
+            if (String(st.status || '').toUpperCase() === 'PROCESSED' && st.case_id) {
+              rec.arrived = true;
+              rec.caseId = st.case_id;
+              break;
+            }
+          }
+        }
+      }
+      rec.ok = !!rec.arrived;
     } catch (e) {
       rec.error = String(e).split('\n')[0].slice(0, 110);
     }
@@ -162,17 +216,21 @@ const run = async () => {
     done.push(rec);
     console.log(`  ${String(i + 1).padStart(3)}/${COUNT}  ${rec.call.padEnd(10)} ` +
       `typed ${String(rec.typed).padStart(3)}/${String(rec.offered).padStart(3)}  ` +
-      `${rec.secs}s  ${rec.ok ? 'stored' : (rec.error || 'NOT STORED')}`);
+      `${String(rec.secs).padStart(5)}s  ` +
+      `${rec.ok ? `ARRIVED case ${String(rec.caseId || '').slice(0, 8)}`
+                : (rec.error || (rec.captured ? `stuck at ${rec.lastStatus || rec.submitStatus}` : 'NOT STORED'))}`);
   }
   await browser.close();
 
   const ok = done.filter((r) => r.ok);
+  const captured = done.filter((r) => r.captured);
   const secs = done.map((r) => r.secs).sort((a, b) => a - b);
   const wall = (Date.now() - t0) / 1000;
   console.log(`\n  ── form driver ──`);
   console.log(`  forms driven through the crew form   ${done.length}`);
-  console.log(`  stored with the typed patient        ${ok.length}`);
-  console.log(`  values typed (median per form)       ${ok.length ? ok[Math.floor(ok.length / 2)].typed : 0}`);
+  console.log(`  captured (typed data reached server) ${captured.length}`);
+  console.log(`  SUBMITTED AND ARRIVED (processed)    ${ok.length}`);
+  console.log(`  values typed (median per form)       ${captured.length ? captured[Math.floor(captured.length / 2)].typed : 0}`);
   console.log(`  seconds per form  p50 ${secs[Math.floor(secs.length / 2)] || 0}   max ${secs[secs.length - 1] || 0}`);
   console.log(`  wall ${wall.toFixed(0)}s   ->  ${(3600 / (wall / done.length)).toFixed(0)} forms/hour`);
   console.log(`  uncaught page errors                 ${crashes.length}${crashes[0] ? '  ' + crashes[0] : ''}`);
