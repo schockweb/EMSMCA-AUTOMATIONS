@@ -23,10 +23,13 @@ const PROVIDERS = [{
   pr_number: 'PR1', phone: '011', email: 'a@x.test', address: 'A',
   is_active: true, crew_count: 1, vehicle_count: 1, prf_count: 0, created_at: null,
 }];
-const CREW = [{
-  id: 'c1', full_name: 'A. Mokoena', email: 'a@x.test', initials: 'AM',
-  hpcsa_number: 'AEA0001', qualification: 'AEA', phone: '', is_active: true,
-}];
+const CREW = [
+  { id: 'c1', full_name: 'A. Mokoena', email: 'a@x.test', initials: 'AM',
+    hpcsa_number: 'AEA0001', qualification: 'AEA', phone: '', role: 'crew', is_active: true },
+  // A back-office login. Real ones exist on production with no HPCSA number.
+  { id: 'c2', full_name: 'MichaelsEMS Admin', email: 'admin@x.test', initials: '',
+    hpcsa_number: '', qualification: 'ILS', phone: '', role: 'admin', is_active: true },
+];
 const VEHICLES = [{ id: 'v1', callsign: 'ALPHA 12', registration: 'GP 123-456', vehicle_type: 'Ambulance' }];
 
 vi.mock('../api/client', () => {
@@ -163,5 +166,39 @@ describe('Add Vehicle', () => {
     fireEvent.click(btn('Add Vehicle'));
     await new Promise(r => setTimeout(r, 60));
     expect(api.post).not.toHaveBeenCalled();
+  });
+});
+
+describe('Edit Crew Member', () => {
+  const openEdit = async (which: 'practitioner' | 'admin') => {
+    render(<MemoryRouter><ProviderManagement /></MemoryRouter>);
+    await waitFor(() => expect(screen.getAllByText('Michaels EMS').length).toBeGreaterThan(0));
+    fireEvent.click(screen.getAllByText('Michaels EMS')[0]);
+    const name = which === 'admin' ? 'MichaelsEMS Admin' : 'A. Mokoena';
+    await waitFor(() => expect(screen.getAllByText(name).length).toBeGreaterThan(0));
+    const row = screen.getAllByText(name)[0].closest('tr') || screen.getAllByText(name)[0].parentElement!;
+    const edit = [...row.querySelectorAll('button')].find(b => /edit/i.test(b.title || b.getAttribute('aria-label') || ''));
+    fireEvent.click(edit!);
+    await waitFor(() => expect(screen.getByText('Edit Crew Member')).toBeTruthy());
+  };
+
+  it('will not let a practitioner have their HPCSA number blanked', async () => {
+    await openEdit('practitioner');
+    expect(btn('Save Changes').disabled).toBe(false);
+    type('HPCSA Number *', '');
+    await waitFor(() => expect(btn('Save Changes').disabled).toBe(true));
+  });
+
+  it('does not demand one from a back-office admin login', async () => {
+    // These records legitimately have no registration number. Requiring one
+    // would make them uneditable, or get a fake number typed in — which is
+    // worse than the blank the gate exists to prevent.
+    await openEdit('admin');
+    // Prove we are actually on the admin record before trusting the verdict:
+    // opening the wrong row would have an HPCSA number in it and the button
+    // would be enabled for the wrong reason.
+    expect(fieldUnder('Full Name *').value).toBe('MichaelsEMS Admin');
+    expect(fieldUnder('HPCSA Number').value).toBe('');
+    expect(btn('Save Changes').disabled).toBe(false);
   });
 });

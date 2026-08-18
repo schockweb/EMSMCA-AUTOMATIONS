@@ -60,6 +60,10 @@ interface CrewMember {
   hpcsa_number: string | null;
   qualification: string;
   phone: string | null;
+  // 'crew' for a practitioner, 'admin' for a back-office login. Returned by
+  // GET /providers/{id}/crew and used to decide whether an HPCSA number is
+  // required — an admin login is not a practitioner and never signs a PRF.
+  role?: string;
   is_active: boolean;
   last_login: string | null;
 }
@@ -774,9 +778,17 @@ export default function ProviderManagement() {
   const canAddVehicle = trimmed(newVehicle.callsign) && trimmed(newVehicle.registration);
   // Edit is held to the same standard, or the rule is one click wide: the edit
   // form could blank an HPCSA number that Add had just insisted on.
+  // ...except for a back-office login. A `role: 'admin'` record never signs a
+  // PRF, so demanding a registration number would only get an invented one
+  // typed in, and a made-up HPCSA number on a record is worse than the blank
+  // this gate exists to prevent. On production every one of the 255 real crew
+  // carries a number; the only two without are exactly these admin logins,
+  // which the gate would otherwise have made uneditable.
+  const editingCrewIsAdmin =
+    crew.find(c => c.id === editingCrewId)?.role === 'admin';
   const canSaveCrew = trimmed(editCrewForm.full_name)
     && trimmed(editCrewForm.email)
-    && trimmed(editCrewForm.hpcsa_number);
+    && (editingCrewIsAdmin || trimmed(editCrewForm.hpcsa_number));
   const canSaveVehicle = trimmed(editVehicleForm.callsign) && trimmed(editVehicleForm.registration);
 
   const handleAddCrew = async () => {
@@ -1629,7 +1641,7 @@ export default function ProviderManagement() {
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 14px' }}>
                     <div><label style={labelStyle}>Initials</label><input style={inputStyle} value={editCrewForm.initials} onChange={e => setEditCrewForm({ ...editCrewForm, initials: e.target.value })} /></div>
-                    <div><label style={labelStyle}>HPCSA Number *</label><input style={inputStyle} value={editCrewForm.hpcsa_number} onChange={e => setEditCrewForm({ ...editCrewForm, hpcsa_number: e.target.value })} /></div>
+                    <div><label style={labelStyle}>{editingCrewIsAdmin ? 'HPCSA Number' : 'HPCSA Number *'}</label><input style={inputStyle} value={editCrewForm.hpcsa_number} onChange={e => setEditCrewForm({ ...editCrewForm, hpcsa_number: e.target.value })} /></div>
                     <div>
                       <label style={labelStyle}>Qualification</label>
                       <select style={inputStyle} value={editCrewForm.qualification} onChange={e => setEditCrewForm({ ...editCrewForm, qualification: e.target.value })}>
@@ -1648,7 +1660,9 @@ export default function ProviderManagement() {
                     style={{ ...btnPrimaryGated(canSaveCrew && !editCrewSaving), flex: 2, padding: '10px 18px' }}
                     onClick={handleSaveCrew}
                     disabled={editCrewSaving || !canSaveCrew}
-                    title={canSaveCrew ? undefined : 'Full name, email and HPCSA number are all required'}
+                    title={canSaveCrew ? undefined : (editingCrewIsAdmin
+                      ? 'Full name and email are required'
+                      : 'Full name, email and HPCSA number are all required')}
                   >
                     {editCrewSaving ? 'Saving...' : 'Save Changes'}
                   </button>
