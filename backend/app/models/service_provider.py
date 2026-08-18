@@ -37,7 +37,11 @@ class ServiceProvider(Base):
         String(100), nullable=True,
         comment="Admin-chosen prefix for PRF file/display names; falls back to `name` when unset"
     )
-    phone: Mapped[Union[str, None]] = mapped_column(String(20), nullable=True)
+    # 100, not 20: clients list two contact numbers on the PRF letterhead
+    # ("011 123 4567 / 082 555 1234" is 27 characters) and the old width
+    # turned that into a 422 at the boundary. Widened by migration
+    # e2b4c17d9f36 — create_all will NOT alter an existing column.
+    phone: Mapped[Union[str, None]] = mapped_column(String(100), nullable=True)
     email: Mapped[Union[str, None]] = mapped_column(String(255), nullable=True)
     address: Mapped[Union[str, None]] = mapped_column(Text, nullable=True)
     logo_url: Mapped[Union[str, None]] = mapped_column(String(500), nullable=True)

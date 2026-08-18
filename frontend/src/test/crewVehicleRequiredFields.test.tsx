@@ -189,6 +189,30 @@ describe('Edit Crew Member', () => {
     await waitFor(() => expect(btn('Save Changes').disabled).toBe(true));
   });
 
+  it('offers no Email or Phone field, and never sends either', async () => {
+    // Email was dead: the value shown was the auto-generated portal
+    // placeholder, and the PATCH schema (CrewMemberUpdate) has no `email`
+    // field, so edits to it were silently discarded server-side — crew sign in
+    // with their HPCSA number via the portal grant. Phone did save; it was
+    // dropped by request, and stays editable on the provider's own dashboard.
+    // Add Crew Member has never offered either.
+    await openEdit('practitioner');
+    expect(screen.queryByText('Email (for Portal Login) *')).toBeNull();
+    // 'Phone' scoped to the modal: the crew table behind it still lists one.
+    const modal = screen.getByText('Edit Crew Member').closest('div')!.parentElement!;
+    expect([...modal.querySelectorAll('label')].map(l => l.textContent))
+      .toEqual(['Full Name *', 'Initials', 'HPCSA Number *', 'Qualification']);
+
+    type('Full Name *', 'A. Mokoena-Smith');
+    fireEvent.click(btn('Save Changes'));
+    await waitFor(() => expect(api.patch).toHaveBeenCalled());
+    const [, body] = (api.patch as any).mock.calls[0];
+    expect(body).toEqual({
+      full_name: 'A. Mokoena-Smith', initials: 'AM',
+      hpcsa_number: 'AEA0001', qualification: 'AEA',
+    });
+  });
+
   it('does not demand one from a back-office admin login', async () => {
     // These records legitimately have no registration number. Requiring one
     // would make them uneditable, or get a fake number typed in — which is

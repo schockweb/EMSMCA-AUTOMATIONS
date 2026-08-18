@@ -195,10 +195,11 @@ async def get_admin_or_crew_admin(
 # ── Schemas ──────────────────────────────────────────────────
 
 class ProviderCreate(BaseModel):
-    # Lengths mirror the columns in models/service_provider.py. Without them an
-    # ordinary control-room contact like "011 123 4567 / 082 555 1234" (27
-    # chars) overflows phone's VARCHAR(20) and the worker gets a bare 500 that
-    # names no field; a 422 at the boundary says which one is too long.
+    # Lengths mirror the columns in models/service_provider.py. Without them a
+    # value that is too long overflows its column and the worker gets a bare
+    # 500 that names no field; a 422 at the boundary says which one it was.
+    # phone is 100 because an ordinary control-room contact carries two numbers
+    # ("011 123 4567 / 082 555 1234" is 27 chars) and the old 20 rejected it.
     name: str = Field(min_length=1, max_length=255)
     slug: str | None = Field(None, max_length=100)
     pr_number: str | None = Field(None, max_length=50)
@@ -206,7 +207,7 @@ class ProviderCreate(BaseModel):
     # PRF file/display naming prefix — replaces the automatic provider-name
     # prefix in exported-PDF filenames when set; blank keeps automatic naming.
     prf_name: str | None = Field(None, max_length=100)
-    phone: str | None = Field(None, max_length=20)
+    phone: str | None = Field(None, max_length=100)
     email: str | None = Field(None, max_length=255)
     address: str | None = None
     # PRF numbering baseline — the last PRF number already used; new PRFs for this
@@ -234,7 +235,7 @@ class ProviderUpdate(BaseModel):
     # PRF naming prefix. Sent as an explicit null to clear back to automatic
     # provider-name naming (unlike credentials, which are omit-to-keep).
     prf_name: str | None = Field(None, max_length=100)
-    phone: str | None = Field(None, max_length=20)
+    phone: str | None = Field(None, max_length=100)
     email: str | None = Field(None, max_length=255)
     address: str | None = None
     logo_url: str | None = None
@@ -1539,7 +1540,9 @@ class ProviderSettingsUpdate(BaseModel):
     pty_reg_number: str | None = None
     # PRF naming prefix — explicit null/blank clears back to automatic naming.
     prf_name: str | None = None
-    phone: str | None = None
+    # Capped at the column width so two contact numbers are accepted and an
+    # over-long one is a 422 naming the field, not a 500 from the driver.
+    phone: str | None = Field(None, max_length=100)
     email: str | None = None
     address: str | None = None
     # EMSMCA Client Login (shared portal credentials on ServiceProvider)

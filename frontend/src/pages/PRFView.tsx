@@ -2975,20 +2975,34 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
                 the brand mark sits in a consistent box on every provider's PRF.
                 The logo scales to fit (objectFit:contain + maxWidth:100%): it is
                 never cropped or stretched — a wide logo just uses the extra
-                width, a tall one fills the height. */}
+                width, a tall one fills the height.
+
+                Sized so the brand mark is actually readable in print. At the
+                old 78px the frame was much wider than it was tall, so a logo
+                with any height to it printed small in a mostly-empty box and
+                clients could not make out their own mark. The band is not the
+                tallest column on page 1 (the billing/meta stacks beside it
+                are), so the extra height is absorbed by slack that was already
+                there — it does not push the sheet toward the 944px ceiling.
+                The side padding is tight so a WIDE logo, which is capped by
+                maxWidth rather than height, gets the full column to grow in. */}
             <div style={{
               border: `1.5px solid ${LN}`, borderRadius: 6, background: '#fff',
-              height: 78, display: 'flex', alignItems: 'center', justifyContent: 'center',
-              padding: '5px 12px', overflow: 'hidden',
+              height: 118, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              padding: '6px 7px', overflow: 'hidden',
             }}>
-              <ProviderLogo prov={prov} height={62} />
+              <ProviderLogo prov={prov} height={104} />
             </div>
             {prov.phone && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                 <span style={{ fontSize: '0.5rem', fontWeight: 800, color: MUT, textTransform: 'uppercase', letterSpacing: '0.09em' }}>Phone</span>
+                {/* Wraps rather than overflowing the brand column: a control
+                    room that lists two numbers ("011 123 4567 / 082 555 1234")
+                    is longer than this column is wide. */}
                 <span style={{
                   fontSize: '1.02rem', fontWeight: 900, color: INK,
                   fontFamily: 'ui-monospace, monospace', letterSpacing: '0.02em',
+                  wordBreak: 'break-word', lineHeight: 1.2,
                 }}>{prov.phone}</span>
               </div>
             )}

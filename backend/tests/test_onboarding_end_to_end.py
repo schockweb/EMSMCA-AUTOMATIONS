@@ -181,6 +181,38 @@ async def test_two_clients_onboarded_together_stay_separate(client, auth_headers
 
 
 @pytest.mark.asyncio
+async def test_a_client_can_list_two_contact_numbers(client, auth_headers):
+    """Control rooms publish a landline AND a cell on their letterhead.
+
+    The column was VARCHAR(20), which is shorter than the commonest real
+    answer: "011 123 4567 / 082 555 1234" is 27 characters. The onboarding
+    form capped typing at 20 and the edit dialog, which had no cap, got a 422
+    back — so the second number simply could not be recorded, and the PRF
+    printed one contact for a service that answers on two.
+    """
+    two = "011 123 4567 / 082 555 1234"
+    body = _company("phones") | {"phone": two}
+    res = await client.post("/api/providers", json=body, headers=auth_headers)
+    assert res.status_code in (200, 201), res.text
+    pid = res.json()["id"]
+    try:
+        # Round-tripped, not truncated: a silent LEFT(20) would be worse than
+        # the rejection it replaced.
+        got = (await client.get(f"/api/providers/{pid}", headers=auth_headers)).json()
+        assert got["phone"] == two
+
+        longer = "Control 011 123 4567 / Ops 082 555 1234 / AH 083 111 2222"
+        res = await client.patch(
+            f"/api/providers/{pid}", json={"phone": longer}, headers=auth_headers
+        )
+        assert res.status_code == 200, res.text
+        got = (await client.get(f"/api/providers/{pid}", headers=auth_headers)).json()
+        assert got["phone"] == longer
+    finally:
+        await client.delete(f"/api/providers/{pid}", headers=auth_headers)
+
+
+@pytest.mark.asyncio
 async def test_the_details_the_worker_typed_survive_an_edit(client, auth_headers, onboarded):
     """Settings saved from the client screen must persist and not disturb others."""
     a = await onboarded("delta")
@@ -211,7 +243,10 @@ async def test_the_form_refuses_bad_input_without_creating_anything(client, auth
     bad_cases = {
         "blank name": {"name": "   "},
         "name of only punctuation (slug becomes empty)": {"name": "!!! ???"},
-        "phone longer than the column": {"name": f"Long Phone {RUN}", "phone": "011 123 4567 / 082 555 1234 ext 9"},
+        # Two numbers ARE legitimate now (see the test below) — this is the
+        # boundary past the widened column, which must still be a named 422
+        # rather than a driver-level 500.
+        "phone longer than the column": {"name": f"Long Phone {RUN}", "phone": "011 123 4567 / " * 8},
         "PRF baseline with two numbers in it": {"name": f"Ambig PRF {RUN}", "current_prf_number": "0690/26"},
         "PRF baseline with no digits": {"name": f"No Digits {RUN}", "current_prf_number": "none"},
         "portal password too weak": {

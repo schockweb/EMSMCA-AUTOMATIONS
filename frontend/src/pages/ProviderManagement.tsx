@@ -470,7 +470,7 @@ export default function ProviderManagement() {
   
   const [showEditCrew, setShowEditCrew] = useState(false);
   const [editingCrewId, setEditingCrewId] = useState<string | null>(null);
-  const [editCrewForm, setEditCrewForm] = useState({ full_name: '', email: '', initials: '', hpcsa_number: '', qualification: 'AEA', phone: '' });
+  const [editCrewForm, setEditCrewForm] = useState({ full_name: '', initials: '', hpcsa_number: '', qualification: 'AEA' });
   const [editCrewSaving, setEditCrewSaving] = useState(false);
 
   // Lock the background page while any pop-up on this screen is open.
@@ -787,7 +787,6 @@ export default function ProviderManagement() {
   const editingCrewIsAdmin =
     crew.find(c => c.id === editingCrewId)?.role === 'admin';
   const canSaveCrew = trimmed(editCrewForm.full_name)
-    && trimmed(editCrewForm.email)
     && (editingCrewIsAdmin || trimmed(editCrewForm.hpcsa_number));
   const canSaveVehicle = trimmed(editVehicleForm.callsign) && trimmed(editVehicleForm.registration);
 
@@ -883,11 +882,9 @@ export default function ProviderManagement() {
     setEditingCrewId(member.id);
     setEditCrewForm({
       full_name: member.full_name,
-      email: member.email,
       initials: member.initials || '',
       hpcsa_number: member.hpcsa_number || '',
       qualification: member.qualification || 'AEA',
-      phone: member.phone || '',
     });
     setShowEditCrew(true);
   };
@@ -1012,7 +1009,11 @@ export default function ProviderManagement() {
                 <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12 }}>
                   <div>
                     <label style={labelStyle}>Phone Number</label>
-                    <input style={inputStyle} maxLength={20} value={newProvider.phone} onChange={e => setNewProvider({ ...newProvider, phone: e.target.value })} />
+                    {/* No 20-character cap: clients routinely list two numbers
+                        ("011 123 4567 / 082 555 1234" is 27). The column and the
+                        request schema were widened to 100 to match — see
+                        models/service_provider.py. */}
+                    <input style={inputStyle} maxLength={100} value={newProvider.phone} onChange={e => setNewProvider({ ...newProvider, phone: e.target.value })} />
                   </div>
                   <div>
                     <label style={labelStyle}>Email Address</label>
@@ -1635,14 +1636,26 @@ export default function ProviderManagement() {
                 </div>
                 
                 <div style={{ padding: '20px 26px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  {/* No Email / Phone here, matching Add Crew Member.
+
+                      Email was worse than clutter: the value shown was the
+                      auto-generated portal placeholder
+                      (uuid.HPCSA@hpcsa.placeholder), crew sign in with their
+                      HPCSA number via the portal grant, and CrewMemberUpdate
+                      has no `email` field — pydantic dropped it, so every edit
+                      typed here was silently discarded. A field that looks
+                      editable and is not is worse than no field.
+
+                      Phone DID save. It is gone by request: the client's own
+                      admin edits it on the provider dashboard (Edit Employee),
+                      which is where the roster is actually maintained. */}
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 14px' }}>
                     <div style={{ gridColumn: '1 / -1' }}><label style={labelStyle}>Full Name *</label><input style={inputStyle} value={editCrewForm.full_name} onChange={e => setEditCrewForm({ ...editCrewForm, full_name: e.target.value })} /></div>
-                    <div style={{ gridColumn: '1 / -1' }}><label style={labelStyle}>Email (for Portal Login) *</label><input style={inputStyle} value={editCrewForm.email} onChange={e => setEditCrewForm({ ...editCrewForm, email: e.target.value })} /></div>
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 14px' }}>
                     <div><label style={labelStyle}>Initials</label><input style={inputStyle} value={editCrewForm.initials} onChange={e => setEditCrewForm({ ...editCrewForm, initials: e.target.value })} /></div>
                     <div><label style={labelStyle}>{editingCrewIsAdmin ? 'HPCSA Number' : 'HPCSA Number *'}</label><input style={inputStyle} value={editCrewForm.hpcsa_number} onChange={e => setEditCrewForm({ ...editCrewForm, hpcsa_number: e.target.value })} /></div>
-                    <div>
+                    <div style={{ gridColumn: '1 / -1' }}>
                       <label style={labelStyle}>Qualification</label>
                       <select style={inputStyle} value={editCrewForm.qualification} onChange={e => setEditCrewForm({ ...editCrewForm, qualification: e.target.value })}>
                         {[...legacyOption(editCrewForm.qualification), ...QUAL_OPTIONS].map(o => (
@@ -1650,7 +1663,6 @@ export default function ProviderManagement() {
                         ))}
                       </select>
                     </div>
-                    <div><label style={labelStyle}>Phone</label><input style={inputStyle} value={editCrewForm.phone} onChange={e => setEditCrewForm({ ...editCrewForm, phone: e.target.value })} /></div>
                   </div>
                 </div>
 
@@ -1661,8 +1673,8 @@ export default function ProviderManagement() {
                     onClick={handleSaveCrew}
                     disabled={editCrewSaving || !canSaveCrew}
                     title={canSaveCrew ? undefined : (editingCrewIsAdmin
-                      ? 'Full name and email are required'
-                      : 'Full name, email and HPCSA number are all required')}
+                      ? 'Enter the full name first'
+                      : 'Enter the full name and HPCSA number first')}
                   >
                     {editCrewSaving ? 'Saving...' : 'Save Changes'}
                   </button>
