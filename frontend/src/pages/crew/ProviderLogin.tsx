@@ -244,7 +244,7 @@ export default function ProviderLogin() {
         </div>
 
         {/* ── ADMIN LOGIN + SHIFT START ── */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
+        <div className="login-sections" style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
 
             {/* Admin Login Section */}
             <div>

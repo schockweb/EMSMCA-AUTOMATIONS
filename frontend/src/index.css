@@ -663,12 +663,23 @@ tr:hover td {
   position: fixed;
   inset: 0;
   display: flex;
-  align-items: center;
+  /* flex-start + `margin:auto` on the card, NOT align-items:center.
+     Centring an item taller than its container pushes the overflow off BOTH
+     ends, and the top half is then unreachable however you scroll. With the
+     card taking `margin:auto` instead, it still centres when it fits and keeps
+     its breathing room above and below when it does not. */
+  align-items: flex-start;
   justify-content: center;
   background: var(--gradient-hero);
-  overflow: hidden;
+  /* Was `hidden`. On a 667px phone the unlock form makes this card 698px, so
+     it was cut off top and bottom with no way to reach either end. A login
+     screen must never be able to hide its own submit button. */
+  overflow-y: auto;
   overflow-x: hidden;
-  padding: 16px;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: max(16px, env(safe-area-inset-top, 0px)) 16px
+           max(16px, env(safe-area-inset-bottom, 0px));
   box-sizing: border-box;
 }
 
@@ -697,6 +708,9 @@ tr:hover td {
 .login-card {
   width: 100%;
   max-width: 440px;
+  /* Pairs with align-items:flex-start above — centres while it fits, then
+     yields to the page padding rather than overflowing past it. */
+  margin: auto;
   background: #ffffff;
   backdrop-filter: blur(20px);
   border: 1px solid var(--glass-border);
@@ -945,7 +959,9 @@ tr:hover td {
     grid-template-columns: 1fr;
   }
   .login-card {
-    margin: 16px;
+    /* `auto` not a fixed margin: a fixed one cancels the centring above and
+       re-introduces the clipping this breakpoint is meant to relieve. */
+    margin: auto;
     padding: 32px 24px;
   }
 }
@@ -1580,7 +1596,14 @@ tr:hover td {
 
   /* Login page mobile adjustments */
   .login-page {
-    padding: 20px;
+    /* Top padding clears the floating Back button, which is absolutely
+       positioned and was landing ON the card's top-left corner. The button
+       cannot move up — its 44px offset exists to clear browser chrome in a
+       plain mobile tab, where the safe-area inset reports 0 — so the card
+       moves down instead. On a short phone that pushes the card past the fold;
+       the page scrolls now, which is the right trade against an overlap. */
+    padding: calc(env(safe-area-inset-top, 0px) + 92px) 20px
+             max(20px, env(safe-area-inset-bottom, 0px));
   }
 
   /* Push the back button clear of the status bar / notch on phones. The inline
@@ -1601,14 +1624,22 @@ tr:hover td {
      Logo.tsx renders the image inline with width/height attributes — we
      override those with !important so a single mobile rule rescales it. */
   .login-logo {
-    margin-bottom: 18px;
+    margin-bottom: 12px;
+  }
+  /* Sections sit 32px apart on desktop; on a phone that spacing is the
+     difference between the Unlock button being on screen and off it. */
+  .login-sections {
+    gap: 20px !important;
   }
   .login-logo > div {
     gap: 8px !important;
   }
   .login-logo img {
     width: auto !important;
-    height: 140px !important;
+    /* 140px put the card at 698px — taller than an iPhone SE. The logo is the
+       largest single block on the screen and the least load-bearing: the crew
+       already know whose portal they opened. */
+    height: 72px !important;
     max-width: 100%;
   }
   .login-logo > div > div > div:first-child {
