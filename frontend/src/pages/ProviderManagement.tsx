@@ -76,6 +76,34 @@ interface Vehicle {
   is_active: boolean;
 }
 
+// Every pop-up on this page sits in this overlay.
+//
+// `align-items: flex-start` + `margin: auto` on the card, NOT
+// `align-items: center`, and the OVERLAY is what scrolls. Centring a card
+// taller than its container pushes the overflow off BOTH ends, and the top is
+// then unreachable however you scroll — the close button and the first fields
+// with it. `margin: auto` still centres the card whenever it does fit.
+//
+// This is not theoretical on a phone. iOS resolves `vh` against the LARGE
+// viewport (browser chrome hidden) while a position:fixed overlay is laid out
+// against the SMALL one, so a `92vh` card is taller than the box holding it the
+// moment the toolbar is showing. Measured on Add New Client at 390x664: card
+// 744px, its top at -48px, its close button at -35px, and the overlay's
+// overflow-y was `visible` — there was nothing to scroll. Hence also `dvh`
+// rather than `vh` on the caps below: dvh is the CURRENTLY visible viewport, so
+// the cap cannot outgrow the box. A browser too old for dvh drops the cap
+// entirely and the overlay scroll still saves it.
+//
+// Same fix and same reasoning as `.login-page` in index.css.
+const MODAL_OVERLAY: React.CSSProperties = {
+  position: 'fixed', inset: 0, zIndex: 1000,
+  display: 'flex', justifyContent: 'center', alignItems: 'flex-start',
+  overflowY: 'auto', overflowX: 'hidden',
+  overscrollBehavior: 'contain', WebkitOverflowScrolling: 'touch',
+  padding: 'max(16px, env(safe-area-inset-top, 0px)) 16px max(16px, env(safe-area-inset-bottom, 0px))',
+  boxSizing: 'border-box',
+};
+
 const teal = '#088395';
 const rose = '#C2185B';
 
@@ -302,9 +330,7 @@ function AppPasswordHelp({ service }: { service: string }) {
           aria-label="How to get an app password"
           onClick={() => setOpen(false)}
           style={{
-            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)',
-            display: 'flex', justifyContent: 'center', alignItems: 'center',
-            zIndex: 1100, padding: 12,
+            ...MODAL_OVERLAY, background: 'rgba(0,0,0,0.45)', zIndex: 1100,
           }}
         >
           <div
@@ -314,7 +340,7 @@ function AppPasswordHelp({ service }: { service: string }) {
               border: '1px solid var(--surface-200)',
               boxShadow: '0 18px 45px rgba(0,0,0,0.28)',
               width: isMobile ? '100%' : 460, maxWidth: '100%',
-              maxHeight: '82vh', overflowY: 'auto',
+              margin: 'auto', maxHeight: '82dvh', overflowY: 'auto',
               padding: isMobile ? 16 : 20, position: 'relative',
               textTransform: 'none', letterSpacing: 'normal',
             }}
@@ -980,8 +1006,8 @@ export default function ProviderManagement() {
 
         {/* Add Provider Modal */}
         {showAddProvider && (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
-            <div style={{ ...cardStyle, maxWidth: 600, width: isMobile ? '94%' : '90%', padding: isMobile ? 18 : 32, maxHeight: isMobile ? '92vh' : '85vh', overflowY: 'auto', position: 'relative' }}>
+          <div style={{ ...MODAL_OVERLAY, background: 'rgba(0,0,0,0.5)' }}>
+            <div style={{ ...cardStyle, maxWidth: 600, width: '100%', padding: isMobile ? 18 : 32, margin: 'auto', maxHeight: isMobile ? '92dvh' : '85dvh', overflowY: 'auto', position: 'relative' }}>
               <button onClick={closeAddProvider} style={{ position: 'absolute', top: 12, right: 16, background: 'none', border: 'none', fontSize: '1.3rem', cursor: 'pointer', color: 'var(--text-muted)' }}>&times;</button>
               <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 16, color: teal }}>Add New Client</h3>
               
@@ -1241,8 +1267,8 @@ export default function ProviderManagement() {
       `}</style>
       {/* Edit Client Modal */}
       {showEditClient && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
-          <div style={{ ...cardStyle, maxWidth: 560, width: isMobile ? '94%' : '90%', padding: isMobile ? 18 : 32, maxHeight: '90vh', overflowY: 'auto', position: 'relative' }}>
+        <div style={{ ...MODAL_OVERLAY, background: 'rgba(0,0,0,0.55)' }}>
+          <div style={{ ...cardStyle, maxWidth: 560, width: '100%', padding: isMobile ? 18 : 32, margin: 'auto', maxHeight: '90dvh', overflowY: 'auto', position: 'relative' }}>
             <button onClick={() => setShowEditClient(false)} style={{ position: 'absolute', top: 12, right: 16, background: 'none', border: 'none', fontSize: '1.4rem', cursor: 'pointer', color: 'var(--text-muted)' }}>&times;</button>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
               <div style={{ width: 36, height: 36, borderRadius: 8, background: `rgba(8,131,149,0.1)`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: teal }}>
@@ -1557,14 +1583,14 @@ export default function ProviderManagement() {
 
           {showAddCrew && (
             <div
-              style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: 16 }}
+              style={{ ...MODAL_OVERLAY, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}
               onClick={e => { if (e.target === e.currentTarget) closeAddCrew(); }}
             >
               <div style={{
                 background: 'var(--surface-50)', borderRadius: 16,
                 border: '1px solid var(--surface-100)',
                 boxShadow: '0 24px 60px rgba(0,0,0,0.28), 0 4px 14px rgba(0,0,0,0.12)',
-                width: '100%', maxWidth: 480, maxHeight: '90vh', overflowY: 'auto',
+                width: '100%', maxWidth: 480, margin: 'auto', maxHeight: '90dvh', overflowY: 'auto',
                 position: 'relative',
               }}>
                 {/* Header */}
@@ -1628,8 +1654,8 @@ export default function ProviderManagement() {
           )}
 
           {showEditCrew && (
-            <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-              <div style={{ ...cardStyle, width: '100%', maxWidth: 500, padding: 0, display: 'flex', flexDirection: 'column', maxHeight: '90vh' }}>
+            <div style={{ ...MODAL_OVERLAY, zIndex: 9999, background: 'rgba(0,0,0,0.5)' }}>
+              <div style={{ ...cardStyle, width: '100%', maxWidth: 500, padding: 0, display: 'flex', flexDirection: 'column', margin: 'auto', maxHeight: '90dvh' }}>
                 <div style={{ padding: '20px 26px 16px', borderBottom: '1px solid var(--surface-100)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <h3 style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--text)' }}>Edit Crew Member</h3>
                   <button onClick={closeEditCrew} style={{ background: 'none', border: 'none', fontSize: '1.4rem', color: 'var(--text-muted)', cursor: 'pointer', lineHeight: 1 }}>&times;</button>
@@ -1803,14 +1829,14 @@ export default function ProviderManagement() {
 
           {showAddVehicle && (
             <div
-              style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: 16 }}
+              style={{ ...MODAL_OVERLAY, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}
               onClick={e => { if (e.target === e.currentTarget) closeAddVehicle(); }}
             >
               <div style={{
                 background: 'var(--surface-50)', borderRadius: 16,
                 border: '1px solid var(--surface-100)',
                 boxShadow: '0 24px 60px rgba(0,0,0,0.28), 0 4px 14px rgba(0,0,0,0.12)',
-                width: '100%', maxWidth: 480, maxHeight: '90vh', overflowY: 'auto',
+                width: '100%', maxWidth: 480, margin: 'auto', maxHeight: '90dvh', overflowY: 'auto',
                 position: 'relative',
               }}>
                 {/* Header */}
@@ -1864,8 +1890,8 @@ export default function ProviderManagement() {
           )}
 
           {showEditVehicle && (
-            <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-              <div style={{ ...cardStyle, width: '100%', maxWidth: 450, padding: 0, display: 'flex', flexDirection: 'column', maxHeight: '90vh' }}>
+            <div style={{ ...MODAL_OVERLAY, zIndex: 9999, background: 'rgba(0,0,0,0.5)' }}>
+              <div style={{ ...cardStyle, width: '100%', maxWidth: 450, padding: 0, display: 'flex', flexDirection: 'column', margin: 'auto', maxHeight: '90dvh' }}>
                 <div style={{ padding: '20px 26px 16px', borderBottom: '1px solid var(--surface-100)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <h3 style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--text)' }}>Edit Vehicle</h3>
                   <button onClick={closeEditVehicle} style={{ background: 'none', border: 'none', fontSize: '1.4rem', color: 'var(--text-muted)', cursor: 'pointer', lineHeight: 1 }}>&times;</button>
