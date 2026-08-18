@@ -1596,14 +1596,7 @@ tr:hover td {
 
   /* Login page mobile adjustments */
   .login-page {
-    /* Top padding clears the floating Back button, which is absolutely
-       positioned and was landing ON the card's top-left corner. The button
-       cannot move up — its 44px offset exists to clear browser chrome in a
-       plain mobile tab, where the safe-area inset reports 0 — so the card
-       moves down instead. On a short phone that pushes the card past the fold;
-       the page scrolls now, which is the right trade against an overlap. */
-    padding: calc(env(safe-area-inset-top, 0px) + 92px) 20px
-             max(20px, env(safe-area-inset-bottom, 0px));
+    padding: 20px;
   }
 
   /* Push the back button clear of the status bar / notch on phones. The inline
@@ -1624,22 +1617,14 @@ tr:hover td {
      Logo.tsx renders the image inline with width/height attributes — we
      override those with !important so a single mobile rule rescales it. */
   .login-logo {
-    margin-bottom: 12px;
-  }
-  /* Sections sit 32px apart on desktop; on a phone that spacing is the
-     difference between the Unlock button being on screen and off it. */
-  .login-sections {
-    gap: 20px !important;
+    margin-bottom: 18px;
   }
   .login-logo > div {
     gap: 8px !important;
   }
   .login-logo img {
     width: auto !important;
-    /* 140px put the card at 698px — taller than an iPhone SE. The logo is the
-       largest single block on the screen and the least load-bearing: the crew
-       already know whose portal they opened. */
-    height: 72px !important;
+    height: 140px !important;
     max-width: 100%;
   }
   .login-logo > div > div > div:first-child {
@@ -1650,6 +1635,33 @@ tr:hover td {
     margin-top: 6px !important;
     letter-spacing: 0.18em !important;
   }
+}
+
+/* ── Crew login: browser tab only ──────────────────────────────────────────
+   The INSTALLED app was already right and is left exactly as it was — the
+   rules above are its rules, untouched. Only a plain mobile tab has the
+   problem: there the safe-area inset reports 0 and browser chrome eats the top
+   of the screen, so the floating Back button sits 44px down and lands on the
+   card's corner, and the 698px unlock card runs off both ends of a 667px
+   screen.
+
+   A SEPARATE query rather than a nested one, deliberately. Nested, it sat
+   above `.login-logo img { height: 140px !important }` in source order, and
+   between two `!important` declarations of equal specificity the later one
+   wins — so the logo silently kept its full height and the card stayed too
+   tall. Out here it is unambiguously last.
+
+   `display-mode: browser` rather than `not (display-mode: standalone)`: a
+   browser that does not understand the feature matches nothing and falls back
+   to the installed-app layout, which is the one known to be good. */
+@media (max-width: 768px) and (display-mode: browser) {
+  .login-page {
+    padding: calc(env(safe-area-inset-top, 0px) + 92px) 20px
+             max(20px, env(safe-area-inset-bottom, 0px));
+  }
+  .login-logo { margin-bottom: 12px; }
+  .login-logo img { height: 72px !important; }
+  .login-sections { gap: 20px !important; }
 }
 
 /* ── Mobile: prevent iOS auto-zoom on input focus ─────────────────────────
