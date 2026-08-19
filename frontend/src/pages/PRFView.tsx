@@ -1712,7 +1712,49 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
   // ("Patent", "Clear bilaterally") and it stays where it belongs; above it
   // they are writing sentences, and sentences read better on the detail sheet
   // at full width anyway.
-  const SURVEY_CHAR_BUDGET = 220;
+  // ...but 660px is the WORST case, and most calls are nowhere near it. Every
+  // block above the survey — Oxygen, Airway, Circulation, Immobilisation,
+  // Mechanism, Priority — hides when it captured nothing. On an inter-facility
+  // transfer almost all of them do: measured on a real one, column 1 carried
+  // seven rows totalling 156px and then 655px of blank filler, while the survey
+  // it had just displaced sat on a sheet of its own. A fixed budget calibrated
+  // against the fullest possible column spends most records' space on nothing.
+  //
+  // So count the rows that will actually render and spend what is actually
+  // left. The arithmetic is the same as the comment above, just not frozen at
+  // one input: 220 characters fitted the 284px that remained after 660px of
+  // rows, which is ~1.29px per character in this column width.
+  const COL1_ROW_PX = 23;                     // measured: heads 22, field rows 22-24
+  const SURVEY_PX_PER_CHAR = 284 / 220;       // the calibration above, as a rate
+  const countIn = (v: any) => (Array.isArray(v) ? v.filter(Boolean).length : 0);
+  const filled = (...vals: any[]) => vals.filter((v) => !isBlank(v)).length;
+
+  const o2Rows = [fd.o2_flow_rate, fd.o2_percent, fd.o2_device, fd.o2_bvm,
+                  fd.o2_start_time, fd.o2_stop_time].some((v) => !isBlank(v))
+    ? 1 + 5 + (isBlank(fd.o2_percent) ? 0 : 1) : 0;
+  const airwayItems = countIn(fd.airway_interventions)
+    + filled(fd.op_airway_size, fd.intubation_attempts, fd.ett_size, fd.ett_depth, fd.ng_tube_size);
+  const circItems = countIn(fd.circulation_interventions) + filled(fd.iv_attempts, fd.defib_joules);
+  const immobItems = countIn(fd.immob_equipment) + filled(fd.other_equipment);
+  const mechItems = (Array.isArray(fd.mechanism) ? fd.mechanism.filter(Boolean).length
+                                                 : (fd.mechanism ? 1 : 0))
+    + filled(fd.mechanism_other);
+  const hasPriorityRow = fd.call_type !== 'DOD' && fd.call_type !== 'RESUS' && !isBlank(fd.priority);
+
+  const col1FixedRows =
+    o2Rows
+    + (airwayItems ? 1 + airwayItems : 0)
+    + (circItems ? 1 + circItems : 0)
+    + (immobItems ? 1 + immobItems : 0)
+    + (fd.call_type !== 'DOD' && mechItems ? 1 + mechItems : 0)
+    + (hasPriorityRow ? 2 : 0);
+
+  // Never tighter than the old fixed budget — this may only ever hand back
+  // space the column genuinely is not using.
+  const SURVEY_CHAR_BUDGET = Math.max(
+    220,
+    Math.floor((944 - col1FixedRows * COL1_ROW_PX) / SURVEY_PX_PER_CHAR),
+  );
   const SURVEY_KEYS = [
     'survey_a', 'survey_b', 'survey_c', 'survey_head_back', 'survey_neuro',
     'survey_chest', 'survey_abdo', 'survey_limbs', 'survey_back',
