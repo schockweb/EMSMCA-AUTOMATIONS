@@ -3783,25 +3783,52 @@ export default function PRFView({ silentMode = false, onSilentDone }: PRFViewPro
                   // Labels carry sigLabel explicitly rather than inheriting:
                   // the clause body is 0.46rem, already the smallest text on the
                   // sheet, and a signature label must not be smaller still.
+                  // TWO PER ROW once there is more than one mark.
+                  //
+                  // Stacked, each signature costs a label plus a 34px rule, and
+                  // the third one measured at 60px on the page — taking page 1
+                  // from 868px to 928px against the 944px ceiling. Sixteen
+                  // pixels of headroom is not a margin; any record with a
+                  // wrapped address or a long facility name spends it and the
+                  // crew block spills onto a continuation sheet.
+                  //
+                  // Pairing them costs nothing legible. The printed size is
+                  // already normalised — SignatureRule caps the image at 32px
+                  // tall with objectFit: contain — so a mark captured on an
+                  // iPad prints exactly as one captured on a phone, and halving
+                  // the cell width only reduces slack around the ink, which is
+                  // transparent anyway.
+                  //
+                  // Kept to two rather than three across: three in this column
+                  // leaves about 90px per signature, which starts to squeeze a
+                  // long surname's flourish, and the second row is free once
+                  // the first two share one.
+                  const sigCount = [showPatientSig, showWitnessSig, showNokSig]
+                    .filter(Boolean).length;
+                  const sigPair = sigCount > 1;
+
                   return (
                     <div style={{
-                      display: 'flex', flexDirection: 'column',
-                      borderTop: `1px solid ${LN}`, padding: '6px 8px 8px', gap: 7,
+                      display: sigPair ? 'grid' : 'flex',
+                      ...(sigPair
+                        ? { gridTemplateColumns: '1fr 1fr', columnGap: 10, rowGap: 7 }
+                        : { flexDirection: 'column', gap: 7 }),
+                      borderTop: `1px solid ${LN}`, padding: '6px 8px 8px',
                     }}>
                       {showPatientSig && (
-                        <div>
+                        <div style={{ minWidth: 0 }}>
                           <div style={sigLabel}>Patient / Rep.</div>
                           <SignatureRule src={fd.tc_patient_signature || prf.signatures?.patient_signature} />
                         </div>
                       )}
                       {showWitnessSig && (
-                        <div>
+                        <div style={{ minWidth: 0 }}>
                           <div style={sigLabel}>Witness</div>
                           <SignatureRule src={witnessSig} />
                         </div>
                       )}
                       {showNokSig && (
-                        <div>
+                        <div style={{ minWidth: 0 }}>
                           <div style={sigLabel}>Next of Kin</div>
                           <SignatureRule src={nokSig} />
                         </div>
