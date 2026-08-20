@@ -1,0 +1,67 @@
+---
+import brand from '../data/brand.json';
+import '../styles/global.css';
+
+interface Props {
+  title?: string;
+  description?: string;
+  /** Set true on pages that should not appear in search results (e.g. staging previews). */
+  noindex?: boolean;
+}
+
+const { title, description, noindex = false } = Astro.props;
+const c = brand.client;
+const col = brand.colour;
+const t = brand.type;
+
+const pageTitle = title ? `${title} — ${c.tradingName}` : `${c.tradingName} — ${c.tagline}`;
+const desc = description ?? c.tagline;
+const canonical = new URL(Astro.url.pathname, Astro.site).href;
+
+// One Google Fonts request for both families, weights taken from brand.json.
+const rootVars = `:root{
+  --primary:${col.primary.hex};
+  --accent:${col.accent.hex};
+  --ink:${col.ink.hex};
+  --muted:${col.muted.hex};
+  --line:${col.line.hex};
+  --surface:${col.surface.hex};
+  --background:${col.background.hex};
+  --font-heading:'${t.heading.family}', ${t.fallbackHeading};
+  --font-body:'${t.body.family}', ${t.fallbackBody};
+}`;
+
+const fontHref =
+  'https://fonts.googleapis.com/css2' +
+  `?family=${t.heading.family.replace(/ /g, '+')}:wght@${t.heading.weights.join(';')}` +
+  `&family=${t.body.family.replace(/ /g, '+')}:wght@${t.body.weights.join(';')}` +
+  '&display=swap';
+---
+<!doctype html>
+<html lang="en-ZA">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{pageTitle}</title>
+    <meta name="description" content={desc} />
+    <link rel="canonical" href={canonical} />
+    {noindex && <meta name="robots" content="noindex, nofollow" />}
+
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={pageTitle} />
+    <meta property="og:description" content={desc} />
+    <meta property="og:url" content={canonical} />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="theme-color" content={col.primary.hex} />
+
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href={fontHref} />
+
+    <style set:html={rootVars}></style>
+  </head>
+  <body>
+    <slot />
+  </body>
+</html>

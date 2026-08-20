@@ -1,0 +1,84 @@
+---
+// One virtual business card page per staff member, generated at build time
+// from staff.json. This is the URL the printed QR code points at, and the
+// "Save my contact details" button in every email signature.
+import Base from '../../layouts/Base.astro';
+import brand from '../../data/brand.json';
+import staff from '../../data/staff.json';
+
+export function getStaticPaths() {
+  return staff.map((person: any) => ({
+    params: { slug: person.slug },
+    props: { person },
+  }));
+}
+
+const { person } = Astro.props;
+const c = brand.client;
+const ct = brand.contact;
+const a = ct.address;
+
+const mobileTel = (person.mobile || '').replace(/[^\d+]/g, '');
+const directTel = (person.directLine || '').replace(/[^\d+]/g, '');
+const waNumber = (person.mobile || '').replace(/[^\d]/g, '');
+const mapQuery = encodeURIComponent(
+  [a.line1, a.line2, a.city, a.postalCode, a.country].filter(Boolean).join(', ')
+);
+
+const rows = [
+  person.mobile    && { label: 'Mobile', value: person.mobile,     href: `tel:${mobileTel}` },
+  person.directLine&& { label: 'Office', value: person.directLine, href: `tel:${directTel}` },
+                       { label: 'Email',  value: person.email,      href: `mailto:${person.email}` },
+                       { label: 'Web',    value: c.domain,          href: c.url },
+].filter(Boolean) as { label: string; value: string; href: string }[];
+---
+<Base title={person.fullName} description={`${person.fullName} — ${person.title} at ${c.tradingName}`}>
+  <main style="min-height:100dvh;display:grid;place-items:start center;padding:2rem 1.25rem 3rem;">
+    <div style="width:min(28rem, 100%);">
+
+      <div class="card" style="background:var(--background);padding:0;overflow:hidden;">
+        <div style="background:var(--primary);padding:1.75rem 1.5rem;color:#fff;">
+          <div style="font-family:var(--font-heading);font-weight:800;font-size:1.5rem;letter-spacing:-0.01em;">
+            {person.fullName}
+          </div>
+          <div style="opacity:0.85;font-size:0.95rem;margin-top:0.25rem;">{person.title}</div>
+          <div style="opacity:0.7;font-size:0.85rem;margin-top:0.75rem;">{c.tradingName}</div>
+        </div>
+
+        <dl style="margin:0;padding:0.5rem 1.5rem 1.25rem;">
+          {rows.map(r => (
+            <div style="display:flex;gap:1rem;align-items:baseline;padding-block:0.7rem;border-bottom:1px solid var(--line);">
+              <dt class="muted" style="flex:0 0 4rem;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.08em;font-weight:600;">{r.label}</dt>
+              <dd style="margin:0;"><a href={r.href} style="color:var(--ink);text-decoration:none;word-break:break-word;">{r.value}</a></dd>
+            </div>
+          ))}
+          <div style="display:flex;gap:1rem;align-items:baseline;padding-block:0.7rem;">
+            <dt class="muted" style="flex:0 0 4rem;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.08em;font-weight:600;">Address</dt>
+            <dd style="margin:0;">
+              <a href={`https://www.google.com/maps/search/?api=1&query=${mapQuery}`}
+                 style="color:var(--ink);text-decoration:none;">
+                {a.line1}, {a.city}
+              </a>
+            </dd>
+          </div>
+        </dl>
+
+        <div style="padding:0 1.5rem 1.5rem;display:grid;gap:0.6rem;">
+          {/* The .vcf is emitted into public/card/ by scripts/build_cards.py */}
+          <a class="btn" href={`/card/${person.slug}.vcf`} download style="text-align:center;">
+            Save to contacts
+          </a>
+          {waNumber && (
+            <a class="btn btn--ghost" href={`https://wa.me/${waNumber}`} style="text-align:center;">
+              WhatsApp {person.firstName}
+            </a>
+          )}
+        </div>
+      </div>
+
+      <p class="muted" style="text-align:center;font-size:0.8rem;margin-top:1.5rem;">
+        <a href="/" style="color:var(--muted);">{c.domain}</a>
+      </p>
+    </div>
+  </main>
+</Base>

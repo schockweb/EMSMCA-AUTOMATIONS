@@ -1,0 +1,50 @@
+---
+import Base from '../layouts/Base.astro';
+import Header from '../components/Header.astro';
+import Footer from '../components/Footer.astro';
+import brand from '../data/brand.json';
+
+const c = brand.client;
+
+// Replace with the client's real services once the brief comes back.
+const services = [
+  { title: 'First service',  body: 'One or two sentences describing what this is and who it is for.' },
+  { title: 'Second service', body: 'Keep each description to roughly the same length — uneven cards read as unfinished.' },
+  { title: 'Third service',  body: 'Three is the usual sweet spot. Four also works; five starts to dilute.' },
+];
+---
+<Base>
+  <Header />
+
+  <main>
+    <section class="section">
+      <div class="wrap">
+        <p class="eyebrow">{c.tradingName}</p>
+        <h1 style="margin-top:0.75rem;">{c.tagline}</h1>
+        <p class="muted" style="font-size:1.125rem;margin-top:1.25rem;">
+          A short paragraph that says who the client is, what they do and who they do it for.
+          Two sentences. Written in the client's own words wherever possible.
+        </p>
+        <p style="margin-top:2rem;">
+          <a class="btn" href="/contact/">Get in touch</a>
+        </p>
+      </div>
+    </section>
+
+    <section class="section" style="background:var(--surface);border-block:1px solid var(--line);">
+      <div class="wrap">
+        <h2>What we do</h2>
+        <div class="grid grid--3" style="margin-top:2rem;">
+          {services.map(s => (
+            <article class="card" style="background:var(--background);">
+              <h3>{s.title}</h3>
+              <p class="muted" style="margin-top:0.5rem;font-size:0.95rem;">{s.body}</p>
+            </article>
+          ))}
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <Footer />
+</Base>

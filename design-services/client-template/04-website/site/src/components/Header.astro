@@ -1,0 +1,29 @@
+---
+import brand from '../data/brand.json';
+const c = brand.client;
+const nav = [
+  { label: 'Home', href: '/' },
+  { label: 'Contact', href: '/contact/' },
+];
+const here = Astro.url.pathname;
+---
+<header style="border-bottom:1px solid var(--line);">
+  <div class="wrap" style="display:flex;align-items:center;justify-content:space-between;gap:1.5rem;padding-block:1.125rem;">
+    <a href="/" style="font-family:var(--font-heading);font-weight:800;font-size:1.2rem;color:var(--primary);text-decoration:none;letter-spacing:-0.01em;">
+      {c.tradingName}
+    </a>
+    <nav aria-label="Main">
+      <ul style="display:flex;gap:1.5rem;list-style:none;padding:0;margin:0;font-size:0.95rem;">
+        {nav.map(n => (
+          <li>
+            <a href={n.href}
+               aria-current={here === n.href ? 'page' : undefined}
+               style={`text-decoration:none;font-weight:${here === n.href ? 600 : 400};color:${here === n.href ? 'var(--primary)' : 'var(--ink)'};`}>
+              {n.label}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </nav>
+  </div>
+</header>

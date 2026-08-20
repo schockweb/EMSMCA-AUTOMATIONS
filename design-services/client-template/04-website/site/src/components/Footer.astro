@@ -1,0 +1,26 @@
+---
+import brand from '../data/brand.json';
+const c = brand.client;
+const ct = brand.contact;
+const a = ct.address;
+const year = new Date().getFullYear();
+---
+<footer style="border-top:1px solid var(--line);background:var(--surface);margin-top:2rem;">
+  <div class="wrap" style="padding-block:2.5rem;display:grid;gap:1.5rem;">
+    <div>
+      <div style="font-family:var(--font-heading);font-weight:700;color:var(--primary);">{c.tradingName}</div>
+      <address class="muted" style="font-style:normal;font-size:0.9rem;margin-top:0.5rem;line-height:1.7;">
+        {a.line1}{a.line2 ? `, ${a.line2}` : ''}<br />
+        {a.city}, {a.postalCode}<br />
+        <a href={`tel:${ct.phone.replace(/[^\d+]/g, '')}`} style="color:var(--ink);text-decoration:none;">{ct.phoneDisplay}</a>
+        &nbsp;·&nbsp;
+        <a href={`mailto:${ct.email}`} style="color:var(--ink);text-decoration:none;">{ct.email}</a>
+      </address>
+    </div>
+    <div class="muted" style="font-size:0.8rem;border-top:1px solid var(--line);padding-top:1.25rem;">
+      © {year} {c.legalName}. All rights reserved.
+      {c.registrationNumber && <span> &nbsp;·&nbsp; Reg. No. {c.registrationNumber}</span>}
+      {c.vatNumber && <span> &nbsp;·&nbsp; VAT No. {c.vatNumber}</span>}
+    </div>
+  </div>
+</footer>

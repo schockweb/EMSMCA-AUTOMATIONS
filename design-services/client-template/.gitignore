@@ -1,0 +1,18 @@
+node_modules/
+dist/
+.astro/
+.DS_Store
+Thumbs.db
+*.tmp
+
+# Generated — rebuild with scripts/sync.sh, never commit or hand-edit
+03-email-signatures/generated/
+05-virtual-cards/vcf/
+05-virtual-cards/qr/
+04-website/site/src/data/brand.json
+04-website/site/src/data/staff.json
+04-website/site/public/card/
+
+# Client admin may contain confidential commercial terms
+00-admin/contract/
+00-admin/invoices/

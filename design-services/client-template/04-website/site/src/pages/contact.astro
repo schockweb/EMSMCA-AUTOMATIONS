@@ -1,0 +1,74 @@
+---
+import Base from '../layouts/Base.astro';
+import Header from '../components/Header.astro';
+import Footer from '../components/Footer.astro';
+import brand from '../data/brand.json';
+
+const ct = brand.contact;
+const a = ct.address;
+const tel = ct.phone.replace(/[^\d+]/g, '');
+const wa = ct.whatsapp.replace(/[^\d]/g, '');
+---
+<Base title="Contact" description={`Contact ${brand.client.tradingName}`}>
+  <Header />
+
+  <main class="section">
+    <div class="wrap" style="display:grid;gap:3rem;">
+      <div>
+        <p class="eyebrow">Contact</p>
+        <h1 style="margin-top:0.75rem;">Let's talk</h1>
+      </div>
+
+      <div class="grid grid--3">
+        <div class="card">
+          <h3>Telephone</h3>
+          <p style="margin-top:0.5rem;"><a href={`tel:${tel}`}>{ct.phoneDisplay}</a></p>
+          {wa && <p style="margin-top:0.5rem;"><a href={`https://wa.me/${wa}`}>WhatsApp us</a></p>}
+          <p class="muted" style="margin-top:0.5rem;font-size:0.9rem;">{ct.hours}</p>
+        </div>
+        <div class="card">
+          <h3>Email</h3>
+          <p style="margin-top:0.5rem;"><a href={`mailto:${ct.email}`}>{ct.email}</a></p>
+        </div>
+        <div class="card">
+          <h3>Address</h3>
+          <address class="muted" style="font-style:normal;margin-top:0.5rem;font-size:0.95rem;line-height:1.7;">
+            {a.line1}<br />{a.line2 && <>{a.line2}<br /></>}{a.city}<br />{a.postalCode}
+          </address>
+        </div>
+      </div>
+
+      <!--
+        Enquiry form.
+        A static site has no server, so the form needs a handler. Two free options:
+          1. Cloudflare Pages Function  — add functions/api/enquiry.js (stays on their domain)
+          2. Formspree / Web3Forms free tier — change the action= below to their endpoint
+        Until one is wired up this form does nothing. Do not ship it unconnected.
+      -->
+      <form method="POST" action="#" style="max-width:34rem;display:grid;gap:1rem;">
+        <h2>Send an enquiry</h2>
+        <label style="display:grid;gap:0.35rem;font-size:0.9rem;font-weight:600;">
+          Name
+          <input required type="text" name="name" autocomplete="name"
+                 style="padding:0.7rem;border:1px solid var(--line);border-radius:4px;font:inherit;font-weight:400;" />
+        </label>
+        <label style="display:grid;gap:0.35rem;font-size:0.9rem;font-weight:600;">
+          Email
+          <input required type="email" name="email" autocomplete="email"
+                 style="padding:0.7rem;border:1px solid var(--line);border-radius:4px;font:inherit;font-weight:400;" />
+        </label>
+        <label style="display:grid;gap:0.35rem;font-size:0.9rem;font-weight:600;">
+          Message
+          <textarea required name="message" rows="5"
+                    style="padding:0.7rem;border:1px solid var(--line);border-radius:4px;font:inherit;font-weight:400;resize:vertical;"></textarea>
+        </label>
+        <!-- Honeypot: bots fill hidden fields, humans do not. Reject any submission where this is non-empty. -->
+        <input type="text" name="_gotcha" tabindex="-1" autocomplete="off" aria-hidden="true"
+               style="position:absolute;left:-9999px;" />
+        <div><button class="btn" type="submit">Send enquiry</button></div>
+      </form>
+    </div>
+  </main>
+
+  <Footer />
+</Base>

@@ -1,0 +1,49 @@
+<!-- Email signature template.
+     Table-based on purpose: Outlook (Word rendering engine) ignores flexbox, grid,
+     external stylesheets, and most modern CSS. Inline styles on tables are the only
+     thing that renders consistently across Outlook, Gmail, Apple Mail and mobile.
+     Placeholders {{like_this}} are replaced by scripts/build_signatures.py -->
+<table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;font-family:{{font_stack}};font-size:13px;line-height:1.45;color:{{ink}};">
+  <tr>
+    <td style="padding:0 16px 0 0;vertical-align:top;">
+      <a href="{{url}}" style="text-decoration:none;">
+        <img src="{{logo_url}}" alt="{{trading_name}}" width="120" style="display:block;border:0;outline:none;width:120px;height:auto;">
+      </a>
+    </td>
+    <td style="padding:0 0 0 16px;vertical-align:top;border-left:3px solid {{primary}};">
+
+      <div style="font-size:15px;font-weight:700;color:{{primary}};padding-bottom:1px;">{{full_name}}</div>
+      <div style="font-size:12.5px;color:{{muted}};padding-bottom:8px;">{{title}} &nbsp;|&nbsp; {{trading_name}}</div>
+
+      <div style="font-size:12.5px;padding-bottom:2px;">
+        <span style="color:{{muted}};">M</span>
+        <a href="tel:{{mobile_raw}}" style="color:{{ink}};text-decoration:none;">{{mobile}}</a>
+        {{direct_line_block}}
+      </div>
+      <div style="font-size:12.5px;padding-bottom:2px;">
+        <span style="color:{{muted}};">E</span>
+        <a href="mailto:{{email}}" style="color:{{ink}};text-decoration:none;">{{email}}</a>
+      </div>
+      <div style="font-size:12.5px;padding-bottom:8px;">
+        <span style="color:{{muted}};">W</span>
+        <a href="{{url}}" style="color:{{accent}};text-decoration:none;">{{domain}}</a>
+      </div>
+
+      <div style="font-size:11.5px;color:{{muted}};padding-bottom:8px;">
+        {{address_line}}
+      </div>
+
+      <div>
+        <a href="{{card_url}}" style="display:inline-block;font-size:11.5px;font-weight:600;color:#ffffff;background:{{primary}};padding:6px 12px;border-radius:3px;text-decoration:none;">Save my contact details</a>
+      </div>
+
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2" style="padding-top:12px;">
+      <div style="border-top:1px solid {{line}};padding-top:8px;font-size:10px;line-height:1.4;color:{{muted}};">
+        {{disclaimer}}
+      </div>
+    </td>
+  </tr>
+</table>

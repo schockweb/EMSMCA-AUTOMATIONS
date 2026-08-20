@@ -1,0 +1,71 @@
+{
+  "_comment": "SINGLE SOURCE OF TRUTH. Edit this file and re-run the scripts — the website, email signatures and virtual cards all read from here. Never hard-code a colour or phone number anywhere else.",
+
+  "client": {
+    "legalName": "Example Holdings (Pty) Ltd",
+    "tradingName": "Example",
+    "tagline": "A short line that says what they do",
+    "registrationNumber": "0000/000000/07",
+    "vatNumber": "",
+    "domain": "example.co.za",
+    "url": "https://example.co.za"
+  },
+
+  "contact": {
+    "email": "info@example.co.za",
+    "phone": "+27 11 000 0000",
+    "phoneDisplay": "011 000 0000",
+    "whatsapp": "+27820000000",
+    "address": {
+      "line1": "1 Example Street",
+      "line2": "Suburb",
+      "city": "Johannesburg",
+      "province": "Gauteng",
+      "postalCode": "2000",
+      "country": "South Africa"
+    },
+    "hours": "Monday to Friday, 08:00 – 17:00"
+  },
+
+  "social": {
+    "linkedin": "",
+    "facebook": "",
+    "instagram": ""
+  },
+
+  "colour": {
+    "_comment": "RGB/hex for screen. Record the CMYK and Pantone equivalents once the printer confirms them — do not guess.",
+    "primary":    { "hex": "#14304F", "cmyk": "100 / 75 / 35 / 25", "pantone": "" },
+    "accent":     { "hex": "#1F6F8B", "cmyk": "80 / 40 / 30 / 5",   "pantone": "" },
+    "ink":        { "hex": "#1C1C1C", "cmyk": "0 / 0 / 0 / 95",     "pantone": "" },
+    "muted":      { "hex": "#6B7280", "cmyk": "0 / 0 / 0 / 60",     "pantone": "" },
+    "line":       { "hex": "#D5DCE5", "cmyk": "0 / 0 / 0 / 15",     "pantone": "" },
+    "surface":    { "hex": "#F7F9FB", "cmyk": "0 / 0 / 0 / 3",      "pantone": "" },
+    "background": { "hex": "#FFFFFF", "cmyk": "0 / 0 / 0 / 0",      "pantone": "" }
+  },
+
+  "type": {
+    "_comment": "Google Fonts only unless you hold a licence you can produce on demand. Record the licence in 06-assets/licences/.",
+    "heading": { "family": "Manrope",     "weights": [600, 700, 800], "source": "Google Fonts", "licence": "OFL 1.1" },
+    "body":    { "family": "Inter",       "weights": [400, 500, 600], "source": "Google Fonts", "licence": "OFL 1.1" },
+    "fallbackHeading": "system-ui, -apple-system, 'Segoe UI', sans-serif",
+    "fallbackBody": "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+  },
+
+  "logo": {
+    "primarySvg": "01-brand/logo/rgb/logo-primary.svg",
+    "monoSvg": "01-brand/logo/rgb/logo-mono.svg",
+    "reverseSvg": "01-brand/logo/rgb/logo-reverse.svg",
+    "iconSvg": "01-brand/logo/rgb/logo-icon.svg",
+    "emailPng": "https://example.co.za/brand/logo-email.png",
+    "_emailPngNote": "Email signature images MUST be an absolute https URL on the client's own domain. Embedded/attached images are stripped or shown as attachments by many mail clients."
+  },
+
+  "project": {
+    "reference": "EX-2026-001",
+    "startDate": "",
+    "targetLaunch": "",
+    "tier": "Standard",
+    "quotedExVat": 42000
+  }
+}
