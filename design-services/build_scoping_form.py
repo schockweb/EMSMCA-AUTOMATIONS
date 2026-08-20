@@ -249,14 +249,41 @@ textfield(M, y[0] - 26, CW, 26, uid("f"), multiline=True, size=8.5)
 y[0] -= 34
 
 section("3", "Website")
+question("You already have a website. What would you like done with it?")
+checks(["Redesign it — new look, existing content",
+        "Redesign and rewrite — new look, new content",
+        "Rebuild it on a new platform",
+        "Leave it as is — we need the other items only"])
+
+question("Roughly how many pages does the current site have?")
+checks(["Under 10", "10 – 25", "26 – 50", "More than 50", "Not sure"])
+
+labelled_fields([
+    [("What is it currently built on? (WordPress, Wix, custom — or 'not sure')", 2),
+     ("Who currently maintains it / holds the login?", 1.4)],
+])
+
+question("Which of these are true of the current site? (tick any)")
+checks(["We receive enquiries through it",
+        "We rank well on Google for certain searches",
+        "We cannot update it ourselves",
+        "Not sure"])
+note("Where a site already ranks, we preserve every existing web address and redirect the old pages to the new ones, so that established search rankings and any links pointing to you are carried across rather than lost.")
+
 question("What should the website primarily achieve?")
 checks(["Establish a professional online presence", "Generate enquiries / leads",
         "Take online bookings", "Sell products online", "Not sure yet"])
 
-question("Approximate number of pages")
-checks(["One page", "3 – 5 pages", "6 – 10 pages", "More than 10", "Not sure"])
+question("Approximate number of pages for the new site")
+checks(["One page", "3 – 5 pages", "6 – 10 pages", "11 – 25 pages", "More than 25", "Not sure"])
 
-question("Please list the pages you have in mind (e.g. Home, About, Services, Team, Contact)")
+labelled_fields([
+    [("How many individual team / staff profile pages?", 1),
+     ("How many service or specialisation pages?", 1)],
+])
+note("These two numbers are the largest single driver of the website cost — a best estimate is fine.")
+
+question("Any pages to add, remove or merge compared with the current site?")
 need(30)
 textfield(M, y[0] - 24, CW, 24, uid("f"), multiline=True, size=8.5)
 y[0] -= 32
@@ -271,6 +298,12 @@ checks([("Domain already registered:", 130), "Hosting already in place", "Neithe
 
 question("Would you like to update the website content yourselves?")
 checks(["Yes", "No", "Not sure"])
+
+question("Compliance and policy pages required (tick any)")
+checks(["Privacy notice (POPIA)", "PAIA manual or access request page",
+        "Terms of use", "Cookie notice", "Complaints procedure",
+        "Not sure — please advise"], cols=3)
+note("We will draft the page structure and standard wording; final approval of any legal text rests with you.")
 
 question("Features required (tick any)")
 checks(["Contact / enquiry form", "Google Maps location", "Photo gallery",
@@ -299,18 +332,18 @@ labelled_fields([
     [("Target date / launch", 1), ("Is any part urgent? If so, which?", 1.6), ("Who approves the final designs?", 1.3)],
 ])
 question("So that we present options in the appropriate range, kindly indicate the budget you have in mind:")
-checks(["Essentials — R15 000 to R20 000",
-        "Standard — R40 000 to R50 000",
-        "Premium — R80 000 and above",
+checks(["Essentials — R20 000 to R30 000",
+        "Standard — R45 000 to R65 000",
+        "Comprehensive — R85 000 and above",
         "Prefer to discuss"], cols=2)
 note("All figures exclude VAT and are indicative only. The final quotation will be itemised so that you may include or omit any element.")
 
 question("Would you prefer the work to be phased over time rather than delivered all at once?")
 checks(["Yes — please propose phases", "No — all at once", "Open to discussion"])
 
-section("7", "Anything else we should know", keep=145)
-textfield(M, y[0] - 38, CW, 38, uid("f"), multiline=True, size=8.5)
-y[0] -= 48
+section("7", "Anything else we should know", keep=203)
+textfield(M, y[0] - 96, CW, 96, uid("f"), multiline=True, size=8.5)
+y[0] -= 106
 
 # ----------------------------------------------------------- closing block ---
 need(92)
