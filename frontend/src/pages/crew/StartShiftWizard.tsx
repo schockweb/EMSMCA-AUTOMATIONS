@@ -202,11 +202,11 @@ export default function StartShiftWizard({
         </div>
 
         {/* Body */}
-        <div style={{ padding: '20px 24px', overflowY: 'auto' }}>
-          {shiftError && <div className="login-error" style={{ marginBottom: '14px', fontSize: '0.8rem' }}>{shiftError}</div>}
+        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+          {shiftError && <div className="login-error" style={{ margin: '20px 24px 0', fontSize: '0.8rem' }}>{shiftError}</div>}
 
           {shiftStep === 1 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '20px 24px', overflowY: 'auto' }}>
               {vehicleList.map(v => (
                 <button
                   key={v.id}
@@ -237,8 +237,8 @@ export default function StartShiftWizard({
           )}
 
           {shiftStep === 2 && (
-            <form onSubmit={handleStartShift}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '20px' }}>
+            <form onSubmit={handleStartShift} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', padding: '20px 24px', overflowY: 'auto', flex: 1 }}>
                 {crewList.map(c => {
                   const isSelected = selectedCrewIds.includes(c.id);
                   return (
@@ -273,7 +273,7 @@ export default function StartShiftWizard({
                 })}
               </div>
 
-              <div style={{ display: 'flex', gap: '10px', borderTop: '1px solid #f0f0f0', paddingTop: '16px' }}>
+              <div style={{ display: 'flex', gap: '10px', borderTop: '1px solid #f0f0f0', padding: '16px 24px', flexShrink: 0, background: '#fff', borderBottomLeftRadius: '14px', borderBottomRightRadius: '14px' }}>
                 <button
                   type="button"
                   onClick={() => setShiftStep(1)}
