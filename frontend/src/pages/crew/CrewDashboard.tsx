@@ -113,6 +113,7 @@ export default function CrewDashboard() {
   const [newPrfError, setNewPrfError] = useState('');
   const [endingShift, setEndingShift] = useState(false);
   const [drafts, setDrafts] = useState<any[]>([]);
+  const [recentSubmitted, setRecentSubmitted] = useState<any[]>([]);
   const [baaWarningOpen, setBaaWarningOpen] = useState(false);
 
   // Live list of additional crew shown on the personal dashboard. Mirrors
@@ -187,7 +188,13 @@ export default function CrewDashboard() {
 
   const loadDrafts = (tkn: string) => {
     axios.get('/api/digital-prf', { headers: { Authorization: `Bearer ${tkn}` } })
-      .then(res => setDrafts(res.data.filter((d: any) => d.status === 'draft')))
+      .then(res => {
+        setDrafts(res.data.filter((d: any) => d.status === 'draft'));
+        const twelveHoursAgo = Date.now() - 12 * 60 * 60 * 1000;
+        setRecentSubmitted(res.data.filter((d: any) => 
+          d.status === 'submitted' && new Date(d.created_at).getTime() > twelveHoursAgo
+        ));
+      })
       .catch(err => {
         // 401 → shift token expired (12h cap) or revoked. Without this, the
         // dashboard would silently render an empty drafts list and the crew
@@ -988,6 +995,52 @@ export default function CrewDashboard() {
                     </div>
                   </div>
                   <div style={{ color: G, fontSize: '0.78rem', fontWeight: 700 }}>Resume →</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── Recently Submitted ────────────────────────────────────────── */}
+        {recentSubmitted.length > 0 && (
+          <div style={{ marginBottom: 28 }}>
+            <h2 style={{ fontSize: '1rem', fontWeight: 800, color: T, marginBottom: 12 }}>
+              Recently Submitted
+            </h2>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {recentSubmitted.map(d => (
+                <button key={d.id} onClick={() => navigate(`/${providerSlug}/crew/prf/${d.id}`)} style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  padding: '14px 18px', borderRadius: 14, textAlign: 'left',
+                  border: `1px solid ${B}`, background: '#fff', cursor: 'pointer',
+                  boxShadow: '0 1px 4px rgba(0,0,0,0.03)', transition: 'all 0.15s',
+                }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = G; e.currentTarget.style.boxShadow = '0 4px 12px rgba(16,185,129,0.08)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = B; e.currentTarget.style.boxShadow = '0 1px 4px rgba(0,0,0,0.03)'; }}
+                >
+                  <div>
+                    <div style={{ fontWeight: 800, fontSize: '0.92rem', color: T }}>PRF #{d.prf_number}</div>
+                    <div style={{ fontSize: '0.72rem', color: M, marginTop: 3 }}>
+                      {d.case_number && <span style={{ marginRight: 8, fontFamily: 'monospace' }}>{d.case_number}</span>}
+                      {new Date(d.created_at).toLocaleDateString('en-ZA', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ color: d.facility_email_sent_at ? '#059669' : d.facility_email_error ? '#b91c1c' : '#d97706', fontSize: '0.72rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'flex-end' }}>
+                      {d.facility_email_sent_at ? (
+                        <>✓ Delivered</>
+                      ) : d.facility_email_error ? (
+                        <>⚠ Failed</>
+                      ) : (
+                        <>⟳ Sending...</>
+                      )}
+                    </div>
+                    {d.facility_email_sent_at && (
+                       <div style={{ fontSize: '0.65rem', color: '#059669', opacity: 0.8, marginTop: 2 }}>
+                         {new Date(d.facility_email_sent_at).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}
+                       </div>
+                    )}
+                  </div>
                 </button>
               ))}
             </div>

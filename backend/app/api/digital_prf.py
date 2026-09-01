@@ -1516,6 +1516,8 @@ async def list_prfs(
             "crew_2": crew2_name,
             "created_at": p.created_at.isoformat() if p.created_at else None,
             "submitted_at": p.submitted_at.isoformat() if p.submitted_at else None,
+            "facility_email_sent_at": p.facility_email_sent_at.isoformat() if p.facility_email_sent_at else None,
+            "facility_email_error": p.facility_email_error,
         })
 
     return items
