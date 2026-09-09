@@ -441,9 +441,10 @@ That PRF is the point of no return.
 
 ## Phase 4 — After
 
-- **Keep the old VM stopped but intact for 7 days.** Rollback is repointing DNS
-  back and starting it — worth having while DNS and certificates settle, even
-  though there is no data on it worth recovering.
+- **Keep the old VM stopped but intact for 7 days — and diarise the deletion
+  date now, before moving on.** Rollback is repointing DNS back and starting it
+  — worth having while DNS and certificates settle, even though there is no data
+  on it worth recovering. Seven days is the whole of the window; see 4.1.
 - **Re-check the clean-database count after the first day** (2.11 again). It
   should equal the number of real calls, and nothing more. A jump that nobody can
   account for is an unpurged device.
@@ -452,9 +453,75 @@ That PRF is the point of no return.
 - Confirm the first automated backup and the first Sunday restore rehearsal both
   fire and report to healthchecks.io, and re-run `restore-test.sh` once there are
   real PRFs so the content comparison means something.
-- **Then decommission the old VM and delete its disks and backups.** Its data is
-  pilot data; leaving copies of it lying around only creates something else to
-  have to account for.
+- **On day 8, decommission the old VM — see 4.1.** This is a dated task with a
+  verification, not a reminder. Its data is pilot data; leaving copies of it
+  lying around only creates something else to have to account for.
+
+
+### 4.1 Decommissioning the old VM
+
+Do this on day 8. It is written out because the two obvious ways of "turning the
+old server off" both leave it billing, and because an undocumented VM holding
+pilot patient data is a POPIA problem as well as a cost one.
+
+**Two traps.**
+
+1. *Stopping is not deallocating.* `sudo shutdown` from inside the guest leaves
+   the VM **Allocated** in Azure and it keeps charging full compute. Only
+   `az vm deallocate`, or "Stop" in the portal, releases the compute. A VM
+   showing `Stopped` rather than `Stopped (deallocated)` is still costing money.
+2. *Deleting the VM does not delete what it was made of.* Managed disks, the
+   public IP, snapshots and any Recovery Services vault items survive the VM and
+   go on billing indefinitely. Disks are usually the largest remainder.
+
+**Confirm the target before deleting anything.** The old box is
+`172.209.218.22`; production is `102.37.216.162`. If the command below prints
+the production address, stop.
+
+```bash
+RG=rg-ems-prod
+OLD=ems-portal-vm
+
+az vm list-ip-addresses -g "$RG" -n "$OLD" -o table    # MUST show 172.209.218.22
+```
+
+**Check what is on the disk before destroying it.** The migration decision was
+that no pilot data moves, so nothing should need recovering — but confirm that
+rather than assume it, and record the result. If the platform has carried live
+claims, treat anything found as patient data under POPIA.
+
+**Delete, then clear the remainders.** List first; do not pipe blindly, as some
+unattached disks may belong to production.
+
+```bash
+az vm delete -g "$RG" -n "$OLD" --yes
+
+az disk list -g "$RG" --query "[?diskState=='Unattached'].{name:name,gb:diskSizeGb}" -o table
+az disk delete -g "$RG" -n <name> --yes
+
+az network public-ip list -g "$RG" --query "[?ipConfiguration==null].{name:name,ip:ipAddress}" -o table
+az network public-ip delete -g "$RG" -n <name>
+
+az network nic list -g "$RG" --query "[?virtualMachine==null].name" -o table
+az network nic delete -g "$RG" -n <name>
+
+az snapshot list -g "$RG" -o table          # review before deleting
+```
+
+**Verify it actually stopped costing.** Deletion is not proven by the absence of
+the VM in a list — it is proven by the bill. In Cost Management, group by
+**Resource** and confirm nothing named for the old box appears in the next full
+billing period. Charges trail by a day or two, so check again a week later.
+
+**Then update the paperwork, which is the step most likely to be skipped.**
+
+- `deploy/HOSTING-HANDOVER.md` states the estate as one subscription, one
+  resource group, one VM. While a second VM exists, that inventory is wrong and
+  the hosting provider is carrying backup and incident responsibility for an
+  estate they have an incomplete map of. Correct it, or confirm it is already
+  correct once the old VM is gone.
+- Tell the client the retained VM existed and has been destroyed. A rollback
+  safeguard is a defensible engineering decision; an undisclosed one is not.
 
 ---
 
