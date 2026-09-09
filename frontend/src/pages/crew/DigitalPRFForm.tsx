@@ -5549,6 +5549,10 @@ export default function DigitalPRFForm() {
     cardiac_incident: 6, rosc_achieved: 6, perfusing_rhythm_on_handover: 6,
     patient_refused_transport: 6, vehicle_tracking_report: 6, is_multi_patient: 6,
     supervising_practitioner_pr: 6, signature_refused_reason: 6,
+    // The DOD Declaration sign-off is rendered by P2, and its section carries a
+    // prf-field-med_aid_dec_death_witness_signature anchor so the review item
+    // for a named-but-unsigned witness lands on it instead of doing nothing.
+    med_aid_dec_death_witness_signature: 2,
   };
   // Tapping a review item navigates AT MOST ONCE, to that field's home phase,
   // and then stops.
@@ -7874,8 +7878,11 @@ export default function DigitalPRFForm() {
             )}
           </div>
 
-          {/* Declaration — its own section, separate from the form dropdown. */}
-          <div style={{ marginBottom: 20 }}>
+          {/* Declaration — its own section, separate from the form dropdown.
+              The id is the jump target for the review's named-but-unsigned
+              witness warning; the pad itself lives behind this section's
+              toggle, so the section is as close as a jump can land. */}
+          <div id="prf-field-med_aid_dec_death_witness_signature" style={{ marginBottom: 20 }}>
             <DodDeclarationSection />
           </div>
         </>

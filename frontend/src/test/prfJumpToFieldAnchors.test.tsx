@@ -194,6 +194,19 @@ describe('tap-to-jump anchors exist for the fields the review flags', () => {
     await expectAnchors(['prf-field-debtor_gender', 'prf-field-dependent_number']);
   });
 
+  it('Patient Info on a DOD: the Declaration section, for the witness warning', async () => {
+    // The review's named-but-unsigned witness warning (ALL-D3-DOD-WITNESS-SIG)
+    // points at med_aid_dec_death_witness_signature. The pad itself lives
+    // behind the Declaration section's toggle and emits no id of its own, so
+    // the section carries the anchor. Without it the crew taps the warning and
+    // nothing happens — which is exactly the silent failure this file exists
+    // to catch.
+    seed(2, { call_type: 'DOD' });
+    const { container } = mountForm();
+    await waitFor(() => expect(container.textContent).toBeTruthy(), { timeout: 4000 });
+    await expectAnchors(['prf-field-med_aid_dec_death_witness_signature']);
+  });
+
   it('Handover: receiving_facility, which is a picker, not an input', async () => {
     // The anchor here is written as a template literal on HospitalPicker's root
     // (id={`prf-field-${fk}`}), so a plain source grep does not see it. Only a

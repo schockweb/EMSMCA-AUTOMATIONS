@@ -2196,6 +2196,33 @@ export const COMPLETENESS_RULES: ValidationRule[] = [
     message: 'CPR recorded — check the call type matches.',
     source: 'Consistency — a resuscitation billed against a routine call type is queried.',
   },
+  {
+    // A witness is OPTIONAL on a Declaration of Death, so an untouched witness
+    // block must stay silent — this fires only on the half-filled state, where
+    // a name was typed and the pad beside it never signed.
+    //
+    // Found on a real record (LRS PRF #3, 2026-09-09): the declaration carried
+    // the signatory's and the second crew member's signatures and the witness
+    // name "Yogi", but no witness mark — the PDF printed "Not captured" under
+    // the name. Nothing had asked the crew for it. The signature pad writes its
+    // key only when saved, and its Cancel path discards silently, so drawing a
+    // mark and dismissing the pad without saving looks exactly like never
+    // having signed. This is the only place that difference can still be
+    // caught while the crew is standing there.
+    id: 'ALL-D3-DOD-WITNESS-SIG',
+    schemes: ['all'],
+    phases: [6],
+    severity: 'warn',
+    field: 'med_aid_dec_death_witness_signature',
+    check: (d) => {
+      const dod = String(d.call_type || '').toUpperCase() === 'DOD' || !!d.med_aid_dec_death;
+      if (!dod) return true;
+      if (!has(d, 'med_aid_dec_death_witness_name')) return true;   // no witness → not required
+      return has(d, 'med_aid_dec_death_witness_signature');
+    },
+    message: 'Witness named on the declaration but not signed — capture the signature, or clear the name.',
+    source: 'Consistency — a named witness with no mark is an unsupported declaration of death.',
+  },
 ];
 
 // Register every scheme's rules into the shared RULES table. Each rule is

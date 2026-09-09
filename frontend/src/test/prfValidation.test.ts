@@ -571,6 +571,44 @@ describe('ALL-* completeness rules', () => {
     expect(fire({ call_type: 'DOD' }, { hasHandoverSig: false })).not.toContain('ALL-A3-HANDOVER-SIG');
   });
 
+  it('D3 asks for a witness signature only once a witness has been named', () => {
+    // From a real record: the declaration was signed by the practitioner and the
+    // second crew member, the witness name was typed, and the witness pad was
+    // never signed — so the PDF printed "Not captured" under the name and
+    // nothing had asked the crew for it.
+    const named = { call_type: 'DOD', med_aid_dec_death_witness_name: 'Yogi' };
+    expect(fire(named)).toContain('ALL-D3-DOD-WITNESS-SIG');
+
+    // Signed → silent.
+    expect(fire({ ...named, med_aid_dec_death_witness_signature: 'data:image/webp;base64,AAA' }))
+      .not.toContain('ALL-D3-DOD-WITNESS-SIG');
+
+    // A witness is OPTIONAL on a DOD. An untouched witness block must never
+    // nag — that is the whole reason this rule keys off the NAME and not the
+    // call type, and getting it wrong would put a warning on every DOD.
+    expect(fire({ call_type: 'DOD' })).not.toContain('ALL-D3-DOD-WITNESS-SIG');
+    expect(fire({ call_type: 'DOD', med_aid_dec_death_witness_name: '   ' }))
+      .not.toContain('ALL-D3-DOD-WITNESS-SIG');
+
+    // A cleared pad writes the key back as null; that is still unsigned.
+    expect(fire({ ...named, med_aid_dec_death_witness_signature: null }))
+      .toContain('ALL-D3-DOD-WITNESS-SIG');
+
+    // Not a death call → none of this rule's business.
+    expect(fire({ call_type: 'PRIMARY', med_aid_dec_death_witness_name: 'Yogi' }))
+      .not.toContain('ALL-D3-DOD-WITNESS-SIG');
+
+    // A Resus that became a declaration of death reaches it by the flag, not
+    // the call type.
+    expect(fire({ call_type: 'RESUS', med_aid_dec_death: true, med_aid_dec_death_witness_name: 'Yogi' }))
+      .toContain('ALL-D3-DOD-WITNESS-SIG');
+  });
+
+  it('D3 stays quiet while the crew is still on the call', () => {
+    const named = { call_type: 'DOD', med_aid_dec_death_witness_name: 'Yogi' };
+    expect(fire(named, {}, 5)).not.toContain('ALL-D3-DOD-WITNESS-SIG');
+  });
+
   it('A3 and A5 stay silent at handover and speak only at submission', () => {
     const atHandover = fire({ call_type: 'PRIMARY' }, { hasHandoverSig: false }, 5);
     expect(atHandover).not.toContain('ALL-A3-HANDOVER-SIG');
